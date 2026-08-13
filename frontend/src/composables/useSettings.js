@@ -282,6 +282,11 @@ export function useSettings() {
         // Trigger platform updates to load API keys/models
         updatePlatformParams(form.platform, 'translator_platform', form);
         updatePlatformParams(form.glossary_agent_platform, 'glossary_agent_platform', form, true);
+
+        // 内置大模型引擎：localStorage 无 model_id/base_url/api_key 时，用后端 .env 默认值（defaults）
+        if (!form.model_id && defaults.model_id) form.model_id = defaults.model_id;
+        if (!form.base_url && defaults.base_url) form.base_url = defaults.base_url;
+        if (!form.api_key && defaults.api_key) form.api_key = defaults.api_key;
     };
 
     // ===== 保存配置 - 拆分为子函数 =====

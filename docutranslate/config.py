@@ -198,4 +198,9 @@ default_params = {
     "extra_body": EXTRA_BODY,
     "web_skip_validation": WEB_SKIP_VALIDATION,
     "env_force_override": ENV_FORCE_OVERRIDE,
+    # 内置大模型引擎：隐藏 AISettings 后，前端 model_id/base_url/provider 用 .env 默认值
+    "model_id": MODEL_ID,
+    "base_url": BASE_URL,
+    "provider": PROVIDER,
+    "to_lang": TO_LANG,
 }
