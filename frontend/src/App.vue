@@ -224,7 +224,7 @@ onMounted(async () => {
 
     // Restore tasks
     if (window.location.pathname.includes('/admin')) {
-        document.title = "DocuTranslate - Admin Panel";
+        document.title = "荃信翻译 Qyunslation";
         try {
             const r = await fetch('/service/task-list');
             const ids = await r.json();

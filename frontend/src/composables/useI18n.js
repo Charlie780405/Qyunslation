@@ -35,7 +35,7 @@ export function useI18n() {
         } catch (e) {
             // Fallback defaults
             i18nData.value = {
-                pageTitle: "DocuTranslate",
+                pageTitle: "荃信翻译 Qyunslation",
                 tutorialBtn: "教程",
                 projectContributeBtn: "项目协作",
                 workflowTitle: "选择工作流",

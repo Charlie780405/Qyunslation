@@ -128,9 +128,9 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
-    title="DocuTranslate API",
+    title="Qyunslation API",
     description=f"""
-DocuTranslate 后端服务 API，提供文档翻译、状态查询、结果下载等功能。
+Qyunslation（荃信翻译）后端服务 API，提供文档翻译、状态查询、结果下载等功能。
 
 **注意**: 所有任务状态都保存在服务进程的内存中，服务重启将导致所有任务信息丢失。
 
