@@ -45,6 +45,7 @@
         ref="queueSettingsModalRef"
         :t="t"
         @save="val => saveSetting('queue_concurrent', val)" />
+    <ExtensionsModal v-model="extensionsOpen" />
 
     <!-- Preview Offcanvas -->
     <PreviewOffcanvas
@@ -64,6 +65,7 @@ import { ref, reactive, computed, onMounted, provide, watch } from 'vue';
 import TutorialModal from './components/modals/TutorialModal.vue';
 import ContributorsModal from './components/modals/ContributorsModal.vue';
 import QueueSettingsModal from './components/modals/QueueSettingsModal.vue';
+import ExtensionsModal from './components/modals/ExtensionsModal.vue';
 import GlossaryModal from './components/modals/GlossaryModal.vue';
 import DefaultWorkflowModal from './components/modals/DefaultWorkflowModal.vue';
 import SettingsPanel from './components/settings/SettingsPanel.vue';
@@ -123,6 +125,13 @@ const openQueueSettings = () => {
     }
 };
 provide('openQueueSettings', openQueueSettings);
+
+// Extensions modal
+const extensionsOpen = ref(false);
+const openExtensions = () => {
+    extensionsOpen.value = true;
+};
+provide('openExtensions', openExtensions);
 
 // ===== Provide to child components =====
 provide('form', form);

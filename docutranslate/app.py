@@ -1174,6 +1174,13 @@ async def redoc_html():
 
 app.include_router(service_router)
 
+# 自定义扩展（图片嵌字 + 术语表管理，阶段 4 UI 后端）
+try:
+    from docutranslate.custom_api import router as custom_router
+    app.include_router(custom_router, prefix="/service")
+except Exception as e:  # 扩展依赖缺失时不影响主服务
+    logging.getLogger(__name__).warning(f"custom_api 加载失败（不影响主服务）: {e}")
+
 
 # ===================================================================
 # --- Run function ---

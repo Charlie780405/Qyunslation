@@ -26,3 +26,6 @@ docutranslate/output/
 .vite
 # Environment variables
 .env
+
+# 运行时术语表数据（用户自定义术语，运行时生成）
+glossary_db.json
