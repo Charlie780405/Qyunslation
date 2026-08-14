@@ -95,6 +95,7 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
             converter_config=converter_config,
             translator_config=translator_config,
             html_exporter_config=html_exporter_config,
+            md2docx_exporter_config=None,
             logger=logger,
         )
         return MarkdownBasedWorkflow(config=workflow_config)

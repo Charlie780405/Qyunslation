@@ -95,6 +95,31 @@ from docutranslate.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConf
 MAX_LOG_HISTORY = 200
 
 
+def _get_unresolved_error_count(statistics: Any) -> int:
+    """Return the authoritative unresolved-error count from workflow stats."""
+    if not isinstance(statistics, dict):
+        return 0
+
+    total = statistics.get("total")
+    if isinstance(total, dict) and isinstance(total.get("unresolved_errors"), int):
+        return max(0, total["unresolved_errors"])
+
+    counts = []
+    for stage in ("translation", "glossary"):
+        value = statistics.get(stage)
+        if isinstance(value, dict) and isinstance(value.get("unresolved_errors"), int):
+            counts.append(max(0, value["unresolved_errors"]))
+    return max(counts, default=0)
+
+
+def _translation_failure_message(statistics: Any) -> str | None:
+    """Build a user-safe failure message, or return None when stats are clean."""
+    unresolved = _get_unresolved_error_count(statistics)
+    if unresolved <= 0:
+        return None
+    return f"翻译请求失败：有 {unresolved} 个分块未生成有效译文，已阻止导出原文/伪译文。"
+
+
 # --- Workflow dictionary ---
 WORKFLOW_DICT: Dict[str, Type[Workflow]] = {
     "markdown_based": MarkdownBasedWorkflow,
@@ -133,34 +158,34 @@ class QueueAndHistoryHandler(logging.Handler):
     def __init__(
         self,
         queue_ref: asyncio.Queue,
-        history_list_ref: List[str],
+        history_list_ref: List[Dict[str, Any]],
         max_history_items: int,
         task_id: str,
+        start_seq: int = 1,
     ):
         super().__init__()
+        # queue_ref 保留为兼容参数；日志读取已改为基于历史+游标，
+        # 不再向无消费者队列写入，避免每条日志长期积压。
         self.queue = queue_ref
-        self.history_list = history_list_ref
+        self.history_list_ref = history_list_ref
         self.max_history = max_history_items
         self.task_id = task_id
+        self._next_seq = max(1, start_seq)
 
     def emit(self, record: logging.LogRecord):
         log_entry = self.format(record)
         # 过滤敏感信息后再存储和输出
         masked_log_entry = mask_secrets(log_entry)
+        log_item = {"seq": self._next_seq, "message": masked_log_entry}
+        self._next_seq += 1
         print(f"[{self.task_id}] {masked_log_entry}")
-        self.history_list.append(masked_log_entry)
-        if len(self.history_list) > self.max_history:
-            del self.history_list[: len(self.history_list) - self.max_history]
+        self.history_list_ref.append(log_item)
+        if len(self.history_list_ref) > self.max_history:
+            del self.history_list_ref[: len(self.history_list_ref) - self.max_history]
         if self.queue is not None:
-            try:
-                # Try to get the main event loop - this will be set by the application
-                self.queue.put_nowait(masked_log_entry)
-            except asyncio.QueueFull:
-                print(f"[{self.task_id}] Log queue is full. Log dropped: {masked_log_entry}")
-            except Exception as e:
-                print(
-                    f"[{self.task_id}] Error putting log to queue: {e}. Log: {masked_log_entry}"
-                )
+            # 队列仅保留给旧调用方兼容；当前日志 API 使用历史+游标，
+            # 因此不再写入队列，避免无消费者时无限积压。
+            pass
 
 
 def get_workflow_type_from_filename(filename: str) -> str:
@@ -225,7 +250,7 @@ class TranslationService:
         # Task state storage
         self.tasks_state: Dict[str, Dict[str, Any]] = {}
         self.tasks_log_queues: Dict[str, asyncio.Queue] = {}
-        self.tasks_log_histories: Dict[str, List[str]] = {}
+        self.tasks_log_histories: Dict[str, List[Dict[str, Any]]] = {}
 
         # HTTP client for CDN checks
         self.httpx_client: Optional[httpx.AsyncClient] = None
@@ -255,25 +280,22 @@ class TranslationService:
         """Get task state by ID."""
         return self.tasks_state.get(task_id)
 
-    def get_task_logs(self, task_id: str) -> List[str]:
-        """Get task log history by ID."""
-        return self.tasks_log_histories.get(task_id, [])
+    def get_task_logs(self, task_id: str) -> List[Dict[str, Any]]:
+        """Get the complete retained log history for a task."""
+        return list(self.tasks_log_histories.get(task_id, []))
 
-    async def get_new_logs(self, task_id: str) -> List[str]:
-        """Get new logs from the queue."""
-        if task_id not in self.tasks_log_queues:
-            raise HTTPException(
-                status_code=404, detail=f"找不到任务ID '{task_id}' 的日志队列。"
-            )
-        log_queue = self.tasks_log_queues[task_id]
-        new_logs = []
-        while not log_queue.empty():
-            try:
-                new_logs.append(log_queue.get_nowait())
-                log_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
-        return new_logs
+    def get_task_logs_since(self, task_id: str, since: int = 0) -> List[Dict[str, Any]]:
+        """Read retained logs after a sequence number without consuming them."""
+        if task_id not in self.tasks_log_histories:
+            raise HTTPException(status_code=404, detail=f"找不到任务ID '{task_id}'。")
+        return [
+            item for item in self.tasks_log_histories[task_id]
+            if isinstance(item, dict) and item.get("seq", 0) > since
+        ]
+
+    async def get_new_logs(self, task_id: str) -> List[Dict[str, Any]]:
+        """Compatibility method: return retained logs without consuming history."""
+        return self.get_task_logs_since(task_id, 0)
 
     def get_downloadable_file_path(self, task_id: str, file_type: str) -> Optional[Dict[str, str]]:
         """Get downloadable file info."""
@@ -435,7 +457,7 @@ class TranslationService:
 
         initial_log_msg = f"收到新的翻译请求: {original_filename}"
         print(f"[{task_id}] {initial_log_msg}")
-        await log_queue.put(initial_log_msg)
+        log_history.append({"seq": 1, "message": initial_log_msg})
 
         try:
             loop = asyncio.get_running_loop()
@@ -477,7 +499,11 @@ class TranslationService:
         if task_logger.hasHandlers():
             task_logger.handlers.clear()
         task_handler = QueueAndHistoryHandler(
-            log_queue, log_history, MAX_LOG_HISTORY, task_id=task_id
+            log_queue,
+            log_history,
+            MAX_LOG_HISTORY,
+            task_id=task_id,
+            start_seq=len(log_history) + 1,
         )
         task_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -533,7 +559,15 @@ class TranslationService:
             workflow.read_bytes(content=file_contents, stem=file_stem, suffix=file_suffix)
             await workflow.translate_async()
 
-            task_logger.info("翻译完成，正在生成临时结果文件...")
+            # 收集统计信息并在导出前执行失败门禁。
+            statistics = workflow.get_statistics()
+            task_logger.info(f"收集统计信息: {statistics}")
+            failure_message = _translation_failure_message(statistics)
+            if failure_message:
+                task_logger.error(failure_message)
+                raise RuntimeError(failure_message)
+
+            task_logger.info("翻译统计通过失败门禁，正在生成临时结果文件...")
             temp_dir = tempfile.mkdtemp(prefix=f"docutranslate_{task_id}_")
             task_state["temp_dir"] = temp_dir
             downloadable_files = {}
@@ -910,7 +944,15 @@ class TranslationService:
             return XlsxWorkflow(config=workflow_config)
 
         elif isinstance(payload, DocxWorkflowParams):
-            task_logger.info("构建 DocxWorkflow 配置。")
+            task_logger.info(
+                "DOCX有效配置: insert_mode=%s, separator=%r, to_lang=%s, chunk_size=%s, concurrent=%s, retry=%s",
+                payload.insert_mode,
+                payload.separator,
+                payload.to_lang,
+                payload.chunk_size,
+                payload.concurrent,
+                payload.retry,
+            )
             translator_args = payload.model_dump(
                 include={
                     "skip_translate",

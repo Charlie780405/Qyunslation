@@ -28,7 +28,8 @@ from fastapi import (
     UploadFile,
     File,
     Form,
-    Request
+    Request,
+    Query,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import (
@@ -637,10 +638,11 @@ def _get_default_statistics() -> dict:
     },
 )
 async def service_get_logs(
-        task_id: str = FastApiPath(..., description="要获取日志的任务ID", examples=["a1b2c3d4"])
+        task_id: str = FastApiPath(..., description="要获取日志的任务ID", examples=["a1b2c3d4"]),
+        since: int = Query(0, ge=0, description="只返回序号大于此值的日志")
 ):
-    new_logs = await translation_service.get_new_logs(task_id)
-    return JSONResponse(content={"logs": new_logs})
+    logs = translation_service.get_task_logs_since(task_id, since)
+    return JSONResponse(content={"logs": logs})
 
 
 FileType = Literal[
