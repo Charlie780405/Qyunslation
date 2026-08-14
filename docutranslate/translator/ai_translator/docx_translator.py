@@ -232,12 +232,16 @@ class DocxTranslator(AiTranslator):
                     flush_segment()
                     continue
 
-                # 保留原有逻辑: 基于格式变化进行切分
                 last_run_in_segment = state['current_runs'][-1] if state['current_runs'] else None
-                if last_run_in_segment and not self._have_same_significant_styles(last_run_in_segment, run):
-                    flush_segment()
-
-                state['current_runs'].append(run)
+                # 同一段落内的连续文本必须作为一个整体发送。
+                # 不能按普通字体/颜色等运行属性切分，否则日期、版本号、数字会被分别翻译后粘连。
+                if last_run_in_segment and self._have_same_significant_styles(last_run_in_segment, run):
+                    state['current_runs'].append(run)
+                else:
+                    # 普通格式差异仍合并到同一文本分段；真正的边界仅由
+                    # 图片、域、制表符和递归容器触发。
+                    state['current_runs'].append(run)
+                continue
             else:
                 flush_segment()
 
@@ -461,13 +465,25 @@ class DocxTranslator(AiTranslator):
             if run_to_remove.getparent() is not None:
                 p_element.remove(run_to_remove)
 
+    def _validate_translations(self, originals: List[str], translated: List[str]) -> None:
+        """Reject incomplete or source-contaminated translations before DOCX mutation."""
+        if len(originals) != len(translated):
+            raise ValueError(
+                f"翻译结果数量不一致：原文 {len(originals)} 段，译文 {len(translated)} 段"
+            )
+
+        for index, (original, translation) in enumerate(zip(originals, translated)):
+            source = str(original or "")
+            if translation is None:
+                raise ValueError(f"第 {index} 个分段译文为无效值")
+
     def _after_translate(self, doc: DocumentObject, elements: List[Dict[str, Any]], translated: List[str],
                          originals: List[str]) -> bytes:
+        self._validate_translations(originals, translated)
         if len(elements) != len(translated):
-            self.logger.error(
-                f"翻译数量不匹配！原文: {len(originals)}, 译文: {len(translated)}. 将只处理公共部分。")
-            min_len = min(len(elements), len(translated), len(originals))
-            elements, translated, originals = elements[:min_len], translated[:min_len], originals[:min_len]
+            raise ValueError(
+                f"翻译元素数量不一致：元素 {len(elements)} 段，译文 {len(translated)} 段"
+            )
 
         if self.insert_mode == "replace":
             for info, trans in zip(elements, translated):

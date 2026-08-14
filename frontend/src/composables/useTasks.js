@@ -52,7 +52,7 @@ export function useTasks(settings, glossary, i18n) {
     const createNewTask = (backendId = null) => {
         const uiId = 'card_' + Math.random().toString(36).substring(2, 9);
         const task = reactive({
-            uiId, backendId, file: null, fileName: '', logs: '', statusMessage: '',
+            uiId, backendId, file: null, fileName: '', logs: '', logSeq: 0, statusMessage: '',
             statusClass: 'text-muted', isTranslating: false, isFinished: false, isProcessing: false,
             validationError: false, downloads: null, attachment: null, initializing: false, isDragOver: false,
             progressPercent: 0, detectedWorkflow: null, statistics: null
@@ -133,7 +133,7 @@ export function useTasks(settings, glossary, i18n) {
         files.forEach(f => {
             const task = reactive({
                 uiId: 'card_' + Math.random().toString(36).substring(2, 9),
-                backendId: null, file: f, fileName: f.name, logs: '', statusMessage: '',
+                backendId: null, file: f, fileName: f.name, logs: '', logSeq: 0, statusMessage: '',
                 statusClass: 'text-muted', isTranslating: false, isFinished: false, isProcessing: false,
                 validationError: false, downloads: null, attachment: null, initializing: false, isDragOver: false,
                 progressPercent: 0, detectedWorkflow: null
@@ -357,6 +357,7 @@ export function useTasks(settings, glossary, i18n) {
             }
             task.isFinished = false;
             task.logs = '';
+            task.logSeq = 0;
             task.downloads = null;
             await toggleTaskState(task, errors);
             return;
@@ -416,11 +417,15 @@ export function useTasks(settings, glossary, i18n) {
                 return;
             }
             try {
-                // Fetch Logs
-                const logRes = await fetch(`/service/logs/${task.backendId}`);
+                const logSince = task.logSeq || 0;
+                const logRes = await fetch(`/service/logs/${task.backendId}?since=${logSince}`);
                 const logData = await logRes.json();
                 if (logData.logs && logData.logs.length) {
-                    task.logs += logData.logs.map(l => l.replace(/</g, "&lt;").replace(/>/g, "&gt;")).join('<br>') + '<br>';
+                    task.logs += logData.logs.map(item => {
+                        const message = typeof item === 'string' ? item : item.message;
+                        if (item && typeof item.seq === 'number') task.logSeq = Math.max(task.logSeq || 0, item.seq);
+                        return message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    }).join('<br>') + '<br>';
                     nextTick(() => {
                         const logEl = document.getElementById('log-' + task.uiId);
                         if (logEl) logEl.scrollTop = logEl.scrollHeight;

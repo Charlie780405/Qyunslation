@@ -250,11 +250,11 @@ class SegmentsTranslateAgent(Agent):
                 if extra_keys:
                     logger.warning(f"检测到多余的ID（可能是模型幻觉，已丢弃）: {extra_keys}")
 
-                # 合并已翻译的部分和缺失的部分
+                # 合并已翻译的部分；缺失ID不能回填原文。
+                # 回填原文会让上层误以为该分段已翻译，最终导出原文/中英混排。
                 for key in common_keys:
                     final_chunk[key] = str(result_dict[key])
-                for key in missing_keys:
-                    final_chunk[key] = str(original_chunk[key])
+                missing_keys = original_keys - result_keys
 
                 # 如果所有ID都匹配了，直接返回
                 if not missing_keys and not extra_keys:
@@ -276,27 +276,66 @@ class SegmentsTranslateAgent(Agent):
             raise AgentResultError(f"结果处理失败: {e.__repr__()}")
 
     def _error_result_handler(self, origin_prompt: str, logger: Logger):
-        """
-        处理在所有重试后仍然失败的请求。
-        作为备用方案，返回原文内容，并将所有值转换为字符串。
+        """处理所有重试均失败的请求。
+
+        失败不能返回原文作为“译文”：上层会据此将任务标记为成功并导出
+        原文/伪译文。抛出 ``AgentResultError`` 让失败沿调用链传播到任务层。
         """
         try:
             original_segments = get_original_segments(origin_prompt)
         except ValueError as e:
-            logger.error(f"无法从prompt中提取初始文本: {e}")
+            raise AgentResultError(f"翻译失败，无法解析原始分块: {e}") from e
+
+        if original_segments.strip() == "":
             return {}
-        if original_segments == "":
-            return {}
+
         try:
             original_chunk = json_repair.loads(original_segments)
-            # 此处逻辑保留，作为最终的兜底方案
-            for key, value in original_chunk.items():
-                original_chunk[key] = f"{value}"
-            return original_chunk
-        except (RuntimeError, JSONDecodeError):
-            logger.error(f"原始prompt也不是有效的json格式: {original_segments}")
-            # 如果原始prompt本身也无效，返回一个清晰的错误对象
-            return {"error": f"{original_segments}"}
+            segment_ids = list(original_chunk.keys()) if isinstance(original_chunk, dict) else []
+        except (RuntimeError, JSONDecodeError, TypeError) as e:
+            raise AgentResultError(f"翻译失败，原始分块不是有效JSON: {e}") from e
+
+        logger.error(
+            "翻译请求在所有重试后仍失败，拒绝使用原文兜底: segment_ids=%s",
+            segment_ids,
+        )
+        raise AgentResultError(
+            f"翻译请求在所有重试后仍失败（{len(segment_ids)}个分段），未生成可用译文"
+        )
+
+    def _assemble_translated_segments(
+        self,
+        indexed_originals: dict[str, str],
+        merged_indices_list: list[tuple[int, int]],
+        translated_chunks: list[dict],
+    ) -> list[str]:
+        """Merge model chunks without silently retaining source text for missing IDs."""
+        indexed_translated = {key: None for key in indexed_originals}
+        for chunk in translated_chunks:
+            if not isinstance(chunk, dict):
+                self.logger.error(f"接收到的chunk不是有效的字典，已拒绝: {chunk}")
+                continue
+            for key, val in chunk.items():
+                if key in indexed_translated:
+                    indexed_translated[key] = str(val)
+                else:
+                    self.logger.warning(f"在结果chunk中发现未知键 '{key}'，已忽略。")
+
+        missing_keys = [key for key, value in indexed_translated.items() if value is None]
+        if missing_keys:
+            raise AgentResultError(
+                f"翻译结果缺失 {len(missing_keys)} 个分段ID，拒绝使用原文补齐: {missing_keys[:20]}"
+            )
+
+        values = list(indexed_translated.values())
+        result = []
+        last_end = 0
+        for start, end in merged_indices_list:
+            result.extend(values[last_end:start])
+            result.append("".join(values[start:end]))
+            last_end = end
+        result.extend(values[last_end:])
+        return result
 
     def send_segments(self, segments: list[str], chunk_size: int) -> list[str]:
         indexed_originals, chunks, merged_indices_list = segments2json_chunks(segments, chunk_size)
@@ -305,35 +344,7 @@ class SegmentsTranslateAgent(Agent):
                                                  pre_send_handler=self._pre_send_handler,
                                                  result_handler=self._result_handler,
                                                  error_result_handler=self._error_result_handler)
-
-        indexed_translated = indexed_originals.copy()
-        for chunk in translated_chunks:
-            try:
-                if not isinstance(chunk, dict):
-                    self.logger.warning(f"接收到的chunk不是有效的字典，已跳过: {chunk}")
-                    continue
-                for key, val in chunk.items():
-                    if key in indexed_translated:
-                        indexed_translated[key] = val
-                    else:
-                        self.logger.warning(f"在结果chunk中发现未知键 '{key}'，已忽略。")
-            except (AttributeError, TypeError) as e:
-                self.logger.error(f"处理chunk时发生类型或属性错误，已跳过。Chunk: {chunk}, 错误: {e.__repr__()}")
-            except Exception as e:
-                self.logger.error(f"处理chunk时发生未知错误: {e.__repr__()}")
-
-        # 重建最终列表
-        result = []
-        last_end = 0
-        ls = list(indexed_translated.values())
-        for start, end in merged_indices_list:
-            result.extend(ls[last_end:start])
-            merged_item = "".join(map(str, ls[start:end]))
-            result.append(merged_item)
-            last_end = end
-
-        result.extend(ls[last_end:])
-        return result
+        return self._assemble_translated_segments(indexed_originals, merged_indices_list, translated_chunks)
 
     async def send_segments_async(self, segments: list[str], chunk_size: int) -> list[str]:
         indexed_originals, chunks, merged_indices_list = await asyncio.to_thread(segments2json_chunks, segments,
@@ -344,35 +355,7 @@ class SegmentsTranslateAgent(Agent):
                                                              pre_send_handler=self._pre_send_handler,
                                                              result_handler=self._result_handler,
                                                              error_result_handler=self._error_result_handler)
-        indexed_translated = indexed_originals.copy()
-        for chunk in translated_chunks:
-            try:
-                if not isinstance(chunk, dict):
-                    self.logger.error(f"接收到的chunk不是有效的字典，已跳过: {chunk}")
-                    continue
-                for key, val in chunk.items():
-                    if key in indexed_translated:
-                        # 此处不再需要 str(val)，因为 _result_handler 已经处理好了
-                        indexed_translated[key] = val
-                    else:
-                        self.logger.warning(f"在结果chunk中发现未知键 '{key}'，已忽略。")
-            except (AttributeError, TypeError) as e:
-                self.logger.error(f"处理chunk时发生类型或属性错误，已跳过。Chunk: {chunk}, 错误: {e.__repr__()}")
-            except Exception as e:
-                self.logger.error(f"处理chunk时发生未知错误: {e.__repr__()}")
-
-        # 重建最终列表
-        result = []
-        last_end = 0
-        ls = list(indexed_translated.values())
-        for start, end in merged_indices_list:
-            result.extend(ls[last_end:start])
-            merged_item = "".join(map(str, ls[start:end]))
-            result.append(merged_item)
-            last_end = end
-
-        result.extend(ls[last_end:])
-        return result
+        return self._assemble_translated_segments(indexed_originals, merged_indices_list, translated_chunks)
 
     def update_glossary_dict(self, update_dict: dict | None):
         if self.glossary_dict is None:

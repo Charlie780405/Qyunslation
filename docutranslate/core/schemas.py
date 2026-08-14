@@ -245,10 +245,12 @@ class BaseWorkflowParams(BaseModel):
                 }
 
                 if ENV_FORCE_OVERRIDE:
-                    # 强制覆盖模式：仅当 .env 中实际设置了值时才覆盖前端传参
-                    for field, env_value in env_values.items():
+                    # 强制覆盖模式只用于隐藏的模型连接配置；目标语言、并发、
+                    # 分块、重试等必须保留用户在前端选择的值。
+                    forced_fields = {"api_key", "base_url", "model_id", "provider"}
+                    for field in forced_fields:
                         if ENV_SET.get(field):
-                            values[field] = env_value
+                            values[field] = env_values[field]
                 else:
                     # 默认模式：仅空值时填充
                     for field, env_value in env_values.items():
