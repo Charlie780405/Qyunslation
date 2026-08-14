@@ -1,0 +1,50 @@
+{
+  "measured_at": "2026-08-14T12:35:00+08:00",
+  "host": "100.67.66.123",
+  "gpu": {
+    "cards": [
+      {"index": 0, "name": "NVIDIA GeForce RTX 5090", "memory_total_mib": 32607, "role": "Ollama (CUDA_VISIBLE_DEVICES=0)"},
+      {"index": 1, "name": "NVIDIA GeForce RTX 5090", "memory_total_mib": 32607, "role": "HPD-Parsing (~25.8GB VRAM)"}
+    ],
+    "ollama_env": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "OLLAMA_NUM_CTX": "8192",
+      "OLLAMA_HOST": "0.0.0.0:11434",
+      "OLLAMA_NUM_PARALLEL": null,
+      "OLLAMA_KEEP_ALIVE": null,
+      "OLLAMA_MAX_LOADED_MODELS": null
+    }
+  },
+  "hpd": {
+    "endpoint": "http://100.67.66.123:8120",
+    "health": "ok",
+    "avg_latency_s_per_page": 0.54,
+    "upload_bandwidth_kbps": 84.8
+  },
+  "ollama_residency": {
+    "cold_load_wall_s": 10.56,
+    "load_duration_ns": 4960992218,
+    "model_size_vram_bytes": 16997542788,
+    "context_length": 8192
+  },
+  "concurrent_curve": [
+    {"concurrent": 1, "wall_s": 9.75, "ok": 1, "errors": 0},
+    {"concurrent": 2, "wall_s": 14.83, "ok": 2, "errors": 0},
+    {"concurrent": 4, "wall_s": 48.08, "ok": 4, "errors": 0},
+    {"concurrent": 8, "wall_s": 81.32, "ok": 8, "errors": 0}
+  ],
+  "recommended_concurrent": 2,
+  "extra_body_openai_compat": {
+    "top_level_options_accepted": true,
+    "note": "agent.py extra_body merges at top level; Ollama native /api/chat accepts options; OpenAI /v1/chat/completions accepts top-level options in test"
+  },
+  "modelfile_parameters": "presence_penalty 1.5, temperature 1, num_ctx 8192",
+  "presence_penalty_ab": {
+    "1.5": "术语一致，无额外注释",
+    "0": "术语一致，模型额外输出注释行"
+  },
+  "dual_runner": {
+    "note": "qwen3.6:27b 与 qwen3.6:27b-ctx8k 为不同 model name; 切换时 /api/ps 仅显示当前加载模型，但交替调用会触发重复冷加载",
+    "fix": "统一使用 DOCUTRANSLATE_MODEL_ID"
+  }
+}
