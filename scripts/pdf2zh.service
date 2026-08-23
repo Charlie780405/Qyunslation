@@ -1,0 +1,14 @@
+[Unit]
+Description=PDFMathTranslate-next (BabelDOC) WebUI for translate.qyunsgen.com
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dev/pdf2zh
+Environment=PATH=/home/dev/.local/bin:/usr/bin:/bin
+ExecStart=/home/dev/.local/bin/pdf2zh_next --gui --server-port 7860 --ui-lang zh --config-file /home/dev/pdf2zh/config.toml --disable-config-auto-save --disable-gui-sensitive-input --enabled-services Ollama
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
