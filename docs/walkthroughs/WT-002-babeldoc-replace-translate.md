@@ -48,6 +48,9 @@
 | babeldoc | 0.6.2 |
 | Caddy | `caddy reload`（非 restart，符合生产 hook） |
 | 切流 | translate → `127.0.0.1:7860` |
+| git qyunslation | `0ac5df0` |
+| git qyunsgen | `a4c8a2fe` |
+| git homepage | `8ad36d3` |
 
 ## 回归确认
 
