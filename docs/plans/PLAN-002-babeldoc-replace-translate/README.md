@@ -10,3 +10,4 @@
 | `PLAN-002c-caddy-cutover.md` | Caddy 切 `translate.qyunsgen.com` |
 | `PLAN-002d-cleanup-wt.md` | 停旧进程、修 systemd、改 homepage 文案、WT |
 | `PLAN-002e-pdf2zh-archive.md` | pdf2zh 旁路 MinIO 归档 + watcher |
+| `PLAN-002f-vault-vector.md` | Vault 入库 + Hermes 向量索引 |

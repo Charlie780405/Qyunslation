@@ -21,6 +21,7 @@ from qyunslation.archive.pdf2zh_ingest import (  # noqa: E402
     ingest_pdf2zh_group,
     output_group_key,
 )
+from qyunslation.archive.pdf2zh_vault import ingest_vault_and_index  # noqa: E402
 
 logger = logging.getLogger("pdf2zh-archive-watch")
 
@@ -60,6 +61,23 @@ def cfg_from_env() -> dict:
         "minio_prefix": os.environ.get("PDF2ZH_MINIO_PREFIX", "pdf2zh"),
         "poll_seconds": float(os.environ.get("PDF2ZH_ARCHIVE_POLL_SECONDS", "5")),
         "settle_seconds": float(os.environ.get("PDF2ZH_ARCHIVE_SETTLE_SECONDS", "8")),
+        "vault_enable": os.environ.get("PDF2ZH_VAULT_ENABLE", "true").lower()
+        in ("1", "true", "yes"),
+        "vault_root": os.environ.get(
+            "PDF2ZH_VAULT_ROOT", "/home/dev/Targets/vault"
+        ),
+        "vault_translations_dir": os.environ.get(
+            "PDF2ZH_VAULT_TRANSLATIONS_DIR", "10-Source-Documents/Translations"
+        ),
+        "vector_index_enable": os.environ.get(
+            "PDF2ZH_VECTOR_INDEX_ENABLE", "true"
+        ).lower()
+        in ("1", "true", "yes"),
+        "hermes_root": os.environ.get("HERMES_ROOT", "/home/dev/Hermes"),
+        "hermes_python": os.environ.get(
+            "HERMES_PYTHON",
+            str(Path.home() / ".hermes/hermes-agent/venv/bin/python3"),
+        ),
     }
 
 
@@ -68,15 +86,24 @@ class GroupStateDB:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
-            conn.execute(
+            conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS ingested_groups (
                     group_key TEXT PRIMARY KEY,
                     archive_id TEXT NOT NULL,
-                    ingested_at TEXT NOT NULL
+                    ingested_at TEXT NOT NULL,
+                    vault_note_path TEXT
                 )
                 """
             )
+            cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(ingested_groups)").fetchall()
+            }
+            if "vault_note_path" not in cols:
+                conn.execute(
+                    "ALTER TABLE ingested_groups ADD COLUMN vault_note_path TEXT"
+                )
 
     def is_done(self, group_key: str) -> bool:
         with sqlite3.connect(self.path) as conn:
@@ -85,11 +112,32 @@ class GroupStateDB:
             ).fetchone()
         return row is not None
 
-    def mark_done(self, group_key: str, archive_id: str) -> None:
+    def get(self, group_key: str) -> tuple[str, str | None] | None:
+        with sqlite3.connect(self.path) as conn:
+            row = conn.execute(
+                "SELECT archive_id, vault_note_path FROM ingested_groups WHERE group_key = ?",
+                (group_key,),
+            ).fetchone()
+        if not row:
+            return None
+        return row[0], row[1]
+
+    def mark_done(
+        self, group_key: str, archive_id: str, vault_note_path: str | None = None
+    ) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO ingested_groups (group_key, archive_id, ingested_at) VALUES (?, ?, ?)",
-                (group_key, archive_id, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+                """
+                INSERT OR REPLACE INTO ingested_groups
+                (group_key, archive_id, ingested_at, vault_note_path)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    group_key,
+                    archive_id,
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    vault_note_path,
+                ),
             )
             conn.commit()
 
@@ -128,22 +176,56 @@ def run_once(cfg: dict, *, dry_run: bool = False) -> int:
     ingested = 0
 
     for group_key, paths in scan_groups(watch_dir).items():
-        if state.is_done(group_key):
-            continue
         if not files_stable(paths, cfg["settle_seconds"]):
             continue
+
+        existing = state.get(group_key)
+        if existing and existing[1]:
+            continue
+        if existing and not cfg.get("vault_enable"):
+            continue
+
         if dry_run:
             logger.info("dry-run 将归档 %s (%d 文件)", group_key, len(paths))
             ingested += 1
             continue
-        record = ingest_pdf2zh_group(
-            storage=storage,
-            index=index,
-            group_key=group_key,
-            paths=paths,
+
+        if existing:
+            record = index.get(existing[0])
+            if not record:
+                logger.warning("索引无记录 %s，跳过", existing[0])
+                continue
+        else:
+            record = ingest_pdf2zh_group(
+                storage=storage,
+                index=index,
+                group_key=group_key,
+                paths=paths,
+            )
+
+        vault_rel = None
+        if cfg.get("vault_enable"):
+            vault_rel = ingest_vault_and_index(
+                record=record,
+                group_key=group_key,
+                output_paths=paths,
+                vault_root=Path(cfg["vault_root"]),
+                hermes_root=Path(cfg["hermes_root"]),
+                hermes_python=Path(cfg["hermes_python"]),
+                translations_dir=cfg.get(
+                    "vault_translations_dir", "10-Source-Documents/Translations"
+                ),
+                index_enable=bool(cfg.get("vector_index_enable")),
+            )
+
+        state.mark_done(group_key, record.archive_id, vault_rel)
+        logger.info(
+            "已归档 %s → %s vault=%s (%d 文件)",
+            group_key,
+            record.archive_id,
+            vault_rel or "-",
+            len(paths),
         )
-        state.mark_done(group_key, record.archive_id)
-        logger.info("已归档 %s → %s (%d 文件)", group_key, record.archive_id, len(paths))
         ingested += 1
     return ingested
 

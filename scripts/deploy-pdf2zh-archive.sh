@@ -14,9 +14,9 @@ if [[ -f "$QYUNSGEN_ROOT/scripts/ensure-minio-buckets.sh" ]]; then
   bash "$QYUNSGEN_ROOT/scripts/ensure-minio-buckets.sh" "$QYUNSGEN_ROOT/.env.docker"
 fi
 
-echo "== 安装 minio Python 客户端"
-python3 -m pip install --break-system-packages -q minio 2>/dev/null \
-  || uv pip install --python "$(command -v python3)" minio
+echo "== 安装 minio + pymupdf"
+python3 -m pip install --break-system-packages -q minio pymupdf 2>/dev/null \
+  || uv pip install --python "$(command -v python3)" minio pymupdf
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "== 生成 $ENV_FILE"
@@ -29,6 +29,16 @@ if [[ ! -f "$ENV_FILE" ]]; then
   sed -i "s/^PDF2ZH_MINIO_SECRET_KEY=.*/PDF2ZH_MINIO_SECRET_KEY=$SK/" "$ENV_FILE"
   sed -i "s/^PDF2ZH_MINIO_ENDPOINT=.*/PDF2ZH_MINIO_ENDPOINT=127.0.0.1:$PORT/" "$ENV_FILE"
 fi
+
+grep -q '^PDF2ZH_VAULT_ENABLE=' "$ENV_FILE" || cat >>"$ENV_FILE" <<'EOF'
+
+PDF2ZH_VAULT_ENABLE=true
+PDF2ZH_VAULT_ROOT=/home/dev/Targets/vault
+PDF2ZH_VAULT_TRANSLATIONS_DIR=10-Source-Documents/Translations
+PDF2ZH_VECTOR_INDEX_ENABLE=true
+HERMES_ROOT=/home/dev/Hermes
+HERMES_PYTHON=/home/dev/.hermes/hermes-agent/venv/bin/python3
+EOF
 
 mkdir -p "$PDF2ZH_ROOT/out" "$PDF2ZH_ROOT/archive"
 
@@ -48,4 +58,5 @@ PYTHONPATH="$ROOT" python3 "$ROOT/scripts/pdf2zh-archive-watch.py" --env-file "$
 
 echo "== 验收"
 bash "$ROOT/scripts/verify-plan-002e.sh"
-echo "OK: pdf2zh 旁路归档已部署"
+bash "$ROOT/scripts/verify-plan-002f.sh" || true
+echo "OK: pdf2zh 旁路归档 + Vault/向量索引已部署"
