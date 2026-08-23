@@ -11,3 +11,4 @@
 | `PLAN-002d-cleanup-wt.md` | 停旧进程、修 systemd、改 homepage 文案、WT |
 | `PLAN-002e-pdf2zh-archive.md` | pdf2zh 旁路 MinIO 归档 + watcher |
 | `PLAN-002f-vault-vector.md` | Vault 入库 + Hermes 向量索引 |
+| `PLAN-002g-translation-search-ui.md` | 知识库 / homepage 翻译检索卡片 |
