@@ -14,7 +14,7 @@ htmlcov/
 __pycache__/
 examples/
 check/
-docutranslate/output/
+qyunslation/output/
 # Virtual environments
 .venv
 #idea
@@ -28,3 +28,8 @@ docutranslate/output/
 
 # 运行时术语表数据（用户自定义术语，运行时生成）
 glossary_db.json
+translation_cache.json
+qyunslation.log
+archive/index.db
+archive/objects/
+

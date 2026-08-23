@@ -1,0 +1,16 @@
+[Unit]
+Description=pdf2zh output archive watcher (MinIO + SQLite)
+After=network-online.target pdf2zh.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dev/qyunslation
+Environment=PATH=/home/dev/.local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/dev/qyunslation
+ExecStart=/usr/bin/python3 /home/dev/qyunslation/scripts/pdf2zh-archive-watch.py --env-file /home/dev/pdf2zh/archive.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

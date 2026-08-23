@@ -9,3 +9,4 @@
 | `PLAN-002b-ollama-smoke.md` | 接泰州 Ollama + 资产 warmup + 样张烟测 |
 | `PLAN-002c-caddy-cutover.md` | Caddy 切 `translate.qyunsgen.com` |
 | `PLAN-002d-cleanup-wt.md` | 停旧进程、修 systemd、改 homepage 文案、WT |
+| `PLAN-002e-pdf2zh-archive.md` | pdf2zh 旁路 MinIO 归档 + watcher |
