@@ -1,0 +1,15 @@
+{
+  "recorded_at": "2026-08-23T14:06:18.018063+00:00",
+  "observed_llama_server": [
+    {
+      "line": "genscend  246137  0.1  0.5 52341420 1311728 ?    Ssl  Aug13  15:26 /usr/local/lib/ollama/llama-server --model /home/genscend/hermes-rerank/bge-reranker-v2-m3-Q8_0.gguf --reranking --pooling rank --gpu-layers 99 --ctx-size 8192 --host 0.0.0.0 --port 11435",
+      "ctx": null,
+      "num_parallel": null
+    },
+    {
+      "line": "ollama   3788122 63.4  0.5 80373100 1344904 ?    Sl   22:06   0:03 /usr/local/lib/ollama/llama-server --model /mnt/ai/ollama/models/blobs/sha256-f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d --port 37109 --host 127.0.0.1 --no-webui --offline -c 262144 -np 1 --log-verbosity 4 --no-log-prefix --no-log-timestamps --no-jinja --chat-template chatml --mmproj /mnt/ai/ollama/models/blobs/sha256-f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d --flash-attn auto -b 512 -",
+      "ctx": 262144,
+      "num_parallel": 1
+    }
+  ]
+}

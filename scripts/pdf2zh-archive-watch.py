@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import logging
 import os
 import sqlite3
@@ -42,8 +43,14 @@ def load_env_file(path: Path) -> None:
 def cfg_from_env() -> dict:
     return {
         "watch_dir": os.environ.get("PDF2ZH_ARCHIVE_WATCH_DIR", "/home/dev/pdf2zh/out"),
+        "session_dir": os.environ.get(
+            "PDF2ZH_ARCHIVE_SESSION_DIR", "/home/dev/pdf2zh/pdf2zh_files"
+        ),
         "state_db": os.environ.get(
-            "PDF2ZH_ARCHIVE_STATE_DB", "/home/dev/pdf2zh/.archive-state.db"
+            "PDF2ZH_ARCHIVE_STATE_DB", "/home/dev/pdf2zh/archive/watch-state.db"
+        ),
+        "lock_file": os.environ.get(
+            "PDF2ZH_ARCHIVE_LOCK_FILE", "/home/dev/pdf2zh/archive/watch.lock"
         ),
         "index_db": os.environ.get(
             "PDF2ZH_ARCHIVE_INDEX_DB", "/home/dev/pdf2zh/archive/index.db"
@@ -83,7 +90,7 @@ def cfg_from_env() -> dict:
 
 class GroupStateDB:
     def __init__(self, path: Path):
-        self.path = path
+        self.path = path.expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
             conn.executescript(
@@ -142,16 +149,25 @@ class GroupStateDB:
             conn.commit()
 
 
-def scan_groups(watch_dir: Path) -> dict[str, list[Path]]:
+def _collect_output_files(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    files: list[Path] = []
+    for path in root.iterdir():
+        if path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            files.extend(p for p in path.iterdir() if p.is_file())
+    return files
+
+
+def scan_groups(*watch_dirs: Path) -> dict[str, list[Path]]:
     groups: dict[str, list[Path]] = defaultdict(list)
-    if not watch_dir.is_dir():
-        return groups
-    for path in watch_dir.iterdir():
-        if not path.is_file():
-            continue
-        key = output_group_key(path.name)
-        if key:
-            groups[key].append(path)
+    for watch_dir in watch_dirs:
+        for path in _collect_output_files(watch_dir):
+            key = output_group_key(path.name)
+            if key:
+                groups[key].append(path)
     return groups
 
 
@@ -170,64 +186,74 @@ def files_stable(paths: list[Path], settle_seconds: float) -> bool:
 
 
 def run_once(cfg: dict, *, dry_run: bool = False) -> int:
-    watch_dir = Path(cfg["watch_dir"])
-    state = GroupStateDB(Path(cfg["state_db"]))
-    storage, index = build_pdf2zh_archive_backend(cfg)
-    ingested = 0
+    lock_path = Path(cfg.get("lock_file") or cfg["state_db"]).with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w", encoding="utf-8") as lockf:
+        try:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.debug("归档锁占用，跳过本轮")
+            return 0
 
-    for group_key, paths in scan_groups(watch_dir).items():
-        if not files_stable(paths, cfg["settle_seconds"]):
-            continue
+        watch_dir = Path(cfg["watch_dir"])
+        session_dir = Path(cfg.get("session_dir") or "")
+        state = GroupStateDB(Path(cfg["state_db"]))
+        storage, index = build_pdf2zh_archive_backend(cfg)
+        ingested = 0
 
-        existing = state.get(group_key)
-        if existing and existing[1]:
-            continue
-        if existing and not cfg.get("vault_enable"):
-            continue
-
-        if dry_run:
-            logger.info("dry-run 将归档 %s (%d 文件)", group_key, len(paths))
-            ingested += 1
-            continue
-
-        if existing:
-            record = index.get(existing[0])
-            if not record:
-                logger.warning("索引无记录 %s，跳过", existing[0])
+        for group_key, paths in scan_groups(watch_dir, session_dir).items():
+            if not files_stable(paths, cfg["settle_seconds"]):
                 continue
-        else:
-            record = ingest_pdf2zh_group(
-                storage=storage,
-                index=index,
-                group_key=group_key,
-                paths=paths,
-            )
 
-        vault_rel = None
-        if cfg.get("vault_enable"):
-            vault_rel = ingest_vault_and_index(
-                record=record,
-                group_key=group_key,
-                output_paths=paths,
-                vault_root=Path(cfg["vault_root"]),
-                hermes_root=Path(cfg["hermes_root"]),
-                hermes_python=Path(cfg["hermes_python"]),
-                translations_dir=cfg.get(
-                    "vault_translations_dir", "10-Source-Documents/Translations"
-                ),
-                index_enable=bool(cfg.get("vector_index_enable")),
-            )
+            existing = state.get(group_key)
+            if existing and existing[1]:
+                continue
+            if existing and not cfg.get("vault_enable"):
+                continue
 
-        state.mark_done(group_key, record.archive_id, vault_rel)
-        logger.info(
-            "已归档 %s → %s vault=%s (%d 文件)",
-            group_key,
-            record.archive_id,
-            vault_rel or "-",
-            len(paths),
-        )
-        ingested += 1
-    return ingested
+            if dry_run:
+                logger.info("dry-run 将归档 %s (%d 文件)", group_key, len(paths))
+                ingested += 1
+                continue
+
+            if existing:
+                record = index.get(existing[0])
+                if not record:
+                    logger.warning("索引无记录 %s，跳过", existing[0])
+                    continue
+            else:
+                record = ingest_pdf2zh_group(
+                    storage=storage,
+                    index=index,
+                    group_key=group_key,
+                    paths=paths,
+                )
+
+            vault_rel = None
+            if cfg.get("vault_enable"):
+                vault_rel = ingest_vault_and_index(
+                    record=record,
+                    group_key=group_key,
+                    output_paths=paths,
+                    vault_root=Path(cfg["vault_root"]),
+                    hermes_root=Path(cfg["hermes_root"]),
+                    hermes_python=Path(cfg["hermes_python"]),
+                    translations_dir=cfg.get(
+                        "vault_translations_dir", "10-Source-Documents/Translations"
+                    ),
+                    index_enable=bool(cfg.get("vector_index_enable")),
+                )
+
+            state.mark_done(group_key, record.archive_id, vault_rel)
+            logger.info(
+                "已归档 %s → %s vault=%s (%d 文件)",
+                group_key,
+                record.archive_id,
+                vault_rel or "-",
+                len(paths),
+            )
+            ingested += 1
+        return ingested
 
 
 def main() -> int:
@@ -252,7 +278,13 @@ def main() -> int:
         logger.error("缺少 PDF2ZH_MINIO_ACCESS_KEY（见 archive.env.example）")
         return 1
 
-    logger.info("监听 %s backend=%s bucket=%s", cfg["watch_dir"], cfg["storage_backend"], cfg["minio_bucket"])
+    logger.info(
+        "监听 %s session=%s backend=%s bucket=%s",
+        cfg["watch_dir"],
+        cfg.get("session_dir"),
+        cfg["storage_backend"],
+        cfg["minio_bucket"],
+    )
 
     if args.once:
         n = run_once(cfg, dry_run=args.dry_run)

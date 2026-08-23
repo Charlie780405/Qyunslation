@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-08-23T13:34:39.565026+00:00",
+  "host": "http://100.67.66.123:11434",
+  "model": "qwen3.6:35b-a3b",
+  "prompt_chars": 353,
+  "results": [
+    {
+      "concurrent": 1,
+      "wall_s": 3.11,
+      "ok": 1,
+      "errors": 0,
+      "avg_latency_s": 3.11,
+      "per_request_wall_s": 3.11,
+      "error_samples": []
+    },
+    {
+      "concurrent": 2,
+      "wall_s": 5.3,
+      "ok": 2,
+      "errors": 0,
+      "avg_latency_s": 4.22,
+      "per_request_wall_s": 2.65,
+      "error_samples": []
+    },
+    {
+      "concurrent": 4,
+      "wall_s": 9.66,
+      "ok": 4,
+      "errors": 0,
+      "avg_latency_s": 6.42,
+      "per_request_wall_s": 2.42,
+      "error_samples": []
+    }
+  ],
+  "recommended_ollama_num_parallel": 4,
+  "recommended_pdf2zh_qps": 4
+}

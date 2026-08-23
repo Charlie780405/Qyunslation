@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-08-23T14:08:49.932606+00:00",
+  "host": "http://100.67.66.123:11434",
+  "model": "qwen3.6:35b-a3b",
+  "prompt_chars": 353,
+  "results": [
+    {
+      "concurrent": 1,
+      "wall_s": 3.95,
+      "ok": 1,
+      "errors": 0,
+      "avg_latency_s": 3.95,
+      "per_request_wall_s": 3.95,
+      "error_samples": []
+    },
+    {
+      "concurrent": 2,
+      "wall_s": 5.31,
+      "ok": 2,
+      "errors": 0,
+      "avg_latency_s": 4.23,
+      "per_request_wall_s": 2.66,
+      "error_samples": []
+    },
+    {
+      "concurrent": 4,
+      "wall_s": 9.9,
+      "ok": 4,
+      "errors": 0,
+      "avg_latency_s": 6.66,
+      "per_request_wall_s": 2.47,
+      "error_samples": []
+    }
+  ],
+  "recommended_ollama_num_parallel": 4,
+  "recommended_pdf2zh_qps": 4,
+  "observed_llama_server": [
+    {
+      "line": "genscend  246137  0.1  0.5 52341420 1311728 ?    Ssl  Aug13  15:26 /usr/local/lib/ollama/llama-server --model /home/genscend/hermes-rerank/bge-reranker-v2-m3-Q8_0.gguf --reranking --pooling rank --gpu-layers 99 --ctx-size 8192 --host 0.0.0.0 --port 11435",
+      "ctx": null,
+      "num_parallel": null
+    },
+    {
+      "line": "ollama   3788122 63.4  0.5 80373100 1344904 ?    Sl   22:06   0:03 /usr/local/lib/ollama/llama-server --model /mnt/ai/ollama/models/blobs/sha256-f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d --port 37109 --host 127.0.0.1 --no-webui --offline -c 262144 -np 1 --log-verbosity 4 --no-log-prefix --no-log-timestamps --no-jinja --chat-template chatml --mmproj /mnt/ai/ollama/models/blobs/sha256-f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d --flash-attn auto -b 512 -",
+      "ctx": 262144,
+      "num_parallel": 1
+    }
+  ],
+  "plan_004a": {
+    "num_predict_config": 512,
+    "num_predict_cap": 1024,
+    "target_per_request_wall_s_at_4": 1.8,
+    "baseline_003b_per_request_wall_s_at_4": 2.42,
+    "actual_per_request_wall_s_at_4": 2.47,
+    "a_v1_pass": false
+  }
+}
