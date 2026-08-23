@@ -1,0 +1,16 @@
+[Unit]
+Description=Qyunslation office sidecar (Word/image) for office.qyunsgen.com
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dev/qyunslation
+EnvironmentFile=/home/dev/pdf2zh/office.env
+Environment=PATH=/home/dev/qyunslation/.venv/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/dev/qyunslation
+ExecStart=/home/dev/qyunslation/.venv/bin/qyunslation -i --host 127.0.0.1 --port 8010
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

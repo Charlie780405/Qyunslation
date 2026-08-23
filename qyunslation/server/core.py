@@ -38,6 +38,10 @@ from docutranslate.global_values.conditional_import import DOCLING_EXIST
 from docutranslate.workflow.ass_workflow import AssWorkflow, AssWorkflowConfig
 from docutranslate.workflow.base import Workflow
 from docutranslate.workflow.docx_workflow import DocxWorkflow, DocxWorkflowConfig
+from docutranslate.workflow.image_overlay_workflow import (
+    ImageOverlayWorkflow,
+    ImageOverlayWorkflowConfig,
+)
 from docutranslate.workflow.epub_workflow import EpubWorkflow, EpubWorkflowConfig
 from docutranslate.workflow.html_workflow import HtmlWorkflow, HtmlWorkflowConfig
 from docutranslate.workflow.interfaces import (
@@ -127,6 +131,7 @@ WORKFLOW_DICT: Dict[str, Type[Workflow]] = {
     "json": JsonWorkflow,
     "xlsx": XlsxWorkflow,
     "docx": DocxWorkflow,
+    "image_overlay": ImageOverlayWorkflow,
     "srt": SrtWorkflow,
     "epub": EpubWorkflow,
     "html": HtmlWorkflow,
@@ -191,7 +196,9 @@ class QueueAndHistoryHandler(logging.Handler):
 def get_workflow_type_from_filename(filename: str) -> str:
     """Get workflow type based on file extension."""
     ext = Path(filename).suffix.lower()
-    if ext in [".pdf", ".png", ".jpg"]:
+    if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        return "image_overlay"
+    if ext in [".pdf"]:
         return "markdown_based"
     elif ext in [".md", ".markdown"]:
         return "markdown_based"
@@ -330,6 +337,14 @@ class TranslationService:
         Returns:
             Response dict with task_id and status
         """
+        # PLAN-005b: .doc → .docx
+        if Path(original_filename).suffix.lower() == ".doc":
+            from docutranslate.converter.doc2docx import ensure_docx
+
+            original_filename, file_contents = ensure_docx(
+                original_filename, file_contents
+            )
+
         # Auto workflow routing
         if payload.workflow_type == "auto":
             detected_type = get_workflow_type_from_filename(original_filename)
@@ -653,6 +668,20 @@ class TranslationService:
                 }
             )
             task_logger.info(f"翻译完成，用时 {duration:.2f} 秒。")
+            # PLAN-005d: 旁路复制到 office_out 供归档 watcher
+            office_out = os.environ.get("QYUNSLATION_OFFICE_OUT", "").strip()
+            if office_out and downloadable_files:
+                try:
+                    out_dir = Path(office_out)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    for meta in downloadable_files.values():
+                        src = Path(meta["path"])
+                        if src.is_file():
+                            dest = out_dir / meta["filename"]
+                            shutil.copy2(src, dest)
+                            task_logger.info("copied to office_out: %s", dest)
+                except Exception as copy_exc:
+                    task_logger.warning("office_out copy failed: %s", copy_exc)
 
         except asyncio.CancelledError:
             end_time = time.time()
@@ -727,6 +756,7 @@ class TranslationService:
             JsonWorkflowParams,
             XlsxWorkflowParams,
             DocxWorkflowParams,
+            ImageOverlayWorkflowParams,
             SrtWorkflowParams,
             EpubWorkflowParams,
             HtmlWorkflowParams,
@@ -983,6 +1013,10 @@ class TranslationService:
             )
             translator_args["glossary_generate_enable"] = payload.glossary_generate_enable
             translator_args["glossary_agent_config"] = build_glossary_agent_config()
+            if not translator_args.get("glossary_dict"):
+                from docutranslate.glossary.static_csv import load_static_glossary
+
+                translator_args["glossary_dict"] = load_static_glossary() or None
             translator_config = DocxTranslatorConfig(**translator_args)
             translator_config.progress_tracker = progress_tracker
 
@@ -994,6 +1028,15 @@ class TranslationService:
                 progress_tracker=progress_tracker,
             )
             return DocxWorkflow(config=workflow_config)
+
+        elif isinstance(payload, ImageOverlayWorkflowParams):
+            task_logger.info("构建 ImageOverlayWorkflow 配置。")
+            return ImageOverlayWorkflow(
+                config=ImageOverlayWorkflowConfig(
+                    logger=task_logger,
+                    progress_tracker=progress_tracker,
+                )
+            )
 
         elif isinstance(payload, SrtWorkflowParams):
             task_logger.info("构建 SrtWorkflow 配置。")
@@ -1268,6 +1311,13 @@ class TranslationService:
                 export_map["docx"] = (
                     workflow.export_to_docx,
                     f"{filename_stem}_translated.docx",
+                    False,
+                )
+            elif isinstance(workflow, ImageOverlayWorkflow):
+                suffix = (workflow.document_translated.suffix if workflow.document_translated else ".png") or ".png"
+                export_map["image"] = (
+                    workflow.export_overlay,
+                    f"{filename_stem}.zh{suffix}",
                     False,
                 )
         if isinstance(workflow, SrtExportable):

@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-08-23T14:45:56.988626+00:00",
+  "hpd_url": "http://100.67.66.123:8120",
+  "hpd_health": "{\"status\":\"ok\"}",
+  "a_v2_hpd_ok": true,
+  "a_v4_text_pdf_skips_hpd": true,
+  "samples": [
+    {
+      "path": "/home/dev/pdf2zh/sample/page1.pdf",
+      "pdf_needs_hpd": false,
+      "chars_gate": 80
+    },
+    {
+      "path": "/home/dev/pdf2zh/pdf2zh_files/87df0b04-e2b3-442b-a4ce-c002dabcc6e9/Abstract.pdf",
+      "pdf_needs_hpd": true,
+      "chars_gate": 80
+    },
+    {
+      "path": "/home/dev/pdf2zh/pdf2zh_files/665d1019-7a80-4378-95ca-7fe21524479f/CBP-201 Ph 3.pdf",
+      "pdf_needs_hpd": false,
+      "chars_gate": 80
+    }
+  ],
+  "notes": "Full scanned dual translate SLO deferred to WT; A-V4 verified on page1 text PDF."
+}

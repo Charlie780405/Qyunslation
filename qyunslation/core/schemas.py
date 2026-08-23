@@ -3,6 +3,7 @@
 # docutranslate.core.schemas.py
 
 import json
+import os
 from typing import (
     List,
     Dict,
@@ -247,10 +248,33 @@ class BaseWorkflowParams(BaseModel):
                 if ENV_FORCE_OVERRIDE:
                     # 强制覆盖模式只用于隐藏的模型连接配置；目标语言、并发、
                     # 分块、重试等必须保留用户在前端选择的值。
+                    # PLAN-005b: office sidecar 额外锁定质量口径（temp/concurrent/prompt/术语）。
                     forced_fields = {"api_key", "base_url", "model_id", "provider"}
+                    if os.environ.get("DOCUTRANSLATE_OFFICE_LOCK", "").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                        "on",
+                    ):
+                        forced_fields |= {
+                            "temperature",
+                            "concurrent",
+                            "custom_prompt",
+                            "thinking",
+                            "glossary_generate_enable",
+                        }
                     for field in forced_fields:
-                        if ENV_SET.get(field):
-                            values[field] = env_values[field]
+                        if field == "glossary_generate_enable":
+                            values[field] = False
+                            continue
+                        if ENV_SET.get(field) or field in (
+                            "temperature",
+                            "concurrent",
+                            "custom_prompt",
+                            "thinking",
+                        ):
+                            if field in env_values and env_values[field] is not None:
+                                values[field] = env_values[field]
                 else:
                     # 默认模式：仅空值时填充
                     for field, env_value in env_values.items():
@@ -503,6 +527,12 @@ class DocxWorkflowParams(BaseWorkflowParams):
     )
 
 
+class ImageOverlayWorkflowParams(BaseWorkflowParams):
+    workflow_type: Literal["image_overlay"] = Field(
+        ..., description="图片嵌字翻译工作流（HPD 检测 + 35b）。"
+    )
+
+
 class SrtWorkflowParams(BaseWorkflowParams):
     workflow_type: Literal["srt"] = Field(
         ..., description="指定使用SRT字幕的翻译工作流。"
@@ -594,6 +624,7 @@ TranslatePayload = Annotated[
         JsonWorkflowParams,
         XlsxWorkflowParams,
         DocxWorkflowParams,
+        ImageOverlayWorkflowParams,
         SrtWorkflowParams,
         EpubWorkflowParams,
         HtmlWorkflowParams,

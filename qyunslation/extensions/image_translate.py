@@ -1,63 +1,156 @@
-#!/usr/bin/env python3
-"""图片嵌字翻译模块：RapidOCR 检测识别 → qwen3.6:27b 翻译 → opencv 擦除 → PIL 嵌字
+# SPDX-License-Identifier: MPL-2.0
+"""图片嵌字：HPD 检测 → qwen3.6:35b-a3b 翻译 → opencv 擦除 → PIL 嵌字（PLAN-005c）。"""
+from __future__ import annotations
 
-阶段 1 验证通过（12 块文字精确检测/翻译/嵌字，非文字区域 97.5% 一致）。
-阶段 2 由 DocuTranslate 内嵌图整合调用。
-
-技术栈（全复用已有能力 + 最小增量）：
-  - 检测+识别: RapidOCR（DBNet onnx + CRNN，本地 CPU，不装 paddle 框架）
-  - 翻译:      qwen3.6:27b（泰州 Ollama，请求级 num_ctx 提速）
-  - 擦除:      opencv inpaint（精确 mask，保护图形）
-  - 嵌字:      PIL + NotoSansSC（字号自适应 + 颜色匹配）
-"""
 import base64
+import csv
 import json
+import logging
+import os
 import re
 import time
 import urllib.request
+from pathlib import Path
 
 import cv2
 import numpy as np
-from rapidocr_onnxruntime import RapidOCR
 from PIL import Image, ImageDraw, ImageFont
 
-OLLAMA = "http://100.67.66.123:11434"
-FONT = "/home/dev/.fonts/NotoSansSC.ttf"
-MODEL = "qwen3.6:27b"
+logger = logging.getLogger(__name__)
 
-# RapidOCR 引擎（det_limit_side_len 放大避免小字丢失）
-_engine = RapidOCR(det_limit_side_len=2400)
+OLLAMA = os.environ.get("DOCUTRANSLATE_BASE_URL", "http://100.67.66.123:11434/v1").replace(
+    "/v1", ""
+)
+HPD_URL = os.environ.get("QYUNSLATION_HPD_BASE_URL", "http://100.67.66.123:8120")
+FONT = os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC.ttf")
+MODEL = os.environ.get("DOCUTRANSLATE_MODEL_ID", "qwen3.6:35b-a3b")
+GLOSSARY_CSV = os.environ.get(
+    "QYUNSLATION_GLOSSARY_CSV", "/home/dev/pdf2zh/glossaries/qx027n.csv"
+)
 
-
-def ocr_image(img_path):
-    """RapidOCR 检测+识别 → [(x1,y1,x2,y2,text,score), ...]（按从上到下排序）"""
-    result, _ = _engine(img_path)
-    boxes = []
-    if result:
-        for box, text, score in result:
-            x = [p[0] for p in box]
-            y = [p[1] for p in box]
-            boxes.append((int(min(x)), int(min(y)), int(max(x)), int(max(y)), text.strip(), float(score)))
-    boxes.sort(key=lambda b: (b[1], b[0]))
-    return boxes
+_BLOCK_RE = re.compile(
+    r"<BLOCK>(?P<type>\w+)\s+\[(?P<x1>\d+),\s*(?P<y1>\d+),\s*(?P<x2>\d+),\s*(?P<y2>\d+)\]"
+    r"<CHILD>(?P<text>.+)$"
+)
 
 
-def translate_texts(texts, model=MODEL, num_ctx=4096):
-    """批量翻译文本 → {序号: 译文}，纯译文不加注释"""
-    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
-    prompt = (f"Translate each numbered line to Chinese. Output ONLY the translation, "
-              f"keep the same numbering, no explanations, no parentheses notes:\n{numbered}")
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        "options": {"temperature": 0, "num_ctx": num_ctx},
-    }).encode()
-    req = urllib.request.Request(f"{OLLAMA}/api/chat", data=payload,
-                                 headers={"Content-Type": "application/json"})
+def _hpd_parse(image_b64: str, timeout: int = 180) -> str:
+    req = urllib.request.Request(
+        f"{HPD_URL.rstrip('/')}/parse",
+        data=json.dumps({"image_b64": image_b64}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode())
+    if data.get("error"):
+        raise RuntimeError(str(data["error"]))
+    return data.get("markdown") or ""
+
+
+def _blocks(raw: str) -> list[tuple[int, int, int, int, str]]:
+    out = []
+    for line in raw.splitlines():
+        m = _BLOCK_RE.match(line.strip())
+        if not m:
+            continue
+        text = m.group("text").strip()
+        if not text or text == "[Non-Text]":
+            continue
+        out.append(
+            (
+                int(m.group("x1")),
+                int(m.group("y1")),
+                int(m.group("x2")),
+                int(m.group("y2")),
+                text,
+            )
+        )
+    return out
+
+
+def ocr_image_hpd(img_path: str | Path) -> list[tuple[int, int, int, int, str, float]]:
+    """HPD 检测+识别 → [(x1,y1,x2,y2,text,score), ...]"""
+    img_path = Path(img_path)
+    raw_bytes = img_path.read_bytes()
+    b64 = base64.b64encode(raw_bytes).decode()
+    md = _hpd_parse(b64)
+    blocks = _blocks(md)
+    img = cv2.imdecode(np.frombuffer(raw_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise RuntimeError(f"cannot read image: {img_path}")
+    h, w = img.shape[:2]
+    max_x = max((b[2] for b in blocks), default=0)
+    max_y = max((b[3] for b in blocks), default=0)
+    # HPD 常返回 0–1000 归一化坐标
+    if max(max_x, max_y) <= 1000 and (w > 1200 or h > 1200):
+        sx, sy = w / 1000.0, h / 1000.0
+    else:
+        sx = sy = 1.0
+    out = []
+    for x1, y1, x2, y2, text in blocks:
+        out.append(
+            (
+                int(x1 * sx),
+                int(y1 * sy),
+                int(max(x2 * sx, x1 * sx + 8)),
+                int(max(y2 * sy, y1 * sy + 8)),
+                text,
+                1.0,
+            )
+        )
+    out.sort(key=lambda b: (b[1], b[0]))
+    return out
+
+
+def _load_glossary() -> dict[str, str]:
+    path = Path(GLOSSARY_CSV)
+    if not path.is_file():
+        return {}
+    d: dict[str, str] = {}
+    with path.open(encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            s, t = (row.get("source") or "").strip(), (row.get("target") or "").strip()
+            if s and t:
+                d[s] = t
+    return d
+
+
+def _apply_glossary(text: str, glossary: dict[str, str]) -> str:
+    # longest keys first
+    for src in sorted(glossary.keys(), key=len, reverse=True):
+        if src in text:
+            text = text.replace(src, glossary[src])
+    return text
+
+
+def translate_texts(texts: list[str], model: str = MODEL, num_ctx: int = 8192) -> dict[int, str]:
+    glossary = _load_glossary()
+    prepared = [_apply_glossary(t, glossary) for t in texts]
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(prepared))
+    prompt = (
+        "/no_think Translate each numbered line to Simplified Chinese. "
+        "Output ONLY the translation, keep the same numbering, no explanations:\n"
+        f"{numbered}"
+    )
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {"temperature": 0, "num_ctx": num_ctx, "num_predict": 2000},
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=300) as r:
         content = json.loads(r.read().decode())["message"]["content"]
-    trans = {}
+    # strip think tags if any
+    content = re.sub(r"<think>[\s\S]*?</think>", "", content, flags=re.I).strip()
+    trans: dict[int, str] = {}
     for line in content.split("\n"):
         m = re.match(r"(\d+)[.、)\s]+(.+)", line.strip())
         if m:
@@ -65,55 +158,85 @@ def translate_texts(texts, model=MODEL, num_ctx=4096):
     return trans
 
 
-def translate_image(img_path, out_path, to_lang="中文"):
-    """完整图片嵌字翻译：读图 → OCR → 翻译 → 擦除 → 嵌字 → 存图"""
-    img_cv = cv2.imread(img_path)
+def translate_image(img_path: str | Path, out_path: str | Path, to_lang: str = "中文") -> int:
+    """完整图片嵌字翻译。失败返回 0（调用方应保留原图）。"""
+    del to_lang  # reserved
+    img_path = Path(img_path)
+    out_path = Path(out_path)
+    if os.environ.get("QYUNSLATION_IMAGE_OVERLAY", "1").lower() in ("0", "false", "off"):
+        logger.info("image overlay disabled")
+        return 0
+
+    img_cv = cv2.imread(str(img_path))
+    if img_cv is None:
+        raise RuntimeError(f"cannot read image: {img_path}")
     orig = img_cv.copy()
-    boxes = ocr_image(img_path)
+    boxes = ocr_image_hpd(img_path)
     if not boxes:
         return 0
 
-    # 翻译
     texts = [b[4] for b in boxes]
     trans = translate_texts(texts)
 
-    # 擦除前取原文字色（深色像素均值）
     colors = []
     for b in boxes:
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
-        gray = cv2.cvtColor(orig[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+        roi = orig[max(0, y1) : y2, max(0, x1) : x2]
+        if roi.size == 0:
+            colors.append((17, 17, 17))
+            continue
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         vals = gray.flatten()
         vals = vals[vals < 120]
         color_val = int(vals.mean()) if len(vals) > 0 else 17
         colors.append((color_val, color_val, color_val))
 
-    # 擦除（精确 mask，收缩 1px 保护相邻图形）
     for b in boxes:
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         mask = np.zeros(img_cv.shape[:2], np.uint8)
-        cv2.rectangle(mask, (x1 + 1, y1 + 1), (x2 - 1, y2 - 1), 255, -1)
+        cv2.rectangle(mask, (x1 + 1, y1 + 1), (max(x1 + 2, x2 - 1), max(y1 + 2, y2 - 1)), 255, -1)
         img_cv = cv2.inpaint(img_cv, mask, 3, cv2.INPAINT_TELEA)
 
-    # 嵌字
     result = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(result)
+    font_path = FONT if Path(FONT).is_file() else None
     for i, b in enumerate(boxes):
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         zh = trans.get(i + 1, "")
         if not zh:
             continue
         size = max(12, min(int((y2 - y1) * 0.9), 40))
-        font = ImageFont.truetype(FONT, size)
+        font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
         d.text((x1, y1 - int(size * 0.1)), zh, fill=colors[i], font=font)
 
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(out_path)
     return len(boxes)
 
 
+def translate_image_bytes(data: bytes, suffix: str = ".png") -> tuple[bytes, int]:
+    """嵌字内存版，供 Word 内嵌图调用。失败则返回原字节、0。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="img_ov_") as td:
+        src = Path(td) / f"in{suffix}"
+        dst = Path(td) / f"out{suffix}"
+        src.write_bytes(data)
+        try:
+            n = translate_image(src, dst)
+        except Exception as exc:
+            logger.warning("image overlay failed, keep original: %s", exc)
+            return data, 0
+        if n <= 0 or not dst.is_file():
+            return data, 0
+        return dst.read_bytes(), n
+
+
 if __name__ == "__main__":
     import sys
+
     src = sys.argv[1] if len(sys.argv) > 1 else "/tmp/dense_design.png"
     dst = sys.argv[2] if len(sys.argv) > 2 else "/tmp/dense_design_zh.png"
     t0 = time.time()
     n = translate_image(src, dst)
-    print(f"翻译 {n} 个文字块 → {dst} ({time.time()-t0:.1f}s)")
+    print(f"翻译 {n} 个文字块 → {dst} ({time.time() - t0:.1f}s)")

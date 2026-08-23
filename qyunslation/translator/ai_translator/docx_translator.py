@@ -633,8 +633,50 @@ class DocxTranslator(AiTranslator):
                             translated_p_element.addnext(separator_p_element)
 
         doc_output_stream = BytesIO()
+        self._overlay_embedded_images(doc)
         doc.save(doc_output_stream)
         return doc_output_stream.getvalue()
+
+    def _overlay_embedded_images(self, doc: DocumentObject) -> None:
+        """PLAN-005c：对 Word 内嵌图做 HPD+35b 嵌字；单图失败保留原图。"""
+        import os
+
+        if os.environ.get("QYUNSLATION_IMAGE_OVERLAY", "1").lower() in (
+            "0",
+            "false",
+            "off",
+        ):
+            return
+        try:
+            from docutranslate.extensions.image_translate import translate_image_bytes
+        except Exception as exc:
+            self.logger.warning("image overlay import failed: %s", exc)
+            return
+
+        ctype_suffix = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/webp": ".webp",
+        }
+        try:
+            rels = list(doc.part.rels.values())
+        except Exception:
+            return
+        for rel in rels:
+            try:
+                if "image" not in getattr(rel, "reltype", ""):
+                    continue
+                part = rel.target_part
+                ctype = getattr(part, "content_type", "") or ""
+                suffix = ctype_suffix.get(ctype, ".png")
+                new_blob, n = translate_image_bytes(part.blob, suffix=suffix)
+                if n > 0 and new_blob:
+                    part._blob = new_blob
+                    self.logger.info("embedded image overlay ok (%s blocks)", n)
+            except Exception as exc:
+                self.logger.warning("embedded image overlay failed, keep original: %s", exc)
+
 
     def translate(self, document: Document) -> Self:
         doc, elements, originals = self._pre_translate(document)

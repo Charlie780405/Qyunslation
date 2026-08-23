@@ -1,0 +1,17 @@
+[Unit]
+Description=Office output archive watcher (MinIO + Vault DT-2026-*)
+After=network.target qyunslation-office.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dev/qyunslation
+EnvironmentFile=-/home/dev/pdf2zh/archive.env
+EnvironmentFile=-/home/dev/pdf2zh/office.env
+Environment=PATH=/home/dev/qyunslation/.venv/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/dev/qyunslation
+ExecStart=/home/dev/qyunslation/.venv/bin/python3 /home/dev/qyunslation/scripts/office-archive-watch.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
