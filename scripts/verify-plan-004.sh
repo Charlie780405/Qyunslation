@@ -37,8 +37,8 @@ case "$PHASE" in
   baseline)
     ;;
   after-a|after-b|after-c)
-    check "config num_predict=512" grep -q 'num_predict = 512' "$CONFIG"
-    check "ollama.py 封顶 1024" grep -q 'min(len(text) \* 5, 1024)' "$OLLAMA_PY"
+    check "config num_predict=2000（004a 封顶已回滚）" grep -q 'num_predict = 2000' "$CONFIG"
+    check "ollama.py 无 1024 封顶" bash -c "! grep -q 'min(len(text) \\* 5, 1024)' '$OLLAMA_PY'"
     check "baseline-004a.json 存在" test -f "$ROOT/docs/perf/baseline-004a.json"
     check "baseline 含 observed_llama_server" python3 -c "import json; d=json.load(open('$ROOT/docs/perf/baseline-004a.json')); assert 'observed_llama_server' in d"
     check "泰州 Ollama 探活" curl -fsS --max-time 8 http://100.67.66.123:11434/api/tags
@@ -59,8 +59,8 @@ if [[ "$PHASE" == "after-b" || "$PHASE" == "after-c" ]]; then
 fi
 
 if [[ "$PHASE" == "after-c" ]]; then
-  check "批阈值 400/8 补丁" grep -q 'PDF2ZH_LLM_BATCH_TOKENS' "$IL_PY"
-  check "批阈值默认 400" grep -q '_PDF2ZH_LLM_BATCH_TOKENS = int' "$IL_PY"
+  check "批阈值旋钮存在" grep -q 'PDF2ZH_LLM_BATCH_TOKENS' "$IL_PY"
+  check "批阈值已回滚默认 200/5" grep -q 'PDF2ZH_LLM_BATCH_TOKENS", "200"' "$IL_PY"
   check "004d WT 关闭文档" test -f "$ROOT/docs/walkthroughs/WT-004d-vllm-gate-closed.md"
 fi
 

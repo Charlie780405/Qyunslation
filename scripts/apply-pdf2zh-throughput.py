@@ -121,16 +121,16 @@ def patch_gui(text: str) -> tuple[str, bool]:
 
 
 def patch_ollama(text: str) -> tuple[str, bool]:
+    # PLAN-004a cap caused empty JSON (Successful:0 / Fallback:43 on CBP-201).
+    # Restore upstream unbounded num_predict; do not re-apply 1024 cap.
     changed = False
-    old = """        if (max_token := len(text) * 5) > self.options["num_predict"]:
+    capped = """        if (max_token := min(len(text) * 5, 1024)) > self.options["num_predict"]:
             self.options["num_predict"] = max_token"""
-    new = """        if (max_token := min(len(text) * 5, 1024)) > self.options["num_predict"]:
+    original = """        if (max_token := len(text) * 5) > self.options["num_predict"]:
             self.options["num_predict"] = max_token"""
-    if old in text:
-        text = text.replace(old, new)
+    if capped in text:
+        text = text.replace(capped, original)
         changed = True
-    elif "min(len(text) * 5, 1024)" not in text:
-        print("WARN: ollama num_predict anchor not found", file=sys.stderr)
     return text, changed
 
 
@@ -142,8 +142,8 @@ import os
 
 # PLAN-004b/c throughput knobs (apply-pdf2zh-throughput.py)
 _PDF2ZH_SKIP_ALREADY_TARGET_COUNT = 0
-_PDF2ZH_LLM_BATCH_TOKENS = int(os.environ.get("PDF2ZH_LLM_BATCH_TOKENS", "400"))
-_PDF2ZH_LLM_BATCH_PARAS = int(os.environ.get("PDF2ZH_LLM_BATCH_PARAS", "8"))
+_PDF2ZH_LLM_BATCH_TOKENS = int(os.environ.get("PDF2ZH_LLM_BATCH_TOKENS", "200"))
+_PDF2ZH_LLM_BATCH_PARAS = int(os.environ.get("PDF2ZH_LLM_BATCH_PARAS", "5"))
 
 
 def _pdf2zh_han_ratio(text: str) -> float:

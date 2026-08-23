@@ -23,8 +23,4 @@
 
 ## 结论
 
-ctx/num_predict 卫生已落地；段均摊未达 25% 降幅，按纲领 **不硬冲 004d**，进入 004b。
-
-## 回滚
-
-`deploy-taizhou-ollama-004a.sh` 去掉 Modelfile 步骤；`num_predict=2000`；重跑 `apply-pdf2zh-throughput.py` 回滚 ollama 补丁。
+ctx 卫生保留（35b `-c 8192`）。`num_predict=512` + 1024 封顶在 CBP-201 上导致空 JSON、100% fallback，**已回滚** `num_predict=2000` 并无封顶。段均摊未达 1.8s，不硬冲 004d。

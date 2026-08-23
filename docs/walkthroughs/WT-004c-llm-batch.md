@@ -1,31 +1,24 @@
 # WT-004c LLM 批阈值
 
 **日期：** 2026-08-23  
-**状态：** 已部署补丁；fallback 门与 QnA SLO 待长文档实测
+**状态：** **失败并回滚**（质量门触发）
 
-## 变更
+## 事故（CBP-201 Ph 3.pdf）
 
-`apply-pdf2zh-throughput.py` 将 `process_page` 批门槛改为：
-
-- `PDF2ZH_LLM_BATCH_TOKENS` 默认 **400**（原 200）
-- `PDF2ZH_LLM_BATCH_PARAS` 默认 **8**（原 5）
-
-可通过环境变量回滚为 `200` / `5`。
-
-## 门禁（待测）
-
-| 项 | 状态 |
-| --- | --- |
-| C-V1 批阈值 400/8 | ✅ 补丁已生效 |
-| C-V2 fallback ≤2× 基线 | ⏳ 需 10+ 页 PDF 对比 200/5 vs 400/8 日志 `Fallback:` |
-| C-V3 QnA ≤10 min | ⏳ 需全量 QX027N QnA 墙钟 |
-| C-V4 3 页抽检 | ⏳ 对照 DT-2026-0002 |
-
-未跑长文档前 **不阻塞** 004b；若 fallback 恶化，设 `PDF2ZH_LLM_BATCH_TOKENS=200 PDF2ZH_LLM_BATCH_PARAS=5` 后重启 pdf2zh。
+- JSON 批译：`Expecting value: line 1 column 1 (char 0)`（模型输出为空）
+- `Successful: 0, Fallback: 43`（100% fallback，远超「不得 ≥2× 基线」）
+- dual 右侧大段空白，仅剩「五十二」等残片
+- `num_predict=512` + `min(..., 1024)` 把批 JSON / fallback 解码截断
 
 ## 回滚
 
-```bash
-export PDF2ZH_LLM_BATCH_TOKENS=200 PDF2ZH_LLM_BATCH_PARAS=5
-systemctl --user restart pdf2zh.service
-```
+| 项 | 现网 |
+| --- | --- |
+| `config.toml` `num_predict` | **2000** |
+| `ollama.py` 封顶 | **已去掉** |
+| 批阈值默认 | **200 / 5**（`PDF2ZH_LLM_BATCH_*` 仍可覆盖） |
+| 004b skip / glossary / cache 日志 | 保留 |
+
+## 验收
+
+重新翻译同一 PDF 时，journal 不应再出现 `Successful: 0`；dual 右侧应有完整中文段。
