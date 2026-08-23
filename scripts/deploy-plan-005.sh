@@ -10,10 +10,12 @@ HOMEPAGE_CTR="${HOMEPAGE_CONTAINER:-qyunsgen-homepage}"
 
 echo "== 安装/更新 qyunslation 可编辑包"
 cd "$ROOT"
-if [[ ! -x .venv/bin/qyunslation ]]; then
-  python3 -m venv .venv
+if [[ -x .venv/bin/qyunslation ]]; then
+  echo "qyunslation 已安装，跳过 pip"
+else
+  uv venv .venv
+  uv pip install --python .venv/bin/python -e .
 fi
-.venv/bin/pip install -q -e .
 
 echo "== 确保 docutranslate 包名兼容"
 ln -sfn qyunslation "$ROOT/docutranslate"
