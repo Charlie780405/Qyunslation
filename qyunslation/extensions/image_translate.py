@@ -57,6 +57,11 @@ def _blocks(raw: str) -> list[tuple[int, int, int, int, str]]:
         text = m.group("text").strip()
         if not text or text == "[Non-Text]":
             continue
+        if "<" in text:
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = " ".join(text.split()).strip()
+        if not text:
+            continue
         out.append(
             (
                 int(m.group("x1")),
