@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-014：Office/DOCX/MD/图片走 HTML 预览，避免 Gradio PDF() 白屏。uv 升级后重跑。"""
+"""PLAN-014/015：Office HTML 预览 + 翻译进度绑定双预览 + 一屏布局。uv 升级后重跑。"""
 from __future__ import annotations
 
 import sys
@@ -295,8 +295,8 @@ def apply(text: str) -> str:
         background: #fff;
         padding: 12px 16px;
     }
-    /* 非 PDF 预览时 PDF() 可能仍占 75vh 空壳 */
-    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {
+    /* 非 PDF 预览时 PDF() 可能仍占 75vh 空壳；翻译进度例外 */
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)):not(:has(.wrap)) {
         display: none !important;
         height: 0 !important;
         max-height: 0 !important;
@@ -611,15 +611,16 @@ def apply(text: str) -> str:
             "            empty_html,\n",
         )
 
-    hide_empty_css = (
+    hide_empty_css_old = (
         "    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {"
     )
-    if hide_empty_css not in text:
-        text = text.replace(
-            "    .qy-html-preview-wrap {\n",
-            "    .qy-html-preview-wrap {\n",
-            1,
-        )
+    hide_empty_css_new = (
+        "    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed))"
+        ":not(:has(.progress-text)):not(:has(.wrap)) {"
+    )
+    if hide_empty_css_new not in text and hide_empty_css_old in text:
+        text = text.replace(hide_empty_css_old, hide_empty_css_new, 1)
+    elif hide_empty_css_new not in text:
         text = text.replace(
             """    .qy-html-preview-wrap {
         max-height: min(70vh, 820px);
@@ -637,7 +638,7 @@ def apply(text: str) -> str:
         background: #fff;
         padding: 12px 16px;
     }
-    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)):not(:has(.wrap)) {
         display: none !important;
         height: 0 !important;
         max-height: 0 !important;
@@ -666,6 +667,166 @@ def apply(text: str) -> str:
                 preview_path = None'''
         if old in text:
             text = text.replace(old, new, 1)
+
+    # --- PLAN-015: progress on both preview surfaces ---
+    if "show_progress_on=[preview, preview_html]" not in text:
+        if "show_progress_on=[preview]," not in text:
+            raise RuntimeError("找不到 show_progress_on=[preview]")
+        text = text.replace(
+            "show_progress_on=[preview],",
+            "show_progress_on=[preview, preview_html],",
+            1,
+        )
+
+    # --- PLAN-015: fullscreen layout anchors ---
+    row_old = '''                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.Markdown(_("## File(s)"), elem_classes=["tab-title"])'''
+    row_new = '''                    with gr.Row(elem_classes=["qy-main-inner-row"], equal_height=True):
+                        with gr.Column(scale=1, elem_classes=["qy-col-left"]):
+                            gr.Markdown(_("## File(s)"), elem_classes=["tab-title"])'''
+    if "qy-main-inner-row" not in text:
+        if row_old not in text:
+            raise RuntimeError("找不到主页内层 Row 锚点")
+        text = text.replace(row_old, row_new, 1)
+
+    col_right_old = '''                        with gr.Column(scale=2):
+                            gr.Markdown(_("## Preview"), elem_classes=["tab-title"])'''
+    col_right_new = '''                        with gr.Column(scale=2, elem_classes=["qy-col-right"]):
+                            gr.Markdown(_("## Preview"), elem_classes=["tab-title"])'''
+    if "qy-col-right" not in text:
+        if col_right_old not in text:
+            raise RuntimeError("找不到右侧预览列锚点")
+        text = text.replace(col_right_old, col_right_new, 1)
+
+    # --- PLAN-015: fullscreen CSS (实测 tab-main-row.top ≈ 102.5) ---
+    fs_marker = "    :root { --qy-shell-top:"
+    fs_css = """
+    /* PLAN-015: 首页锁一屏，左右栏各自内滚 */
+    :root { --qy-shell-top: 104px; }
+    html, body {
+        height: 100% !important;
+        max-height: 100vh !important;
+        overflow: hidden !important;
+    }
+    .gradio-container,
+    .gradio-container .app,
+    main.fillable {
+        height: 100vh !important;
+        max-height: 100vh !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+    }
+    .gradio-container .wrap,
+    .gradio-container .contain {
+        height: 100% !important;
+        max-height: 100% !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+    }
+    footer {
+        display: none !important;
+    }
+    .tab-main-row {
+        height: calc(100vh - var(--qy-shell-top)) !important;
+        max-height: calc(100vh - var(--qy-shell-top)) !important;
+        overflow: hidden !important;
+        align-items: stretch !important;
+    }
+    .tab-main-row > .column:not(.sidebar-nav) {
+        height: 100% !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .tab-main-row > .column:not(.sidebar-nav) > .gr-group:not(.hide):not(.settings-container),
+    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+    }
+    .tab-main-row > .column:not(.sidebar-nav) > .gr-group:not(.hide):not(.settings-container) > .styler,
+    .tab-main-row > .column:not(.sidebar-nav) > .gr-group:not(.hide):not(.settings-container) > div,
+    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) > .styler,
+    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) > div {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+    }
+    .qy-main-inner-row {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        align-items: stretch !important;
+        min-height: 0 !important;
+    }
+    .qy-col-left {
+        height: 100% !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+    .qy-col-right {
+        height: 100% !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .qy-col-right > .styler,
+    .qy-col-right > div {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        height: 100% !important;
+    }
+    .qy-col-right .pdf-preview-fixed {
+        flex: 1 1 auto !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+    }
+    .qy-col-right .qy-html-preview-wrap {
+        flex: 1 1 auto !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: auto !important;
+    }
+    .settings-container:not(.hide) {
+        flex: 1 1 auto !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        min-height: 0 !important;
+        display: block !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+    }
+"""
+    if fs_marker not in text:
+        needle = "    .qy-html-preview-wrap {"
+        if needle not in text:
+            raise RuntimeError("找不到 fullscreen CSS 锚点")
+        text = text.replace(needle, fs_css + "\n" + needle, 1)
+    elif ":not(.settings-container)" not in text or "settings-container:not(.hide)" not in text:
+        # 升级：替换整块 PLAN-015 CSS
+        import re
+
+        pat = re.compile(
+            r"    /\* PLAN-015: 首页锁一屏，左右栏各自内滚 \*/.*?"
+            r"    \.settings-container(?::not\(\.hide\))? \{\n"
+            r"(?:.*?\n)*?"
+            r"    \}\n",
+            re.S,
+        )
+        if not pat.search(text):
+            raise RuntimeError("找不到既有 PLAN-015 CSS 块以便升级")
+        text = pat.sub(fs_css.lstrip("\n"), text, count=1)
 
     return text
 
