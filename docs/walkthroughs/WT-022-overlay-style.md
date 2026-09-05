@@ -24,6 +24,8 @@ bash scripts/verify-skill-registry.sh
 
 ## 部署
 
+生产部署：`5ad27e9`（office + pdf2zh 已重启；verify-plan-022 23/20；SK-Q002 已 sync）。
+
 ```bash
 systemctl --user restart qyunslation-office.service pdf2zh.service
 ```
