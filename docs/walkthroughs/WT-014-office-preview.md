@@ -23,8 +23,9 @@ bash scripts/verify-plan-014.sh
 systemctl --user restart pdf2zh.service
 ```
 
-## 人工
+## 部署
 
-1. https://translate.qyunsgen.com 上传 `.docx`，下拉选中后右侧应出现 HTML 正文
-2. 翻译完成后选 `*_mono.docx` / `*.zh.docx` 仍可见正文
-3. PDF 预览不回归
+- **时间：** 2026-09-05
+- **main：** `f522368`（merge PLAN-014）
+- **动作：** 同步 `pdf2zh.service` → `systemctl --user restart pdf2zh`；`verify-plan-014.sh` 13/13
+- **入口：** https://translate.qyunsgen.com
