@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -13,9 +13,12 @@ from qyunslation.extensions.image_translate import translate_image
 router = APIRouter(tags=["Custom Extensions"])
 
 
-@router.post("/image-translate", summary="图片嵌字翻译（上传图→返回中文图）")
-async def image_translate_endpoint(file: UploadFile = File(...)):
-    """上传英文设计图，返回图内文字已翻译为中文的图片（版式不变）。"""
+@router.post("/image-translate", summary="图片嵌字翻译（上传图→返回译后图）")
+async def image_translate_endpoint(
+    file: UploadFile = File(...),
+    to_lang: str = Form("简体中文", description="目标语言"),
+):
+    """上传设计图，返回图内文字已翻译为目标语言的图片（版式不变）。"""
     suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
     if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
         raise HTTPException(400, f"不支持的图片格式: {suffix}")
@@ -27,7 +30,7 @@ async def image_translate_endpoint(file: UploadFile = File(...)):
             f.write(await file.read())
             tmp_in = f.name
         tmp_out = tmp_in.replace(suffix, f"_zh{suffix}")
-        n = translate_image(tmp_in, tmp_out)
+        n = translate_image(tmp_in, tmp_out, to_lang=to_lang)
         data = Path(tmp_out).read_bytes()
     except Exception as e:
         raise HTTPException(500, f"图片嵌字失败: {e}") from e
