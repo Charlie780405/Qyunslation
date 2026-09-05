@@ -84,19 +84,27 @@ def _qy_md_to_html(path: Path) -> str:
         return f"<pre>{text}</pre>"
 
 
+def _qy_hide_pdf():
+    return gr.update(value=None, visible=False)
+
+
+def _qy_show_pdf(path: str):
+    return gr.update(value=path, visible=True)
+
+
 def _qy_preview_payload(path_str: str | None) -> tuple:
-    """返回 (pdf_path_or_none, html_update)。"""
+    """返回 (pdf_update, html_update)。非 PDF 必须隐藏 PDF()，否则空壳占 75vh。"""
     if not path_str:
-        return None, gr.update(value="", visible=False)
+        return _qy_hide_pdf(), gr.update(value="", visible=False)
     path = Path(str(path_str))
     if not path.is_file():
-        return None, gr.update(
+        return _qy_hide_pdf(), gr.update(
             value=_qy_wrap_preview_html(f"<p>文件不存在：{path.name}</p>"),
             visible=True,
         )
     suf = path.suffix.lower()
     if suf == ".pdf":
-        return str(path), gr.update(value="", visible=False)
+        return _qy_show_pdf(str(path)), gr.update(value="", visible=False)
     # 优先旁路 html（office-route 下载的 sidecar 预览）
     for cand in (
         path.with_suffix(".html"),
@@ -105,7 +113,7 @@ def _qy_preview_payload(path_str: str | None) -> tuple:
     ):
         if cand.is_file() and cand.suffix.lower() in {".html", ".htm"}:
             body = cand.read_text(encoding="utf-8", errors="replace")
-            return None, gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)
+            return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)
     try:
         if suf in {".html", ".htm"}:
             body = path.read_text(encoding="utf-8", errors="replace")
@@ -131,7 +139,7 @@ def _qy_preview_payload(path_str: str | None) -> tuple:
             body = f"<p>暂不支持预览此格式（{suf or '无后缀'}），请下载查看。</p>"
     except Exception as exc:
         body = f"<p>预览失败：{_html_escape(str(exc))}</p>"
-    return None, gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)
+    return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)
 
 
 def _html_escape(s: str) -> str:
@@ -165,11 +173,12 @@ def apply(text: str) -> str:
     PLAN-014: non-PDF → HTML preview (_qy_office_preview).
     """
     empty_html = gr.update(value="", visible=False)
+    hide_pdf = gr.update(value=None, visible=False)
     # 1. Basic validation
     if not selected_label or not state or "display_map" not in state:
         return (
             None,
-            None,
+            hide_pdf,
             None,
             None,
             gr.update(visible=False),
@@ -187,7 +196,7 @@ def apply(text: str) -> str:
         if not selected_label:
             return (
                 None,
-                None,
+                hide_pdf,
                 None,
                 None,
                 gr.update(visible=False),
@@ -203,7 +212,7 @@ def apply(text: str) -> str:
     if not preview_path:
         return (
             None,
-            None,
+            hide_pdf,
             None,
             None,
             gr.update(visible=False),
@@ -285,6 +294,16 @@ def apply(text: str) -> str:
         border-radius: 10px;
         background: #fff;
         padding: 12px 16px;
+    }
+    /* 非 PDF 预览时 PDF() 可能仍占 75vh 空壳 */
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {
+        display: none !important;
+        height: 0 !important;
+        max-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+        border: none !important;
     }
     .qy-html-preview-title {
         margin: 0 0 12px;
@@ -521,6 +540,132 @@ def apply(text: str) -> str:
         raise RuntimeError(
             "update_preview 未打上 PLAN-014；请检查空白差异后手动对齐"
         )
+
+    # 升级：非 PDF 时隐藏 PDF()，避免空壳占 75vh
+    if "def _qy_hide_pdf(" not in text:
+        text = text.replace(
+            "def _qy_preview_payload(path_str: str | None) -> tuple:\n"
+            '    """返回 (pdf_path_or_none, html_update)。"""\n',
+            "def _qy_hide_pdf():\n"
+            "    return gr.update(value=None, visible=False)\n"
+            "\n"
+            "\n"
+            "def _qy_show_pdf(path: str):\n"
+            "    return gr.update(value=path, visible=True)\n"
+            "\n"
+            "\n"
+            "def _qy_preview_payload(path_str: str | None) -> tuple:\n"
+            '    """返回 (pdf_update, html_update)。非 PDF 必须隐藏 PDF()，否则空壳占 75vh。"""\n',
+            1,
+        )
+        text = text.replace(
+            "        return None, gr.update(value=\"\", visible=False)\n",
+            "        return _qy_hide_pdf(), gr.update(value=\"\", visible=False)\n",
+        )
+        text = text.replace(
+            "        return None, gr.update(\n"
+            "            value=_qy_wrap_preview_html(f\"<p>文件不存在：{path.name}</p>\"),\n"
+            "            visible=True,\n"
+            "        )\n",
+            "        return _qy_hide_pdf(), gr.update(\n"
+            "            value=_qy_wrap_preview_html(f\"<p>文件不存在：{path.name}</p>\"),\n"
+            "            visible=True,\n"
+            "        )\n",
+        )
+        text = text.replace(
+            '        return str(path), gr.update(value="", visible=False)\n',
+            '        return _qy_show_pdf(str(path)), gr.update(value="", visible=False)\n',
+        )
+        text = text.replace(
+            "            return None, gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)\n",
+            "            return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)\n",
+        )
+        text = text.replace(
+            "    return None, gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)\n",
+            "    return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)\n",
+        )
+        text = text.replace(
+            "    empty_html = gr.update(value=\"\", visible=False)\n"
+            "    # 1. Basic validation\n",
+            "    empty_html = gr.update(value=\"\", visible=False)\n"
+            "    hide_pdf = gr.update(value=None, visible=False)\n"
+            "    # 1. Basic validation\n",
+            1,
+        )
+        text = text.replace(
+            "            None,\n"
+            "            None,\n"
+            "            None,\n"
+            "            None,\n"
+            "            gr.update(visible=False),\n"
+            "            gr.update(visible=False),\n"
+            "            gr.update(visible=False),\n"
+            "            empty_html,\n",
+            "            None,\n"
+            "            hide_pdf,\n"
+            "            None,\n"
+            "            None,\n"
+            "            gr.update(visible=False),\n"
+            "            gr.update(visible=False),\n"
+            "            gr.update(visible=False),\n"
+            "            empty_html,\n",
+        )
+
+    hide_empty_css = (
+        "    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {"
+    )
+    if hide_empty_css not in text:
+        text = text.replace(
+            "    .qy-html-preview-wrap {\n",
+            "    .qy-html-preview-wrap {\n",
+            1,
+        )
+        text = text.replace(
+            """    .qy-html-preview-wrap {
+        max-height: min(70vh, 820px);
+        overflow: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        padding: 12px 16px;
+    }""",
+            """    .qy-html-preview-wrap {
+        max-height: min(70vh, 820px);
+        overflow: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #fff;
+        padding: 12px 16px;
+    }
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)) {
+        display: none !important;
+        height: 0 !important;
+        max-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+        border: none !important;
+    }""",
+            1,
+        )
+
+    skip_marker = "# PLAN-014: don't feed non-PDF into PDF()"
+    if skip_marker not in text:
+        old = '''        if preview_file_key:
+            preview_path = state["display_map"].get(preview_file_key)
+            parent_key = state["parent_map"].get(preview_file_key)
+            if parent_key and parent_key in state["results"]:
+                current_res = state["results"][parent_key]'''
+        new = '''        if preview_file_key:
+            preview_path = state["display_map"].get(preview_file_key)
+            parent_key = state["parent_map"].get(preview_file_key)
+            if parent_key and parent_key in state["results"]:
+                current_res = state["results"][parent_key]
+            # PLAN-014: don't feed non-PDF into PDF()
+            if preview_path and not str(preview_path).lower().endswith(".pdf"):
+                preview_path = None'''
+        if old in text:
+            text = text.replace(old, new, 1)
 
     return text
 
