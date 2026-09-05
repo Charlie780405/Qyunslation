@@ -30,7 +30,7 @@ def _safe_extractall(zf: zipfile.ZipFile, dest: str | Path) -> None:
     zf.extractall(dest_path)
 
 
-def translate_docx_images(input_docx, output_docx, skip_small=True):
+def translate_docx_images(input_docx, output_docx, skip_small=True, to_lang="简体中文"):
     """解包 docx，对 word/media/ 里的图片嵌字，重打包。返回处理数量。"""
     tmp = tempfile.mkdtemp(prefix="docx_img_")
     try:
@@ -46,7 +46,7 @@ def translate_docx_images(input_docx, output_docx, skip_small=True):
                 if skip_small and img.stat().st_size < 8192:
                     continue
                 try:
-                    n = translate_image(str(img), str(img))
+                    n = translate_image(str(img), str(img), to_lang=to_lang)
                     count += 1
                     print(f"  [{img.name}] 嵌字 {n} 个文字块")
                 except Exception as e:
@@ -61,7 +61,7 @@ def translate_docx_images(input_docx, output_docx, skip_small=True):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def translate_markdown_images(md_text):
+def translate_markdown_images(md_text, to_lang="简体中文"):
     """提取 markdown 里的 base64 图片 → 嵌字 → 替换回。返回 (新markdown, 处理数量)。"""
     pattern = re.compile(r"!\[[^\]]*\]\((data:image/(?:png|jpe?g|webp);base64,([A-Za-z0-9+/=]+))\)")
     count = 0
@@ -74,7 +74,7 @@ def translate_markdown_images(md_text):
         img_path = Path(tmpdir) / f"img_{count}{ext}"
         try:
             img_path.write_bytes(base64.b64decode(b64))
-            translate_image(str(img_path), str(img_path))
+            translate_image(str(img_path), str(img_path), to_lang=to_lang)
             new_b64 = base64.b64encode(img_path.read_bytes()).decode()
             count += 1
             return f"![Image](data:{mime.split(';')[0]};base64,{new_b64})"

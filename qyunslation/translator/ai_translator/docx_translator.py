@@ -670,7 +670,9 @@ class DocxTranslator(AiTranslator):
                 part = rel.target_part
                 ctype = getattr(part, "content_type", "") or ""
                 suffix = ctype_suffix.get(ctype, ".png")
-                new_blob, n = translate_image_bytes(part.blob, suffix=suffix)
+                new_blob, n = translate_image_bytes(
+                    part.blob, suffix=suffix, to_lang=self.config.to_lang
+                )
                 if n > 0 and new_blob:
                     part._blob = new_blob
                     self.logger.info("embedded image overlay ok (%s blocks)", n)
