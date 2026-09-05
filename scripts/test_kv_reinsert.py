@@ -66,12 +66,12 @@ class TestKvReinsert(unittest.TestCase):
         )
         self.assertGreater(kr._wrap_height("甲" * 80, 400.0, 12.0), 12.0 * 2)
         fs_s, sec_s, lead_s, gap_s = kr._flow_plan(6, 2, 600.0)
-        self.assertEqual(fs_s, kr._BODY_AIRY)
-        self.assertEqual(sec_s, kr._SEC_AIRY)
+        self.assertEqual(fs_s, kr._BODY_BASE)
+        self.assertEqual(sec_s, kr._SEC_BASE)
         self.assertLessEqual(lead_s, 1.60)
         fs_m, sec_m, lead_m, _ = kr._flow_plan(18, 4, 600.0)
-        self.assertEqual(fs_m, kr._BODY_AIRY)
-        self.assertEqual(sec_m, kr._SEC_AIRY)
+        self.assertEqual(fs_m, kr._BODY_BASE)
+        self.assertEqual(sec_m, kr._SEC_BASE)
         self.assertGreaterEqual(lead_m, kr._LEAD_AIRY)
         fs_n, sec_n, lead_n, _ = kr._flow_plan(28, 5, 600.0)
         self.assertEqual(fs_n, kr._BODY_BASE)
@@ -82,6 +82,7 @@ class TestKvReinsert(unittest.TestCase):
         self.assertEqual(lead_t, kr._LEAD_MIN)
         self.assertEqual(gap_t, kr._GAP_MIN)
         self.assertEqual(kr._cjk_glue("建议如下。美国食品与药品管理局"), "建议如下。")
+        self.assertFalse(hasattr(kr, "_BODY_AIRY"))
 
 
 if __name__ == "__main__":

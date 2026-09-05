@@ -15,8 +15,17 @@ def _near(a: float, b: float, tol: float = 3.0) -> bool:
     return abs(a - b) <= tol
 
 
-def reinsert(pdf: Path, manifest: Path, *, dual_left: bool = True) -> int:
-    """把 manifest 中的 PNG 插回译文 PDF。返回新插入张数。幂等。"""
+def reinsert(
+    pdf: Path,
+    manifest: Path,
+    *,
+    dual_left: bool = True,
+    kinds: set[str] | None = None,
+) -> int:
+    """把 manifest 中的 PNG 插回译文 PDF。返回新插入张数。幂等。
+
+    kinds: 只回插这些 kind（如 {"logo","stamp"}）；None 表示全部。
+    """
     import pymupdf
 
     pdf = Path(pdf)
@@ -58,6 +67,9 @@ def reinsert(pdf: Path, manifest: Path, *, dual_left: bool = True) -> int:
 
         existing = page.get_image_info() or []
         for reg in page_info.get("regions") or []:
+            kind = str(reg.get("kind") or "graphic")
+            if kinds is not None and kind not in kinds:
+                continue
             box = reg["box"]
             png_name = reg.get("png") or ""
             png_path = gdir / png_name

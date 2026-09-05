@@ -45,17 +45,15 @@ def _wrap_height(text: str, width: float, fs: float, *, lead: float = 1.42) -> f
 
 
 _BODY_BASE = 12.0
-_BODY_AIRY = 13.0
 _SEC_BASE = 14.0
-_SEC_AIRY = 15.0
 _LEAD_MIN = 1.38
 _LEAD_BASE = 1.50
-_LEAD_AIRY = 1.58
-_LEAD_MAX = 1.88
+_LEAD_AIRY = 1.56
+_LEAD_MAX = 1.90
 _GAP_MIN = 8.0
 _GAP_BASE = 12.0
 _GAP_AIRY = 14.0
-_GAP_MAX = 24.0
+_GAP_MAX = 26.0
 _FILL_LO = 0.68
 _FILL_MID = 0.80
 _FILL_HI = 0.88
@@ -93,34 +91,20 @@ def _flow_need(n_lines: int, n_blocks: int, body_fs: float, lead: float, gap: fl
 
 
 def _flow_plan(n_lines: int, n_blocks: int, well_h: float) -> tuple[float, float, float, float]:
-    """返回 (正文 pt, 章节 pt, 行距倍数, 段距)。疏页升 13pt，密页锁 12pt。"""
+    """返回 (正文 pt, 章节 pt, 行距倍数, 段距)。正文锁 12pt / 章节 14pt，疏页只拉行距段距。"""
     need = _flow_need(n_lines, n_blocks, _BODY_BASE, _LEAD_BASE, _GAP_BASE)
     if n_lines <= _SHORT_LINES:
-        return _BODY_AIRY, _SEC_AIRY, 1.56, _GAP_AIRY
+        return _BODY_BASE, _SEC_BASE, _LEAD_AIRY, _GAP_AIRY
     if need > well_h:
         return _BODY_BASE, _SEC_BASE, _LEAD_MIN, _GAP_MIN
     if need >= well_h * _FILL_MID:
         return _BODY_BASE, _SEC_BASE, _LEAD_BASE, _GAP_BASE
-    if need >= well_h * _FILL_LO:
-        scale = min((well_h * _FILL_HI) / max(need, 1.0), _LEAD_MAX / _LEAD_BASE)
-        lead = min(_LEAD_MAX, _LEAD_BASE * scale)
-        gap = min(_GAP_MAX, _GAP_BASE * scale)
-        if _flow_need(n_lines, n_blocks, _BODY_BASE, lead, gap) > well_h:
-            return _BODY_BASE, _SEC_BASE, _LEAD_MIN, _GAP_MIN
-        return _BODY_BASE, _SEC_BASE, lead, gap
-    n13 = max(n_lines, int(round(n_lines * _BODY_AIRY / _BODY_BASE)))
-    need13 = _flow_need(n13, n_blocks, _BODY_AIRY, _LEAD_AIRY, _GAP_AIRY)
-    if need13 > well_h:
-        scale = min((well_h * _FILL_HI) / max(need, 1.0), _LEAD_MAX / _LEAD_BASE)
-        return _BODY_BASE, _SEC_BASE, min(_LEAD_MAX, _LEAD_BASE * scale), min(
-            _GAP_MAX, _GAP_BASE * scale
-        )
-    scale = min((well_h * _FILL_HI) / max(need13, 1.0), _LEAD_MAX / _LEAD_AIRY)
-    lead = min(_LEAD_MAX, _LEAD_AIRY * scale)
-    gap = min(_GAP_MAX, _GAP_AIRY * scale)
-    if _flow_need(n13, n_blocks, _BODY_AIRY, lead, gap) > well_h:
+    scale = min((well_h * _FILL_HI) / max(need, 1.0), _LEAD_MAX / _LEAD_BASE)
+    lead = min(_LEAD_MAX, _LEAD_BASE * scale)
+    gap = min(_GAP_MAX, _GAP_BASE * scale)
+    if _flow_need(n_lines, n_blocks, _BODY_BASE, lead, gap) > well_h:
         return _BODY_BASE, _SEC_BASE, _LEAD_MIN, _GAP_MIN
-    return _BODY_AIRY, _SEC_AIRY, lead, gap
+    return _BODY_BASE, _SEC_BASE, lead, gap
 
 
 def _paint_lines(

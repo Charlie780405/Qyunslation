@@ -15,4 +15,9 @@
 11. **已验收金样** `letter.page2.mono.png` 是视觉 SSOT；改排版先对金样，规范在 `reference.md`（WT-010）。
 12. **切回 qwen3.6:35b-a3b 只提升译文，不自动保版式**。模型 PDF / BabelDOC 仍会串栏缩字；必须空白页重绘。装不下时收行距，禁止丢段（WT-010）。
 13. **`insert_textbox` 试号会真的落字**。12pt 装不下再试 11pt 会叠两层，下一块再叠上来。只排一次；按全角估高；用返回的剩余高度推进光标。绘完必须能在 PDF 里找回每段 `text_zh`（WT-010）。
-14. **疏页只拉行距到 1.70 填不满**。12pt/1.50 占版心约 60% 时，1.70 只能到约 68%。估高 <68% 升正文 13pt、章节 15pt；68–80% 只拉行距到 1.88。少于 8 行仍不拉满（WT-010）。
+14. **疏页只拉行距填不满时不要升字号**。正文锁 12pt / 章节 14pt；行距上限 1.90、段距上限 26pt。少于 8 行仍不拉满（WT-010 → WT-012）。
+15. **`graphic` 回插把英文正文贴回中文页**。第 2 页 `p2-r2.png` 是漏擦英文行带（aspect>5、h<60）。根因：检测器吃了 `pack_kv_table`/`clamp` 后的排版盒，y 差 ~58pt。正解：擦除用原始 OCR 盒；letter 只回插 logo/stamp（WT-012）。
+16. **`missing_zh` raise 毁掉整单**。`引言:` vs `引言`、未译英文段都会误杀。改为告警 + `.warnings.json`（WT-012）。
+17. **GUI 返回 `str` 路径** → `AttributeError: 'str' object has no attribute 'exists'`。钩子必须返回 `Path`（WT-011）。
+18. **OCR 在 async handler 同步跑** → 进度条卡死。须 `run_in_executor` + 进度泵（WT-012）。
+19. **HPD 并发反而更慢**（同卡 1/3/5 → 33/38/46s）。默认 `QYUNSLATION_HPD_WORKERS=1`；提速靠翻译并行 + 持久缓存（WT-012）。
