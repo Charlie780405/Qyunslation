@@ -28,6 +28,8 @@ bash scripts/verify-plan-021.sh
 
 浏览器：硬刷新后上传流程图，中译英应覆盖阶段标题与给药标签；预览悬停出现工具条，可缩放/旋转/全屏。
 
+生产部署：`c76302f`（office + pdf2zh 已重启；verify-plan-021 20/20；viewer 补丁已写入 gui.py）。
+
 ## 部署
 
 ```bash
