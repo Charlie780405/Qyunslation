@@ -14,13 +14,15 @@
 | 并发 | `.env` 推荐 8；`office.env` 现网仍为 4 |
 | 安全 | TLS 默认校验、可选 API Token、Zip Slip/XSS、CORS、MCP 白名单 |
 | 缺陷 | extensions 导入修复、`to_thread`、任务 TTL、cacher 锁 |
-| unit | `qyunslation-office.service` → `127.0.0.1:8010` |
+| unit | `qyunslation-office.service` → `127.0.0.1:8010`（sidecar，公网经 `translate.qyunsgen.com` 内路由） |
+| 公网 | **`https://translate.qyunsgen.com`**；旧 `office.qyunsgen.com` 301 跳转 |
 
 ## 验收
 
 - `bash scripts/verify-plan-006.sh` 全绿
 - `curl 127.0.0.1:8010/service/meta` → version
 - `curl 127.0.0.1:8010/service/glossary` → 200
+- 公网 `https://translate.qyunsgen.com` 可访问
 
 ## 回滚
 

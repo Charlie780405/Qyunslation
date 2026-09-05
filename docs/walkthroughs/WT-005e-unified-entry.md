@@ -14,7 +14,8 @@
 | 上传类型 | `translate.qyunsgen.com` 支持 `.pdf` + `.doc/.docx` + `.png/.jpg/.jpeg` |
 | 路由 | PDF 仍走 BabelDOC `:7860`；Word/图片自动调本机 sidecar `:8010` |
 | 补丁 | `scripts/apply-pdf2zh-office-route.py`（`pdf2zh.service` ExecStartPre） |
-| 旧域名 | `office.qyunsgen.com` → 301 到 `translate.qyunsgen.com` |
+| 公网入口 | **`https://translate.qyunsgen.com`**（唯一用户-facing URL） |
+| 旧域名 | `office.qyunsgen.com` 仅 301 兼容，勿再宣传或配置新链接 |
 | homepage | 合并为一张「翻译 Qyunslation」卡片 |
 
 ## 不变

@@ -1,5 +1,5 @@
 [Unit]
-Description=Qyunslation office sidecar (Word/image) for office.qyunsgen.com
+Description=Qyunslation sidecar (Word/image) for translate.qyunsgen.com via :8010
 After=network.target
 
 [Service]

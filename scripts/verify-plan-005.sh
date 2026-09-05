@@ -56,7 +56,7 @@ if [[ "$PHASE" == "after-b" || "$PHASE" == "after-c" || "$PHASE" == "after-d" ]]
   check "office unit 模板" test -f "$ROOT/scripts/qyunslation-office.service"
   check "office service active" systemctl --user is-active qyunslation-office.service
   check "8010 HTTP" bash -c 'c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 8 http://127.0.0.1:8010/); test "$c" = 200 -o "$c" = 307 -o "$c" = 302'
-  check "Caddy office 块" grep -q 'office.qyunsgen.com' "$CADDY"
+  check "Caddy translate 主站块" grep -q 'https://translate.qyunsgen.com' "$CADDY"
   check "translate 仍 7860" grep -A5 'translate.qyunsgen.com' "$CADDY" | grep -q '7860'
 fi
 
@@ -72,7 +72,7 @@ if [[ "$PHASE" == "after-d" ]]; then
   check "005e office-route 补丁" test -f "$ROOT/scripts/apply-pdf2zh-office-route.py"
   check "005e WT 启用" test -f "$ROOT/docs/walkthroughs/WT-005e-unified-entry.md"
   check "gui office 路由" grep -q '_qy_is_office_sidecar_file' "$GUI"
-  check "office 重定向 translate" grep -A3 'office.qyunsgen.com' "$CADDY" | grep -q 'translate.qyunsgen.com'
+  check "旧 office 域名 301→translate" grep -A3 'office.qyunsgen.com' "$CADDY" | grep -q 'translate.qyunsgen.com'
 fi
 
 echo "verify-plan-005 [$PHASE]: $pass/$((pass + fail))"

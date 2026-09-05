@@ -10,7 +10,7 @@
 
 ## Task B3 — 入口
 
-Caddy 新增 `office.qyunsgen.com` → :8010；homepage 第二卡片。不改 translate→7860。
+Sidecar 监听 `:8010`（本机）；公网仍用 `translate.qyunsgen.com` → :7860，Word/图片经 pdf2zh 内路由到 sidecar。旧 `office.qyunsgen.com` 301 到 translate。
 
 ## Task B4 — SLO
 
@@ -18,4 +18,4 @@ Caddy 新增 `office.qyunsgen.com` → :8010；homepage 第二卡片。不改 tr
 
 ## 回滚
 
-`disable --now qyunslation-office`；Caddy 删 office 块后 reload。
+`disable --now qyunslation-office`；pdf2zh 去掉 office-route 补丁。

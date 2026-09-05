@@ -1,14 +1,12 @@
-# WT-005e 统一入口 — 关闭（未触发）
+# WT-005e 统一入口 — 已 superseded
 
 **日期：** 2026-08-23  
-**状态：** **不做**
+**状态：** 已被 [WT-005e-unified-entry.md](WT-005e-unified-entry.md) 取代
 
-## 门禁
+早期门禁评估为「关闭」；用户后续明确要求「在 PDF 界面翻译、不单开域名」后已启用。
 
-| # | 条件 | 结果 |
-| --- | --- | --- |
-| 1 | 005a+b 完成 | ✅ |
-| 2 | 用户明确「不要两个 URL」 | ❌ 未提出 |
-| 3 | 不改 BabelDOC 为 PDF 后端 | ✅ |
+**现网：**
 
-→ 关闭 005e。`translate.qyunsgen.com` 仍 :7860；`office.qyunsgen.com` 仍 :8010。
+- 公网入口：**`https://translate.qyunsgen.com`**（:7860 pdf2zh）
+- Word/图片：pdf2zh GUI 内路由到 sidecar `:8010`
+- 旧域名 `office.qyunsgen.com` → 301 到 `translate.qyunsgen.com`（Caddy 保留兼容）
