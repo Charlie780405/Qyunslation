@@ -295,8 +295,8 @@ def apply(text: str) -> str:
         background: #fff;
         padding: 12px 16px;
     }
-    /* 非 PDF 预览时 PDF() 可能仍占 75vh 空壳；翻译进度例外 */
-    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)):not(:has(.wrap)) {
+    /* 非 PDF 预览时 PDF() 可能仍占 75vh 空壳；翻译进度例外（勿用 :has(.wrap)，Gradio 空壳自带 wrap） */
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)) {
         display: none !important;
         height: 0 !important;
         max-height: 0 !important;
@@ -616,9 +616,15 @@ def apply(text: str) -> str:
     )
     hide_empty_css_new = (
         "    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed))"
+        ":not(:has(.progress-text)) {"
+    )
+    hide_empty_css_wrap = (
+        "    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed))"
         ":not(:has(.progress-text)):not(:has(.wrap)) {"
     )
-    if hide_empty_css_new not in text and hide_empty_css_old in text:
+    if hide_empty_css_wrap in text:
+        text = text.replace(hide_empty_css_wrap, hide_empty_css_new, 1)
+    elif hide_empty_css_new not in text and hide_empty_css_old in text:
         text = text.replace(hide_empty_css_old, hide_empty_css_new, 1)
     elif hide_empty_css_new not in text:
         text = text.replace(
@@ -638,7 +644,7 @@ def apply(text: str) -> str:
         background: #fff;
         padding: 12px 16px;
     }
-    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)):not(:has(.wrap)) {
+    .pdf-preview-fixed:not(:has(canvas)):not(:has(iframe)):not(:has(embed)):not(:has(.progress-text)) {
         display: none !important;
         height: 0 !important;
         max-height: 0 !important;
@@ -699,11 +705,11 @@ def apply(text: str) -> str:
             raise RuntimeError("找不到右侧预览列锚点")
         text = text.replace(col_right_old, col_right_new, 1)
 
-    # --- PLAN-015: fullscreen CSS (实测 tab-main-row.top ≈ 102.5) ---
+    # --- PLAN-015/015b: fullscreen + layout polish ---
     fs_marker = "    :root { --qy-shell-top:"
     fs_css = """
     /* PLAN-015: 首页锁一屏，左右栏各自内滚 */
-    :root { --qy-shell-top: 104px; }
+    :root { --qy-shell-top: 104px; --qy-footer-h: 34px; }
     html, body {
         height: 100% !important;
         max-height: 100vh !important;
@@ -728,8 +734,8 @@ def apply(text: str) -> str:
         display: none !important;
     }
     .tab-main-row {
-        height: calc(100vh - var(--qy-shell-top)) !important;
-        max-height: calc(100vh - var(--qy-shell-top)) !important;
+        height: calc(100vh - var(--qy-shell-top) - var(--qy-footer-h)) !important;
+        max-height: calc(100vh - var(--qy-shell-top) - var(--qy-footer-h)) !important;
         overflow: hidden !important;
         align-items: stretch !important;
     }
@@ -747,56 +753,108 @@ def apply(text: str) -> str:
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
     .tab-main-row > .column:not(.sidebar-nav) > .gr-group:not(.hide):not(.settings-container) > .styler,
-    .tab-main-row > .column:not(.sidebar-nav) > .gr-group:not(.hide):not(.settings-container) > div,
-    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) > .styler,
-    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) > div {
+    .tab-main-row > .column:not(.sidebar-nav) > [class*="group"]:not(.hide):not(.settings-container) > .styler {
         flex: 1 1 auto !important;
         height: 100% !important;
         min-height: 0 !important;
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .tab-main-row .gr-group:not(.settings-container),
+    .tab-main-row .gr-group:not(.settings-container) > .styler {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
     .qy-main-inner-row {
         flex: 1 1 auto !important;
         height: 100% !important;
         align-items: stretch !important;
         min-height: 0 !important;
+        gap: 20px !important;
+        padding: 0 20px 8px 4px !important;
     }
     .qy-col-left {
         height: 100% !important;
         min-height: 0 !important;
         overflow-y: auto !important;
         overflow-x: hidden !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: flex-start !important;
+        gap: 12px !important;
+    }
+    .qy-col-left > * {
+        flex: 0 0 auto !important;
+    }
+    .qy-col-left .input-file .wrap {
+        min-height: 132px !important;
+    }
+    .qy-col-left .input-file button.center {
+        height: auto !important;
+        min-height: 0 !important;
     }
     .qy-col-right {
         height: 100% !important;
         min-height: 0 !important;
         display: flex !important;
         flex-direction: column !important;
+        gap: 8px !important;
     }
-    .qy-col-right > .styler,
-    .qy-col-right > div {
+    .qy-col-right > * {
+        flex: 0 0 auto !important;
+    }
+    .qy-col-right > .pdf-preview-fixed.hidden,
+    .qy-col-right > .qy-html-preview-wrap.hidden {
+        display: none !important;
+        flex: 0 0 0 !important;
+        height: 0 !important;
+        max-height: 0 !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .qy-col-right > .pdf-preview-fixed:not(.hidden):has(canvas),
+    .qy-col-right > .pdf-preview-fixed:not(.hidden):has(iframe),
+    .qy-col-right > .pdf-preview-fixed:not(.hidden):has(embed),
+    .qy-col-right > .qy-html-preview-wrap:not(.hidden) {
         flex: 1 1 auto !important;
         min-height: 0 !important;
-        display: flex !important;
-        flex-direction: column !important;
-        height: 100% !important;
-    }
-    .qy-col-right .pdf-preview-fixed {
-        flex: 1 1 auto !important;
         height: auto !important;
         max-height: none !important;
-        min-height: 0 !important;
     }
-    .qy-col-right .qy-html-preview-wrap {
-        flex: 1 1 auto !important;
-        height: auto !important;
-        max-height: none !important;
-        min-height: 0 !important;
+    .qy-col-right > .qy-html-preview-wrap:not(.hidden) {
         overflow: auto !important;
+    }
+    .qy-col-right::after {
+        content: "上传文件后在此预览";
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 0.95rem;
+        min-height: 120px;
+    }
+    .qy-col-right:has(> .pdf-preview-fixed:not(.hidden):has(canvas))::after,
+    .qy-col-right:has(> .pdf-preview-fixed:not(.hidden):has(iframe))::after,
+    .qy-col-right:has(> .pdf-preview-fixed:not(.hidden):has(embed))::after,
+    .qy-col-right:has(> .qy-html-preview-wrap:not(.hidden))::after {
+        display: none !important;
     }
     .settings-container:not(.hide) {
         flex: 1 1 auto !important;
@@ -807,26 +865,78 @@ def apply(text: str) -> str:
         overflow-x: hidden !important;
         overflow-y: auto !important;
     }
+    .qy-page-footer {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        height: var(--qy-footer-h) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 8px !important;
+        border-top: 1px solid #eef2f7 !important;
+        background: #fff !important;
+        z-index: 40 !important;
+        margin: 0 !important;
+        padding: 0 12px !important;
+        box-sizing: border-box !important;
+    }
+    .qy-page-footer img {
+        height: 16px !important;
+        width: auto !important;
+        max-width: 120px !important;
+        object-fit: contain !important;
+    }
+    .qy-page-footer span {
+        color: #64748b !important;
+        font-size: 0.82rem !important;
+        line-height: 1 !important;
+    }
 """
     if fs_marker not in text:
         needle = "    .qy-html-preview-wrap {"
         if needle not in text:
             raise RuntimeError("找不到 fullscreen CSS 锚点")
         text = text.replace(needle, fs_css + "\n" + needle, 1)
-    elif ":not(.settings-container)" not in text or "settings-container:not(.hide)" not in text:
+    elif "qy-col-right > .pdf-preview-fixed.hidden" not in text:
         # 升级：替换整块 PLAN-015 CSS
         import re
 
         pat = re.compile(
             r"    /\* PLAN-015: 首页锁一屏，左右栏各自内滚 \*/.*?"
-            r"    \.settings-container(?::not\(\.hide\))? \{\n"
-            r"(?:.*?\n)*?"
-            r"    \}\n",
+            r"(?:    \.settings-container(?::not\(\.hide\))? \{|"
+            r"    \.qy-page-footer \{).*?"
+            r"    \}\n(?:    \.qy-page-footer (?:img|span) \{.*?\n    \}\n)*",
             re.S,
         )
         if not pat.search(text):
-            raise RuntimeError("找不到既有 PLAN-015 CSS 块以便升级")
-        text = pat.sub(fs_css.lstrip("\n"), text, count=1)
+            # 宽松回退：从注释到下一个非 PLAN-015 的已知锚点
+            pat = re.compile(
+                r"    /\* PLAN-015: 首页锁一屏，左右栏各自内滚 \*/.*?(?=\n    \.qy-html-preview-wrap \{)",
+                re.S,
+            )
+            if not pat.search(text):
+                raise RuntimeError("找不到既有 PLAN-015 CSS 块以便升级")
+            text = pat.sub(fs_css.lstrip("\n"), text, count=1)
+        else:
+            text = pat.sub(fs_css.lstrip("\n"), text, count=1)
+
+    # --- PLAN-015b: page footer in brand HTML ---
+    brand_old = (
+        "'<div class=\"qy-brand\"><img src=\"/gradio_api/file=/home/dev/pdf2zh/brand/quanxin-logo.svg\" "
+        "alt=\"QYuns\"><div><strong>Qyunslation</strong><span>荃信翻译</span></div></div>'"
+    )
+    brand_new = (
+        "'<div class=\"qy-brand\"><img src=\"/gradio_api/file=/home/dev/pdf2zh/brand/quanxin-logo.svg\" "
+        "alt=\"QYuns\"><div><strong>Qyunslation</strong><span>荃信翻译</span></div></div>"
+        "<div class=\"qy-page-footer\"><img src=\"/gradio_api/file=/home/dev/pdf2zh/brand/quanxin-logo.svg\" "
+        "alt=\"QYuns\"><span>Qyunslation · 荃信生物 © 2026</span></div>'"
+    )
+    if 'qy-page-footer"><img' not in text:
+        if brand_old not in text:
+            raise RuntimeError("找不到品牌 HTML 锚点")
+        text = text.replace(brand_old, brand_new, 1)
 
     return text
 

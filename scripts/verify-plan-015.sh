@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-plan-015.sh — 翻译进度双绑定 + 一屏布局 + doc_profile 自定义值
+# verify-plan-015.sh — 翻译进度双绑定 + 一屏布局 + 015b 布局收敛
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,11 +26,16 @@ check "gui 含 qy-main-inner-row" grep -q 'qy-main-inner-row' "$GUI"
 check "gui 含 qy-col-left" grep -q 'qy-col-left' "$GUI"
 check "gui 含 qy-col-right" grep -q 'qy-col-right' "$GUI"
 check "gui 含 --qy-shell-top" grep -q -- '--qy-shell-top' "$GUI"
+check "gui 含 --qy-footer-h" grep -q -- '--qy-footer-h' "$GUI"
 check "gui 空壳 CSS 含 progress 例外" grep -q 'progress-text' "$GUI"
 check "gui 隐藏 Gradio footer" grep -q 'footer {' "$GUI"
 check "gui Group 隐藏不覆盖" grep -q 'gr-group:not(.hide)' "$GUI"
 check "gui settings 排除 overflow hidden" grep -q ':not(.settings-container)' "$GUI"
 check "gui settings-container 可内滚" grep -q 'settings-container' "$GUI"
+check "gui 右栏空态 ::after" grep -q 'qy-col-right::after' "$GUI"
+check "gui 含页面版权条 HTML" grep -q 'qy-page-footer"><img' "$GUI"
+check "gui 无右栏 > div 通配拉伸" bash -c "! grep -q 'qy-col-right > div {' \"$GUI\""
+check "gui 左栏控件不拉伸" grep -q 'qy-col-left > \*' "$GUI"
 check "doc_profile allow_custom_value" bash -c "
   awk '/doc_profile_dropdown = gr.Dropdown/,/\)/' \"$GUI\" | grep -q 'allow_custom_value=True'
 "
