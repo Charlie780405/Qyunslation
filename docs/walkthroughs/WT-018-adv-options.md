@@ -1,16 +1,31 @@
 # WT-018 高级选项展开修复与位置下移
 
-## 前置
+## 目标
+
+修复左栏 `flex-wrap: wrap` 导致高级选项展开后内容与翻译按钮「消失」；将高级选项移到翻译/取消下方并内部滚动；隐藏「保存设置」。
+
+## 部署
+
+- feat: `f72ad23`
+- merge main: `14d6ec4`
 
 ```bash
 bash scripts/verify-plan-017.sh
 bash scripts/verify-plan-017b.sh
 bash scripts/verify-plan-018.sh
+systemctl --user daemon-reload
 systemctl --user restart pdf2zh.service
 ```
 
-## 手动验收
+## 浏览器核对
 
-1. **折叠态**：左栏可见 Type / 上传 / 当前文档 / 翻译选项 / 文档类型模板 / 翻译·取消 / 「高级选项」折叠条；翻译按钮在高级选项上方；左栏无异常横向换列。
-2. **展开态**：点击「高级选项」向下展开；页码范围、术语表、水印、忽略缓存、仅输出翻译页、界面语言可见；「保存设置」不可见；翻译/取消按钮仍在原位；内容过高时手风琴内部出现纵向滚动条，左栏不把按钮挤出可视区。
-3. **上传后**：上传文件，中/右预览与页脚不回归；再次折叠/展开高级选项行为同上。
+1. **折叠态**：翻译/取消在「高级选项」上方；左栏 `flex-wrap: nowrap`。
+2. **展开态**：手风琴在按钮下方向下展开；内容 `max-height: 400px` + `overflow-y: auto`；翻译/取消仍在左栏可视区内，不换列消失。
+3. 「保存设置」不可见；页码范围/术语表/水印/忽略缓存/仅输出翻译页/界面语言仍可用。
+
+## 已核对（2026-09-05）
+
+- verify-plan-017: 18/18
+- verify-plan-017b: 13/13
+- verify-plan-018: 9/9
+- 浏览器：折叠/展开均通过；`flexWrap=nowrap`；展开后 action-row 仍在左栏内；手风琴内容 `overflow-y: auto`
