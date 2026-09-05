@@ -25,6 +25,7 @@ OLLAMA = (
 ).replace("/v1", "")
 HPD_URL = os.environ.get("QYUNSLATION_HPD_BASE_URL") or ""
 FONT = os.environ.get("QYUNSLATION_FONT") or ""
+FONT_BOLD = os.environ.get("QYUNSLATION_FONT_BOLD") or ""
 MODEL = (
     os.environ.get("QYUNSLATION_MODEL_ID")
     or os.environ.get("DOCUTRANSLATE_MODEL_ID")
@@ -35,6 +36,9 @@ GLOSSARY_CSV = os.environ.get("QYUNSLATION_GLOSSARY_CSV") or ""
 OCR_MIN_SCORE = float(os.environ.get("QYUNSLATION_OCR_MIN_SCORE", "0.5"))
 TRANSLATE_BATCH = int(os.environ.get("QYUNSLATION_TRANSLATE_BATCH", "25"))
 NUM_PREDICT = int(os.environ.get("QYUNSLATION_NUM_PREDICT", "4096"))
+CONTRAST_MIN = float(os.environ.get("QYUNSLATION_CONTRAST_MIN", "60"))
+SOLID_STD_MAX = float(os.environ.get("QYUNSLATION_SOLID_STD_MAX", "12"))
+BOLD_AREA_RATIO = float(os.environ.get("QYUNSLATION_BOLD_AREA_RATIO", "0.28"))
 
 _RAPID_ENGINE = None
 
@@ -57,6 +61,24 @@ def _hpd_url() -> str:
 
 def _font() -> str:
     return _require_env("QYUNSLATION_FONT", FONT)
+
+
+def _font_bold() -> str | None:
+    """粗体字面；缺省时尝试 Regular 旁的 Bold.otf。"""
+    if FONT_BOLD and Path(FONT_BOLD).is_file():
+        return FONT_BOLD
+    regular = FONT or ""
+    if not regular:
+        return None
+    p = Path(regular)
+    for cand in (
+        p.with_name("NotoSansSC-Bold.otf"),
+        p.with_name(p.stem.replace("Regular", "Bold") + p.suffix),
+        p.parent / "NotoSansSC-Bold.otf",
+    ):
+        if cand.is_file():
+            return str(cand)
+    return None
 
 
 _BLOCK_RE = re.compile(
@@ -311,6 +333,91 @@ def translate_texts(
     return result
 
 
+def _median_bgr(pixels: np.ndarray) -> tuple[int, int, int]:
+    if pixels.size == 0:
+        return (17, 17, 17)
+    med = np.median(pixels.reshape(-1, 3), axis=0)
+    return (int(med[0]), int(med[1]), int(med[2]))
+
+
+def _gray_of(bgr: tuple[int, int, int]) -> float:
+    return 0.114 * bgr[0] + 0.587 * bgr[1] + 0.299 * bgr[2]
+
+
+def _analyze_box_style(roi: np.ndarray) -> dict:
+    """Otsu 分层取背景/文字色、纯色判定、粗细与水平对齐（PLAN-022）。"""
+    if roi.size == 0:
+        return {
+            "bg_bgr": (240, 240, 240),
+            "fg_bgr": (17, 17, 17),
+            "solid": True,
+            "bold": False,
+            "align": "left",
+            "contrast": 223.0,
+        }
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    border = np.concatenate(
+        [
+            roi[0 : min(2, h), :, :].reshape(-1, 3),
+            roi[max(0, h - 2) : h, :, :].reshape(-1, 3),
+            roi[:, 0 : min(2, w), :].reshape(-1, 3),
+            roi[:, max(0, w - 2) : w, :].reshape(-1, 3),
+        ]
+    )
+    solid = float(np.std(border.astype(np.float32))) < SOLID_STD_MAX
+
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask_hi = th > 0
+    mask_lo = ~mask_hi
+    n_hi, n_lo = int(mask_hi.sum()), int(mask_lo.sum())
+    if n_hi == 0 and n_lo == 0:
+        text_mask = np.zeros_like(gray, dtype=bool)
+        bg_mask = np.ones_like(gray, dtype=bool)
+    elif n_hi <= n_lo:
+        text_mask, bg_mask = mask_hi, mask_lo
+    else:
+        text_mask, bg_mask = mask_lo, mask_hi
+
+    bg_bgr = _median_bgr(roi[bg_mask]) if bg_mask.any() else _median_bgr(border)
+    fg_bgr = _median_bgr(roi[text_mask]) if text_mask.any() else (17, 17, 17)
+
+    contrast = abs(_gray_of(fg_bgr) - _gray_of(bg_bgr))
+    if contrast < CONTRAST_MIN:
+        fg_bgr = (255, 255, 255) if _gray_of(bg_bgr) < 140 else (0, 0, 0)
+        contrast = abs(_gray_of(fg_bgr) - _gray_of(bg_bgr))
+
+    area_ratio = float(text_mask.sum()) / float(max(1, h * w))
+    bold = area_ratio >= BOLD_AREA_RATIO
+
+    align = "center"
+    if text_mask.any():
+        ys, xs = np.where(text_mask)
+        cx = float(xs.mean())
+        mid = w / 2.0
+        offset = (cx - mid) / max(1.0, w)
+        if offset < -0.12:
+            align = "left"
+        elif offset > 0.12:
+            align = "right"
+        else:
+            align = "center"
+
+    return {
+        "bg_bgr": bg_bgr,
+        "fg_bgr": fg_bgr,
+        "solid": solid,
+        "bold": bold,
+        "align": align,
+        "contrast": contrast,
+    }
+
+
+def _bgr_to_rgb(bgr: tuple[int, int, int]) -> tuple[int, int, int]:
+    return (bgr[2], bgr[1], bgr[0])
+
+
 def _text_size(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
     if hasattr(font, "getbbox"):
         bbox = font.getbbox(text)
@@ -322,7 +429,6 @@ def _wrap_text(text: str, font: ImageFont.ImageFont, max_w: int) -> list[str]:
     """按词/字换行，使每行宽度不超过 max_w。"""
     if max_w <= 0:
         return [text]
-    # 英文按空格，中文按字
     if any(ord(c) > 127 for c in text):
         tokens = list(text)
         joiner = ""
@@ -367,7 +473,6 @@ def _fit_font_and_lines(
             best_font, best_lines, best_size = font, [text], mid
             lo = mid + 1
             continue
-        # 尝试换行
         lines = _wrap_text(text, font, max(8, box_w))
         line_h = max((_text_size(font, ln)[1] for ln in lines), default=th)
         total_h = line_h * len(lines) + max(0, len(lines) - 1) * max(1, mid // 8)
@@ -405,79 +510,87 @@ def translate_image(
     texts = [b[4] for b in boxes]
     trans = translate_texts(texts, to_lang=to_lang)
 
-    # 最终要写的文字：有译文用译文，无译文回退原文（绝不净擦除）
     finals: list[str] = []
     redraw: list[bool] = []
     for i, src in enumerate(texts):
         zh = (trans.get(i + 1) or "").strip()
-        if zh and zh != src:
-            finals.append(zh)
-            redraw.append(True)
-        elif zh:
-            # 译文与原文相同（专名/缩写）：仍重绘以统一字体，但不算丢字
+        if zh:
             finals.append(zh)
             redraw.append(True)
         else:
             finals.append(src)
-            redraw.append(False)  # 缺译：保留原像素，不擦不画
+            redraw.append(False)
 
-    colors = []
+    styles: list[dict] = []
     for b in boxes:
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         roi = orig[max(0, y1):y2, max(0, x1):x2]
-        if roi.size == 0:
-            colors.append((17, 17, 17))
-            continue
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        vals = gray.flatten()
-        vals = vals[vals < 120]
-        color_val = int(vals.mean()) if len(vals) > 0 else 17
-        colors.append((color_val, color_val, color_val))
+        styles.append(_analyze_box_style(roi))
 
-    # 只擦将要重绘的框
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
-        mask = np.zeros(img_cv.shape[:2], np.uint8)
-        cv2.rectangle(
-            mask,
-            (x1 + 1, y1 + 1),
-            (max(x1 + 2, x2 - 1), max(y1 + 2, y2 - 1)),
-            255,
-            -1,
-        )
-        img_cv = cv2.inpaint(img_cv, mask, 3, cv2.INPAINT_TELEA)
+        st = styles[i]
+        if st["solid"]:
+            cv2.rectangle(img_cv, (x1, y1), (x2, y2), st["bg_bgr"], -1)
+        else:
+            mask = np.zeros(img_cv.shape[:2], np.uint8)
+            cv2.rectangle(
+                mask,
+                (x1 + 1, y1 + 1),
+                (max(x1 + 2, x2 - 1), max(y1 + 2, y2 - 1)),
+                255,
+                -1,
+            )
+            img_cv = cv2.inpaint(img_cv, mask, 3, cv2.INPAINT_TELEA)
 
     result = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(result)
-    font_path = _font()
-    font_path = font_path if Path(font_path).is_file() else None
+    font_regular = _font()
+    font_regular = font_regular if Path(font_regular).is_file() else None
+    font_bold = _font_bold()
     drawn = 0
+    min_contrast = 999.0
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         text = finals[i]
+        st = styles[i]
         box_w = max(8, x2 - x1)
         box_h = max(8, y2 - y1)
         max_size = max(12, min(int(box_h * 0.9), 40))
-        font, lines, size = _fit_font_and_lines(text, box_w, box_h, font_path, max_size)
+        use_path = font_bold if st["bold"] and font_bold else font_regular
+        font, lines, size = _fit_font_and_lines(text, box_w, box_h, use_path, max_size)
         line_gap = max(1, size // 8)
         line_h = max((_text_size(font, ln)[1] for ln in lines), default=size)
         total_h = line_h * len(lines) + line_gap * max(0, len(lines) - 1)
-        y = y1 + max(0, (box_h - total_h) // 2) - int(size * 0.05)
+        y = y1 + max(0, (box_h - total_h) // 2)
+        fill = _bgr_to_rgb(st["fg_bgr"])
+        min_contrast = min(min_contrast, float(st["contrast"]))
         for ln in lines:
             tw, _ = _text_size(font, ln)
+            if st["align"] == "center":
+                x = x1 + max(0, (box_w - tw) // 2)
+            elif st["align"] == "right":
+                x = max(x1, x2 - tw)
+            else:
+                x = x1
             if tw > box_w * 1.15:
                 logger.warning(
-                    "text overflow box#%d w=%d need≈%d: %s",
+                    "text overflow box#%d w=%d need≈%d align=%s: %s",
                     i + 1,
                     box_w,
                     tw,
+                    st["align"],
                     ln[:40],
                 )
-            d.text((x1, y), ln, fill=colors[i], font=font)
+            top = 0
+            if hasattr(font, "getbbox"):
+                bb = font.getbbox(ln)
+                top = bb[1]
+            d.text((x, y - top), ln, fill=fill, font=font)
             y += line_h + line_gap
         drawn += 1
 
@@ -485,11 +598,12 @@ def translate_image(
     result.save(out_path)
     kept = sum(1 for r in redraw if not r)
     logger.info(
-        "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d",
+        "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d min_contrast=%.1f",
         len(boxes),
         sum(1 for i in range(len(boxes)) if trans.get(i + 1)),
         drawn,
         kept,
+        min_contrast if drawn else 0.0,
     )
     return drawn
 

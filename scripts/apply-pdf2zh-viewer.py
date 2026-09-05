@@ -215,23 +215,18 @@ JS_BLOCK = r"""
       var inner = document.createElement('div');
       inner.className = 'qy-viewer-inner';
 
-      // clone visible content
+      // clone visible content once (whole container); avoid matching nested img inside .prose
       var cloneRoot = sourcePanel.querySelector('.qy-viewer-inner') || sourcePanel;
-      var kids = cloneRoot.querySelectorAll('img, canvas, iframe, embed, .prose, .markdown');
-      if (kids.length === 0) {
-        inner.innerHTML = cloneRoot.innerHTML;
-      } else {
-        kids.forEach(function (el) {
-          var c = el.cloneNode(true);
-          if (c.tagName === 'CANVAS') {
-            try {
-              var ctx = c.getContext('2d');
-              ctx.drawImage(el, 0, 0);
-            } catch (err) {}
-          }
-          inner.appendChild(c);
-        });
-      }
+      var clone = cloneRoot.cloneNode(true);
+      var srcCanvases = cloneRoot.querySelectorAll('canvas');
+      clone.querySelectorAll('canvas').forEach(function (c, i) {
+        try {
+          if (srcCanvases[i]) c.getContext('2d').drawImage(srcCanvases[i], 0, 0);
+        } catch (err) {}
+      });
+      // strip nested toolbars from clone
+      clone.querySelectorAll('.qy-viewer-toolbar').forEach(function (el) { el.remove(); });
+      inner.appendChild(clone);
 
       stage.appendChild(inner);
       viewport.appendChild(stage);
