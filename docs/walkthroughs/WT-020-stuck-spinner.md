@@ -42,6 +42,9 @@ curl -sI https://translate.qyunsgen.com/ | grep -i cache-control   # no-store
 浏览器实测：预览载荷 789855 B → 3031 B；图片中译英 20s 出结果；
 空态提示 `display: none`；无误报横幅。
 
+生产部署：`1fcae7e`（重启后 017 18/18、017b 13/13、018 9/9、019 22/22、020 PASS，
+`cache-control: no-store, no-cache, must-revalidate` 已生效）。
+
 ## 注意
 
 - `apply-pdf2zh-brand.py` 每次运行都重写 `gui.py`，会冲掉后续 CSS/JS 块，
