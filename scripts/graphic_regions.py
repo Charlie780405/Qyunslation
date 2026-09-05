@@ -35,7 +35,7 @@ def _erase_text(
     text_boxes: Sequence[tuple[float, float, float, float]],
     *,
     dpi: int,
-    pad_pt: float = 2.0,
+    pad_pt: float = 3.5,
 ):
     scale = dpi / 72.0
     pad = pad_pt * scale
@@ -135,6 +135,9 @@ def detect(
         if ink_ratio < 0.02:
             continue
         aspect = w_pt / max(h_pt, 1e-6)
+        # 细长行带 ≈ 漏擦英文正文，不是插图
+        if aspect > 5.0 and h_pt < 60.0:
+            continue
         if y1 < 0.25 * page_h:
             kind, suppress = "logo", True
         elif 0.8 <= aspect <= 1.25 and ink_ratio > 0.35:

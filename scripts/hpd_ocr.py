@@ -444,15 +444,67 @@ def ocr_pdf_with_hpd(
     floor_hits = 0
     total = len(doc)
     font = _pymupdf_font()
+    try:
+        hpd_workers = max(1, int(os.environ.get("QYUNSLATION_HPD_WORKERS", "1") or "1"))
+    except ValueError:
+        hpd_workers = 1
+
+    # 预取：串行渲染 pixmap（pymupdf 线程不安全），并行打 HPD /parse
+    # 实测 HPD 同卡串行更快，默认 workers=1；多卡/升级后再调 QYUNSLATION_HPD_WORKERS
+    page_raws: list[str | None] = [None] * total
+    page_pix: list = [None] * total
+    page_err: list[BaseException | None] = [None] * total
+
+    def _render(i: int):
+        page = doc[i]
+        pix = page.get_pixmap(dpi=dpi)
+        b64 = base64.b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode()
+        return i, pix, b64
+
+    rendered = [_render(i) for i in range(total)]
+    for i, pix, _b64 in rendered:
+        page_pix[i] = pix
+
+    def _parse_one(item):
+        i, pix, b64 = item
+        try:
+            return i, _parse(HPD_URL, b64), None
+        except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
+            return i, None, exc
+
+    if hpd_workers <= 1:
+        parsed = []
+        for item in rendered:
+            r = _parse_one(item)
+            parsed.append(r)
+            if progress_cb:
+                progress_cb(r[0] + 1, total)
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        parsed = [None] * total
+        with ThreadPoolExecutor(max_workers=hpd_workers) as ex:
+            futs = {ex.submit(_parse_one, item): item[0] for item in rendered}
+            done_n = 0
+            for fut in as_completed(futs):
+                i, raw, err = fut.result()
+                parsed[i] = (i, raw, err)
+                done_n += 1
+                if progress_cb:
+                    progress_cb(done_n, total)
+    for i, raw, err in parsed:
+        page_raws[i] = raw
+        page_err[i] = err
+
     for i, page in enumerate(doc):
         if progress_cb:
             progress_cb(i + 1, total)
-        pix = page.get_pixmap(dpi=dpi)
-        b64 = base64.b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode()
-        try:
-            raw = _parse(HPD_URL, b64)
-        except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
-            logger.warning("HPD 第 %s 页失败: %s", i + 1, exc)
+        pix = page_pix[i]
+        if page_err[i] is not None:
+            logger.warning("HPD 第 %s 页失败: %s", i + 1, page_err[i])
+            continue
+        raw = page_raws[i]
+        if not raw:
             continue
         blocks = _blocks(raw)
         pw, ph = page.rect.width, page.rect.height
@@ -537,6 +589,8 @@ def ocr_pdf_with_hpd(
             cleaned = split_kv_rows(cleaned, pw)
             cleaned = split_named_sections(cleaned)
             cleaned = split_leading_caps_title(cleaned)
+            # 图形擦除必须用排版前原始盒；pack/clamp 会改写 y（可差 ~58pt）
+            raw_boxes = [b[:4] for b in cleaned]
             cleaned = pack_kv_table(cleaned, pw, ph)
             cleaned = clamp_before_section_heads(cleaned)
             # 2) 行级角色 + 眼科并入职务行
@@ -553,7 +607,8 @@ def ocr_pdf_with_hpd(
                         detect as _gr_detect,
                         drop_boxes_in_suppress,
                     )
-                regs = _gr_detect(page, [b[:4] for b in cleaned])
+                erase_boxes = list(raw_boxes) + [b[:4] for b in cleaned]
+                regs = _gr_detect(page, erase_boxes)
                 if regs:
                     before = len(cleaned)
                     cleaned = drop_boxes_in_suppress(cleaned, regs)

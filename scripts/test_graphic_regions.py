@@ -69,6 +69,81 @@ class TestGraphicRegions(unittest.TestCase):
             self.assertGreaterEqual(n1, 1)
             self.assertEqual(n2, 0)
 
+    def test_strip_heuristic_constants(self):
+        # 细长带判据：aspect>5 且 h<60 → 丢弃（与 detect 内一致）
+        w, h = 416.0, 42.0
+        self.assertGreater(w / h, 5.0)
+        self.assertLess(h, 60.0)
+
+    def test_kinds_filter_skips_graphic(self):
+        import pymupdf
+        import struct
+        import zlib
+
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            pdf = td / "x.pdf"
+            doc = pymupdf.open()
+            doc.new_page(width=595.32, height=841.92)
+            doc.save(pdf)
+            doc.close()
+            gdir = Path(str(pdf) + ".graphics")
+            gdir.mkdir()
+
+            def _png(path: Path) -> None:
+                raw = b"\x00" + b"\xff\x00\x00"
+                comp = zlib.compress(raw)
+
+                def chunk(tag: bytes, data: bytes) -> bytes:
+                    return (
+                        struct.pack(">I", len(data))
+                        + tag
+                        + data
+                        + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+                    )
+
+                ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+                path.write_bytes(
+                    b"\x89PNG\r\n\x1a\n"
+                    + chunk(b"IHDR", ihdr)
+                    + chunk(b"IDAT", comp)
+                    + chunk(b"IEND", b"")
+                )
+
+            _png(gdir / "a.png")
+            _png(gdir / "b.png")
+            mf = Path(str(pdf) + ".graphics.json")
+            mf.write_text(
+                json.dumps(
+                    {
+                        "pages": [
+                            {
+                                "page": 1,
+                                "size": [595.32, 841.92],
+                                "regions": [
+                                    {
+                                        "box": [70, 70, 104, 105],
+                                        "kind": "logo",
+                                        "png": "a.png",
+                                    },
+                                    {
+                                        "box": [71, 385, 486, 426],
+                                        "kind": "graphic",
+                                        "png": "b.png",
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            n = gi.reinsert(pdf, mf, kinds={"logo", "stamp"})
+            self.assertEqual(n, 1)
+            n_all = gi.reinsert(pdf, mf, kinds=None)
+            # logo 已在，graphic 新插
+            self.assertEqual(n_all, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

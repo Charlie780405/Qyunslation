@@ -24,7 +24,13 @@ qyunslation 自治 Skill。不改泰州 HPD。裁图过滤可参考 Hermes `lit-
 9. **全文翻译必须带跨页上下文**——生产译整本，不拆单页当终稿。页首/页尾半句按正文续译，不当标题/题注。提示见 `letter_translate_prompt.py`；单页夹具用 `QYUNSLATION_TRANSLATE_CONTEXT` 塞上页末段+下页首段。
 10. **已验收页是视觉 SSOT**——会议初步意见页以 `deliverables/plan-010-fidelity/letter.page2.mono.png` 为准；问答续页以 `letter.page3.mono.png` 为准。字号/粗体/表/跨页句见同目录 `reference.md`。后续改排版先对金样，禁止回退到 BabelDOC 串栏或引言微字。
 11. **模型只出译文，重绘才出页**——切回 `qwen3.6:35b-a3b` 算译文质量，不算版式。每页必须 OCR 英文全文 → 模型/金句 → 空白页 `kv_reinsert`。生产 GUI（正式书信 + HPD debug）走 `letter_pipeline`，禁止把 BabelDOC PDF 当终稿。
-12. **问答页按内容量分档，不堆在天头**——默认正文 12pt / 行距 1.50 / 段距 12pt（章节 14pt，保持 +2pt）。疏页升正文 **13pt**、章节 **15pt**，行距 1.58–1.88、段距 14–24pt，目标占版心（y≈118–740）的 80–88%。≤8 行只略放大、不拉满；超长锁 12pt、行距 1.38，禁止小于 12pt、禁止丢段。详表见 `reference.md`「版心与行距」。
+12. **问答页按内容量分档，不堆在天头**——正文锁 **12pt** / 章节 **14pt**（+2pt）。疏页只靠行距 1.50–1.90、段距 12–26pt 填版心（y≈118–740，目标 80–88%）。≤8 行用行距 1.56 / 段距 14pt，下空白保留。密页行距 1.38、段距 8pt。**禁止升到 13pt**、禁止小于 12pt、禁止丢段。详表见 `reference.md`「版心与行距」。
+13. **译后回插只限 logo / stamp**——`graphic` 在纯文字书信上基本是漏擦的英文行带；letter 默认 `kinds={"logo","stamp"}`。真有图表时设 `QYUNSLATION_LETTER_GRAPHICS=1`。
+14. **图形擦除盒必须用原始 OCR 盒**——`pack_kv_table` / `clamp_*` 会改写 y（可差 ~58pt）；`_erase_text` 喂错位置会把英文正文当成插图贴回，造成中英叠字。
+15. **完整性检查只告警不中断**——`missing_zh` 命中写 `.warnings.json` + log，禁止因单段未译 raise 掉整单。
+16. **生产 GUI 钩子返回 Path**——`gui.py` 对产物做 `.exists()`；返回 `str` 会 `AttributeError`。须有契约测试。
+17. **长任务必须 `run_in_executor` + 进度泵**——OCR / 翻译禁止在 async handler 里同步跑，否则进度条卡死。
+18. **译文缓存按英文 `sha1` 持久化**——`~/.cache/qyunslation/letter-zh.json`；跨进程复用，重复跑近乎瞬时。
 
 ## 已验收口径（会议初步意见页）
 
@@ -62,7 +68,9 @@ qyunslation 自治 Skill。不改泰州 HPD。裁图过滤可参考 Hermes `lit-
 | 会议初步意见太小 | 角色必须是 `section`，不是 `header` |
 | 页底半句缩成脚注 | `tag_paragraph_text` 勿单靠 `y>0.82` 判 footer |
 | 跨页指代/半句断裂 | 译整本；`letter_translate_prompt.py` |
-| 中英叠字 | 是否误恢复 `base_operations`（禁止） |
+| 中英叠字 | 是否误恢复 `base_operations`；或 `graphic` 文字带被 reinsert（查 `*.graphics.json` kind） |
+| 第 N 页字偏大 | `_flow_plan` 是否仍升 13pt；正文须锁 12pt |
+| 进度条卡住 | OCR/翻译是否在 async 里同步跑；须 `run_in_executor` |
 
 ## 关键脚本
 

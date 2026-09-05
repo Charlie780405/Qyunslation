@@ -114,15 +114,67 @@ HPD_CALL_OLD = (
     "                settings.pdf.disable_rich_text_translate = True\n"
 )
 HPD_CALL_NEW = (
+    "                import asyncio as _qy_aio_ocr\n"
+    "                _qy_ocr_st = {\"f\": 0.04, \"d\": \"①识别\"}\n"
+    "                def _hpd_progress(cur: int, total: int) -> None:\n"
+    "                    _qy_ocr_st[\"f\"] = 0.04 + 0.36 * cur / max(total, 1)\n"
+    "                    _qy_ocr_st[\"d\"] = f\"①识别 {cur}/{total} 页\"\n"
+    "                _qy_ocr_task = _qy_aio_ocr.get_event_loop().run_in_executor(\n"
+    "                    None,\n"
+    "                    lambda: ocr_pdf_with_hpd(\n"
+    "                        Path(file_path), progress_cb=_hpd_progress,\n"
+    "                        aggressive=_qy_merge_agg, min_font_size=_qy_min_fs,\n"
+    "                        profile=_qy_name,\n"
+    "                    ),\n"
+    "                )\n"
+    "                while not _qy_ocr_task.done():\n"
+    "                    progress(_qy_ocr_st[\"f\"], desc=f\"{task_prefix}{_qy_ocr_st['d']}\")\n"
+    "                    await _qy_aio_ocr.sleep(0.4)\n"
+    "                file_path = await _qy_ocr_task\n"
+    "                settings.pdf.ocr_workaround = True\n"
+    "                settings.pdf.skip_scanned_detection = True\n"
+    "                settings.pdf.disable_rich_text_translate = bool(\n"
+    "                    _qy_prof.get(\"disable_rich_text_translate\", True)\n"
+    "                )\n"
+)
+
+HPD_SYNC_BLOCK = (
+    "                def _hpd_progress(cur: int, total: int) -> None:\n"
+    "                    progress(0.04 + 0.36 * cur / max(total, 1), "
+    "desc=f\"{task_prefix}①识别 {cur}/{total} 页\")\n"
+    "\n"
     "                file_path = ocr_pdf_with_hpd(\n"
     "                    Path(file_path), progress_cb=_hpd_progress,\n"
     "                    aggressive=_qy_merge_agg, min_font_size=_qy_min_fs,\n"
     "                    profile=_qy_name,\n"
     "                )\n"
-    "                settings.pdf.ocr_workaround = True\n"
-    "                settings.pdf.skip_scanned_detection = True\n"
-    "                settings.pdf.disable_rich_text_translate = bool(\n"
-    "                    _qy_prof.get(\"disable_rich_text_translate\", True)\n"
+)
+HPD_ASYNC_BLOCK = (
+    "                import asyncio as _qy_aio_ocr\n"
+    "                _qy_ocr_st = {\"f\": 0.04, \"d\": \"①识别\"}\n"
+    "                def _hpd_progress(cur: int, total: int) -> None:\n"
+    "                    _qy_ocr_st[\"f\"] = 0.04 + 0.36 * cur / max(total, 1)\n"
+    "                    _qy_ocr_st[\"d\"] = f\"①识别 {cur}/{total} 页\"\n"
+    "                _qy_ocr_task = _qy_aio_ocr.get_event_loop().run_in_executor(\n"
+    "                    None,\n"
+    "                    lambda: ocr_pdf_with_hpd(\n"
+    "                        Path(file_path), progress_cb=_hpd_progress,\n"
+    "                        aggressive=_qy_merge_agg, min_font_size=_qy_min_fs,\n"
+    "                        profile=_qy_name,\n"
+    "                    ),\n"
+    "                )\n"
+    "                while not _qy_ocr_task.done():\n"
+    "                    progress(_qy_ocr_st[\"f\"], desc=f\"{task_prefix}{_qy_ocr_st['d']}\")\n"
+    "                    await _qy_aio_ocr.sleep(0.4)\n"
+    "                file_path = await _qy_ocr_task\n"
+)
+
+# 旧进度文案（无 async）
+HPD_CALL_SYNC_LEGACY = (
+    "                file_path = ocr_pdf_with_hpd(\n"
+    "                    Path(file_path), progress_cb=_hpd_progress,\n"
+    "                    aggressive=_qy_merge_agg, min_font_size=_qy_min_fs,\n"
+    "                    profile=_qy_name,\n"
     "                )\n"
 )
 
@@ -221,14 +273,54 @@ LETTER_NEW = """        if _qy_name == "letter":
             _qy_dbg = _qy_P(str(file_path) + ".hpd-debug.json")
             if _qy_dbg.is_file():
                 # _qy_letter_reflow
+                import asyncio as _qy_aio
                 from letter_pipeline import translate_scanned_letter as _qy_letter
                 _qy_out = _qy_P(getattr(getattr(settings, "translation", None), "output", None) or ".")
                 _qy_dest = _qy_out / f"{_qy_P(file_path).stem}.letter-mono.pdf"
-                def _qy_lp(cur, total, msg=""):
-                    progress(0.12 + 0.85 * cur / max(total, 1), desc=f"{task_prefix}书信重绘 {cur}/{total} {msg}")
-                _qy_letter(_qy_P(file_path), _qy_dbg, _qy_dest, progress_cb=_qy_lp)
-                return str(_qy_dest), str(_qy_dest), None, {}
+                _qy_st = {"f": 0.40, "d": "②翻译"}
+                def _qy_lp(frac, desc=""):
+                    _qy_st["f"] = 0.40 + 0.58 * min(max(float(frac), 0.0), 1.0)
+                    _qy_st["d"] = str(desc or "")
+                _qy_task = _qy_aio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: _qy_letter(_qy_P(file_path), _qy_dbg, _qy_dest, progress_cb=_qy_lp),
+                )
+                while not _qy_task.done():
+                    progress(_qy_st["f"], desc=f"{task_prefix}{_qy_st['d']}")
+                    await _qy_aio.sleep(0.4)
+                await _qy_task
+                progress(1.0, desc=f"{task_prefix}完成")
+                return _qy_dest, _qy_dest, None, {}
         async for event in do_translate_async_stream(settings, file_path):
+"""
+LETTER_SYNC = """                # _qy_letter_reflow
+                from letter_pipeline import translate_scanned_letter as _qy_letter
+                _qy_out = _qy_P(getattr(getattr(settings, "translation", None), "output", None) or ".")
+                _qy_dest = _qy_out / f"{_qy_P(file_path).stem}.letter-mono.pdf"
+                def _qy_lp(frac, desc=""):
+                    progress(0.40 + 0.58 * min(max(float(frac), 0.0), 1.0), desc=f"{task_prefix}{desc}")
+                _qy_letter(_qy_P(file_path), _qy_dbg, _qy_dest, progress_cb=_qy_lp)
+                return _qy_dest, _qy_dest, None, {}
+"""
+LETTER_ASYNC = """                # _qy_letter_reflow
+                import asyncio as _qy_aio
+                from letter_pipeline import translate_scanned_letter as _qy_letter
+                _qy_out = _qy_P(getattr(getattr(settings, "translation", None), "output", None) or ".")
+                _qy_dest = _qy_out / f"{_qy_P(file_path).stem}.letter-mono.pdf"
+                _qy_st = {"f": 0.40, "d": "②翻译"}
+                def _qy_lp(frac, desc=""):
+                    _qy_st["f"] = 0.40 + 0.58 * min(max(float(frac), 0.0), 1.0)
+                    _qy_st["d"] = str(desc or "")
+                _qy_task = _qy_aio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: _qy_letter(_qy_P(file_path), _qy_dbg, _qy_dest, progress_cb=_qy_lp),
+                )
+                while not _qy_task.done():
+                    progress(_qy_st["f"], desc=f"{task_prefix}{_qy_st['d']}")
+                    await _qy_aio.sleep(0.4)
+                await _qy_task
+                progress(1.0, desc=f"{task_prefix}完成")
+                return _qy_dest, _qy_dest, None, {}
 """
 BROKEN_INDENT = "                )\n                                settings.pdf.ocr_workaround"
 FIXED_INDENT = "                )\n                settings.pdf.ocr_workaround"
@@ -292,6 +384,28 @@ def apply_fixed(text: str) -> str:
         if RETRY_RICH_OLD in text:
             text = text.replace(RETRY_RICH_OLD, RETRY_RICH_NEW, 1)
             changed = True
+    if HPD_SYNC_BLOCK in text:
+        text = text.replace(HPD_SYNC_BLOCK, HPD_ASYNC_BLOCK, 1)
+        changed = True
+    elif (
+        "_qy_aio_ocr" not in text
+        and HPD_CALL_SYNC_LEGACY in text
+        and "def _hpd_progress" in text
+    ):
+        # 已有 sync progress + sync call：整块换成 async
+        _prog_old = (
+            "                def _hpd_progress(cur: int, total: int) -> None:\n"
+            "                    progress(0.04 + 0.36 * cur / max(total, 1), "
+            'desc=f"{task_prefix}①识别 {cur}/{total} 页")\n'
+            "\n"
+            + HPD_CALL_SYNC_LEGACY
+        )
+        if _prog_old in text:
+            text = text.replace(_prog_old, HPD_ASYNC_BLOCK, 1)
+            changed = True
+        elif HPD_CALL_SYNC_LEGACY in text:
+            text = text.replace(HPD_CALL_SYNC_LEGACY, HPD_ASYNC_BLOCK, 1)
+            changed = True
     if "profile=_qy_name" not in text:
         if HPD_CALL_008 in text:
             text = text.replace(HPD_CALL_008, HPD_CALL_NEW.split("settings.pdf.ocr_workaround")[0], 1)
@@ -331,6 +445,37 @@ def apply_fixed(text: str) -> str:
             changed = True
         else:
             print("WARNING: letter reflow anchor not found", file=sys.stderr)
+    if LETTER_SYNC in text:
+        text = text.replace(LETTER_SYNC, LETTER_ASYNC, 1)
+        changed = True
+    _lp_old = (
+        "                def _qy_lp(cur, total, msg=\"\"):\n"
+        "                    progress(0.12 + 0.85 * cur / max(total, 1), "
+        "desc=f\"{task_prefix}书信重绘 {cur}/{total} {msg}\")\n"
+    )
+    _lp_new = (
+        "                def _qy_lp(frac, desc=\"\"):\n"
+        "                    progress(0.40 + 0.58 * min(max(float(frac), 0.0), 1.0), "
+        "desc=f\"{task_prefix}{desc}\")\n"
+    )
+    if _lp_old in text:
+        text = text.replace(_lp_old, _lp_new, 1)
+        changed = True
+    _hpd_old = 'progress(0.02 + 0.08 * cur / max(total, 1), desc=f"HPD OCR {cur}/{total}")'
+    _hpd_new = (
+        'progress(0.04 + 0.36 * cur / max(total, 1), '
+        'desc=f"{task_prefix}①识别 {cur}/{total} 页")'
+    )
+    if _hpd_old in text:
+        text = text.replace(_hpd_old, _hpd_new)
+        changed = True
+    if "return str(_qy_dest), str(_qy_dest), None, {}" in text:
+        text = text.replace(
+            "return str(_qy_dest), str(_qy_dest), None, {}",
+            "return _qy_dest, _qy_dest, None, {}",
+            1,
+        )
+        changed = True
     if changed:
         print("patched:", GUI)
     else:
