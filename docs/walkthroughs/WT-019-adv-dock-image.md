@@ -6,8 +6,8 @@
 
 ## 部署
 
-- feat: （见 commit）
-- merge main: （见 commit）
+- feat: `c60dbee`
+- merge main: `500b604`
 
 ```bash
 bash scripts/verify-plan-017.sh
