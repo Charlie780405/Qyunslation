@@ -27,6 +27,24 @@ DROP_NEW = DROP_ANCHOR + """
                             choices=["自动", "正式书信", "学术文献", "IND递交资料", "通用"],
                             value="自动",
                             interactive=True,
+                            allow_custom_value=True,
+                        )
+"""
+
+DROP_OLD_NO_CUSTOM = """                        doc_profile_dropdown = gr.Dropdown(
+                            label="文档类型模板",
+                            choices=["自动", "正式书信", "学术文献", "IND递交资料", "通用"],
+                            value="自动",
+                            interactive=True,
+                        )
+"""
+
+DROP_WITH_CUSTOM = """                        doc_profile_dropdown = gr.Dropdown(
+                            label="文档类型模板",
+                            choices=["自动", "正式书信", "学术文献", "IND递交资料", "通用"],
+                            value="自动",
+                            interactive=True,
+                            allow_custom_value=True,
                         )
 """
 
@@ -357,6 +375,12 @@ def apply_fixed(text: str) -> str:
         else:
             text = text.replace(DROP_ANCHOR, DROP_NEW, 1)
             changed = True
+    elif "allow_custom_value=True" not in text.split("doc_profile_dropdown", 1)[-1][:400]:
+        if DROP_OLD_NO_CUSTOM in text:
+            text = text.replace(DROP_OLD_NO_CUSTOM, DROP_WITH_CUSTOM, 1)
+            changed = True
+        else:
+            print("WARNING: doc_profile allow_custom_value upgrade skipped", file=sys.stderr)
     if "_qy_hint_doc_profile" not in text:
         if UPLOAD_ANCHOR not in text:
             print("ERROR: upload anchor not found", file=sys.stderr)
