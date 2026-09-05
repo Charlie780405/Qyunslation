@@ -675,7 +675,10 @@ def apply(text: str) -> str:
             text = text.replace(old, new, 1)
 
     # --- PLAN-015: progress on both preview surfaces ---
-    if "show_progress_on=[preview, preview_html]" not in text:
+    # PLAN-017 may later move this to qy_progress_slot; treat that as done.
+    if "show_progress_on=[qy_progress_slot]" in text:
+        pass
+    elif "show_progress_on=[preview, preview_html]" not in text:
         if "show_progress_on=[preview]," not in text:
             raise RuntimeError("找不到 show_progress_on=[preview]")
         text = text.replace(
