@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from qyunslation.archive.models import ArchiveFileRef, ArchiveRecord
 
@@ -27,8 +28,14 @@ class ArchiveIndex:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
+        # sqlite3 连接的 with 只提交事务、不关闭连接，必须 closing
+        with closing(self._connect()) as conn:
+            yield conn
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS archive_counter (
@@ -64,7 +71,7 @@ class ArchiveIndex:
 
     def allocate_id(self) -> str:
         year = datetime.now(timezone.utc).year
-        with self._connect() as conn:
+        with self._db() as conn:
             row = conn.execute(
                 "SELECT next_seq FROM archive_counter WHERE year = ?", (year,)
             ).fetchone()
@@ -84,7 +91,7 @@ class ArchiveIndex:
         return f"DT-{year}-{seq:04d}"
 
     def insert(self, record: ArchiveRecord) -> None:
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 INSERT INTO archives (
@@ -126,7 +133,7 @@ class ArchiveIndex:
             conn.commit()
 
     def get(self, archive_id: str) -> ArchiveRecord | None:
-        with self._connect() as conn:
+        with self._db() as conn:
             row = conn.execute(
                 "SELECT * FROM archives WHERE archive_id = ?", (archive_id,)
             ).fetchone()
@@ -148,7 +155,7 @@ class ArchiveIndex:
             like = f"%{prefix}%"
             params.extend([like, like])
 
-        with self._connect() as conn:
+        with self._db() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) AS c FROM archives {where}", params
             ).fetchone()["c"]

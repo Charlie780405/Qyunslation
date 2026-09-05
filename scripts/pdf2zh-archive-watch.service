@@ -11,6 +11,7 @@ Environment=PYTHONPATH=/home/dev/qyunslation
 ExecStart=/usr/bin/python3 /home/dev/qyunslation/scripts/pdf2zh-archive-watch.py --env-file /home/dev/pdf2zh/archive.env
 Restart=on-failure
 RestartSec=10
+LimitNOFILE=4096
 
 [Install]
 WantedBy=default.target

@@ -33,9 +33,17 @@ def extract_pdf_text(path: Path, *, max_chars: int = 120_000) -> str:
 
 def pick_mono_pdf(paths: list[Path]) -> Path | None:
     for p in paths:
-        if p.name.lower().endswith(".mono.pdf"):
+        n = p.name.lower()
+        if n.endswith(".letter-mono.pdf") or n.endswith(".mono.pdf"):
             return p
     for p in paths:
-        if p.suffix.lower() == ".pdf":
+        if p.suffix.lower() == ".pdf" and "dual" not in p.name.lower():
+            return p
+    return None
+
+
+def pick_translated_md(paths: list[Path]) -> Path | None:
+    for p in paths:
+        if p.name.lower().endswith(".zh.md"):
             return p
     return None
