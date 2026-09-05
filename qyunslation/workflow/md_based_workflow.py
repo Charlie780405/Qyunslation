@@ -46,12 +46,19 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
             X2MarkdownConverterConfig]] | None] = {
         "mineru": (ConverterMineru, ConverterMineruConfig),
         "identity": (ConverterIdentity, None),
-        "mineru_deploy": (ConverterMineruDeploy, ConverterMineruDeployConfig)
+        "mineru_deploy": (ConverterMineruDeploy, ConverterMineruDeployConfig),
     }
 
     @classmethod
+    def _ensure_hpd_factory(cls) -> None:
+        if cls._converter_factory.get("hpd"):
+            return
+        from qyunslation.converter.x2md.converter_hpd import ConverterHpd, ConverterHpdConfig
+        cls._converter_factory["hpd"] = (ConverterHpd, ConverterHpdConfig)
+
+    @classmethod
     def _ensure_docling_factory(cls) -> None:
-        if "docling" in cls._converter_factory or not DOCLING_EXIST:
+        if cls._converter_factory.get("docling") or not DOCLING_EXIST:
             return
         from qyunslation.converter.x2md.converter_docling import ConverterDocling
         cls._converter_factory["docling"] = (ConverterDocling, ConverterDoclingConfig)
@@ -68,6 +75,7 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
 
     def _get_document_md(self, convert_engin: ConvertEngineType, convert_config: X2MarkdownConverterConfig):
         self._ensure_docling_factory()
+        self._ensure_hpd_factory()
         if self.document_original is None:
             raise RuntimeError("File has not been read yet. Call read_path or read_bytes first.")
 

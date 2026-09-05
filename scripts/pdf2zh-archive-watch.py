@@ -92,39 +92,45 @@ class GroupStateDB:
     def __init__(self, path: Path):
         self.path = path.expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS ingested_groups (
-                    group_key TEXT PRIMARY KEY,
-                    archive_id TEXT NOT NULL,
-                    ingested_at TEXT NOT NULL,
-                    vault_note_path TEXT
-                )
-                """
+        # 长连接：sqlite3 的 with 只提交事务不 close，轮询会泄漏 fd
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS ingested_groups (
+                group_key TEXT PRIMARY KEY,
+                archive_id TEXT NOT NULL,
+                ingested_at TEXT NOT NULL,
+                vault_note_path TEXT
             )
-            cols = {
-                row[1]
-                for row in conn.execute("PRAGMA table_info(ingested_groups)").fetchall()
-            }
-            if "vault_note_path" not in cols:
-                conn.execute(
-                    "ALTER TABLE ingested_groups ADD COLUMN vault_note_path TEXT"
-                )
+            """
+        )
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(ingested_groups)").fetchall()
+        }
+        if "vault_note_path" not in cols:
+            self._conn.execute(
+                "ALTER TABLE ingested_groups ADD COLUMN vault_note_path TEXT"
+            )
+        self._conn.commit()
+
+    def close(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
     def is_done(self, group_key: str) -> bool:
-        with sqlite3.connect(self.path) as conn:
-            row = conn.execute(
-                "SELECT 1 FROM ingested_groups WHERE group_key = ?", (group_key,)
-            ).fetchone()
+        row = self._conn.execute(
+            "SELECT 1 FROM ingested_groups WHERE group_key = ?", (group_key,)
+        ).fetchone()
         return row is not None
 
     def get(self, group_key: str) -> tuple[str, str | None] | None:
-        with sqlite3.connect(self.path) as conn:
-            row = conn.execute(
-                "SELECT archive_id, vault_note_path FROM ingested_groups WHERE group_key = ?",
-                (group_key,),
-            ).fetchone()
+        row = self._conn.execute(
+            "SELECT archive_id, vault_note_path FROM ingested_groups WHERE group_key = ?",
+            (group_key,),
+        ).fetchone()
         if not row:
             return None
         return row[0], row[1]
@@ -132,21 +138,20 @@ class GroupStateDB:
     def mark_done(
         self, group_key: str, archive_id: str, vault_note_path: str | None = None
     ) -> None:
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO ingested_groups
-                (group_key, archive_id, ingested_at, vault_note_path)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    group_key,
-                    archive_id,
-                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    vault_note_path,
-                ),
-            )
-            conn.commit()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO ingested_groups
+            (group_key, archive_id, ingested_at, vault_note_path)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                group_key,
+                archive_id,
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                vault_note_path,
+            ),
+        )
+        self._conn.commit()
 
 
 def _collect_output_files(root: Path) -> list[Path]:
@@ -162,12 +167,26 @@ def _collect_output_files(root: Path) -> list[Path]:
 
 
 def scan_groups(*watch_dirs: Path) -> dict[str, list[Path]]:
+    from qyunslation.archive.pdf2zh_ingest import find_source_pdf
+
     groups: dict[str, list[Path]] = defaultdict(list)
     for watch_dir in watch_dirs:
         for path in _collect_output_files(watch_dir):
             key = output_group_key(path.name)
             if key:
                 groups[key].append(path)
+    # 同名文件跨 session 去重，保留最新 mtime
+    for key, paths in list(groups.items()):
+        best: dict[str, Path] = {}
+        for p in paths:
+            prev = best.get(p.name)
+            if prev is None or p.stat().st_mtime >= prev.stat().st_mtime:
+                best[p.name] = p
+        paths = list(best.values())
+        src = find_source_pdf(key, paths)
+        if src is not None and src.name not in best:
+            paths.append(src)
+        groups[key] = paths
     return groups
 
 
@@ -182,7 +201,13 @@ def files_stable(paths: list[Path], settle_seconds: float) -> bool:
             return False
         if st.st_size <= 0:
             return False
-    return any(p.name.lower().endswith(".pdf") for p in paths)
+    # 至少有一份译稿（PDF/md/docx），不能仅凭原文 PDF 触发入库
+    return any(
+        p.name.lower().endswith(
+            (".mono.pdf", ".dual.pdf", ".letter-mono.pdf", ".zh.md", ".zh.docx")
+        )
+        for p in paths
+    )
 
 
 def run_once(cfg: dict, *, dry_run: bool = False) -> int:

@@ -8,10 +8,12 @@ import subprocess
 from pathlib import Path
 
 from qyunslation.archive.models import ArchiveRecord
-from qyunslation.archive.pdf2zh_ingest import infer_original_filename
-from qyunslation.archive.pdf_text import extract_pdf_text, pick_mono_pdf
+from qyunslation.archive.pdf_text import extract_pdf_text, pick_mono_pdf, pick_translated_md
 
 logger = logging.getLogger(__name__)
+
+# 不复制进 Vault assets 的类型（原文过大，仅 MinIO）
+_SKIP_VAULT_COPY = {"source_pdf"}
 
 
 def _preview(text: str, limit: int = 8000) -> str:
@@ -19,6 +21,23 @@ def _preview(text: str, limit: int = 8000) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def _file_type_of(name: str) -> str:
+    n = name.lower()
+    if n.endswith(".letter-mono.pdf") or n.endswith(".mono.pdf"):
+        return "mono_pdf" if not n.endswith(".letter-mono.pdf") else "letter_mono_pdf"
+    if n.endswith(".dual.pdf"):
+        return "dual_pdf"
+    if n.endswith(".zh.md"):
+        return "translated_md"
+    if n.endswith(".zh.docx"):
+        return "translated_docx"
+    if n.endswith(".glossary.csv"):
+        return "glossary_csv"
+    if n.endswith(".pdf"):
+        return "source_pdf"
+    return "other"
 
 
 def write_vault_note(
@@ -41,24 +60,59 @@ def write_vault_note(
 
     rel_assets = f"{assets_subdir}/{record.archive_id}"
     copied: list[tuple[str, Path]] = []
+    formats: list[str] = []
+    seen_names: set[str] = set()
     for src in output_paths:
         if not src.is_file():
+            continue
+        if src.name in seen_names:
+            continue
+        seen_names.add(src.name)
+        ft = _file_type_of(src.name)
+        # 对照 ArchiveRecord.files 的 source 角色；路径侧跳过疑似原文大文件
+        if ft in _SKIP_VAULT_COPY:
+            continue
+        # 与 group 同名的原文 PDF 不进 Vault
+        if src.name == record.original_filename:
             continue
         dest = assets_dir / src.name
         shutil.copy2(src, dest)
         copied.append((src.name, dest))
+        if ft not in formats and ft != "other":
+            formats.append(ft)
 
-    mono = pick_mono_pdf(output_paths)
+    # 记录里的 source MinIO key
+    original_storage_key = ""
+    for f in record.files:
+        if f.role == "source" or f.file_type == "source_pdf":
+            original_storage_key = f.storage_key
+            break
+        if f.file_type not in formats and f.file_type not in ("other",):
+            if f.file_type not in formats:
+                formats.append(f.file_type)
+
+    md_path = pick_translated_md(output_paths)
     translated_text = ""
-    if mono:
+    body_source = "pdf_extract"
+    if md_path and md_path.is_file():
         try:
-            translated_text = extract_pdf_text(mono)
-        except Exception as exc:
-            logger.warning("PDF 文本提取失败 %s: %s", mono.name, exc)
+            translated_text = md_path.read_text(encoding="utf-8")
+            body_source = "translated_md"
+        except OSError as exc:
+            logger.warning("读取译文 md 失败 %s: %s", md_path.name, exc)
+    if not translated_text:
+        mono = pick_mono_pdf(output_paths)
+        if mono:
+            try:
+                translated_text = extract_pdf_text(mono)
+            except Exception as exc:
+                logger.warning("PDF 文本提取失败 %s: %s", mono.name, exc)
 
     stem = Path(record.original_filename).stem
     note_name = f"{record.archive_id}-{stem}.md"
     note_path = note_dir / note_name
+    doc_profile = (record.extra or {}).get("doc_profile", "")
+    formats_csv = ", ".join(formats) if formats else "pdf"
 
     lines = [
         "---",
@@ -72,6 +126,10 @@ def write_vault_note(
         "tags: [translation, pdf2zh, babeldoc]",
         "source_grade: B",
         f"output_group: {group_key}",
+        f"formats: [{formats_csv}]",
+        f"original_storage_key: {original_storage_key or ''}",
+        f"doc_profile: {doc_profile or ''}",
+        f"body_source: {body_source}",
         "---",
         "",
         f"# {stem}（{record.to_lang} · PDF 保留排版）",
@@ -81,19 +139,35 @@ def write_vault_note(
         f"- 原文件：{record.original_filename}",
         f"- 引擎：PDFMathTranslate-next / BabelDOC",
         f"- 存储：MinIO `{record.storage_backend}`",
-        "",
-        "## 归档文件",
     ]
+    if original_storage_key:
+        lines.append(f"- 原文 MinIO：`{original_storage_key}`")
+    if doc_profile:
+        lines.append(f"- 文档画像：`{doc_profile}`")
+
+    lines.extend(["", "## 归档文件（Vault 附件）"])
     for name, _ in copied:
-        lines.append(
-            f"- [[{translations_dir}/{rel_assets}/{name}|{name}]]"
+        lines.append(f"- [[{translations_dir}/{rel_assets}/{name}|{name}]]")
+    if not copied:
+        lines.append("- （无 Vault 附件）")
+
+    if original_storage_key:
+        lines.extend(
+            [
+                "",
+                "## 原文（仅 MinIO）",
+                f"- `{original_storage_key}`",
+            ]
         )
 
-    lines.extend(["", "## 译文正文摘录", ""])
+    lines.extend(["", "## 译文正文", ""])
     if translated_text:
-        lines.append(_preview(translated_text, 12000))
+        if body_source == "translated_md":
+            lines.append(translated_text.strip())
+        else:
+            lines.append(_preview(translated_text, 12000))
     else:
-        lines.append("> （未能从 PDF 提取文本，见上方链接）")
+        lines.append("> （未能从 PDF / Markdown 提取文本，见上方链接）")
 
     lines.extend(
         [
