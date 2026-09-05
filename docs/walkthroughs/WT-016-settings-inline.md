@@ -6,6 +6,9 @@
 
 ## 部署
 
+- feat: `60aaa7e`
+- merge main: `6fb25ee`
+
 ```bash
 bash scripts/verify-plan-016.sh
 systemctl --user daemon-reload
@@ -19,3 +22,8 @@ systemctl --user restart pdf2zh.service
 3. 上传 PDF 后手动改模板为「正式书信」，点翻译；日志出现 `应用文档模板 letter`。
 4. 高级选项选「First 5 pages」试译，输出仅前几页。
 5. 设置页入口不可达；旧运维项不再干扰主流程。
+
+## 已核对（2026-09-05）
+
+- verify-plan-016: 18/18
+- 浏览器：文档类型模板常驻、「高级选项」展开含页码/术语表/忽略缓存/水印/界面语言/保存；侧栏入口已消失
