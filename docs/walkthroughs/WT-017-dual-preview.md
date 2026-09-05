@@ -6,6 +6,9 @@
 
 ## 部署
 
+- feat: 
+- merge main: 
+
 ```bash
 bash scripts/verify-plan-017.sh
 systemctl --user daemon-reload
