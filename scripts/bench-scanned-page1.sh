@@ -35,18 +35,25 @@ PY
 
 run_hpd() {
   local force="${1:-0}"
+  local profile="${2:-}"
   if [[ "$force" != "1" && -f "$WORK/page1.hpd-ocr.pdf" && "$WORK/page1.hpd-ocr.pdf" -nt "$HPD_SSOT" ]]; then
     echo "reuse OCR: $WORK/page1.hpd-ocr.pdf"
     return
   fi
-  echo "== HPD OCR =="
+  echo "== HPD OCR profile=${profile:-none} =="
   QYUNSLATION_HPD_DEBUG=1 PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" "$PY" - <<PY
 import sys
 from pathlib import Path
 sys.path.insert(0, r"$ROOT/scripts")
 from hpd_ocr import ocr_pdf_with_hpd
 dest = Path(r"$WORK/page1.hpd-ocr.pdf")
-ocr_pdf_with_hpd(Path(r"$WORK/page1.pdf"), dest)
+kw = {}
+prof = r"""$profile""".strip()
+if prof:
+    kw["profile"] = prof
+    kw["aggressive"] = True
+    kw["min_font_size"] = 8.0
+ocr_pdf_with_hpd(Path(r"$WORK/page1.pdf"), dest, **kw)
 print("wrote", dest)
 PY
 }
@@ -59,6 +66,9 @@ variant_flags() {
     V3) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif" ;;
     V4) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif --enable-json-mode-if-requested" ;;
     V5) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif" ;;
+    V6) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif" ;;
+    V7) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif" ;;
+    V8) echo "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif" ;;
     *) echo "unknown variant: $1" >&2; exit 2 ;;
   esac
 }
@@ -67,6 +77,14 @@ measure_pdf_fonts() {
   local pdf="$1"
   "$PY" - <<PY
 import json, statistics, re, pymupdf
+SENTENCE_END = re.compile(r"[.!?:;。！？：；」）)\]》]$")
+ORPHAN_OK = re.compile(
+    r"^(\d+|[A-Za-z]\.|PIND|FDA|ID:?|此致，?|敬上，?|附件：?|[‑\-\u2011\u2013])$",
+    re.I,
+)
+CJK_INCOMPLETE = re.compile(
+    r"[是的将和与在了着过把被从对向为以及或而但且若如因由]$"
+)
 d = pymupdf.open(r"""$pdf""")
 pg = d[0]
 sizes = []
@@ -75,6 +93,44 @@ for b in pg.get_text("dict")["blocks"]:
         for s in l["spans"]:
             if s.get("text", "").strip():
                 sizes.append(float(s["size"]))
+raw = []
+for b in pg.get_text("blocks"):
+    x0, y0, x1, y1, txt, _bno, btype = b
+    if btype != 0:
+        continue
+    t = " ".join((txt or "").split()).strip()
+    if t:
+        raw.append({"y0": y0, "y1": y1, "x0": x0, "x1": x1, "text": t})
+raw.sort(key=lambda b: (round(b["y0"], 0), b["x0"]))
+# 先按列把紧邻换行并成段，避免中文正常折行被算腰斩
+blocks = []
+for b in raw:
+    if blocks:
+        prev = blocks[-1]
+        gap = b["y0"] - prev["y1"]
+        overlap = min(prev["x1"], b["x1"]) - max(prev["x0"], b["x0"])
+        pw = max(prev["x1"] - prev["x0"], 1.0)
+        if gap <= 6.0 and overlap > pw * 0.3:
+            prev["text"] = (prev["text"] + " " + b["text"]).strip()
+            prev["y1"] = max(prev["y1"], b["y1"])
+            prev["x0"] = min(prev["x0"], b["x0"])
+            prev["x1"] = max(prev["x1"], b["x1"])
+            continue
+    blocks.append(dict(b))
+truncated = 0
+for i, cur in enumerate(blocks[:-1]):
+    if SENTENCE_END.search(cur["text"].rstrip()):
+        continue
+    nxt = blocks[i + 1]["text"].lstrip()
+    if not nxt:
+        continue
+    if nxt[0].islower() or CJK_INCOMPLETE.search(cur["text"]):
+        truncated += 1
+orphans = sum(
+    1
+    for b in blocks
+    if len(b["text"]) <= 4 and not ORPHAN_OK.match(b["text"].replace(" ", "").replace("\u0003", ""))
+)
 text = pg.get_text() or ""
 cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
 latin = len(re.findall(r"[A-Za-z]", text))
@@ -88,6 +144,9 @@ print(json.dumps({
     "cjk_ratio": round(cjk_ratio, 4),
     "cjk": cjk,
     "latin": latin,
+    "truncated_blocks": truncated,
+    "orphan_fragments": orphans,
+    "block_count": len(blocks),
 }))
 d.close()
 PY
@@ -112,15 +171,31 @@ run_variant() {
   flags="$(variant_flags "$v")"
   mkdir -p "$out"
   echo "== $v flags: $flags =="
+  local runner="$BABELDOC"
+  if [[ "$v" == "V7" || "$v" == "V8" ]]; then
+    runner="$PY $ROOT/scripts/run_babeldoc_letter.py"
+  fi
+  local gloss="$GLOSSARY"
+  if [[ "$v" == "V8" ]]; then
+    gloss="$("$PY" -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, r'$ROOT/scripts')
+from proper_nouns import harvest, glossary_args
+harvest(Path(r'$WORK/page1.pdf'))
+print(glossary_args([Path(r'$GLOSSARY')]))
+")"
+    echo "V8 glossaries: $gloss"
+  fi
   local t0 t1 elapsed
   t0=$(date +%s)
   # shellcheck disable=SC2086
-  "$BABELDOC" "$WORK/page1.hpd-ocr.pdf" \
+  $runner "$WORK/page1.hpd-ocr.pdf" \
     --lang-in en --lang-out zh --output "$out" \
     --ollama --ollama-model "$MODEL" \
     --ollama-host "$OLLAMA_HOST" \
-    --glossaries "$GLOSSARY" \
-    --custom-system-prompt "/no_think You are a professional, authentic machine translation engine." \
+    --glossaries "$gloss" \
+    --custom-system-prompt "$("$PY" -c "import sys; sys.path.insert(0, r'$ROOT/scripts'); from letter_translate_prompt import system_prompt; print(system_prompt())")" \
     --no-auto-extract-glossary --ignore-cache --qps 4 --pool-max-workers 4 \
     --watermark-output-mode no_watermark \
     $flags 2>&1 | tee "$out/babeldoc.log"
@@ -163,6 +238,26 @@ PY
   if [[ -n "$dual" && -f "$dual" ]]; then
     render_png "$dual" "$WORK/page1.$v.dual.png"
   fi
+  if [[ "$v" == "V8" ]]; then
+    mf="$WORK/page1.hpd-ocr.pdf.graphics.json"
+    if [[ -f "$mf" ]]; then
+      for pdf_target in "$mono" "$dual"; do
+        if [[ -n "$pdf_target" && -f "$pdf_target" ]]; then
+          "$PY" -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, r'$ROOT/scripts')
+from graphic_reinsert import reinsert
+print('reinsert', reinsert(Path(r'''$pdf_target'''), Path(r'''$mf''')))
+"
+        fi
+      done
+      [[ -n "$mono" && -f "$mono" ]] && render_png "$mono" "$WORK/page1.$v.mono.png"
+      [[ -n "$dual" && -f "$dual" ]] && render_png "$dual" "$WORK/page1.$v.dual.png"
+    else
+      echo "WARN: missing graphics manifest $mf"
+    fi
+  fi
   local fallback
   fallback="$(grep -c 'try fallback' "$out/babeldoc.log" || true)"
 
@@ -203,20 +298,66 @@ case "$VARIANT" in
     for v in V0 V1 V2; do run_variant "$v"; done
     echo "NOTE: V3/V4 require 007b/007d; run after those land: bash scripts/bench-scanned-page1.sh V3"
     ;;
-  V3|V4|V5)
-    run_hpd 1
-    if [[ "$VARIANT" == "V5" ]]; then
+  V3|V4|V5|V6|V7|V8)
+    if [[ "$VARIANT" == "V7" || "$VARIANT" == "V8" ]]; then
+      run_hpd 1 letter
+    else
+      run_hpd 1
+    fi
+    if [[ "$VARIANT" == "V5" || "$VARIANT" == "V6" || "$VARIANT" == "V7" || "$VARIANT" == "V8" ]]; then
       export PDF2ZH_LLM_BATCH_PARAS="${PDF2ZH_LLM_BATCH_PARAS:-3}"
       export PDF2ZH_LLM_BATCH_TOKENS="${PDF2ZH_LLM_BATCH_TOKENS:-120}"
     fi
     run_variant "$VARIANT"
+    # PLAN-008a / 009：同步写 baseline
+    if [[ "$VARIANT" == "V5" || "$VARIANT" == "V6" || "$VARIANT" == "V7" || "$VARIANT" == "V8" ]]; then
+      "$PY" - <<PY
+import json, pathlib, datetime, shutil
+base = pathlib.Path(r"""$BASELINE""")
+out = pathlib.Path(r"""$ROOT/docs/perf/baseline-008a.json""")
+data = json.loads(base.read_text()) if base.is_file() else {}
+v = data.get("variants", {}).get(r"""$VARIANT""", {})
+payload = {
+    "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "variant": r"""$VARIANT""",
+    "ocr_layer": v.get("ocr_layer"),
+    "mono": v.get("mono"),
+}
+out.parent.mkdir(parents=True, exist_ok=True)
+prev = json.loads(out.read_text()) if out.is_file() else {}
+prev.setdefault("variants", {})[r"""$VARIANT"""] = payload
+prev["generated_at"] = payload["generated_at"]
+out.write_text(json.dumps(prev, ensure_ascii=False, indent=2) + "\n")
+print("updated", out)
+if r"""$VARIANT""" == "V7":
+    dest = pathlib.Path(r"""$ROOT/deliverables/plan-009-letter""")
+    dest.mkdir(parents=True, exist_ok=True)
+    mono = v.get("mono_pdf")
+    png = v.get("mono_png")
+    if mono and pathlib.Path(mono).is_file():
+        shutil.copy2(mono, dest / "letter.mono.pdf")
+    if png and pathlib.Path(png).is_file():
+        shutil.copy2(png, dest / "letter.mono.png")
+    print("deliverables", dest)
+if r"""$VARIANT""" == "V8":
+    dest = pathlib.Path(r"""$ROOT/deliverables/plan-010-fidelity""")
+    dest.mkdir(parents=True, exist_ok=True)
+    mono = v.get("mono_pdf")
+    png = v.get("mono_png")
+    if mono and pathlib.Path(mono).is_file():
+        shutil.copy2(mono, dest / "letter.mono.pdf")
+    if png and pathlib.Path(png).is_file():
+        shutil.copy2(png, dest / "letter.mono.png")
+    print("deliverables", dest)
+PY
+    fi
     ;;
   V0|V1|V2)
     run_hpd 0
     run_variant "$VARIANT"
     ;;
   *)
-    echo "usage: $0 [V0|V1|V2|V3|V4|V5|all]" >&2
+    echo "usage: $0 [V0|V1|V2|V3|V4|V5|V6|V7|V8|all]" >&2
     exit 2
     ;;
 esac

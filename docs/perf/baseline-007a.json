@@ -146,6 +146,105 @@
         "no_english_overlay": true,
         "header_readable": true
       }
+    },
+    "V6": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif",
+      "elapsed_s": 36,
+      "fallback_count": 0,
+      "ocr_layer": {
+        "chars": 1439,
+        "font_median": 11.44891357421875,
+        "font_min": 8.081787109375,
+        "font_max": 15.08648681640625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118,
+        "truncated_blocks": 6,
+        "orphan_fragments": 0,
+        "block_count": 30
+      },
+      "mono": {
+        "chars": 577,
+        "font_median": 11.1502685546875,
+        "font_min": 7.677698135375977,
+        "font_max": 15.08648681640625,
+        "cjk_ratio": 0.7089,
+        "cjk": 302,
+        "latin": 124,
+        "truncated_blocks": 2,
+        "orphan_fragments": 1,
+        "block_count": 20
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V6/translated-left.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V6/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V6.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V6.dual.png"
+    },
+    "V7": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif",
+      "elapsed_s": 34,
+      "fallback_count": 0,
+      "ocr_layer": {
+        "chars": 1385,
+        "font_median": 11.8031005859375,
+        "font_min": 8.390625,
+        "font_max": 15.086181640625,
+        "cjk_ratio": 0.0009,
+        "cjk": 1,
+        "latin": 1084,
+        "truncated_blocks": 1,
+        "orphan_fragments": 0,
+        "block_count": 12
+      },
+      "mono": {
+        "chars": 576,
+        "font_median": 9.600000381469727,
+        "font_min": 4.800000190734863,
+        "font_max": 12.0,
+        "cjk_ratio": 0.7156,
+        "cjk": 307,
+        "latin": 122,
+        "truncated_blocks": 2,
+        "orphan_fragments": 0,
+        "block_count": 14
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V7/translated-left.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V7/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V7.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V7.dual.png"
+    },
+    "V8": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family sans-serif",
+      "elapsed_s": 34,
+      "fallback_count": 0,
+      "ocr_layer": {
+        "chars": 1420,
+        "font_median": 9.453741550445557,
+        "font_min": 5.958781719207764,
+        "font_max": 12.12353515625,
+        "cjk_ratio": 0.0009,
+        "cjk": 1,
+        "latin": 1108,
+        "truncated_blocks": 0,
+        "orphan_fragments": 0,
+        "block_count": 15
+      },
+      "mono": {
+        "chars": 558,
+        "font_median": 9.0,
+        "font_min": 5.849999904632568,
+        "font_max": 12.0,
+        "cjk_ratio": 0.7446,
+        "cjk": 312,
+        "latin": 107,
+        "truncated_blocks": 0,
+        "orphan_fragments": 0,
+        "block_count": 15
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V8/translated-left.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V8/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V8.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V8.dual.png"
     }
   },
   "updated_at": "2026-09-05T02:40:16.166172+00:00"

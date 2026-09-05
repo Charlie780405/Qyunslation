@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-09-05T04:54:36.115710+00:00",
+  "note": "PLAN-008a pre-merge V5 baseline (refined truncated/orphan rules)",
+  "variants": {
+    "V5": {
+      "variant": "V5",
+      "ocr_layer": {
+        "blocks": 25,
+        "truncated_blocks": 6,
+        "orphan_fragments": 0,
+        "chars": 1439,
+        "font_median": 10.7760009765625,
+        "cjk_ratio": 0.0,
+        "sample_truncated": [
+          {
+            "cur": "Please refer to your pre‑investigational new drug application (PIND) f",
+            "nxt": "discuss the proposed regulatory strategy"
+          },
+          {
+            "cur": "discuss the proposed regulatory strategy, the comparative analytical a",
+            "nxt": "and the non‑clinical and clinical develo"
+          },
+          {
+            "cur": "and the non‑clinical and clinical development plan to support the deve",
+            "nxt": "as a biosimilar to US‑Vabysmo. Our preli"
+          },
+          {
+            "cur": "as a biosimilar to US‑Vabysmo. Our preliminary responses to your meeti",
+            "nxt": "enclosed. You should provide, to the Reg"
+          },
+          {
+            "cur": "enclosed. You should provide, to the Regulatory Project Manager, an el",
+            "nxt": "materials (i.e., slides or handouts) to "
+          }
+        ],
+        "sample_orphans": []
+      },
+      "mono": {
+        "blocks": 18,
+        "truncated_blocks": 2,
+        "orphan_fragments": 2,
+        "chars": 541,
+        "font_median": 10.7760009765625,
+        "cjk_ratio": 0.7847,
+        "sample_truncated": [
+          {
+            "cur": "我们对您会议问题的初步回复是",
+            "nxt": "附后。您应向监管项目经理提供将在会议上展示和/或讨论的任何材料（即幻灯片或 讲义"
+          },
+          {
+            "cur": "附后。您应向监管项目经理提供将在会议上展示和/或讨论的任何材料（即幻灯片或 讲义）的电子版。根据21\u0003CFR\u000310.65(e)的规定，本次会",
+            "nxt": "FDA‑"
+          }
+        ],
+        "sample_orphans": [
+          "‑",
+          "FDA‑"
+        ]
+      }
+    },
+    "V6": {
+      "generated_at": "2026-09-05T03:12:35.253773+00:00",
+      "variant": "V6",
+      "ocr_layer": {
+        "chars": 1439,
+        "font_median": 11.44891357421875,
+        "font_min": 8.081787109375,
+        "font_max": 15.08648681640625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118,
+        "truncated_blocks": 6,
+        "orphan_fragments": 0,
+        "block_count": 30
+      },
+      "mono": {
+        "chars": 577,
+        "font_median": 11.1502685546875,
+        "font_min": 7.677698135375977,
+        "font_max": 15.08648681640625,
+        "cjk_ratio": 0.7089,
+        "cjk": 302,
+        "latin": 124,
+        "truncated_blocks": 2,
+        "orphan_fragments": 1,
+        "block_count": 20
+      }
+    },
+    "V7": {
+      "generated_at": "2026-09-05T03:55:16.128816+00:00",
+      "variant": "V7",
+      "ocr_layer": {
+        "chars": 1385,
+        "font_median": 11.8031005859375,
+        "font_min": 8.390625,
+        "font_max": 15.086181640625,
+        "cjk_ratio": 0.0009,
+        "cjk": 1,
+        "latin": 1084,
+        "truncated_blocks": 1,
+        "orphan_fragments": 0,
+        "block_count": 12
+      },
+      "mono": {
+        "chars": 576,
+        "font_median": 9.600000381469727,
+        "font_min": 4.800000190734863,
+        "font_max": 12.0,
+        "cjk_ratio": 0.7156,
+        "cjk": 307,
+        "latin": 122,
+        "truncated_blocks": 2,
+        "orphan_fragments": 0,
+        "block_count": 14
+      }
+    },
+    "V8": {
+      "generated_at": "2026-09-05T04:54:36.115710+00:00",
+      "variant": "V8",
+      "ocr_layer": {
+        "chars": 1420,
+        "font_median": 9.453741550445557,
+        "font_min": 5.958781719207764,
+        "font_max": 12.12353515625,
+        "cjk_ratio": 0.0009,
+        "cjk": 1,
+        "latin": 1108,
+        "truncated_blocks": 0,
+        "orphan_fragments": 0,
+        "block_count": 15
+      },
+      "mono": {
+        "chars": 558,
+        "font_median": 9.0,
+        "font_min": 5.849999904632568,
+        "font_max": 12.0,
+        "cjk_ratio": 0.7446,
+        "cjk": 312,
+        "latin": 107,
+        "truncated_blocks": 0,
+        "orphan_fragments": 0,
+        "block_count": 15
+      }
+    }
+  }
+}

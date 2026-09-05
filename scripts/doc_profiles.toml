@@ -1,0 +1,57 @@
+# PLAN-008：文档类型排版样例模板
+# 字体只用 BabelDOC 内置思源黑体/思源宋体（serif / sans-serif），不改泰州 HPD。
+
+[letter]
+label = "正式书信"
+primary_font_family = "sans-serif"
+line_skip = 1.5
+split_short_lines = false
+short_line_split_factor = 0.8
+disable_rich_text_translate = true
+merge_alternating_line_numbers = true
+merge_aggressive = true
+min_font_size = 8.0
+body_font_size = 12.0
+section_font_size = 14.0
+kv_font_size = 10.0
+meta_font_size = 9.0
+salutation_font_size = 10.5
+closing_font_size = 9.5
+footer_font_size = 8.5
+body_first_indent = true
+# 落款：块整体保持原 x（偏右），块内逐行左齐（中文公函习惯）
+signature_align = "left"
+signature_line_skip = 1.25
+
+[literature]
+label = "学术文献"
+primary_font_family = "serif"
+line_skip = 1.5
+split_short_lines = true
+short_line_split_factor = 0.8
+disable_rich_text_translate = false
+merge_alternating_line_numbers = true
+merge_aggressive = true
+min_font_size = 8.0
+
+[regulatory]
+label = "IND递交资料"
+primary_font_family = "sans-serif"
+line_skip = 1.5
+split_short_lines = false
+short_line_split_factor = 0.8
+disable_rich_text_translate = true
+merge_alternating_line_numbers = false
+merge_aggressive = false
+min_font_size = 9.0
+
+[generic]
+label = "通用"
+primary_font_family = "serif"
+line_skip = 1.5
+split_short_lines = false
+short_line_split_factor = 0.8
+disable_rich_text_translate = true
+merge_alternating_line_numbers = true
+merge_aggressive = true
+min_font_size = 7.0
