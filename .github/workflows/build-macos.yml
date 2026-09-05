@@ -50,7 +50,7 @@ jobs:
       - name: Get application version
         id: get_version
         run: |
-          VERSION=$(python -c "import docutranslate; print(docutranslate.__version__)")
+          VERSION=$(python -c "import qyunslation; print(qyunslation.__version__)")
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 

@@ -10,8 +10,8 @@ from typing import Hashable
 import charset_normalizer
 import openpyxl
 
-from docutranslate.converter.x2xlsx.base import X2XlsxConverter, X2XlsxConverterConfig
-from docutranslate.ir.document import Document
+from qyunslation.converter.x2xlsx.base import X2XlsxConverter, X2XlsxConverterConfig
+from qyunslation.ir.document import Document
 
 
 # 配置一个基本的日志记录器（如果您的项目尚未配置）

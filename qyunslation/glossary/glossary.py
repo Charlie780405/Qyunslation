@@ -4,7 +4,7 @@ import csv
 import re
 from io import StringIO
 
-from docutranslate.ir.document import Document
+from qyunslation.ir.document import Document
 
 
 class Glossary:

@@ -11,9 +11,9 @@ from typing import Callable
 
 import json_repair
 
-from docutranslate.agents import AgentConfig, Agent
-from docutranslate.agents.agent import AgentResultError
-from docutranslate.utils.json_utils import segments2json_chunks, parse_json_response
+from qyunslation.agents import AgentConfig, Agent
+from qyunslation.agents.agent import AgentResultError
+from qyunslation.utils.json_utils import segments2json_chunks, parse_json_response
 
 
 def generate_prompt(json_segments: str, to_lang: str):

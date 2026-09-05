@@ -1,5 +1,5 @@
 [project]
-name = "docutranslate"
+name = "qyunslation"
 description = "文件翻译工具"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,21 +46,21 @@ dev = [
     "pytest-cov>=7.0.0",
 ]
 [project.scripts]
-docutranslate = "docutranslate.cli:main"
+qyunslation = "qyunslation.cli:main"
 
 [build-system]
 requires = ["setuptools>=80.9.0"]       # 或者你需要的 setuptools 版本
 build-backend = "setuptools.build_meta"
 [tool.setuptools]
-#packages = ["docutranslate"]
+#packages = ["qyunslation"]
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["docutranslate*"]
+include = ["qyunslation*"]
 [tool.setuptools.package-data]
-docutranslate = ["static/**", "template/**"]
+qyunslation = ["static/**", "template/**"]
 
 [tool.setuptools.dynamic]
-version = { attr = "docutranslate.__version__" }
+version = { attr = "qyunslation.__version__" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -68,7 +68,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=docutranslate --cov-report=term --cov-report=html:htmlcov"
+addopts = "-v --cov=qyunslation --cov-report=term --cov-report=html:htmlcov"
 env = [
     "DOCUTRANSLATE_BASE_URL=https://api.openai.com/v1",
     "DOCUTRANSLATE_API_KEY=test-api-key",

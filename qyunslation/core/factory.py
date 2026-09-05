@@ -1,47 +1,47 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
-# docutranslate.core.factory.py
+# qyunslation.core.factory.py
 
 import logging
 
-from docutranslate.agents.glossary_agent import GlossaryAgentConfig
-from docutranslate.core.schemas import TranslatePayload, MarkdownWorkflowParams, TextWorkflowParams, JsonWorkflowParams, \
+from qyunslation.agents.glossary_agent import GlossaryAgentConfig
+from qyunslation.core.schemas import TranslatePayload, MarkdownWorkflowParams, TextWorkflowParams, JsonWorkflowParams, \
     XlsxWorkflowParams, DocxWorkflowParams, SrtWorkflowParams, EpubWorkflowParams, HtmlWorkflowParams, \
     AssWorkflowParams, PPTXWorkflowParams
-from docutranslate.converter.x2md.converter_docling import ConverterDoclingConfig
-from docutranslate.converter.x2md.converter_mineru import ConverterMineruConfig
-from docutranslate.converter.x2md.converter_mineru_deploy import ConverterMineruDeployConfig
-from docutranslate.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig
-from docutranslate.exporter.docx.docx2html_exporter import Docx2HTMLExporterConfig
-from docutranslate.exporter.epub.epub2html_exporter import Epub2HTMLExporterConfig
-from docutranslate.exporter.js.json2html_exporter import Json2HTMLExporterConfig
-from docutranslate.exporter.md.md2html_exporter import MD2HTMLExporterConfig
-from docutranslate.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConfig
-from docutranslate.exporter.srt.srt2html_exporter import Srt2HTMLExporterConfig
-from docutranslate.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig
-from docutranslate.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig
-from docutranslate.global_values.conditional_import import DOCLING_EXIST
-from docutranslate.translator.ai_translator.ass_translator import AssTranslatorConfig
-from docutranslate.translator.ai_translator.docx_translator import DocxTranslatorConfig
-from docutranslate.translator.ai_translator.epub_translator import EpubTranslatorConfig
-from docutranslate.translator.ai_translator.html_translator import HtmlTranslatorConfig
-from docutranslate.translator.ai_translator.json_translator import JsonTranslatorConfig
-from docutranslate.translator.ai_translator.md_translator import MDTranslatorConfig
-from docutranslate.translator.ai_translator.pptx_translator import PPTXTranslatorConfig
-from docutranslate.translator.ai_translator.srt_translator import SrtTranslatorConfig
-from docutranslate.translator.ai_translator.txt_translator import TXTTranslatorConfig
-from docutranslate.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig
-from docutranslate.workflow.ass_workflow import AssWorkflowConfig, AssWorkflow
-from docutranslate.workflow.base import Workflow
-from docutranslate.workflow.docx_workflow import DocxWorkflowConfig, DocxWorkflow
-from docutranslate.workflow.epub_workflow import EpubWorkflowConfig, EpubWorkflow
-from docutranslate.workflow.html_workflow import HtmlWorkflowConfig, HtmlWorkflow
-from docutranslate.workflow.json_workflow import JsonWorkflowConfig, JsonWorkflow
-from docutranslate.workflow.md_based_workflow import MarkdownBasedWorkflowConfig, MarkdownBasedWorkflow
-from docutranslate.workflow.pptx_workflow import PPTXWorkflowConfig, PPTXWorkflow
-from docutranslate.workflow.srt_workflow import SrtWorkflowConfig, SrtWorkflow
-from docutranslate.workflow.txt_workflow import TXTWorkflowConfig, TXTWorkflow
-from docutranslate.workflow.xlsx_workflow import XlsxWorkflowConfig, XlsxWorkflow
+from qyunslation.converter.x2md.converter_docling_config import ConverterDoclingConfig
+from qyunslation.converter.x2md.converter_mineru import ConverterMineruConfig
+from qyunslation.converter.x2md.converter_mineru_deploy import ConverterMineruDeployConfig
+from qyunslation.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig
+from qyunslation.exporter.docx.docx2html_exporter import Docx2HTMLExporterConfig
+from qyunslation.exporter.epub.epub2html_exporter import Epub2HTMLExporterConfig
+from qyunslation.exporter.js.json2html_exporter import Json2HTMLExporterConfig
+from qyunslation.exporter.md.md2html_exporter import MD2HTMLExporterConfig
+from qyunslation.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConfig
+from qyunslation.exporter.srt.srt2html_exporter import Srt2HTMLExporterConfig
+from qyunslation.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig
+from qyunslation.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig
+from qyunslation.global_values.conditional_import import DOCLING_EXIST
+from qyunslation.translator.ai_translator.ass_translator import AssTranslatorConfig
+from qyunslation.translator.ai_translator.docx_translator import DocxTranslatorConfig
+from qyunslation.translator.ai_translator.epub_translator import EpubTranslatorConfig
+from qyunslation.translator.ai_translator.html_translator import HtmlTranslatorConfig
+from qyunslation.translator.ai_translator.json_translator import JsonTranslatorConfig
+from qyunslation.translator.ai_translator.md_translator import MDTranslatorConfig
+from qyunslation.translator.ai_translator.pptx_translator import PPTXTranslatorConfig
+from qyunslation.translator.ai_translator.srt_translator import SrtTranslatorConfig
+from qyunslation.translator.ai_translator.txt_translator import TXTTranslatorConfig
+from qyunslation.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig
+from qyunslation.workflow.ass_workflow import AssWorkflowConfig, AssWorkflow
+from qyunslation.workflow.base import Workflow
+from qyunslation.workflow.docx_workflow import DocxWorkflowConfig, DocxWorkflow
+from qyunslation.workflow.epub_workflow import EpubWorkflowConfig, EpubWorkflow
+from qyunslation.workflow.html_workflow import HtmlWorkflowConfig, HtmlWorkflow
+from qyunslation.workflow.json_workflow import JsonWorkflowConfig, JsonWorkflow
+from qyunslation.workflow.md_based_workflow import MarkdownBasedWorkflowConfig, MarkdownBasedWorkflow
+from qyunslation.workflow.pptx_workflow import PPTXWorkflowConfig, PPTXWorkflow
+from qyunslation.workflow.srt_workflow import SrtWorkflowConfig, SrtWorkflow
+from qyunslation.workflow.txt_workflow import TXTWorkflowConfig, TXTWorkflow
+from qyunslation.workflow.xlsx_workflow import XlsxWorkflowConfig, XlsxWorkflow
 
 
 def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logger = None) -> Workflow:
@@ -49,7 +49,7 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
     根据扁平化的 Payload 配置对象，构建并返回对应的 Workflow 实例。
     """
     if logger is None:
-        logger = logging.getLogger("docutranslate.factory")
+        logger = logging.getLogger("qyunslation.factory")
 
     # 辅助函数：构建术语表生成配置
     def build_glossary_agent_config():

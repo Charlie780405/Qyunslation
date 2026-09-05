@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig, TXT2HTMLExporter
-from docutranslate.exporter.txt.txt2txt_exporter import TXT2TXTExporter
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.txt_translator import TXTTranslatorConfig, TXTTranslator
-from docutranslate.workflow.base import Workflow, WorkflowConfig
-from docutranslate.workflow.interfaces import HTMLExportable, TXTExportable
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig, TXT2HTMLExporter
+from qyunslation.exporter.txt.txt2txt_exporter import TXT2TXTExporter
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.txt_translator import TXTTranslatorConfig, TXTTranslator
+from qyunslation.workflow.base import Workflow, WorkflowConfig
+from qyunslation.workflow.interfaces import HTMLExportable, TXTExportable
 
 
 @dataclass(kw_only=True)

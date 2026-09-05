@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
-# docutranslate.core.schemas.py
+# qyunslation.core.schemas.py
 
 import json
 import os
@@ -22,9 +22,9 @@ from pydantic import (
     ConfigDict,
 )
 
-from docutranslate.agents.agent import ThinkingMode
-from docutranslate.agents.thinking.thinking_factory import ProviderType
-from docutranslate.config import (
+from qyunslation.agents.agent import ThinkingMode
+from qyunslation.agents.thinking.thinking_factory import ProviderType
+from qyunslation.config import (
     # BaseWorkflowParams defaults
     CHUNK_SIZE, CONCURRENT, TEMPERATURE, TOP_P, TIMEOUT,
     THINKING, RETRY, SYSTEM_PROXY_ENABLE,

@@ -325,8 +325,8 @@ export function useSettings() {
         storage.set(STORAGE.keys.RPM, f.rpm || '');
         storage.set(STORAGE.keys.TPM, f.tpm || '');
         storage.set(STORAGE.keys.EXTRA_BODY, f.extra_body || '');
-        // 平台相关
-        storage.set(`translator_platform_${f.platform}_apikey`, f.api_key);
+        // 平台相关（API Key 仅 sessionStorage）
+        sessionStorage.setItem(`translator_platform_${f.platform}_apikey`, f.api_key || '');
         storage.set(`translator_platform_${f.platform}_model_id`, f.model_id);
         storage.set('translator_provider', f.provider);
         if (f.platform === 'custom') storage.set('translator_platform_custom_base_url', f.base_url);
@@ -351,8 +351,8 @@ export function useSettings() {
         storage.set('glossary_agent_rpm', f.glossary_agent_rpm || '');
         storage.set('glossary_agent_tpm', f.glossary_agent_tpm || '');
         storage.set('glossary_agent_extra_body', f.glossary_agent_extra_body || '');
-        // 术语表平台 Key
-        storage.set(`glossary_agent_platform_${f.glossary_agent_platform}_apikey`, f.glossary_agent_key);
+        // 术语表平台 Key（仅 sessionStorage）
+        sessionStorage.setItem(`glossary_agent_platform_${f.glossary_agent_platform}_apikey`, f.glossary_agent_key || '');
         storage.set(`glossary_agent_platform_${f.glossary_agent_platform}_model_id`, f.glossary_agent_model_id);
         storage.set('glossary_agent_provider', f.glossary_agent_provider);
         if (f.glossary_agent_platform === 'custom') storage.set('glossary_agent_platform_custom_base_url', f.glossary_agent_baseurl);
@@ -374,12 +374,13 @@ export function useSettings() {
 
     const updatePlatformParams = (plat, prefix, target, isGlossary = false) => {
         const get = (k) => localStorage.getItem(k) || '';
+        const getSecret = (k) => sessionStorage.getItem(k) || localStorage.getItem(k) || '';
         if (isGlossary) {
-            target.glossary_agent_key = get(`${prefix}_${plat}_apikey`);
+            target.glossary_agent_key = getSecret(`${prefix}_${plat}_apikey`);
             target.glossary_agent_model_id = get(`${prefix}_${plat}_model_id`);
             target.glossary_agent_baseurl = plat === 'custom' ? get(`${prefix}_custom_base_url`) : plat;
         } else {
-            target.api_key = get(`${prefix}_${plat}_apikey`);
+            target.api_key = getSecret(`${prefix}_${plat}_apikey`);
             target.model_id = get(`${prefix}_${plat}_model_id`);
             target.base_url = plat === 'custom' ? get(`${prefix}_custom_base_url`) : plat;
         }

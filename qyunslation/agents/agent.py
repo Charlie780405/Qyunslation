@@ -16,10 +16,11 @@ from urllib.parse import urlparse
 
 import httpx
 
-from docutranslate.agents.provider import get_provider_by_domain
-from docutranslate.agents.thinking.thinking_factory import get_thinking_mode, ProviderType
-from docutranslate.logger import global_logger
-from docutranslate.utils.utils import get_httpx_proxies
+from qyunslation.agents.provider import get_provider_by_domain
+from qyunslation.agents.thinking.thinking_factory import get_thinking_mode, ProviderType
+from qyunslation.logger import global_logger
+from qyunslation.utils.utils import get_httpx_proxies
+from qyunslation.config import TLS_VERIFY
 
 MAX_REQUESTS_PER_ERROR = 15
 MAX_CONTINUE_FETCHES = 2  # 响应被截断时，最多继续获取的次数
@@ -861,7 +862,7 @@ class Agent:
         )
 
         async with httpx.AsyncClient(
-                trust_env=False, mounts=proxies, verify=False, limits=limits
+                trust_env=False, mounts=proxies, verify=TLS_VERIFY, limits=limits
         ) as client:
             async def send_with_semaphore(p_text: str):
                 async with semaphore:
@@ -1297,7 +1298,7 @@ class Agent:
         proxies = get_httpx_proxies(asyn=False) if self.system_proxy_enable else None
 
         with httpx.Client(
-                trust_env=False, mounts=proxies, verify=False, limits=limits
+                trust_env=False, mounts=proxies, verify=TLS_VERIFY, limits=limits
         ) as client:
             clients = itertools.repeat(client, len(prompts))
             with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:

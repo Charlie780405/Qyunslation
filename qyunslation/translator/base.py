@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from logging import Logger
 from typing import TypeVar, Generic, Optional
 
-from docutranslate.ir.document import Document
-from docutranslate.logger import global_logger
-from docutranslate.progress import ProgressTracker
+from qyunslation.ir.document import Document
+from qyunslation.logger import global_logger
+from qyunslation.progress import ProgressTracker
 
 
 @dataclass(kw_only=True)

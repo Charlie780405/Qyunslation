@@ -7,9 +7,9 @@ from io import BytesIO
 
 from pptx import Presentation
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.pptx.base import PPTXExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.pptx.base import PPTXExporter
+from qyunslation.ir.document import Document
 
 
 @dataclass

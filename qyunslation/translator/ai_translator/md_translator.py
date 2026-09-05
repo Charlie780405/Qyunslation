@@ -6,13 +6,13 @@ from typing import Self, List
 
 import charset_normalizer
 
-from docutranslate.agents import MDTranslateAgent
-from docutranslate.agents.markdown_agent import MDTranslateAgentConfig
-from docutranslate.context.md_mask_context import MDMaskUrisContext
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents import MDTranslateAgent
+from qyunslation.agents.markdown_agent import MDTranslateAgentConfig
+from qyunslation.context.md_mask_context import MDMaskUrisContext
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 # 引入新的布局分割和拼接函数
-from docutranslate.utils.markdown_splitter import (
+from qyunslation.utils.markdown_splitter import (
     split_markdown_with_layout,
     join_markdown_with_layout,
     is_placeholder

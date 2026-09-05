@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from docutranslate.context.md_mask_context import MDMaskUrisContext
+from qyunslation.context.md_mask_context import MDMaskUrisContext
 
 
 def test_md_mask_context_initialization():
@@ -16,8 +16,8 @@ def test_md_mask_context_initialization():
     assert context.mask_dict is not None
 
 
-@patch('docutranslate.context.md_mask_context.uris2placeholder')
-@patch('docutranslate.context.md_mask_context.placeholder2uris')
+@patch('qyunslation.context.md_mask_context.uris2placeholder')
+@patch('qyunslation.context.md_mask_context.placeholder2uris')
 def test_md_mask_context_context_manager(mock_placeholder2uris, mock_uris2placeholder):
     """Test MDMaskUrisContext as a context manager"""
     # Setup mocks
@@ -37,8 +37,8 @@ def test_md_mask_context_context_manager(mock_placeholder2uris, mock_uris2placeh
     assert mock_doc.content == b"Restored content with https://example.com"
 
 
-@patch('docutranslate.context.md_mask_context.uris2placeholder')
-@patch('docutranslate.context.md_mask_context.placeholder2uris')
+@patch('qyunslation.context.md_mask_context.uris2placeholder')
+@patch('qyunslation.context.md_mask_context.placeholder2uris')
 def test_md_mask_context_with_exception(mock_placeholder2uris, mock_uris2placeholder):
     """Test MDMaskUrisContext still restores even when exception occurs"""
     # Setup mocks

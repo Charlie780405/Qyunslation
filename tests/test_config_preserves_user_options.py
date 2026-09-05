@@ -1,4 +1,4 @@
-from docutranslate.core.schemas import TextWorkflowParams
+from qyunslation.core.schemas import TextWorkflowParams
 
 
 def test_env_force_override_preserves_user_translation_preferences():

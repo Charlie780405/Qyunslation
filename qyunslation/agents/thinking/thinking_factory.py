@@ -1,6 +1,6 @@
 from typing import TypeAlias, Literal, Any
 
-from docutranslate.agents.provider import ProviderType
+from qyunslation.agents.provider import ProviderType
 
 ModeType: TypeAlias = Literal["ollama", "bigmodel", "aliyuncs", "volces", "google", "siliconflow", "deepseek", "default"]
 ThinkingField: TypeAlias = str

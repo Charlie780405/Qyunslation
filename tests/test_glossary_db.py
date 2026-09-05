@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MPL-2.0
 """glossary_db 术语表知识库单元测试（纯本地，不调 Ollama）"""
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import glossary_db
-from glossary_db import PRESET_GLOSSARY, build_glossary_prompt, load_glossary, merge_glossary
+from qyunslation.extensions import glossary_db
+from qyunslation.extensions.glossary_db import (
+    PRESET_GLOSSARY,
+    build_glossary_prompt,
+    load_glossary,
+    merge_glossary,
+)
 
 
 def test_load_glossary_includes_preset():

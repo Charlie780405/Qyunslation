@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 
-from docutranslate.exporter.txt.base import TXTExporter
-from docutranslate.exporter.xlsx.base import XlsxExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.txt.base import TXTExporter
+from qyunslation.exporter.xlsx.base import XlsxExporter
+from qyunslation.ir.document import Document
 
 
 class Epub2EpubExporter(XlsxExporter):

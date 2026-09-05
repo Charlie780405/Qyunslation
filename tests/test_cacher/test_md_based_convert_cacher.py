@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from docutranslate.cacher.md_based_convert_cacher import MDBasedCovertCacher, md_based_convert_cacher
+from qyunslation.cacher.md_based_convert_cacher import MDBasedCovertCacher, md_based_convert_cacher
 
 
 def test_cacher_initialization():

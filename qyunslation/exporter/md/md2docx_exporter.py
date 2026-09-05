@@ -17,11 +17,11 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml.shared import OxmlElement, qn
 from docx.shared import Inches, Pt, RGBColor
 
-from docutranslate.exporter.base import Exporter, ExporterConfig
-from docutranslate.exporter.md.types import MD2DocxEngineType
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.logger import global_logger
+from qyunslation.exporter.base import Exporter, ExporterConfig
+from qyunslation.exporter.md.types import MD2DocxEngineType
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.logger import global_logger
 
 
 @dataclass(kw_only=True)

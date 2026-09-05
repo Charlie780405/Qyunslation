@@ -98,6 +98,7 @@ const apiHrefMap = API_HREF_MAP;
 const apiHref = computed(() => apiHrefMap[props.baseUrl]);
 
 const save = (key, val) => localStorage.setItem(key, val);
+const saveSecret = (key, val) => sessionStorage.setItem(key, val);
 
 const handlePlatformChange = (val) => {
     emit('update:platform', val);
@@ -126,7 +127,7 @@ const handleBaseUrlChange = (val) => {
 const handleApiKeyChange = (val) => {
     emit('update:apiKey', val);
     emit('clearError', 'api_key');
-    save(`${props.prefix}_${props.platform}_apikey`, val);
+    saveSecret(`${props.prefix}_${props.platform}_apikey`, val);
 };
 
 const handleModelChange = (val) => {

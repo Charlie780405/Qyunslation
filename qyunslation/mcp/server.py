@@ -16,7 +16,7 @@ import os
 from typing import Any, Dict, Optional, List
 
 # Import config to load .env and make config values available
-from docutranslate.config import (
+from qyunslation.config import (
     PORT,
     # BaseWorkflowParams defaults
     API_KEY, BASE_URL, MODEL_ID, TO_LANG, PROVIDER,
@@ -35,17 +35,17 @@ from docutranslate.config import (
 )
 
 # Shared server layer imports
-from docutranslate.server import (
+from qyunslation.server import (
     TranslationService,
     get_translation_service,
 )
 
-from docutranslate import __version__
-from docutranslate.core.schemas import TranslatePayload
+from qyunslation import __version__
+from qyunslation.core.schemas import TranslatePayload
 from pydantic import TypeAdapter
 
 # MCP Server configuration
-SERVER_NAME = "docutranslate"
+SERVER_NAME = "qyunslation"
 SERVER_VERSION = __version__
 
 
@@ -205,7 +205,7 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
             is_configured = bool(
                 client_config.get("api_key") and client_config.get("base_url") and client_config.get("model_id"))
             status_info = {
-                "server": "docutranslate",
+                "server": "qyunslation",
                 "version": __version__,
                 "status": "ready",
                 "client_configured": is_configured,
@@ -536,6 +536,16 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
             is_url = file_path.startswith("http://") or file_path.startswith("https://")
             original_filename = None
 
+            # Security: restrict local paths and remote hosts
+            allowed_dirs_env = os.environ.get(
+                "QYUNSLATION_MCP_ALLOWED_DIRS",
+                os.environ.get("DOCUTRANSLATE_MCP_ALLOWED_DIRS", ""),
+            )
+            allowed_hosts_env = os.environ.get(
+                "QYUNSLATION_MCP_ALLOWED_URL_HOSTS",
+                os.environ.get("DOCUTRANSLATE_MCP_ALLOWED_URL_HOSTS", "localhost,127.0.0.1"),
+            )
+
             if is_url:
                 # Download from URL directly into memory
                 try:
@@ -543,6 +553,12 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
 
                     # Parse URL to get filename
                     parsed_url = urlparse(file_path)
+                    if parsed_url.scheme not in ("http", "https"):
+                        return f"Error: URL scheme not allowed: {parsed_url.scheme}"
+                    host = (parsed_url.hostname or "").lower()
+                    allowed_hosts = {h.strip().lower() for h in allowed_hosts_env.split(",") if h.strip()}
+                    if allowed_hosts and host not in allowed_hosts:
+                        return f"Error: URL host not allowed: {host}"
                     url_path = parsed_url.path
                     original_filename = os.path.basename(url_path)
                     if not original_filename:
@@ -558,6 +574,17 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
                 # Local file - check if exists
                 if not os.path.exists(file_path):
                     return f"Error: File not found: {file_path}"
+                resolved = os.path.realpath(file_path)
+                allowed_dirs = [os.path.realpath(d.strip()) for d in allowed_dirs_env.split(",") if d.strip()]
+                if not allowed_dirs:
+                    return (
+                        "Error: local file access disabled. "
+                        "Set QYUNSLATION_MCP_ALLOWED_DIRS to a comma-separated allowlist."
+                    )
+                if not any(
+                    resolved == d or resolved.startswith(d + os.sep) for d in allowed_dirs
+                ):
+                    return f"Error: path not in allowed directories: {file_path}"
 
                 # Read the file
                 try:
@@ -1027,17 +1054,17 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
             except Exception as e:
                 return f"Error loading glossary file: {e}"
 
-        @mcp.resource("docutranslate://info", name="DocuTranslate Server Information")
+        @mcp.resource("qyunslation://info", name="DocuTranslate Server Information")
         async def get_info_resource() -> str:
             """Information about the DocuTranslate MCP server"""
             status_info = {
-                "server": "docutranslate",
+                "server": "qyunslation",
                 "version": __version__,
                 "status": "ready",
             }
             return _format_json(status_info)
 
-        @mcp.resource("docutranslate://formats", name="Supported Formats")
+        @mcp.resource("qyunslation://formats", name="Supported Formats")
         async def get_formats_resource() -> str:
             """List of supported file formats"""
             return _format_json(_get_formats_info())
@@ -1174,7 +1201,7 @@ else:
     def _mcp_not_available(*args, **kwargs):
         raise ImportError(
             "MCP dependencies not installed. "
-            "Install with: pip install docutranslate[mcp]"
+            "Install with: pip install qyunslation[mcp]"
         )
 
 

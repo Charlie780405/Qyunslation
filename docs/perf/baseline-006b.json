@@ -1,0 +1,10 @@
+{
+  "plan": "PLAN-006b",
+  "metric": "import_qyunslation_app",
+  "before_seconds": 12.1,
+  "after_seconds": 2.16,
+  "reduction_pct": 82.1,
+  "notes": "Split ConverterDoclingConfig; lazy-load ConverterDocling in md_based_workflow. conditional_import(docling) still ~0.04s.",
+  "command": "time .venv/bin/python -c 'from qyunslation.app import app'",
+  "measured_at": "2026-09-05"
+}

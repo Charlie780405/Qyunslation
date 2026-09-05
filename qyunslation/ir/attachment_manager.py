@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 from typing import Literal
 
-from docutranslate.ir.document import Document
+from qyunslation.ir.document import Document
 
 AttachMentIdentifier = Literal["glossary", "mineru", "mineru_deploy", "docling", "md_cached"]
 

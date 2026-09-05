@@ -1,10 +1,10 @@
-from docutranslate.agents.agent import AgentResultError
-from docutranslate.agents.segments_agent import (
+from qyunslation.agents.agent import AgentResultError
+from qyunslation.agents.segments_agent import (
     SegmentsTranslateAgent,
     SegmentsTranslateAgentConfig,
     generate_prompt,
 )
-from docutranslate.server.core import (
+from qyunslation.server.core import (
     _get_unresolved_error_count,
     _translation_failure_message,
 )

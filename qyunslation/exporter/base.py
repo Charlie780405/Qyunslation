@@ -5,7 +5,7 @@ from typing import Generic,TypeVar, Any
 
 from dataclasses import dataclass
 
-from docutranslate.ir.document import Document
+from qyunslation.ir.document import Document
 
 D_in = TypeVar('D_in', bound=Document)
 

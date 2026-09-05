@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
-# docutranslate.app.py
+# qyunslation.app.py
 import asyncio
 import base64
 import binascii
@@ -47,27 +47,27 @@ from pydantic import (
     TypeAdapter,
 )
 
-from docutranslate import __version__
-from docutranslate.core.schemas import TranslatePayload
-from docutranslate.exporter.md.types import ConvertEngineType
-from docutranslate.global_values.conditional_import import DOCLING_EXIST
-from docutranslate.logger import global_logger
+from qyunslation import __version__
+from qyunslation.config import API_TOKEN, PORT
+from qyunslation.core.schemas import TranslatePayload
+from qyunslation.exporter.md.types import ConvertEngineType
+from qyunslation.global_values.conditional_import import DOCLING_EXIST
+from qyunslation.logger import global_logger
 # Shared server layer imports
-from docutranslate.server import (
+from qyunslation.server import (
     TranslationService,
     get_translation_service,
     MEDIA_TYPES,
 )
-from docutranslate.config import PORT
-from docutranslate.translator import default_params
-from docutranslate.utils.resource_utils import resource_path
-from docutranslate.utils.utils import mask_secrets
+from qyunslation.translator import default_params
+from qyunslation.utils.resource_utils import resource_path
+from qyunslation.utils.utils import mask_secrets
 
 # MCP integration imports (optional)
 try:
-    import docutranslate.mcp
-    from docutranslate.mcp import get_sse_app
-    MCP_AVAILABLE = docutranslate.mcp.MCP_AVAILABLE
+    import qyunslation.mcp
+    from qyunslation.mcp import get_sse_app
+    MCP_AVAILABLE = qyunslation.mcp.MCP_AVAILABLE
 except ImportError:
     MCP_AVAILABLE = False
 
@@ -154,6 +154,17 @@ STATIC_DIR = resource_path("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def optional_api_token_auth(request: Request, call_next):
+    """When QYUNSLATION_API_TOKEN / DOCUTRANSLATE_API_TOKEN is set, require Bearer for /service/*."""
+    if API_TOKEN and request.url.path.startswith("/service"):
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        if token != API_TOKEN:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+
 # ===================================================================
 # --- MCP Integration (optional) ---
 # ===================================================================
@@ -183,7 +194,7 @@ def setup_mcp_integration(
         print("\n" + "=" * 60)
         print("WARNING: MCP dependencies not installed.")
         print("To use --with-mcp, please install MCP dependencies:")
-        print("  pip install docutranslate[mcp]")
+        print("  pip install qyunslation[mcp]")
         print("=" * 60 + "\n")
         return None
 
@@ -316,7 +327,7 @@ async def service_translate(
             ..., description="翻译任务的详细参数和文件内容。"
         )
 ):
-    task_id = uuid.uuid4().hex[:8]
+    task_id = uuid.uuid4().hex[:16]
 
     try:
         file_contents = base64.b64decode(request.file_content)
@@ -379,7 +390,7 @@ async def service_translate_file(
             ..., description="包含工作流参数的JSON字符串 (详见接口文档说明)。"
         ),
 ):
-    task_id = uuid.uuid4().hex[:8]
+    task_id = uuid.uuid4().hex[:16]
 
     try:
         file_contents = await file.read()
@@ -964,7 +975,7 @@ async def service_flat_translate(
                                                          description="术语表 Agent 配置 JSON 字符串 (包含 base_url, model_id 等)"),
         extra_body_json: Optional[str] = Form("", description="额外请求体参数 JSON 字符串, 会合并到 API 请求中")
 ):
-    task_id = uuid.uuid4().hex[:8]
+    task_id = uuid.uuid4().hex[:16]
 
     try:
         file_contents = await file.read()
@@ -1176,11 +1187,17 @@ async def redoc_html():
 
 app.include_router(service_router)
 
-# 自定义扩展（图片嵌字 + 术语表管理，阶段 4 UI 后端）
+# 自定义扩展（图片嵌字 + 术语表管理）
 try:
-    from docutranslate.custom_api import router as custom_router
+    from qyunslation.custom_api import router as custom_router
     app.include_router(custom_router, prefix="/service")
+    print("=" * 60)
+    print("custom_api 已加载：/service/glossary, /service/image-translate")
+    print("=" * 60)
 except Exception as e:  # 扩展依赖缺失时不影响主服务
+    print("=" * 60)
+    print(f"WARNING: custom_api 加载失败（不影响主服务）: {e}")
+    print("=" * 60)
     logging.getLogger(__name__).warning(f"custom_api 加载失败（不影响主服务）: {e}")
 
 
@@ -1199,7 +1216,7 @@ def find_free_port(start_port):
 
 
 def run_app(host=None, port: int | None = None, enable_CORS=False,
-            allow_origin_regex=r"^(https?://.*|null|file://.*)$",
+            allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|null|file://.*)$",
             with_mcp: bool = False):
     initial_port = port or PORT
     try:

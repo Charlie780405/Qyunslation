@@ -5,9 +5,9 @@ from io import BytesIO
 
 from xlsx2html import xlsx2html
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.xlsx.base import XlsxExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.xlsx.base import XlsxExporter
+from qyunslation.ir.document import Document
 
 
 @dataclass

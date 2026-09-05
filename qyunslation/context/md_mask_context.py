@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.utils.markdown_utils import MaskDict, uris2placeholder, placeholder2uris
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.utils.markdown_utils import MaskDict, uris2placeholder, placeholder2uris
 
 
 class MDMaskUrisContext:

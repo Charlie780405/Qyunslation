@@ -1,5 +1,5 @@
 !function (e, t) {
-    "object" == typeof exports && "object" == typeof module ? module.exports = t(require("docutranslate/static/katex/katex")) : "function" == typeof define && define.amd ? define(["docutranslate/static/katex/katex"], t) : "object" == typeof exports ? exports.renderMathInElement = t(require("docutranslate/static/katex/katex")) : e.renderMathInElement = t(e.katex)
+    "object" == typeof exports && "object" == typeof module ? module.exports = t(require("qyunslation/static/katex/katex")) : "function" == typeof define && define.amd ? define(["qyunslation/static/katex/katex"], t) : "object" == typeof exports ? exports.renderMathInElement = t(require("qyunslation/static/katex/katex")) : e.renderMathInElement = t(e.katex)
 }("undefined" != typeof self ? self : this, (function (e) {
     return function () {
         "use strict";

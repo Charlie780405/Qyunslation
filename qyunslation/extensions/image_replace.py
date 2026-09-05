@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """内嵌图后处理：对翻译结果文档里的图片做嵌字翻译并替换回。
 
-阶段 2 核心：DocuTranslate 翻译时图片原样保留（docx 在 word/media/，pdf/markdown 是 base64 内嵌），
+阶段 2 核心：翻译时图片原样保留（docx 在 word/media/，pdf/markdown 是 base64 内嵌），
 本模块在翻译完成后提取这些图片 → image_translate 嵌字 → 替换回文档。
 
 支持：
@@ -9,15 +9,25 @@
   - markdown：提取 ![](data:image/...;base64,...) → 嵌字 → 替换 base64
 """
 import base64
+import os
 import re
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 
-from image_translate import translate_image
+from qyunslation.extensions.image_translate import translate_image
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _safe_extractall(zf: zipfile.ZipFile, dest: str | Path) -> None:
+    dest_path = Path(dest).resolve()
+    for info in zf.infolist():
+        target = (dest_path / info.filename).resolve()
+        if not str(target).startswith(str(dest_path) + os.sep) and target != dest_path:
+            raise ValueError(f"Zip Slip blocked: {info.filename}")
+    zf.extractall(dest_path)
 
 
 def translate_docx_images(input_docx, output_docx, skip_small=True):
@@ -25,7 +35,7 @@ def translate_docx_images(input_docx, output_docx, skip_small=True):
     tmp = tempfile.mkdtemp(prefix="docx_img_")
     try:
         with zipfile.ZipFile(input_docx) as z:
-            z.extractall(tmp)
+            _safe_extractall(z, tmp)
         media_dir = Path(tmp) / "word" / "media"
         count = 0
         if media_dir.exists():

@@ -5,8 +5,8 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Hashable
 
-from docutranslate.converter.base import Converter, ConverterConfig
-from docutranslate.ir.document import Document
+from qyunslation.converter.base import Converter, ConverterConfig
+from qyunslation.ir.document import Document
 
 @dataclass(kw_only=True)
 class X2XlsxConverterConfig(ConverterConfig):

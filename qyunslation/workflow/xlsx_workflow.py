@@ -5,19 +5,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from docutranslate.converter.base import ConverterConfig
-from docutranslate.converter.converter_identity import ConverterIdentity
-from docutranslate.converter.x2xlsx.base import X2XlsxConverter
-from docutranslate.converter.x2xlsx.converter_csv2xlsx import ConverterCsv2Xlsx, ConverterCsv2XlsxConfig
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.xlsx.xlsx2csv_exporter import Xlsx2CsvExporter
-from docutranslate.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig, Xlsx2HTMLExporter
-from docutranslate.exporter.xlsx.xlsx2xlsx_exporter import Xlsx2XlsxExporter
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig, XlsxTranslator
-from docutranslate.workflow.base import Workflow, WorkflowConfig
-from docutranslate.workflow.interfaces import HTMLExportable, XlsxExportable, CsvExportable
+from qyunslation.converter.base import ConverterConfig
+from qyunslation.converter.converter_identity import ConverterIdentity
+from qyunslation.converter.x2xlsx.base import X2XlsxConverter
+from qyunslation.converter.x2xlsx.converter_csv2xlsx import ConverterCsv2Xlsx, ConverterCsv2XlsxConfig
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.xlsx.xlsx2csv_exporter import Xlsx2CsvExporter
+from qyunslation.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig, Xlsx2HTMLExporter
+from qyunslation.exporter.xlsx.xlsx2xlsx_exporter import Xlsx2XlsxExporter
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig, XlsxTranslator
+from qyunslation.workflow.base import Workflow, WorkflowConfig
+from qyunslation.workflow.interfaces import HTMLExportable, XlsxExportable, CsvExportable
 
 
 @dataclass(kw_only=True)

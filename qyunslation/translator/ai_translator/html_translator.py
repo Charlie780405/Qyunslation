@@ -6,9 +6,9 @@ from typing import Self, Literal, Set, Dict, List, Tuple
 
 from bs4 import BeautifulSoup, NavigableString, Comment, Tag
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 # --- 规则定义 ---
 

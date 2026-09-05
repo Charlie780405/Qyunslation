@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 
-from docutranslate.converter.base import Converter
-from docutranslate.ir.document import Document
+from qyunslation.converter.base import Converter
+from qyunslation.ir.document import Document
 
 
 class ConverterIdentity(Converter):

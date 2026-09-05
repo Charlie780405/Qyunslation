@@ -29,22 +29,22 @@ import httpx
 from fastapi import HTTPException
 from pydantic import TypeAdapter
 
-from docutranslate import __version__
-from docutranslate.agents.glossary_agent import GlossaryAgentConfig
-from docutranslate.core.schemas import TranslatePayload
-from docutranslate.utils.utils import mask_secrets
-from docutranslate.exporter.md.types import ConvertEngineType
-from docutranslate.global_values.conditional_import import DOCLING_EXIST
-from docutranslate.workflow.ass_workflow import AssWorkflow, AssWorkflowConfig
-from docutranslate.workflow.base import Workflow
-from docutranslate.workflow.docx_workflow import DocxWorkflow, DocxWorkflowConfig
-from docutranslate.workflow.image_overlay_workflow import (
+from qyunslation import __version__
+from qyunslation.agents.glossary_agent import GlossaryAgentConfig
+from qyunslation.core.schemas import TranslatePayload
+from qyunslation.utils.utils import mask_secrets
+from qyunslation.exporter.md.types import ConvertEngineType
+from qyunslation.global_values.conditional_import import DOCLING_EXIST
+from qyunslation.workflow.ass_workflow import AssWorkflow, AssWorkflowConfig
+from qyunslation.workflow.base import Workflow
+from qyunslation.workflow.docx_workflow import DocxWorkflow, DocxWorkflowConfig
+from qyunslation.workflow.image_overlay_workflow import (
     ImageOverlayWorkflow,
     ImageOverlayWorkflowConfig,
 )
-from docutranslate.workflow.epub_workflow import EpubWorkflow, EpubWorkflowConfig
-from docutranslate.workflow.html_workflow import HtmlWorkflow, HtmlWorkflowConfig
-from docutranslate.workflow.interfaces import (
+from qyunslation.workflow.epub_workflow import EpubWorkflow, EpubWorkflowConfig
+from qyunslation.workflow.html_workflow import HtmlWorkflow, HtmlWorkflowConfig
+from qyunslation.workflow.interfaces import (
     DocxExportable,
     EpubExportable,
     HTMLExportable,
@@ -57,43 +57,42 @@ from docutranslate.workflow.interfaces import (
     AssExportable,
     PPTXExportable,
 )
-from docutranslate.workflow.json_workflow import JsonWorkflow, JsonWorkflowConfig
-from docutranslate.workflow.md_based_workflow import (
+from qyunslation.workflow.json_workflow import JsonWorkflow, JsonWorkflowConfig
+from qyunslation.workflow.md_based_workflow import (
     MarkdownBasedWorkflow,
     MarkdownBasedWorkflowConfig,
 )
-from docutranslate.workflow.pptx_workflow import PPTXWorkflow, PPTXWorkflowConfig
-from docutranslate.workflow.srt_workflow import SrtWorkflow, SrtWorkflowConfig
-from docutranslate.workflow.txt_workflow import TXTWorkflow, TXTWorkflowConfig
-from docutranslate.workflow.xlsx_workflow import XlsxWorkflow, XlsxWorkflowConfig
-from docutranslate.logger import global_logger
-from docutranslate.progress import ProgressTracker
-from docutranslate.translator import default_params
-
-if DOCLING_EXIST:
-    from docutranslate.converter.x2md.converter_docling import ConverterDoclingConfig
-from docutranslate.converter.x2md.converter_mineru import ConverterMineruConfig
-from docutranslate.converter.x2md.converter_mineru_deploy import ConverterMineruDeployConfig
-from docutranslate.exporter.md.md2html_exporter import MD2HTMLExporterConfig
-from docutranslate.exporter.md.md2docx_exporter import MD2DocxExporterConfig
-from docutranslate.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig
-from docutranslate.translator.ai_translator.md_translator import MDTranslatorConfig
-from docutranslate.translator.ai_translator.txt_translator import TXTTranslatorConfig
-from docutranslate.translator.ai_translator.json_translator import JsonTranslatorConfig
-from docutranslate.exporter.js.json2html_exporter import Json2HTMLExporterConfig
-from docutranslate.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig
-from docutranslate.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig
-from docutranslate.translator.ai_translator.docx_translator import DocxTranslatorConfig
-from docutranslate.exporter.docx.docx2html_exporter import Docx2HTMLExporterConfig
-from docutranslate.translator.ai_translator.srt_translator import SrtTranslatorConfig
-from docutranslate.exporter.srt.srt2html_exporter import Srt2HTMLExporterConfig
-from docutranslate.translator.ai_translator.epub_translator import EpubTranslatorConfig
-from docutranslate.exporter.epub.epub2html_exporter import Epub2HTMLExporterConfig
-from docutranslate.translator.ai_translator.html_translator import HtmlTranslatorConfig
-from docutranslate.translator.ai_translator.ass_translator import AssTranslatorConfig
-from docutranslate.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig
-from docutranslate.translator.ai_translator.pptx_translator import PPTXTranslatorConfig
-from docutranslate.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConfig
+from qyunslation.workflow.pptx_workflow import PPTXWorkflow, PPTXWorkflowConfig
+from qyunslation.workflow.srt_workflow import SrtWorkflow, SrtWorkflowConfig
+from qyunslation.workflow.txt_workflow import TXTWorkflow, TXTWorkflowConfig
+from qyunslation.workflow.xlsx_workflow import XlsxWorkflow, XlsxWorkflowConfig
+from qyunslation.logger import global_logger
+from qyunslation.progress import ProgressTracker
+from qyunslation.translator import default_params
+from qyunslation.config import TASK_TTL_HOURS
+from qyunslation.converter.x2md.converter_docling_config import ConverterDoclingConfig
+from qyunslation.converter.x2md.converter_mineru import ConverterMineruConfig
+from qyunslation.converter.x2md.converter_mineru_deploy import ConverterMineruDeployConfig
+from qyunslation.exporter.md.md2html_exporter import MD2HTMLExporterConfig
+from qyunslation.exporter.md.md2docx_exporter import MD2DocxExporterConfig
+from qyunslation.exporter.txt.txt2html_exporter import TXT2HTMLExporterConfig
+from qyunslation.translator.ai_translator.md_translator import MDTranslatorConfig
+from qyunslation.translator.ai_translator.txt_translator import TXTTranslatorConfig
+from qyunslation.translator.ai_translator.json_translator import JsonTranslatorConfig
+from qyunslation.exporter.js.json2html_exporter import Json2HTMLExporterConfig
+from qyunslation.translator.ai_translator.xlsx_translator import XlsxTranslatorConfig
+from qyunslation.exporter.xlsx.xlsx2html_exporter import Xlsx2HTMLExporterConfig
+from qyunslation.translator.ai_translator.docx_translator import DocxTranslatorConfig
+from qyunslation.exporter.docx.docx2html_exporter import Docx2HTMLExporterConfig
+from qyunslation.translator.ai_translator.srt_translator import SrtTranslatorConfig
+from qyunslation.exporter.srt.srt2html_exporter import Srt2HTMLExporterConfig
+from qyunslation.translator.ai_translator.epub_translator import EpubTranslatorConfig
+from qyunslation.exporter.epub.epub2html_exporter import Epub2HTMLExporterConfig
+from qyunslation.translator.ai_translator.html_translator import HtmlTranslatorConfig
+from qyunslation.translator.ai_translator.ass_translator import AssTranslatorConfig
+from qyunslation.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig
+from qyunslation.translator.ai_translator.pptx_translator import PPTXTranslatorConfig
+from qyunslation.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConfig
 
 
 MAX_LOG_HISTORY = 200
@@ -267,11 +266,47 @@ class TranslationService:
 
         # Reference to main event loop (set by application)
         self.main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ttl_task: Optional[asyncio.Task] = None
+        self.task_ttl_seconds = max(1, int(TASK_TTL_HOURS)) * 3600
 
     def initialize(self, httpx_client: httpx.AsyncClient, main_event_loop: asyncio.AbstractEventLoop):
         """Initialize the service with HTTP client and event loop."""
         self.httpx_client = httpx_client
         self.main_event_loop = main_event_loop
+        if self._ttl_task is None or self._ttl_task.done():
+            self._ttl_task = main_event_loop.create_task(self._ttl_cleanup_loop())
+
+    async def _ttl_cleanup_loop(self) -> None:
+        """Periodically release finished tasks older than TASK_TTL_HOURS."""
+        while True:
+            try:
+                await asyncio.sleep(3600)
+                await self.cleanup_expired_tasks()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                global_logger.warning(f"task TTL cleanup error: {e}")
+
+    async def cleanup_expired_tasks(self) -> int:
+        now = time.time()
+        expired: List[str] = []
+        async with self._lock:
+            for tid, state in list(self.tasks_state.items()):
+                if state.get("is_processing"):
+                    continue
+                end = state.get("task_end_time") or state.get("task_start_time") or 0
+                if end and (now - float(end)) >= self.task_ttl_seconds:
+                    expired.append(tid)
+        released = 0
+        for tid in expired:
+            try:
+                await self.release_task(tid)
+                released += 1
+            except Exception as e:
+                global_logger.warning(f"TTL release {tid} failed: {e}")
+        if released:
+            global_logger.info(f"TTL cleanup released {released} tasks")
+        return released
 
     def clear_all(self):
         """Clear all task states (called during application startup)."""
@@ -339,7 +374,7 @@ class TranslationService:
         """
         # PLAN-005b: .doc → .docx
         if Path(original_filename).suffix.lower() == ".doc":
-            from docutranslate.converter.doc2docx import ensure_docx
+            from qyunslation.converter.doc2docx import ensure_docx
 
             original_filename, file_contents = ensure_docx(
                 original_filename, file_contents
@@ -422,23 +457,24 @@ class TranslationService:
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"自动转换工作流参数失败: {mask_secrets(str(e))}")
 
-        if task_id not in self.tasks_state:
-            self.tasks_state[task_id] = _create_default_task_state()
-            self.tasks_log_queues[task_id] = asyncio.Queue()
-            self.tasks_log_histories[task_id] = []
-        task_state = self.tasks_state[task_id]
+        async with self._lock:
+            if task_id not in self.tasks_state:
+                self.tasks_state[task_id] = _create_default_task_state()
+                self.tasks_log_queues[task_id] = asyncio.Queue()
+                self.tasks_log_histories[task_id] = []
+            task_state = self.tasks_state[task_id]
 
-        if (
-            task_state["is_processing"]
-            and task_state["current_task_ref"]
-            and not task_state["current_task_ref"].done()
-        ):
-            raise HTTPException(
-                status_code=429, detail=f"任务ID '{task_id}' 正在进行中，请稍后再试。"
-            )
+            if (
+                task_state["is_processing"]
+                and task_state["current_task_ref"]
+                and not task_state["current_task_ref"].done()
+            ):
+                raise HTTPException(
+                    status_code=429, detail=f"任务ID '{task_id}' 正在进行中，请稍后再试。"
+                )
 
-        if task_state.get("temp_dir") and os.path.isdir(task_state["temp_dir"]):
-            shutil.rmtree(task_state["temp_dir"])
+            if task_state.get("temp_dir") and os.path.isdir(task_state["temp_dir"]):
+                shutil.rmtree(task_state["temp_dir"])
 
         raw_stem = Path(original_filename).stem
         safe_stem = raw_stem[:50] if len(raw_stem) > 50 else raw_stem
@@ -583,7 +619,7 @@ class TranslationService:
                 raise RuntimeError(failure_message)
 
             task_logger.info("翻译统计通过失败门禁，正在生成临时结果文件...")
-            temp_dir = tempfile.mkdtemp(prefix=f"docutranslate_{task_id}_")
+            temp_dir = tempfile.mkdtemp(prefix=f"qyunslation_{task_id}_")
             task_state["temp_dir"] = temp_dir
             downloadable_files = {}
             filename_stem = task_state["original_filename_stem"]
@@ -750,7 +786,7 @@ class TranslationService:
         md2docx_engine: str,
     ) -> Workflow:
         """Create workflow instance based on payload type."""
-        from docutranslate.core.schemas import (
+        from qyunslation.core.schemas import (
             MarkdownWorkflowParams,
             TextWorkflowParams,
             JsonWorkflowParams,
@@ -1014,7 +1050,7 @@ class TranslationService:
             translator_args["glossary_generate_enable"] = payload.glossary_generate_enable
             translator_args["glossary_agent_config"] = build_glossary_agent_config()
             if not translator_args.get("glossary_dict"):
-                from docutranslate.glossary.static_csv import load_static_glossary
+                from qyunslation.glossary.static_csv import load_static_glossary
 
                 translator_args["glossary_dict"] = load_static_glossary() or None
             translator_config = DocxTranslatorConfig(**translator_args)
@@ -1400,43 +1436,44 @@ class TranslationService:
 
     async def release_task(self, task_id: str) -> Dict[str, Any]:
         """Release task resources."""
-        if task_id not in self.tasks_state:
-            return {
-                "released": False,
-                "message": f"找不到任务ID '{task_id}'。"
-            }
-        task_state = self.tasks_state.get(task_id)
-        message_parts = []
-        if (
-            task_state
-            and task_state.get("is_processing")
-            and task_state.get("current_task_ref")
-        ):
-            try:
-                print(f"[{task_id}] 任务正在进行中，将在释放前尝试取消。")
-                self.cancel_task(task_id)
-                message_parts.append("任务已被取消。")
-            except HTTPException as e:
-                print(f"[{task_id}] 取消任务时出现预期中的情况（可能已完成）: {e.detail}")
-                message_parts.append(f"任务取消步骤已跳过（可能已完成或取消）。")
-
-        if task_state:
-            temp_dir = task_state.get("temp_dir")
-            if temp_dir and os.path.isdir(temp_dir):
+        async with self._lock:
+            if task_id not in self.tasks_state:
+                return {
+                    "released": False,
+                    "message": f"找不到任务ID '{task_id}'。"
+                }
+            task_state = self.tasks_state.get(task_id)
+            message_parts = []
+            if (
+                task_state
+                and task_state.get("is_processing")
+                and task_state.get("current_task_ref")
+            ):
                 try:
-                    shutil.rmtree(temp_dir)
-                    message_parts.append("临时文件已清理。")
-                    print(f"[{task_id}] 临时目录 '{temp_dir}' 已被删除。")
-                except Exception as e:
-                    message_parts.append(f"清理临时文件时出错: {e}。")
-                    print(f"[{task_id}] 删除临时目录 '{temp_dir}' 时出错: {e}")
+                    print(f"[{task_id}] 任务正在进行中，将在释放前尝试取消。")
+                    self.cancel_task(task_id)
+                    message_parts.append("任务已被取消。")
+                except HTTPException as e:
+                    print(f"[{task_id}] 取消任务时出现预期中的情况（可能已完成）: {e.detail}")
+                    message_parts.append(f"任务取消步骤已跳过（可能已完成或取消）。")
 
-        self.tasks_state.pop(task_id, None)
-        self.tasks_log_queues.pop(task_id, None)
-        self.tasks_log_histories.pop(task_id, None)
-        print(f"[{task_id}] 资源已成功释放。")
-        message_parts.append(f"任务 '{task_id}' 的资源已释放。")
-        return {"released": True, "message": " ".join(message_parts)}
+            if task_state:
+                temp_dir = task_state.get("temp_dir")
+                if temp_dir and os.path.isdir(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                        message_parts.append("临时文件已清理。")
+                        print(f"[{task_id}] 临时目录 '{temp_dir}' 已被删除。")
+                    except Exception as e:
+                        message_parts.append(f"清理临时文件时出错: {e}。")
+                        print(f"[{task_id}] 删除临时目录 '{temp_dir}' 时出错: {e}")
+
+            self.tasks_state.pop(task_id, None)
+            self.tasks_log_queues.pop(task_id, None)
+            self.tasks_log_histories.pop(task_id, None)
+            print(f"[{task_id}] 资源已成功释放。")
+            message_parts.append(f"任务 '{task_id}' 的资源已释放。")
+            return {"released": True, "message": " ".join(message_parts)}
 
     async def cleanup_all(self):
         """Cleanup all resources (called during application shutdown)."""

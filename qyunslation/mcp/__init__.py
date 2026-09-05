@@ -15,19 +15,19 @@ Features:
 Quick Start:
     ```bash
     # Install with MCP dependencies
-    pip install docutranslate[mcp]
+    pip install qyunslation[mcp]
 
     # Run stdio server (for Claude Desktop, etc.)
-    docutranslate --mcp
+    qyunslation --mcp
 
     # Run SSE server (for Cherry Studio)
-    docutranslate --mcp --transport sse
+    qyunslation --mcp --transport sse
     ```
 
 Mount to existing FastAPI:
     ```python
     from fastapi import FastAPI
-    from docutranslate.mcp import get_sse_app
+    from qyunslation.mcp import get_sse_app
 
     app = FastAPI()
     mcp_app = get_sse_app()
@@ -38,7 +38,7 @@ For more details, see the README.md in this package.
 """
 
 try:
-    from docutranslate.mcp.server import (
+    from qyunslation.mcp.server import (
         create_mcp_server,
         run_mcp_server,
         get_sse_app,
@@ -51,7 +51,7 @@ except ImportError:
     def _mcp_not_available(*args, **kwargs):
         raise ImportError(
             "MCP dependencies not installed. "
-            "Install with: pip install docutranslate[mcp]"
+            "Install with: pip install qyunslation[mcp]"
         )
 
     create_mcp_server = _mcp_not_available

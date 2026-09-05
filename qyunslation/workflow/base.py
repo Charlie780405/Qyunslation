@@ -6,11 +6,11 @@ from logging import Logger
 from pathlib import Path
 from typing import Self, Generic, TypeVar, Optional
 
-from docutranslate.exporter.base import Exporter
-from docutranslate.ir.attachment_manager import AttachMentManager
-from docutranslate.ir.document import Document
-from docutranslate.logger import global_logger
-from docutranslate.progress import ProgressTracker, null_progress
+from qyunslation.exporter.base import Exporter
+from qyunslation.ir.attachment_manager import AttachMentManager
+from qyunslation.ir.document import Document
+from qyunslation.logger import global_logger
+from qyunslation.progress import ProgressTracker, null_progress
 
 
 @dataclass(kw_only=True)

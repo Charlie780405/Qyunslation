@@ -9,14 +9,14 @@ def main():
         description="DocuTranslate: 一个文档翻译工具。",
         # 更新示例，展示如何使用 host 参数
         epilog="示例:\n"
-               "  docutranslate -i                           (启动图形界面，默认本地访问)\n"
-               "  docutranslate -i --host 0.0.0.0            (允许局域网内其他设备访问)\n"
-               "  docutranslate -i -p 8081                   (指定端口号)\n"
-               "  docutranslate -i --cors                    (启用默认的跨域设置)\n"
-               "  docutranslate -i --with-mcp                (启动图形界面同时启用 MCP SSE 端点，共用队列)\n"
-               "  docutranslate --mcp                         (启动 MCP 服务器，stdio 模式)\n"
-               "  docutranslate --mcp --transport sse         (启动 MCP 服务器，SSE 模式)\n"
-               "  docutranslate --mcp --transport streamable-http  (启动 MCP 服务器，Streamable HTTP 模式)\n",
+               "  qyunslation -i                           (启动图形界面，默认本地访问)\n"
+               "  qyunslation -i --host 0.0.0.0            (允许局域网内其他设备访问)\n"
+               "  qyunslation -i -p 8081                   (指定端口号)\n"
+               "  qyunslation -i --cors                    (启用默认的跨域设置)\n"
+               "  qyunslation -i --with-mcp                (启动图形界面同时启用 MCP SSE 端点，共用队列)\n"
+               "  qyunslation --mcp                         (启动 MCP 服务器，stdio 模式)\n"
+               "  qyunslation --mcp --transport sse         (启动 MCP 服务器，SSE 模式)\n"
+               "  qyunslation --mcp --transport streamable-http  (启动 MCP 服务器，Streamable HTTP 模式)\n",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -51,8 +51,8 @@ def main():
     parser.add_argument(
         "--cors-regex",
         type=str,
-        default=r"^(https?://.*|null|file://.*)$",
-        help="设置 CORS 允许的 Origin 正则表达式。默认为允许所有 HTTP 和 HTTPS 请求。"
+        default=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|null|file://.*)$",
+        help="设置 CORS 允许的 Origin 正则。默认仅 localhost/127.0.0.1。"
     )
 
     parser.add_argument(
@@ -100,18 +100,18 @@ def main():
         print("欢迎使用 DocuTranslate！")
         print("请使用 '-i' 或 '--interactive' 选项来启动图形化界面。")
         print("\n示例:")
-        print("  docutranslate -i")
-        print("  docutranslate -i --host 0.0.0.0 (局域网共享)")
-        print("  docutranslate --mcp (启动 MCP 服务器)")
+        print("  qyunslation -i")
+        print("  qyunslation -i --host 0.0.0.0 (局域网共享)")
+        print("  qyunslation --mcp (启动 MCP 服务器)")
         print("\n如需查看所有可用选项，请运行:")
-        print("  docutranslate --help")
+        print("  qyunslation --help")
         sys.exit(0)
 
     args = parser.parse_args()
 
     # 调用核心逻辑
     if args.interactive:
-        from docutranslate.app import run_app
+        from qyunslation.app import run_app
         run_app(
             host=args.host,
             port=args.port,
@@ -120,14 +120,14 @@ def main():
             with_mcp=args.with_mcp,
         )
     elif args.mcp:
-        from docutranslate.mcp import run_mcp_server
+        from qyunslation.mcp import run_mcp_server
         run_mcp_server(
             transport=args.transport,
             host=args.mcp_host,
             port=args.mcp_port
         )
     elif args.version:
-        from docutranslate import  __version__
+        from qyunslation import  __version__
         print(__version__)
     else:
         parser.print_help()

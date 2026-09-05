@@ -1,3 +1,3 @@
-from docutranslate.config import default_params
+from qyunslation.config import default_params
 
 __all__ = ["default_params"]

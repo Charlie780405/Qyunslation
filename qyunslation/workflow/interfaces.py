@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Protocol, Self, TypeVar, runtime_checkable
 
-from docutranslate.exporter.base import ExporterConfig
+from qyunslation.exporter.base import ExporterConfig
 
 T_ExporterConfig = TypeVar("T_ExporterConfig", bound=ExporterConfig)
 

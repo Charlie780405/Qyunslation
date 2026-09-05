@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 from dataclasses import dataclass
+import html
 
 import jinja2
 
 import srt
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.srt.base import SrtExporter
-from docutranslate.ir.document import Document
-from docutranslate.utils.resource_utils import resource_path
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.srt.base import SrtExporter
+from qyunslation.ir.document import Document
+from qyunslation.utils.resource_utils import resource_path
 
 
 @dataclass
@@ -27,7 +28,7 @@ class Srt2HTMLExporter(SrtExporter):
         srt_string=document.content.decode("utf-8")
         subs = list(srt.parse(srt_string))
         for sub in subs:
-            sub.content = sub.content.replace('\n', '<br>')
+            sub.content = html.escape(sub.content).replace('\n', '<br>')
 
         html_template = resource_path("template/srt.html").read_text(encoding="utf-8")
 

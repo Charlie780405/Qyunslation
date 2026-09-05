@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from docutranslate.agents.agent import PartialAgentResultError
-from docutranslate.agents.segments_agent import (
+from qyunslation.agents.agent import PartialAgentResultError
+from qyunslation.agents.segments_agent import (
     SegmentsTranslateAgent,
     SegmentsTranslateAgentConfig,
     generate_prompt,

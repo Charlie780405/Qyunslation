@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
-# docutranslate/sdk.py
+# qyunslation/sdk.py
 
 import asyncio
 import base64
@@ -10,14 +10,14 @@ from typing import Optional, Literal, Dict, Any, List, Union
 
 from pydantic import TypeAdapter
 
-from docutranslate.agents.agent import ThinkingMode
-from docutranslate.agents.provider import ProviderType
+from qyunslation.agents.agent import ThinkingMode
+from qyunslation.agents.provider import ProviderType
 
-from docutranslate.core.schemas import TranslatePayload, GlossaryAgentConfigPayload, WorkflowType, InsertMode
-from docutranslate.core.factory import create_workflow_from_payload
-from docutranslate.translator import default_params
-from docutranslate.global_values.conditional_import import DOCLING_EXIST
-from docutranslate.config import TO_LANG
+from qyunslation.core.schemas import TranslatePayload, GlossaryAgentConfigPayload, WorkflowType, InsertMode
+from qyunslation.core.factory import create_workflow_from_payload
+from qyunslation.translator import default_params
+from qyunslation.global_values.conditional_import import DOCLING_EXIST
+from qyunslation.config import TO_LANG
 
 # --- 映射配置 ---
 # 格式说明: {workflow_type: {save_type: (method_name, default_suffix)}}

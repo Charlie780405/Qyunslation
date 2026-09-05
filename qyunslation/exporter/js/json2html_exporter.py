@@ -5,10 +5,10 @@ from dataclasses import dataclass
 
 import jinja2
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.js.base import JsonExporter
-from docutranslate.ir.document import Document
-from docutranslate.utils.resource_utils import resource_path
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.js.base import JsonExporter
+from qyunslation.ir.document import Document
+from qyunslation.utils.resource_utils import resource_path
 
 
 @dataclass

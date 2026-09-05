@@ -4,7 +4,7 @@ Tests for utils.json_utils module
 import json
 import pytest
 
-from docutranslate.utils.json_utils import (
+from qyunslation.utils.json_utils import (
     get_json_size,
     segments2json_chunks,
     fix_json_string,

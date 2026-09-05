@@ -5,28 +5,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self, Tuple, Type
 
-from docutranslate.cacher import md_based_convert_cacher
-from docutranslate.converter.x2md.converter_mineru_deploy import ConverterMineruDeploy, ConverterMineruDeployConfig
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.global_values.conditional_import import DOCLING_EXIST
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.utils.markdown_utils import embed_inline_image_from_zip
+from qyunslation.cacher import md_based_convert_cacher
+from qyunslation.converter.x2md.converter_mineru_deploy import ConverterMineruDeploy, ConverterMineruDeployConfig
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.global_values.conditional_import import DOCLING_EXIST
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.utils.markdown_utils import embed_inline_image_from_zip
 
-if DOCLING_EXIST:
-    from docutranslate.converter.x2md.converter_docling import ConverterDoclingConfig, ConverterDocling
-from docutranslate.converter.converter_identity import ConverterIdentity
-from docutranslate.converter.x2md.converter_mineru import ConverterMineruConfig, ConverterMineru
-from docutranslate.converter.x2md.base import X2MarkdownConverterConfig, X2MarkdownConverter
-from docutranslate.exporter.md.md2html_exporter import MD2HTMLExporterConfig, MD2HTMLExporter
-from docutranslate.exporter.md.md2md_exporter import MD2MDExporter
-from docutranslate.exporter.md.md2mdzip_exporter import MD2MDZipExporter
-from docutranslate.exporter.md.md2docx_exporter import MD2DocxExporterConfig, MD2DocxExporter
-from docutranslate.exporter.md.types import ConvertEngineType
-from docutranslate.workflow.base import Workflow, WorkflowConfig
-from docutranslate.workflow.interfaces import MDFormatsExportable, HTMLExportable, DocxExportable
-from docutranslate.translator.ai_translator.md_translator import MDTranslatorConfig, MDTranslator
+from qyunslation.converter.converter_identity import ConverterIdentity
+from qyunslation.converter.x2md.converter_mineru import ConverterMineruConfig, ConverterMineru
+from qyunslation.converter.x2md.base import X2MarkdownConverterConfig, X2MarkdownConverter
+from qyunslation.converter.x2md.converter_docling_config import ConverterDoclingConfig
+from qyunslation.exporter.md.md2html_exporter import MD2HTMLExporterConfig, MD2HTMLExporter
+from qyunslation.exporter.md.md2md_exporter import MD2MDExporter
+from qyunslation.exporter.md.md2mdzip_exporter import MD2MDZipExporter
+from qyunslation.exporter.md.md2docx_exporter import MD2DocxExporterConfig, MD2DocxExporter
+from qyunslation.exporter.md.types import ConvertEngineType
+from qyunslation.workflow.base import Workflow, WorkflowConfig
+from qyunslation.workflow.interfaces import MDFormatsExportable, HTMLExportable, DocxExportable
+from qyunslation.translator.ai_translator.md_translator import MDTranslatorConfig, MDTranslator
 
 
 @dataclass(kw_only=True)
@@ -50,8 +49,12 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
         "mineru_deploy": (ConverterMineruDeploy, ConverterMineruDeployConfig)
     }
 
-    if DOCLING_EXIST:
-        _converter_factory["docling"] = (ConverterDocling, ConverterDoclingConfig)
+    @classmethod
+    def _ensure_docling_factory(cls) -> None:
+        if "docling" in cls._converter_factory or not DOCLING_EXIST:
+            return
+        from qyunslation.converter.x2md.converter_docling import ConverterDocling
+        cls._converter_factory["docling"] = (ConverterDocling, ConverterDoclingConfig)
 
     def __init__(self, config: MarkdownBasedWorkflowConfig):
         super().__init__(config=config)
@@ -64,6 +67,7 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
                     sub_config.logger = config.logger
 
     def _get_document_md(self, convert_engin: ConvertEngineType, convert_config: X2MarkdownConverterConfig):
+        self._ensure_docling_factory()
         if self.document_original is None:
             raise RuntimeError("File has not been read yet. Call read_path or read_bytes first.")
 

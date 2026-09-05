@@ -7,9 +7,9 @@ from typing import Self, Literal
 import charset_normalizer
 import srt  # 导入srt库来处理字幕文件
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 
 @dataclass

@@ -3,7 +3,7 @@ Tests for logger module
 """
 import logging
 
-from docutranslate.logger.logger import global_logger
+from qyunslation.logger.logger import global_logger
 
 
 def test_logger_initialization():

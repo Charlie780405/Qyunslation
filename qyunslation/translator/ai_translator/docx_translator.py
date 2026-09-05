@@ -18,9 +18,9 @@ from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from docx.table import _Cell, Table
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 # ---------------- 辅助函数 ----------------
 
@@ -648,7 +648,7 @@ class DocxTranslator(AiTranslator):
         ):
             return
         try:
-            from docutranslate.extensions.image_translate import translate_image_bytes
+            from qyunslation.extensions.image_translate import translate_image_bytes
         except Exception as exc:
             self.logger.warning("image overlay import failed: %s", exc)
             return

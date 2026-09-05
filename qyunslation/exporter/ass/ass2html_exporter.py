@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 import jinja2
 
-from docutranslate.exporter.ass.base import AssExporter
-from docutranslate.exporter.base import ExporterConfig
+from qyunslation.exporter.ass.base import AssExporter
+from qyunslation.exporter.base import ExporterConfig
 
-from docutranslate.ir.document import Document
-from docutranslate.utils.resource_utils import resource_path
+from qyunslation.ir.document import Document
+from qyunslation.utils.resource_utils import resource_path
 
 
 @dataclass
