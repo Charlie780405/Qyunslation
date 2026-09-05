@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-005c：独立图片嵌字工作流。"""
+"""PLAN-005c：独立图片嵌字工作流。PLAN-019：透传 to_lang。"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,7 @@ from qyunslation.workflow.base import Workflow, WorkflowConfig
 
 @dataclass(kw_only=True)
 class ImageOverlayWorkflowConfig(WorkflowConfig):
-    pass
+    to_lang: str = "简体中文"
 
 
 class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Document]):
@@ -21,7 +21,11 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
         from qyunslation.extensions.image_translate import translate_image_bytes
 
         suffix = (self.document_original.suffix or ".png").lower()
-        data, n = translate_image_bytes(self.document_original.content, suffix=suffix)
+        data, n = translate_image_bytes(
+            self.document_original.content,
+            suffix=suffix,
+            to_lang=self.config.to_lang,
+        )
         stem = self.document_original.stem or "image"
         self.document_translated = Document.from_bytes(
             content=data, suffix=suffix, stem=f"{stem}.zh"

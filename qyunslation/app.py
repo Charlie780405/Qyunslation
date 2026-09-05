@@ -665,6 +665,7 @@ FileType = Literal[
     "xlsx",
     "csv",
     "docx",
+    "image",
     "srt",
     "epub",
     "ass",

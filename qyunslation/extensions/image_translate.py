@@ -155,12 +155,18 @@ def _apply_glossary(text: str, glossary: dict[str, str]) -> str:
     return text
 
 
-def translate_texts(texts: list[str], model: str = MODEL, num_ctx: int = 8192) -> dict[int, str]:
+def translate_texts(
+    texts: list[str],
+    model: str = MODEL,
+    num_ctx: int = 8192,
+    to_lang: str = "简体中文",
+) -> dict[int, str]:
     glossary = _load_glossary()
     prepared = [_apply_glossary(t, glossary) for t in texts]
     numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(prepared))
+    target = (to_lang or "简体中文").strip() or "简体中文"
     prompt = (
-        "/no_think Translate each numbered line to Simplified Chinese. "
+        f"/no_think Translate each numbered line to {target}. "
         "Output ONLY the translation, keep the same numbering, no explanations:\n"
         f"{numbered}"
     )
@@ -189,9 +195,10 @@ def translate_texts(texts: list[str], model: str = MODEL, num_ctx: int = 8192) -
     return trans
 
 
-def translate_image(img_path: str | Path, out_path: str | Path, to_lang: str = "中文") -> int:
+def translate_image(
+    img_path: str | Path, out_path: str | Path, to_lang: str = "简体中文"
+) -> int:
     """完整图片嵌字翻译。失败返回 0（调用方应保留原图）。"""
-    del to_lang  # reserved
     img_path = Path(img_path)
     out_path = Path(out_path)
     if os.environ.get("QYUNSLATION_IMAGE_OVERLAY", "1").lower() in ("0", "false", "off"):
@@ -207,7 +214,7 @@ def translate_image(img_path: str | Path, out_path: str | Path, to_lang: str = "
         return 0
 
     texts = [b[4] for b in boxes]
-    trans = translate_texts(texts)
+    trans = translate_texts(texts, to_lang=to_lang)
 
     colors = []
     for b in boxes:
@@ -246,7 +253,9 @@ def translate_image(img_path: str | Path, out_path: str | Path, to_lang: str = "
     return len(boxes)
 
 
-def translate_image_bytes(data: bytes, suffix: str = ".png") -> tuple[bytes, int]:
+def translate_image_bytes(
+    data: bytes, suffix: str = ".png", to_lang: str = "简体中文"
+) -> tuple[bytes, int]:
     """嵌字内存版，供 Word 内嵌图调用。失败则返回原字节、0。"""
     import tempfile
 
@@ -255,7 +264,7 @@ def translate_image_bytes(data: bytes, suffix: str = ".png") -> tuple[bytes, int
         dst = Path(td) / f"out{suffix}"
         src.write_bytes(data)
         try:
-            n = translate_image(src, dst)
+            n = translate_image(src, dst, to_lang=to_lang)
         except Exception as exc:
             logger.warning("image overlay failed, keep original: %s", exc)
             return data, 0
