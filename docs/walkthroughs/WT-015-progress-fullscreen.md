@@ -28,6 +28,13 @@ bash scripts/verify-plan-015.sh
 systemctl --user restart pdf2zh.service
 ```
 
+## 部署（015b）
+
+- **时间：** 2026-09-05
+- **feat：** 
+- **main：** （merge PLAN-015b）
+- **动作：** 补丁由  ExecStartPre 重放；已 
+
 手工：
 
 1. 空态：无满屏灰；右栏细描边提示「上传文件后在此预览」；底栏「Qyunslation · 荃信生物 © 2026」
