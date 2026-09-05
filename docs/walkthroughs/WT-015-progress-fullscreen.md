@@ -31,9 +31,9 @@ systemctl --user restart pdf2zh.service
 ## 部署（015b）
 
 - **时间：** 2026-09-05
-- **feat：** 
-- **main：** （merge PLAN-015b）
-- **动作：** 补丁由  ExecStartPre 重放；已 
+- **feat：** `87211b3`
+- **main：** `58ae070`（merge PLAN-015b）
+- **动作：** 补丁由 `pdf2zh.service` ExecStartPre 重放；已 `systemctl --user restart pdf2zh`
 
 手工：
 
