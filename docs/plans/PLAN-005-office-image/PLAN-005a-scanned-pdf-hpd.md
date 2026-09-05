@@ -10,7 +10,8 @@
 
 - `scripts/apply-pdf2zh-hpd.py` 幂等打 `gui.py` HPD 分支
 - `pdf2zh.service` ExecStartPre 增加该脚本
-- HPD 失败须 `gr.Error`，禁止 `ocr_workaround`
+- HPD 失败须 `gr.Error`
+- ~~禁止 `ocr_workaround`~~ → **已被 PLAN-007c 反转**（扫描件改为一对一可读，HPD 分支启用 ocr_workaround）
 
 ## Task A3 — 验收
 

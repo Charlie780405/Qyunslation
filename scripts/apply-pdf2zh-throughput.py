@@ -131,6 +131,48 @@ def patch_ollama(text: str) -> tuple[str, bool]:
     if capped in text:
         text = text.replace(capped, original)
         changed = True
+
+    # PLAN-007d: qwen3.6 puts answer in thinking unless think=False;
+    # OpenAI-compat leaves message.content empty. Native Ollama + think=False works.
+    old_chat = """        response = self.client.chat(
+            model=self.model,
+            options=self.options,
+            messages=self.prompt(text),
+        )"""
+    new_chat = """        response = self.client.chat(
+            model=self.model,
+            options=self.options,
+            messages=self.prompt(text),
+            think=False,
+        )"""
+    if "think=False" not in text and old_chat in text:
+        text = text.replace(old_chat, new_chat)
+        changed = True
+
+    old_llm = """        response = self.client.chat(
+            model=self.model,
+            options=self.options,
+            messages=[
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+        )"""
+    new_llm = """        response = self.client.chat(
+            model=self.model,
+            options=self.options,
+            messages=[
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+            think=False,
+        )"""
+    if old_llm in text:
+        text = text.replace(old_llm, new_llm)
+        changed = True
     return text, changed
 
 

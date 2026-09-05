@@ -89,6 +89,50 @@ class TestHpdOcr(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     hpd_ocr.ocr_pdf_with_hpd(p, out)
 
+    def test_fit_fontsize_wide_flat_block(self):
+        """PLAN-007b：宽扁 box 塞长文本时字号中位数须 ≥ 8pt（不塌到 5pt 地板）。"""
+        try:
+            import pymupdf
+            import statistics
+        except ImportError:
+            self.skipTest("pymupdf missing")
+        long = (
+            "You should provide, to the Regulatory Project Manager, "
+            "a copy of any revised documentation or additional information "
+            "for the official record of this meeting will be the official record."
+        )
+        # HPD 归一化坐标：宽扁单行盒（旧公式会塌到 5pt）
+        raw = f"<BLOCK>Text [50, 400, 950, 420]<CHILD>{long}\n"
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "in.pdf"
+            dest = Path(td) / "out.pdf"
+            doc = pymupdf.open()
+            # A4，配合 150dpi pixmap 宽度会 >1200 触发 0–1000 归一化
+            doc.new_page(width=595, height=842)
+            doc.save(src)
+            doc.close()
+            with patch.object(hpd_ocr, "_parse", return_value=raw):
+                hpd_ocr.ocr_pdf_with_hpd(src, dest, dpi=150)
+            out = pymupdf.open(dest)
+            sizes = []
+            for b in out[0].get_text("dict")["blocks"]:
+                for line in b.get("lines", []):
+                    for s in line["spans"]:
+                        if s.get("text", "").strip():
+                            sizes.append(float(s["size"]))
+            out.close()
+            self.assertTrue(sizes, "expected OCR text spans")
+            median = statistics.median(sizes)
+            self.assertGreaterEqual(median, 8.0, f"font median {median} < 8")
+            self.assertGreaterEqual(min(sizes), 7.0, f"font min {min(sizes)} < 7")
+
+    def test_fit_fontsize_helper(self):
+        font = hpd_ocr._pymupdf_font()
+        text = "Hello world " * 20
+        fs = hpd_ocr._fit_fontsize(font, text, box_w=400.0, box_h=40.0)
+        self.assertGreaterEqual(fs, 7.0)
+        self.assertLessEqual(fs, 28.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-09-05T02:07:13.949328+00:00",
+  "work_dir": "/home/dev/pdf2zh/bench/007",
+  "source": "/home/dev/pdf2zh/pdf2zh_files/5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.pdf",
+  "model": "qwen3.6:35b-a3b",
+  "variants": {
+    "V0": {
+      "flags": "--skip-scanned-detection",
+      "elapsed_s": 136,
+      "fallback_count": 2,
+      "ocr_layer": {
+        "chars": 1426,
+        "font_median": 6.061824321746826,
+        "font_min": 5.0,
+        "font_max": 6.87134313583374,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1104
+      },
+      "mono": {
+        "chars": 122,
+        "font_median": 6.819552898406982,
+        "font_min": 4.75,
+        "font_max": 6.87134313583374,
+        "cjk_ratio": 0.6711,
+        "cjk": 51,
+        "latin": 25
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V0/page1.hpd-ocr.no_watermark.zh.mono.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V0/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V0.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V0.dual.png"
+    },
+    "V1": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate",
+      "elapsed_s": 136,
+      "fallback_count": 2,
+      "ocr_layer": {
+        "chars": 1441,
+        "font_median": 10.7760009765625,
+        "font_min": 8.081787109375,
+        "font_max": 12.12310791015625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118
+      },
+      "mono": {
+        "chars": 157,
+        "font_median": 11.44891357421875,
+        "font_min": 7.677698135375977,
+        "font_max": 11.94366455078125,
+        "cjk_ratio": 0.7282,
+        "cjk": 75,
+        "latin": 28
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V1/page1.hpd-ocr.no_watermark.zh.mono.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V1/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V1.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V1.dual.png"
+    },
+    "V3": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif",
+      "elapsed_s": 137,
+      "fallback_count": 2,
+      "ocr_layer": {
+        "chars": 1441,
+        "font_median": 10.7760009765625,
+        "font_min": 8.081787109375,
+        "font_max": 12.12310791015625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118
+      },
+      "mono": {
+        "chars": 157,
+        "font_median": 11.44891357421875,
+        "font_min": 7.677698135375977,
+        "font_max": 11.94366455078125,
+        "cjk_ratio": 0.7282,
+        "cjk": 75,
+        "latin": 28
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V3/page1.hpd-ocr.no_watermark.zh.mono.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V3/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V3.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V3.dual.png"
+    },
+    "V4": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif --enable-json-mode-if-requested",
+      "elapsed_s": 151,
+      "fallback_count": 3,
+      "ocr_layer": {
+        "chars": 1441,
+        "font_median": 10.7760009765625,
+        "font_min": 8.081787109375,
+        "font_max": 12.12310791015625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118
+      },
+      "mono": {
+        "chars": 157,
+        "font_median": 11.44891357421875,
+        "font_min": 7.677698135375977,
+        "font_max": 11.94366455078125,
+        "cjk_ratio": 0.7282,
+        "cjk": 75,
+        "latin": 28
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V4/page1.hpd-ocr.no_watermark.zh.mono.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V4/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V4.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V4.dual.png"
+    },
+    "V5": {
+      "flags": "--skip-scanned-detection --ocr-workaround --disable-rich-text-translate --primary-font-family serif",
+      "elapsed_s": 30,
+      "fallback_count": 0,
+      "ocr_layer": {
+        "chars": 1439,
+        "font_median": 10.7760009765625,
+        "font_min": 8.081787109375,
+        "font_max": 12.12310791015625,
+        "cjk_ratio": 0.0,
+        "cjk": 0,
+        "latin": 1118
+      },
+      "mono": {
+        "chars": 541,
+        "font_median": 10.7760009765625,
+        "font_min": 7.677698135375977,
+        "font_max": 12.12310791015625,
+        "cjk_ratio": 0.7847,
+        "cjk": 317,
+        "latin": 87
+      },
+      "mono_pdf": "/home/dev/pdf2zh/bench/007/out-V5/translated-left.pdf",
+      "dual_pdf": "/home/dev/pdf2zh/bench/007/out-V5/page1.hpd-ocr.no_watermark.zh.dual.pdf",
+      "mono_png": "/home/dev/pdf2zh/bench/007/page1.V5.mono.png",
+      "dual_png": "/home/dev/pdf2zh/bench/007/page1.V5.dual.png",
+      "note": "Successful:14 Fallback:0 via native Ollama think=False; mono=None so metrics from dual-left",
+      "decision_gate": {
+        "cjk_ratio_ge_0_9": false,
+        "font_median_ge_9": true,
+        "fallback_eq_0": true,
+        "no_english_overlay": true,
+        "header_readable": true
+      }
+    }
+  },
+  "updated_at": "2026-09-05T02:40:16.166172+00:00"
+}

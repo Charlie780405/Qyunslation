@@ -7,9 +7,12 @@ Type=simple
 WorkingDirectory=/home/dev/pdf2zh
 Environment=PATH=/home/dev/.local/bin:/usr/bin:/bin
 Environment=PYTHONPATH=/home/dev/qyunslation
+Environment=PDF2ZH_LLM_BATCH_PARAS=3
+Environment=PDF2ZH_LLM_BATCH_TOKENS=120
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-throughput.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-brand.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-hpd.py
+ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-ocr-base.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-office-route.py
 ExecStart=/home/dev/.local/bin/pdf2zh_next --gui --server-port 7860 --ui-lang zh --config-file /home/dev/pdf2zh/config.toml --disable-config-auto-save --disable-gui-sensitive-input --enabled-services Ollama
 Restart=on-failure
