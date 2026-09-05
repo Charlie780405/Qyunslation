@@ -12,7 +12,7 @@
 
 ## 验证
 
-见 `scripts/verify-plan-011.sh`。
+`verify-plan-011.sh` 8/8。部署后 `gui.py` 可解析且含 `_qy_letter_reflow`。
 
 ## 使用
 
