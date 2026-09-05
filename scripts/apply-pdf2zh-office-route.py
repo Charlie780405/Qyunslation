@@ -87,8 +87,8 @@ async def _qy_run_office_sidecar_task(
             if not dl_url.startswith("http"):
                 dl_url = f"{_QY_OFFICE_SIDECAR_URL}{dl_url}"
 
-            def _download():
-                resp = requests.get(dl_url, timeout=600)
+            def _download(url=dl_url):
+                resp = requests.get(url, timeout=600)
                 resp.raise_for_status()
                 return resp.content
 
@@ -99,6 +99,21 @@ async def _qy_run_office_sidecar_task(
             out_name = f"{file_path.stem}.zh{out_suffix}"
             out_path = output_dir / out_name
             out_path.write_bytes(content)
+
+            # PLAN-014: 旁路下载 HTML 供 Gradio 预览（PDF 组件无法渲染 docx）
+            html_key = "html" if "html" in downloads else None
+            if html_key:
+                html_url = downloads[html_key]
+                if not html_url.startswith("http"):
+                    html_url = f"{_QY_OFFICE_SIDECAR_URL}{html_url}"
+                try:
+                    html_bytes = await asyncio.to_thread(_download, html_url)
+                    html_path = out_path.with_suffix(".html")
+                    html_path.write_bytes(html_bytes)
+                except Exception as _html_exc:
+                    import logging as _log
+                    _log.getLogger(__name__).warning("office html preview skip: %s", _html_exc)
+
             progress(1.0, desc=f"{task_prefix}完成")
             return out_path, None, None, None
 
@@ -173,6 +188,68 @@ def apply(text: str) -> tuple[str, bool]:
             return text, False
         text = text.replace(anchor, OFFICE_HELPER + "\n" + anchor, 1)
         changed = True
+    else:
+        # PLAN-014 升级：已注入 sidecar 时补 html 旁路下载
+        old_dl = '''            content = await asyncio.to_thread(_download)
+            out_suffix = file_path.suffix
+            if dl_key == "docx":
+                out_suffix = ".docx"
+            out_name = f"{file_path.stem}.zh{out_suffix}"
+            out_path = output_dir / out_name
+            out_path.write_bytes(content)
+            progress(1.0, desc=f"{task_prefix}完成")
+            return out_path, None, None, None'''
+        new_dl = '''            def _download(url=dl_url):
+                resp = requests.get(url, timeout=600)
+                resp.raise_for_status()
+                return resp.content
+
+            content = await asyncio.to_thread(_download)
+            out_suffix = file_path.suffix
+            if dl_key == "docx":
+                out_suffix = ".docx"
+            out_name = f"{file_path.stem}.zh{out_suffix}"
+            out_path = output_dir / out_name
+            out_path.write_bytes(content)
+
+            # PLAN-014: 旁路下载 HTML 供 Gradio 预览（PDF 组件无法渲染 docx）
+            html_key = "html" if "html" in downloads else None
+            if html_key:
+                html_url = downloads[html_key]
+                if not html_url.startswith("http"):
+                    html_url = f"{_QY_OFFICE_SIDECAR_URL}{html_url}"
+                try:
+                    html_bytes = await asyncio.to_thread(_download, html_url)
+                    html_path = out_path.with_suffix(".html")
+                    html_path.write_bytes(html_bytes)
+                except Exception as _html_exc:
+                    import logging as _log
+                    _log.getLogger(__name__).warning("office html preview skip: %s", _html_exc)
+
+            progress(1.0, desc=f"{task_prefix}完成")
+            return out_path, None, None, None'''
+        # 旧版 _download 无参
+        legacy = '''            def _download():
+                resp = requests.get(dl_url, timeout=600)
+                resp.raise_for_status()
+                return resp.content
+
+            content = await asyncio.to_thread(_download)
+            out_suffix = file_path.suffix
+            if dl_key == "docx":
+                out_suffix = ".docx"
+            out_name = f"{file_path.stem}.zh{out_suffix}"
+            out_path = output_dir / out_name
+            out_path.write_bytes(content)
+            progress(1.0, desc=f"{task_prefix}完成")
+            return out_path, None, None, None'''
+        if "PLAN-014: 旁路下载 HTML" not in text:
+            if legacy in text:
+                text = text.replace(legacy, new_dl, 1)
+                changed = True
+            elif old_dl in text:
+                text = text.replace(old_dl, new_dl, 1)
+                changed = True
 
     if FILE_TYPES_OLD in text:
         text = text.replace(FILE_TYPES_OLD, FILE_TYPES_NEW, 1)
@@ -200,7 +277,7 @@ def main() -> int:
         return 1
     original = GUI.read_text(encoding="utf-8")
     updated, changed = apply(original)
-    if not changed and MARKER in original:
+    if not changed and MARKER in original and "PLAN-014: 旁路下载 HTML" in original:
         print("already patched:", GUI)
         return 0
     if updated == original:
