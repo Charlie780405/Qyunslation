@@ -149,6 +149,7 @@ MEDIA_TYPES = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "csv": "text/csv; charset=utf-8",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image": "application/octet-stream",
     "srt": "text/plain; charset=utf-8",
     "epub": "application/epub+zip",
     "ass": "text/plain; charset=utf-8",
@@ -1071,6 +1072,7 @@ class TranslationService:
                 config=ImageOverlayWorkflowConfig(
                     logger=task_logger,
                     progress_tracker=progress_tracker,
+                    to_lang=payload.to_lang,
                 )
             )
 
@@ -1349,13 +1351,18 @@ class TranslationService:
                     f"{filename_stem}_translated.docx",
                     False,
                 )
-            elif isinstance(workflow, ImageOverlayWorkflow):
-                suffix = (workflow.document_translated.suffix if workflow.document_translated else ".png") or ".png"
-                export_map["image"] = (
-                    workflow.export_overlay,
-                    f"{filename_stem}.zh{suffix}",
-                    False,
-                )
+        # PLAN-019: ImageOverlayWorkflow is not DocxExportable (no export_to_docx)
+        if isinstance(workflow, ImageOverlayWorkflow):
+            suffix = (
+                workflow.document_translated.suffix
+                if workflow.document_translated
+                else ".png"
+            ) or ".png"
+            export_map["image"] = (
+                workflow.export_overlay,
+                f"{filename_stem}.zh{suffix}",
+                False,
+            )
         if isinstance(workflow, SrtExportable):
             export_map["srt"] = (
                 workflow.export_to_srt,

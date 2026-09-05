@@ -1,20 +1,39 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-005e：pdf2zh GUI 内路由 Word/图片到 Qyunslation sidecar (:8010)。"""
+"""PLAN-005e / PLAN-019：pdf2zh GUI 路由 Word/图片到 sidecar，透传 to_lang，去重 helper。"""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 GUI = Path(
-    "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/pdf2zh_next/gui.py"
+    "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/"
+    "site-packages/pdf2zh_next/gui.py"
 )
 
 MARKER = "_qy_office_sidecar"
+HELPER_HEAD = "# --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---"
+
 OFFICE_HELPER = '''
 # --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---
+# _qy_office_sidecar
 _QY_OFFICE_SIDECAR_EXT = {".doc", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
 _QY_OFFICE_SIDECAR_URL = "http://127.0.0.1:8010"
+_QY_LANG_TO_SIDECAR = {
+    "Simplified Chinese": "简体中文",
+    "Traditional Chinese": "繁体中文",
+    "English": "English",
+    "Japanese": "日本語",
+    "Korean": "한국어",
+}
+
+
+def _qy_map_lang_to_sidecar(lang_label) -> str:
+    if not lang_label:
+        return "简体中文"
+    key = str(lang_label).strip()
+    return _QY_LANG_TO_SIDECAR.get(key, key)
 
 
 def _qy_is_office_sidecar_file(path: Path) -> bool:
@@ -26,13 +45,15 @@ async def _qy_run_office_sidecar_task(
     output_dir: Path,
     progress,
     task_prefix: str = "",
+    to_lang: str = "简体中文",
 ):
     """Route Word/image to sidecar; returns (mono_path, dual, glossary, token_usage)."""
     import json
 
     suffix = file_path.suffix.lower()
     workflow_type = "image_overlay" if suffix in {".png", ".jpg", ".jpeg", ".webp"} else "docx"
-    payload = {"workflow_type": workflow_type, "to_lang": "简体中文"}
+    mapped = _qy_map_lang_to_sidecar(to_lang)
+    payload = {"workflow_type": workflow_type, "to_lang": mapped}
 
     progress(0.05, desc=f"{task_prefix}提交文档/图片翻译…")
 
@@ -120,6 +141,7 @@ async def _qy_run_office_sidecar_task(
         if not status.get("is_processing") and not status.get("download_ready"):
             raise gr.Error(status.get("status_message", "文档/图片翻译异常结束"))
 
+
 '''
 
 FILE_TYPES_OLD = 'file_types=[".pdf", ".PDF"],'
@@ -154,6 +176,7 @@ LOOP_PATCH = '''            if _qy_is_office_sidecar_file(file_path):
                         output_dir,
                         progress,
                         task_prefix=task_prefix,
+                        to_lang=ui_inputs.get("lang_to"),
                     )
                 )
             else:
@@ -177,98 +200,112 @@ LOOP_PATCH = '''            if _qy_is_office_sidecar_file(file_path):
                     )
                 )'''
 
+# Old call without to_lang
+LOOP_OLD_CALL = '''            if _qy_is_office_sidecar_file(file_path):
+                task = asyncio.create_task(
+                    _qy_run_office_sidecar_task(
+                        file_path,
+                        output_dir,
+                        progress,
+                        task_prefix=task_prefix,
+                    )
+                )'''
+
+LOOP_NEW_CALL = '''            if _qy_is_office_sidecar_file(file_path):
+                task = asyncio.create_task(
+                    _qy_run_office_sidecar_task(
+                        file_path,
+                        output_dir,
+                        progress,
+                        task_prefix=task_prefix,
+                        to_lang=ui_inputs.get("lang_to"),
+                    )
+                )'''
+
+
+def _strip_all_helpers(text: str) -> tuple[str, int]:
+    """Remove every PLAN-005e sidecar helper block before translate_files."""
+    # Match from helper head through the blank line before async def translate_files
+    # or through end of the while-loop raise line.
+    pat = re.compile(
+        r"\n# --- PLAN-005e: Word/图片 → Qyunslation sidecar \(:8010\) ---\n"
+        r".*?"
+        r"(?=async def translate_files\()",
+        re.S,
+    )
+    text2, n = pat.subn("\n", text)
+    return text2, n
+
 
 def apply(text: str) -> tuple[str, bool]:
     changed = False
 
-    if MARKER not in text:
+    helper_count = text.count(HELPER_HEAD)
+    task_count = text.count("async def _qy_run_office_sidecar_task(")
+    needs_refresh = (
+        helper_count != 1
+        or task_count != 1
+        or MARKER not in text
+        or "_QY_LANG_TO_SIDECAR" not in text
+        or 'payload = {"workflow_type": workflow_type, "to_lang": mapped}' not in text
+    )
+    if needs_refresh:
+        text2, n_removed = _strip_all_helpers(text)
+        if n_removed:
+            text = text2
+            changed = True
         anchor = "async def translate_files("
         if anchor not in text:
             print("ERROR: translate_files anchor not found", file=sys.stderr)
             return text, False
-        text = text.replace(anchor, OFFICE_HELPER + "\n" + anchor, 1)
+        text = text.replace(anchor, OFFICE_HELPER + anchor, 1)
         changed = True
-    else:
-        # PLAN-014 升级：已注入 sidecar 时补 html 旁路下载
-        old_dl = '''            content = await asyncio.to_thread(_download)
-            out_suffix = file_path.suffix
-            if dl_key == "docx":
-                out_suffix = ".docx"
-            out_name = f"{file_path.stem}.zh{out_suffix}"
-            out_path = output_dir / out_name
-            out_path.write_bytes(content)
-            progress(1.0, desc=f"{task_prefix}完成")
-            return out_path, None, None, None'''
-        new_dl = '''            def _download(url=dl_url):
-                resp = requests.get(url, timeout=600)
-                resp.raise_for_status()
-                return resp.content
-
-            content = await asyncio.to_thread(_download)
-            out_suffix = file_path.suffix
-            if dl_key == "docx":
-                out_suffix = ".docx"
-            out_name = f"{file_path.stem}.zh{out_suffix}"
-            out_path = output_dir / out_name
-            out_path.write_bytes(content)
-
-            # PLAN-014: 旁路下载 HTML 供 Gradio 预览（PDF 组件无法渲染 docx）
-            html_key = "html" if "html" in downloads else None
-            if html_key:
-                html_url = downloads[html_key]
-                if not html_url.startswith("http"):
-                    html_url = f"{_QY_OFFICE_SIDECAR_URL}{html_url}"
-                try:
-                    html_bytes = await asyncio.to_thread(_download, html_url)
-                    html_path = out_path.with_suffix(".html")
-                    html_path.write_bytes(html_bytes)
-                except Exception as _html_exc:
-                    import logging as _log
-                    _log.getLogger(__name__).warning("office html preview skip: %s", _html_exc)
-
-            progress(1.0, desc=f"{task_prefix}完成")
-            return out_path, None, None, None'''
-        # 旧版 _download 无参
-        legacy = '''            def _download():
-                resp = requests.get(dl_url, timeout=600)
-                resp.raise_for_status()
-                return resp.content
-
-            content = await asyncio.to_thread(_download)
-            out_suffix = file_path.suffix
-            if dl_key == "docx":
-                out_suffix = ".docx"
-            out_name = f"{file_path.stem}.zh{out_suffix}"
-            out_path = output_dir / out_name
-            out_path.write_bytes(content)
-            progress(1.0, desc=f"{task_prefix}完成")
-            return out_path, None, None, None'''
-        if "PLAN-014: 旁路下载 HTML" not in text:
-            if legacy in text:
-                text = text.replace(legacy, new_dl, 1)
-                changed = True
-            elif old_dl in text:
-                text = text.replace(old_dl, new_dl, 1)
-                changed = True
 
     if FILE_TYPES_OLD in text:
         text = text.replace(FILE_TYPES_OLD, FILE_TYPES_NEW, 1)
         changed = True
-    elif FILE_TYPES_NEW in text:
-        pass
-    else:
+    elif FILE_TYPES_NEW not in text:
         print("WARN: file_types anchor not found", file=sys.stderr)
 
     if LOOP_ANCHOR in text:
         text = text.replace(LOOP_ANCHOR, LOOP_PATCH, 1)
         changed = True
-    elif "_qy_is_office_sidecar_file(file_path)" in text:
+    elif LOOP_OLD_CALL in text:
+        text = text.replace(LOOP_OLD_CALL, LOOP_NEW_CALL, 1)
+        changed = True
+    elif 'to_lang=ui_inputs.get("lang_to")' in text:
         pass
+    elif "_qy_is_office_sidecar_file(file_path)" in text:
+        print("WARN: sidecar call present but to_lang not wired", file=sys.stderr)
     else:
         print("ERROR: translate loop anchor not found", file=sys.stderr)
         return text, False
 
     return text, changed
+
+
+def verify(text: str) -> int:
+    errs = 0
+
+    def need(cond: bool, msg: str) -> None:
+        nonlocal errs
+        if not cond:
+            print(f"ERROR: {msg}", file=sys.stderr)
+            errs += 1
+
+    need(text.count(HELPER_HEAD) == 1, f"helper heads != 1 ({text.count(HELPER_HEAD)})")
+    need(text.count("async def _qy_run_office_sidecar_task(") == 1, "sidecar task defs != 1")
+    need("_QY_LANG_TO_SIDECAR" in text, "lang map missing")
+    need('to_lang=ui_inputs.get("lang_to")' in text, "call site missing to_lang")
+    need('"to_lang": "简体中文"' not in text or "_qy_map_lang_to_sidecar" in text, "hardcoded to_lang")
+    # hardcoded payload should use mapped variable
+    need('payload = {"workflow_type": workflow_type, "to_lang": mapped}' in text, "payload must use mapped")
+    try:
+        compile(text, str(GUI), "exec")
+    except SyntaxError as e:
+        print(f"ERROR: syntax: {e}", file=sys.stderr)
+        errs += 1
+    return errs
 
 
 def main() -> int:
@@ -277,14 +314,16 @@ def main() -> int:
         return 1
     original = GUI.read_text(encoding="utf-8")
     updated, changed = apply(original)
-    if not changed and MARKER in original and "PLAN-014: 旁路下载 HTML" in original:
+    if changed:
+        GUI.write_text(updated, encoding="utf-8")
+        print("patched:", GUI)
+    else:
         print("already patched:", GUI)
-        return 0
-    if updated == original:
-        print("no changes applied", file=sys.stderr)
+    final = GUI.read_text(encoding="utf-8") if changed else original
+    errs = verify(final)
+    if errs:
+        print(f"verify failed: {errs} error(s)", file=sys.stderr)
         return 1
-    GUI.write_text(updated, encoding="utf-8")
-    print("patched:", GUI)
     return 0
 
 
