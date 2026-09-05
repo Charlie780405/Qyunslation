@@ -52,20 +52,30 @@ CSS_BLOCK = """
 """
 
 DOCK_JS_SNIPPET = """
-  function qyUpdateDockHeight() {
+  var qyDockAcc = null;
+  var qyDockRO = null;
+
+  function qyApplyDockHeight(h) {
     var left = document.querySelector('.qy-col-left');
+    if (!left) return;
+    left.style.setProperty('--qy-dock-h', (Math.ceil(h) || 58) + 'px');
+  }
+
+  function qyBindDock() {
     var acc = document.querySelector('.qy-adv-acc');
-    if (!left || !acc) return;
-    var h = Math.ceil(acc.getBoundingClientRect().height) || 58;
-    left.style.setProperty('--qy-dock-h', h + 'px');
-  }
-  qyUpdateDockHeight();
-  setInterval(qyUpdateDockHeight, 400);
-  if (document.body) {
-    new MutationObserver(qyUpdateDockHeight).observe(document.body, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['class']
+    if (!acc || acc === qyDockAcc) return;
+    qyDockAcc = acc;
+    if (qyDockRO) qyDockRO.disconnect();
+    // 只观察折叠面板本身，避免在整页 DOM 变更上反复强制同步重排
+    qyDockRO = new ResizeObserver(function (entries) {
+      qyApplyDockHeight(entries[0].contentRect.height);
     });
+    qyDockRO.observe(acc);
+    qyApplyDockHeight(acc.getBoundingClientRect().height);
   }
+
+  qyBindDock();
+  setInterval(qyBindDock, 2000);
 """
 
 
@@ -122,10 +132,24 @@ def apply_css(text: str) -> tuple[str, bool]:
     return text[:c0] + new_body + text[c1:], True
 
 
+JS_BLOCK_RE = re.compile(
+    r"\n[ \t]*// _qy_left_dock_js\n.*?(?=\n[ \t]*\}\n\"\"\",\n\) as demo:)",
+    re.S,
+)
+
+
 def apply_js(text: str) -> tuple[str, bool]:
     """Inject dock height updater into existing Blocks(js=...) page-sync function."""
+    desired = "\n  // " + JS_MARKER + "\n" + DOCK_JS_SNIPPET
     if JS_MARKER in text:
-        return text, False
+        # 自愈：既有片段与当前版本不一致时整块替换
+        m = JS_BLOCK_RE.search(text)
+        if not m:
+            print("WARNING: dock js block not matchable; leaving as is", file=sys.stderr)
+            return text, False
+        if m.group(0).rstrip() == desired.rstrip():
+            return text, False
+        return text[: m.start()] + desired.rstrip() + "\n" + text[m.end() :], True
     # Prefer inject before closing of page sync arrow function
     # Look for `__qyPageSyncInstalled` block's trailing `}`
     marker = "window.__qyPageSyncInstalled"
