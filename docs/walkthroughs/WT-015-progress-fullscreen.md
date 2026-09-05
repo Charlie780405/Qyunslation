@@ -27,6 +27,13 @@ systemctl --user restart pdf2zh.service
 
 `verify-plan-015.sh`：**15/15 PASS**（2026-09-05）
 
+## 部署
+
+- **时间：** 2026-09-05
+- **feat：** `39fbbea`
+- **main：** `95f629e`（merge PLAN-015）
+- **动作：** 补丁已由 `pdf2zh.service` ExecStartPre 重放；生产已 `systemctl --user restart pdf2zh`
+
 浏览器量测（1080p）：
 
 - `.tab-main-row` top≈102.5、高 976 → 铺满剩余视口；`document` 无外层滚动
