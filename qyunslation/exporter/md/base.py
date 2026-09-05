@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MPL-2.0
 from dataclasses import dataclass
 
-from docutranslate.exporter.base import Exporter, ExporterConfig
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
+from qyunslation.exporter.base import Exporter, ExporterConfig
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
 
 
 @dataclass(kw_only=True)

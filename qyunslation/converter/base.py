@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from logging import Logger
 from typing import Hashable
 
-from docutranslate.ir.document import Document
-from docutranslate.logger import global_logger
+from qyunslation.ir.document import Document
+from qyunslation.logger import global_logger
 
 
 @dataclass(kw_only=True)

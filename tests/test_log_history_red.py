@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from docutranslate.server.core import QueueAndHistoryHandler, TranslationService
+from qyunslation.server.core import QueueAndHistoryHandler, TranslationService
 
 
 def test_log_handler_assigns_monotonic_sequence_and_keeps_history():

@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
-import docutranslate
+import qyunslation
 
 datas = [
-    ('docutranslate/static', 'docutranslate/static'),
-    ('docutranslate/template', 'docutranslate/template'),
+    ('qyunslation/static', 'qyunslation/static'),
+    ('qyunslation/template', 'qyunslation/template'),
     *collect_data_files('pygments'),
 ]
 
@@ -19,7 +19,7 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    ['docutranslate/app.py'],
+    ['qyunslation/app.py'],
     pathex=[],
     binaries=[],
     datas=datas,
@@ -28,7 +28,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     # 注意：exclude docling 可能导致部分依赖丢失，确保你真的不需要它
-    excludes=["docling", "docutranslate.converter.x2md.converter_docling"],
+    excludes=["docling", "qyunslation.converter.x2md.converter_docling"],
     noarchive=False,
     optimize=0,
 )
@@ -41,7 +41,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=f'DocuTranslate-{docutranslate.__version__}-win',
+    name=f'DocuTranslate-{qyunslation.__version__}-win',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

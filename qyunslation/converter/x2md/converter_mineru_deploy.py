@@ -6,11 +6,11 @@ from typing import Literal, Hashable, List
 
 import httpx
 
-from docutranslate.converter.x2md.base import X2MarkdownConverter, X2MarkdownConverterConfig
-from docutranslate.ir.attachment_manager import AttachMent
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.utils.markdown_utils import embed_inline_image_from_zip
+from qyunslation.converter.x2md.base import X2MarkdownConverter, X2MarkdownConverterConfig
+from qyunslation.ir.attachment_manager import AttachMent
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.utils.markdown_utils import embed_inline_image_from_zip
 
 
 @dataclass(kw_only=True)

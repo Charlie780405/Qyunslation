@@ -11,5 +11,5 @@ def get_docling_artifacts(output_dir=None):
     return path
 #
 if __name__ == '__main__':
-    get_docling_artifacts(output_dir=pathlib.Path(r"C:\Users\jxgm\Desktop\translate\docutranslate\dist\models"))
+    get_docling_artifacts(output_dir=pathlib.Path(r"C:\Users\jxgm\Desktop\translate\qyunslation\dist\models"))
 

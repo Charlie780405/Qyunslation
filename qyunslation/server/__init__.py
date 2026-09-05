@@ -7,7 +7,7 @@ This module provides a shared TranslationService that is used by both
 the Web backend (app.py) and MCP server to ensure consistent task management.
 
 Example:
-    from docutranslate.server import TranslationService, get_translation_service
+    from qyunslation.server import TranslationService, get_translation_service
 
     # Get the singleton instance
     service = get_translation_service()
@@ -19,7 +19,7 @@ Example:
     state = service.get_task_state(task_id)
 """
 
-from docutranslate.server.core import (
+from qyunslation.server.core import (
     TranslationService,
     get_translation_service,
     QueueAndHistoryHandler,

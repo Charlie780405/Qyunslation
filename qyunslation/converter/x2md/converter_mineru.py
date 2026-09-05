@@ -18,11 +18,12 @@ try:
 except ImportError:
     HAS_PYPDF = False
 
-from docutranslate.converter.x2md.base import X2MarkdownConverter, X2MarkdownConverterConfig
-from docutranslate.ir.attachment_manager import AttachMent
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.utils.markdown_utils import embed_inline_image_from_zip
+from qyunslation.converter.x2md.base import X2MarkdownConverter, X2MarkdownConverterConfig
+from qyunslation.ir.attachment_manager import AttachMent
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.utils.markdown_utils import embed_inline_image_from_zip
+from qyunslation.config import TLS_VERIFY
 
 URL = 'https://mineru.net/api/v4/file-urls/batch'
 
@@ -50,8 +51,8 @@ timeout = httpx.Timeout(
 )
 
 limits = httpx.Limits(max_connections=500, max_keepalive_connections=20)
-client = httpx.Client(limits=limits, trust_env=False, timeout=timeout, proxy=None, verify=False)
-client_async = httpx.AsyncClient(limits=limits, trust_env=False, timeout=timeout, proxy=None, verify=False)
+client = httpx.Client(limits=limits, trust_env=False, timeout=timeout, proxy=None, verify=TLS_VERIFY)
+client_async = httpx.AsyncClient(limits=limits, trust_env=False, timeout=timeout, proxy=None, verify=TLS_VERIFY)
 
 
 class ConverterMineru(X2MarkdownConverter):

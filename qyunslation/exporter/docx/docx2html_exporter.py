@@ -6,9 +6,9 @@ from io import BytesIO
 
 import mammoth
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.docx.base import DocxExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.docx.base import DocxExporter
+from qyunslation.ir.document import Document
 
 
 @dataclass

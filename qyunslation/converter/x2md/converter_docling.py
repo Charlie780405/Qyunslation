@@ -4,7 +4,6 @@
 import asyncio
 import os
 import time
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
@@ -16,22 +15,15 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import ImageRefMode
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from docutranslate.converter.x2md.base import X2MarkdownConverter, X2MarkdownConverterConfig
-from docutranslate.ir.attachment_manager import AttachMent
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
+from qyunslation.converter.x2md.base import X2MarkdownConverter
+from qyunslation.converter.x2md.converter_docling_config import ConverterDoclingConfig
+from qyunslation.ir.attachment_manager import AttachMent
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
 
 IMAGE_RESOLUTION_SCALE = 4
 
-
-@dataclass(kw_only=True)
-class ConverterDoclingConfig(X2MarkdownConverterConfig):
-    code_ocr: bool = True
-    formula_ocr: bool = True
-    artifact: Path | str | None = None
-
-    def gethash(self):
-        return self.code_ocr, self.formula_ocr
+__all__ = ["ConverterDoclingConfig", "ConverterDocling"]
 
 
 class ConverterDocling(X2MarkdownConverter):

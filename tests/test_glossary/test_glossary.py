@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 
-from docutranslate.glossary.glossary import Glossary
+from qyunslation.glossary.glossary import Glossary
 
 
 def test_glossary_initialization():

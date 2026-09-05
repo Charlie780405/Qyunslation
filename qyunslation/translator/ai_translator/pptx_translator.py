@@ -12,9 +12,9 @@ from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.oxml.ns import qn
 from pptx.text.text import _Paragraph, TextFrame
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 
 # ---------------- 辅助工具类：语言与字体智能适配 ----------------

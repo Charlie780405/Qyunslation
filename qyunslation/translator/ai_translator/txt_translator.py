@@ -7,9 +7,9 @@ from typing import Self, Literal, List
 
 import charset_normalizer
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 
 @dataclass

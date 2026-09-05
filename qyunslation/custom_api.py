@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""DocuTranslate 自定义扩展 API：图片嵌字 + 术语表管理（阶段 4 UI 后端）。
-
-通过 app.py 的 app.include_router(custom_router, prefix="/service") 挂载。
-"""
-import sys
+"""自定义扩展 API：图片嵌字 + 术语表管理。"""
 import tempfile
 from pathlib import Path
 
@@ -11,11 +7,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-# 引用项目根目录的扩展模块（image_translate / glossary_db）
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from glossary_db import load_glossary, merge_glossary, save_glossary  # noqa: E402
-from image_translate import translate_image  # noqa: E402
+from qyunslation.extensions.glossary_db import load_glossary, merge_glossary, save_glossary
+from qyunslation.extensions.image_translate import translate_image
 
 router = APIRouter(tags=["Custom Extensions"])
 
@@ -23,9 +16,12 @@ router = APIRouter(tags=["Custom Extensions"])
 @router.post("/image-translate", summary="图片嵌字翻译（上传图→返回中文图）")
 async def image_translate_endpoint(file: UploadFile = File(...)):
     """上传英文设计图，返回图内文字已翻译为中文的图片（版式不变）。"""
-    suffix = Path(file.filename).suffix.lower() or ".png"
+    suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
     if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
         raise HTTPException(400, f"不支持的图片格式: {suffix}")
+    tmp_in = None
+    tmp_out = None
+    n = 0
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
             f.write(await file.read())
@@ -36,8 +32,10 @@ async def image_translate_endpoint(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"图片嵌字失败: {e}") from e
     finally:
-        Path(tmp_in).unlink(missing_ok=True)
-        Path(tmp_out).unlink(missing_ok=True)
+        if tmp_in:
+            Path(tmp_in).unlink(missing_ok=True)
+        if tmp_out:
+            Path(tmp_out).unlink(missing_ok=True)
     return Response(content=data, media_type="image/png", headers={"X-Translated-Blocks": str(n)})
 
 

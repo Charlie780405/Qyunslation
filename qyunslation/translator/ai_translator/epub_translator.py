@@ -10,9 +10,9 @@ from typing import Self, Literal, List, Dict, Any
 
 from bs4 import BeautifulSoup, Tag, NavigableString
 
-from docutranslate.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
+from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 # 块级元素集合：遇到这些标签时必须闭合当前段落，原样保留，避免嵌套进 <p>
 _BLOCK_ELEMENTS = frozenset({

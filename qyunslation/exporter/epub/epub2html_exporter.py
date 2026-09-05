@@ -13,9 +13,9 @@ import mimetypes
 
 from bs4 import BeautifulSoup
 
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.exporter.epub.base import EpubExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.exporter.epub.base import EpubExporter
+from qyunslation.ir.document import Document
 
 
 @dataclass
@@ -351,4 +351,4 @@ if __name__ == '__main__':
 
     doc_original = Document.from_path(r"C:\Users\jxgm\Downloads\pg6593-images.epub")
     html_exp = Epub2HTMLExporter().export(doc_original)
-    Path(r"C:\Users\jxgm\Desktop\translate\docutranslate\tests\output\output.html").write_bytes(html_exp.content)
+    Path(r"C:\Users\jxgm\Desktop\translate\qyunslation\tests\output\output.html").write_bytes(html_exp.content)

@@ -4,11 +4,11 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import TypeVar, Dict, Any, Optional
 
-from docutranslate.agents.agent import AgentConfig
-from docutranslate.agents.glossary_agent import GlossaryAgentConfig, GlossaryAgent
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.ir.document import Document
-from docutranslate.translator.base import Translator, TranslatorConfig
+from qyunslation.agents.agent import AgentConfig
+from qyunslation.agents.glossary_agent import GlossaryAgentConfig, GlossaryAgent
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.ir.document import Document
+from qyunslation.translator.base import Translator, TranslatorConfig
 
 
 @dataclass(kw_only=True)

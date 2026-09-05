@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MPL-2.0
-"""enhanced_translate 单元测试（mock 网络，测术语表注入 + 嵌字调度逻辑）"""
+"""enhanced_translate 单元测试（mock 网络；脚本已归档至 archive/legacy）"""
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "archive" / "legacy"))
 
 import enhanced_translate
 

@@ -19,7 +19,7 @@ export default defineConfig({
     })
   ],
   build: {
-    outDir: '../docutranslate/static',
+    outDir: '../qyunslation/static',
     emptyOutDir: false,
     cssMinify: false
   }

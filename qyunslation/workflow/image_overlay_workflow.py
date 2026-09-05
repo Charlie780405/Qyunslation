@@ -2,11 +2,12 @@
 """PLAN-005c：独立图片嵌字工作流。"""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Self
 
-from docutranslate.ir.document import Document
-from docutranslate.workflow.base import Workflow, WorkflowConfig
+from qyunslation.ir.document import Document
+from qyunslation.workflow.base import Workflow, WorkflowConfig
 
 
 @dataclass(kw_only=True)
@@ -17,7 +18,7 @@ class ImageOverlayWorkflowConfig(WorkflowConfig):
 class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Document]):
     def translate(self) -> Self:
         self.progress_tracker.update(percent=10, message="图片嵌字中…")
-        from docutranslate.extensions.image_translate import translate_image_bytes
+        from qyunslation.extensions.image_translate import translate_image_bytes
 
         suffix = (self.document_original.suffix or ".png").lower()
         data, n = translate_image_bytes(self.document_original.content, suffix=suffix)
@@ -31,7 +32,7 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
         return self
 
     async def translate_async(self) -> Self:
-        return self.translate()
+        return await asyncio.to_thread(self.translate)
 
     def export_overlay(self) -> bytes:
         assert self.document_translated is not None

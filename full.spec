@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules
-import docutranslate
+import qyunslation
 
 # 初始化列表
 datas = []
@@ -46,8 +46,8 @@ except Exception as e:
 # 注意：确保 .venv 路径在您当前的构建环境中是存在的
 custom_datas = [
     ('./.venv/Lib/site-packages/docling_parse/pdf_resources', 'docling_parse/pdf_resources'),
-    ('./docutranslate/static', 'docutranslate/static'),
-    ('./docutranslate/template', 'docutranslate/template')
+    ('./qyunslation/static', 'qyunslation/static'),
+    ('./qyunslation/template', 'qyunslation/template')
 ]
 
 # 避免添加重复的数据
@@ -57,7 +57,7 @@ for data in custom_datas:
         datas.append(data)
 
 a = Analysis(
-    ['docutranslate/app.py'],
+    ['qyunslation/app.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -78,7 +78,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=f'DocuTranslate_full-{docutranslate.__version__}-win',
+    name=f'DocuTranslate_full-{qyunslation.__version__}-win',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

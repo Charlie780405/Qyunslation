@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 from dataclasses import dataclass
+import logging
 import jinja2
 import markdown
-from docutranslate.exporter.md.base import MDExporter, MDExporterConfig
-from docutranslate.ir.document import Document
-from docutranslate.ir.markdown_document import MarkdownDocument
-from docutranslate.utils.resource_utils import resource_path
+from qyunslation.exporter.md.base import MDExporter, MDExporterConfig
+from qyunslation.ir.document import Document
+from qyunslation.ir.markdown_document import MarkdownDocument
+from qyunslation.utils.resource_utils import resource_path
 
 
 @dataclass
@@ -42,7 +43,8 @@ class MD2HTMLExporter(MDExporter):
                 import httpx
                 response = httpx.get(url, timeout=2.0)
                 return response.status_code == 200
-            except:
+            except Exception as e:
+                logging.getLogger(__name__).debug("CDN check failed for %s: %s", url, e)
                 return False
 
         # CDN 可用时直接用链接
@@ -115,7 +117,7 @@ class MD2HTMLExporter(MDExporter):
         content = document.content.decode()
 
         # 预处理markdown内容
-        from docutranslate.utils.markdown_utils import format_markdown_latex
+        from qyunslation.utils.markdown_utils import format_markdown_latex
         content = format_markdown_latex(content)
 
         html_content = markdown.markdown(

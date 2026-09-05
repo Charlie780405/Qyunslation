@@ -17,8 +17,6 @@ else
   uv pip install --python .venv/bin/python -e .
 fi
 
-echo "== 确保 docutranslate 包名兼容"
-ln -sfn qyunslation "$ROOT/docutranslate"
 
 echo "== 同步 systemd units"
 mkdir -p ~/.config/systemd/user

@@ -55,7 +55,7 @@
 <script src=" https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.min.js "></script>
 <script>
     renderjson.set_show_to_level("all");
-    let data={{ jsonData }}
+    let data={{ jsonData | tojson }}
     document.getElementById("test").appendChild(renderjson(data));
 
 </script>

@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: MPL-2.0
 """custom_api 术语表端点单元测试（FastAPI TestClient，不启动真实服务）"""
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import glossary_db
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from docutranslate.custom_api import router
+from qyunslation.custom_api import router
+from qyunslation.extensions import glossary_db
 
 app = FastAPI()
 app.include_router(router, prefix="/service")

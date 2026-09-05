@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from docutranslate.exporter.ass.ass2ass_exporter import Ass2AssExporter
-from docutranslate.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig, Ass2HTMLExporter
-from docutranslate.exporter.base import ExporterConfig
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.ir.document import Document
-from docutranslate.translator.ai_translator.ass_translator import AssTranslatorConfig, AssTranslator
-from docutranslate.workflow.base import WorkflowConfig, Workflow
-from docutranslate.workflow.interfaces import HTMLExportable, AssExportable
+from qyunslation.exporter.ass.ass2ass_exporter import Ass2AssExporter
+from qyunslation.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig, Ass2HTMLExporter
+from qyunslation.exporter.base import ExporterConfig
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.ir.document import Document
+from qyunslation.translator.ai_translator.ass_translator import AssTranslatorConfig, AssTranslator
+from qyunslation.workflow.base import WorkflowConfig, Workflow
+from qyunslation.workflow.interfaces import HTMLExportable, AssExportable
 
 
 

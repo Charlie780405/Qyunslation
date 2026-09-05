@@ -18,15 +18,39 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
-OLLAMA = os.environ.get("DOCUTRANSLATE_BASE_URL", "http://100.67.66.123:11434/v1").replace(
-    "/v1", ""
+OLLAMA = (
+    os.environ.get("QYUNSLATION_BASE_URL")
+    or os.environ.get("DOCUTRANSLATE_BASE_URL")
+    or ""
+).replace("/v1", "")
+HPD_URL = os.environ.get("QYUNSLATION_HPD_BASE_URL") or ""
+FONT = os.environ.get("QYUNSLATION_FONT") or ""
+MODEL = (
+    os.environ.get("QYUNSLATION_MODEL_ID")
+    or os.environ.get("DOCUTRANSLATE_MODEL_ID")
+    or "qwen3.6:35b-a3b"
 )
-HPD_URL = os.environ.get("QYUNSLATION_HPD_BASE_URL", "http://100.67.66.123:8120")
-FONT = os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC.ttf")
-MODEL = os.environ.get("DOCUTRANSLATE_MODEL_ID", "qwen3.6:35b-a3b")
-GLOSSARY_CSV = os.environ.get(
-    "QYUNSLATION_GLOSSARY_CSV", "/home/dev/pdf2zh/glossaries/qx027n.csv"
-)
+GLOSSARY_CSV = os.environ.get("QYUNSLATION_GLOSSARY_CSV") or ""
+
+
+def _require_env(name: str, value: str) -> str:
+    if not value:
+        raise RuntimeError(
+            f"缺少环境变量 {name}（图片嵌字需要显式配置，不再使用硬编码内网默认值）"
+        )
+    return value
+
+
+def _ollama() -> str:
+    return _require_env("DOCUTRANSLATE_BASE_URL / QYUNSLATION_BASE_URL", OLLAMA)
+
+
+def _hpd_url() -> str:
+    return _require_env("QYUNSLATION_HPD_BASE_URL", HPD_URL)
+
+
+def _font() -> str:
+    return _require_env("QYUNSLATION_FONT", FONT)
 
 _BLOCK_RE = re.compile(
     r"<BLOCK>(?P<type>\w+)\s+\[(?P<x1>\d+),\s*(?P<y1>\d+),\s*(?P<x2>\d+),\s*(?P<y2>\d+)\]"
@@ -36,7 +60,7 @@ _BLOCK_RE = re.compile(
 
 def _hpd_parse(image_b64: str, timeout: int = 180) -> str:
     req = urllib.request.Request(
-        f"{HPD_URL.rstrip('/')}/parse",
+        f"{_hpd_url().rstrip('/')}/parse",
         data=json.dumps({"image_b64": image_b64}).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -109,6 +133,8 @@ def ocr_image_hpd(img_path: str | Path) -> list[tuple[int, int, int, int, str, f
 
 
 def _load_glossary() -> dict[str, str]:
+    if not GLOSSARY_CSV:
+        return {}
     path = Path(GLOSSARY_CSV)
     if not path.is_file():
         return {}
@@ -147,7 +173,7 @@ def translate_texts(texts: list[str], model: str = MODEL, num_ctx: int = 8192) -
         }
     ).encode()
     req = urllib.request.Request(
-        f"{OLLAMA}/api/chat",
+        f"{_ollama()}/api/chat",
         data=payload,
         headers={"Content-Type": "application/json"},
     )
@@ -204,7 +230,8 @@ def translate_image(img_path: str | Path, out_path: str | Path, to_lang: str = "
 
     result = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(result)
-    font_path = FONT if Path(FONT).is_file() else None
+    font_path = _font()
+    font_path = font_path if Path(font_path).is_file() else None
     for i, b in enumerate(boxes):
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         zh = trans.get(i + 1, "")

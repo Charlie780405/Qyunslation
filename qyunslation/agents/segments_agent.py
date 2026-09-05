@@ -10,10 +10,10 @@ from logging import Logger
 
 from json_repair import json_repair
 
-from docutranslate.agents import AgentConfig, Agent
-from docutranslate.agents.agent import PartialAgentResultError, AgentResultError
-from docutranslate.glossary.glossary import Glossary
-from docutranslate.utils.json_utils import segments2json_chunks, fix_json_string, parse_json_response
+from qyunslation.agents import AgentConfig, Agent
+from qyunslation.agents.agent import PartialAgentResultError, AgentResultError
+from qyunslation.glossary.glossary import Glossary
+from qyunslation.utils.json_utils import segments2json_chunks, fix_json_string, parse_json_response
 
 
 def generate_prompt(json_segments: str, to_lang: str):

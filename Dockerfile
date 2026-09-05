@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir uv
 
 # 创建虚拟环境并安装依赖
 COPY pyproject.toml uv.lock ./
-COPY docutranslate ./docutranslate
+COPY qyunslation ./qyunslation
 RUN uv venv && uv sync --frozen --extra mcp
 
 # 阶段2: 运行阶段
@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 从构建阶段复制虚拟环境
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/docutranslate /app/docutranslate
+COPY --from=builder /app/qyunslation /app/qyunslation
 
 # 创建挂载点
 RUN mkdir -p /app/output
@@ -47,7 +47,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${DOCUTRANSLATE_PORT}/service/meta || exit 1
 
 # 启动命令
-ENTRYPOINT ["docutranslate", "-i", "--with-mcp"]
+ENTRYPOINT ["qyunslation", "-i"]
 
 # docker build -t xunbu/docutranslate:latest .
 # docker push xunbu/docutranslate:latest

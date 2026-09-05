@@ -4,8 +4,8 @@ from io import BytesIO, StringIO
 
 import openpyxl
 import csv
-from docutranslate.exporter.xlsx.base import XlsxExporter
-from docutranslate.ir.document import Document
+from qyunslation.exporter.xlsx.base import XlsxExporter
+from qyunslation.ir.document import Document
 
 
 class Xlsx2CsvExporter(XlsxExporter):
