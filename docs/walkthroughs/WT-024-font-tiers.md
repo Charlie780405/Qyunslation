@@ -12,4 +12,4 @@
 - 分支：`feat/plan-024-font-tiers`
 - 合并：`--no-ff` → `main`
 - 服务：`pdf2zh.service` + `qyunslation-office.service`
-- 生产哈希：（合并后回填）
+- 生产哈希：`31198f5`
