@@ -2,13 +2,15 @@
 
 ## 方案设计图-20260728.jpg（4353×2132）
 
-| 指标 | HPD | PLAN-021 | PLAN-022 | PLAN-023 目标 |
-| --- | --- | --- | --- | --- |
-| OCR 框 | 2 | 60 | ≥55 | ≥55 |
-| 译文命中 | 0/60 | 60/60 | ≥95% | ≥95% |
-| 蓝框对比度 | — | 1（旧取色） | ≥60 | ≥60 |
-| solid 命中 | — | 白底约 8/60 | 同左 | ≥55/60 |
-| QC | — | — | — | 六项全绿 |
+| 指标 | HPD | PLAN-021 | PLAN-022 | PLAN-023 | PLAN-024 |
+| --- | --- | --- | --- | --- | --- |
+| OCR 框 | 2 | 60 | ≥55 | ≥55 | ≥55 |
+| 译文命中 | 0/60 | 60/60 | ≥95% | ≥95% | ≥95% |
+| 蓝框对比度 | — | 1 | ≥60 | ≥60 | ≥60 |
+| solid 命中 | — | ~8/60 | 同左 | ≥55/60 | ≥55/60 |
+| 蓝框组字号 | — | 各自 | 各自 | 各自 | 8 个全等 |
+| 脚注组字号 | — | 各自 | 各自 | 各自 | 7 个全等 |
+| QC | — | — | — | C1–C6 | +C7a/C7b |
 
 ### 取色反例（旧 `vals<120`）
 
@@ -48,5 +50,7 @@ for i, b in enumerate(ocr_image(path), 1):
 | `QYUNSLATION_AVAIL_W_MULT` | 可用区横向上限倍数 | 3.0 |
 | `QYUNSLATION_AVAIL_H_MULT` | 可用区纵向上限倍数 | 1.6 |
 | `QYUNSLATION_IMAGE_QC_STRICT` | QC 硬失败抛错 | 0 |
+| `QYUNSLATION_TIER_OUTLIER_RATIO` | 比值低于组中位此倍视为 outlier | 0.6 |
+| `QYUNSLATION_TIER_RATIO_TOL` | 组间比例允许偏差 | 0.02 |
 | `QYUNSLATION_BOLD_AREA_RATIO` | 粗体面积比 | 0.28 |
 | `QYUNSLATION_TRANSLATE_BATCH` | 批大小 | 25 |

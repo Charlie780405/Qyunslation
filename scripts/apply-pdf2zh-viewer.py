@@ -215,7 +215,7 @@ JS_BLOCK = r"""
       var inner = document.createElement('div');
       inner.className = 'qy-viewer-inner';
 
-      // clone visible content once (whole container); avoid matching nested img inside .prose
+      // clone once; if root is already .qy-viewer-inner, move its children (no nested inner)
       var cloneRoot = sourcePanel.querySelector('.qy-viewer-inner') || sourcePanel;
       var clone = cloneRoot.cloneNode(true);
       var srcCanvases = cloneRoot.querySelectorAll('canvas');
@@ -224,9 +224,12 @@ JS_BLOCK = r"""
           if (srcCanvases[i]) c.getContext('2d').drawImage(srcCanvases[i], 0, 0);
         } catch (err) {}
       });
-      // strip nested toolbars from clone
       clone.querySelectorAll('.qy-viewer-toolbar').forEach(function (el) { el.remove(); });
-      inner.appendChild(clone);
+      if (clone.classList && clone.classList.contains('qy-viewer-inner')) {
+        while (clone.firstChild) inner.appendChild(clone.firstChild);
+      } else {
+        inner.appendChild(clone);
+      }
 
       stage.appendChild(inner);
       viewport.appendChild(stage);
@@ -361,8 +364,13 @@ CSS_BLOCK = """
         will-change: transform;
     }
     .qy-viewer-inner {
+        width: 100%;
+        height: 100%;
         max-width: 100%;
         max-height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         transform-origin: center center;
         will-change: transform;
     }
@@ -370,10 +378,26 @@ CSS_BLOCK = """
     .qy-viewer-inner canvas {
         max-width: 100%;
         max-height: 100%;
+        width: auto;
+        height: auto;
         object-fit: contain;
         display: block;
         user-select: none;
         -webkit-user-drag: none;
+    }
+    .qy-viewer-inner .prose,
+    .qy-viewer-inner .markdown,
+    .qy-viewer-inner .html-container,
+    .qy-viewer-inner .qy-html-preview-body {
+        max-height: none;
+        width: 100%;
+        height: auto;
+        overflow: auto;
+        align-self: stretch;
+    }
+    .qy-viewer-fs-viewport img,
+    .qy-viewer-fs-viewport canvas {
+        max-height: calc(100vh - 72px);
     }
     .qy-viewer-toolbar {
         position: absolute;

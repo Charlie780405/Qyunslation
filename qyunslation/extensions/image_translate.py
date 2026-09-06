@@ -49,6 +49,9 @@ QC_STRICT = os.environ.get("QYUNSLATION_IMAGE_QC_STRICT", "0").lower() in (
     "on",
 )
 QC_INK_MIN = float(os.environ.get("QYUNSLATION_QC_INK_MIN", "0.005"))
+TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
+TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
+TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
 
 _RAPID_ENGINE = None
 
@@ -650,6 +653,208 @@ def _available_box(
     return (x1, y1, x2, y2)
 
 
+def _quantize_bgr(bgr: tuple[int, int, int], step: int = TIER_BG_STEP) -> tuple[int, int, int]:
+    return tuple(min(255, int(round(c / step) * step)) for c in bgr)
+
+
+def _is_near_white(bgr: tuple[int, int, int]) -> bool:
+    return sum(bgr) >= 720
+
+
+def _ink_height(roi: np.ndarray) -> int:
+    """ROI 内文字墨迹垂直高度（Otsu 少数类）。"""
+    if roi.size == 0:
+        return 0
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = th > 0
+    if int(mask.sum()) > int((~mask).sum()):
+        mask = ~mask
+    ys = np.where(mask.any(axis=1))[0]
+    if len(ys) == 0:
+        return 0
+    return int(ys.max() - ys.min() + 1)
+
+
+def _estimate_orig_size(
+    text: str, ink_h: int, font_path: str | None, bold: bool = False
+) -> int:
+    """反推原图标称字号：同一原文渲染墨迹高不超过实测值的最大字号。"""
+    if ink_h <= 0 or not text:
+        return max(12, ink_h)
+    path = font_path
+    lo, hi, best = 8, max(8, min(140, ink_h * 3)), 8
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            font = ImageFont.truetype(path, mid) if path else ImageFont.load_default()
+        except OSError:
+            font = ImageFont.load_default()
+        rendered = _text_size(font, text)[1]
+        if rendered <= ink_h:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _assign_tiers(
+    boxes: list, styles: list[dict]
+) -> list[str]:
+    """背景色桶 + 白底 y 行带 → 每框 tier key。"""
+    n = len(boxes)
+    keys: list[str] = [""] * n
+    white_idx: list[int] = []
+    for i, (b, st) in enumerate(zip(boxes, styles)):
+        q = _quantize_bgr(st["bg_bgr"])
+        if _is_near_white(q):
+            white_idx.append(i)
+        else:
+            keys[i] = f"c{q[0]}_{q[1]}_{q[2]}"
+
+    if not white_idx:
+        return keys
+
+    white_idx.sort(key=lambda i: (boxes[i][1] + boxes[i][3]) // 2)
+    heights = [max(1, boxes[i][3] - boxes[i][1]) for i in white_idx]
+    med_h = float(np.median(heights)) if heights else 40.0
+    thr = max(1.5 * med_h, 80.0)
+    band = 0
+    keys[white_idx[0]] = f"w{band}"
+    for a, b in zip(white_idx, white_idx[1:]):
+        cy_a = (boxes[a][1] + boxes[a][3]) // 2
+        cy_b = (boxes[b][1] + boxes[b][3]) // 2
+        if cy_b - cy_a > thr:
+            band += 1
+        keys[b] = f"w{band}"
+    return keys
+
+
+def _percentile(vals: list[float], p: float) -> float:
+    if not vals:
+        return 0.0
+    arr = sorted(vals)
+    if len(arr) == 1:
+        return float(arr[0])
+    k = (len(arr) - 1) * p
+    f = int(k)
+    c = min(f + 1, len(arr) - 1)
+    if f == c:
+        return float(arr[f])
+    return float(arr[f] + (arr[c] - arr[f]) * (k - f))
+
+
+def _assign_tier_sizes(
+    *,
+    boxes: list,
+    texts: list[str],
+    finals: list[str],
+    redraw: list[bool],
+    styles: list[dict],
+    avails: list[tuple[int, int, int, int]],
+    orig: np.ndarray,
+    font_regular: str | None,
+    font_bold: str | None,
+) -> dict:
+    """层级归一：原图 75 分位字号 + 全局比例 k + outlier 降级。"""
+    tiers = _assign_tiers(boxes, styles)
+    n = len(boxes)
+    est_sizes = [0] * n
+    fit_sizes = [0] * n
+    bold_flags = [bool(styles[i].get("bold")) for i in range(n)]
+
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+        roi = orig[max(0, y1):y2, max(0, x1):x2]
+        ink = _ink_height(roi)
+        use = font_bold if bold_flags[i] and font_bold else font_regular
+        est_sizes[i] = _estimate_orig_size(texts[i], ink, use, bold_flags[i])
+
+    # 组 orig_em（75 分位）+ 粗细多数决
+    by_tier: dict[str, list[int]] = {}
+    for i in range(n):
+        if redraw[i]:
+            by_tier.setdefault(tiers[i], []).append(i)
+
+    orig_em: dict[str, int] = {}
+    tier_bold: dict[str, bool] = {}
+    for t, idxs in by_tier.items():
+        ests = [est_sizes[i] for i in idxs if est_sizes[i] > 0]
+        orig_em[t] = max(10, int(round(_percentile(ests, 0.75)))) if ests else 24
+        votes = sum(1 for i in idxs if bold_flags[i])
+        tier_bold[t] = votes * 2 >= len(idxs)
+
+    # 每框最大可行字号（用组粗细）
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        ax1, ay1, ax2, ay2 = avails[i]
+        box_w = max(8, ax2 - ax1)
+        box_h = max(8, ay2 - ay1)
+        max_size = max(12, min(int(box_h * 0.9), 72))
+        use = font_bold if tier_bold.get(tiers[i]) and font_bold else font_regular
+        _, _, fit, _ = _fit_font_and_lines(finals[i], box_w, box_h, use, max_size)
+        fit_sizes[i] = fit
+
+    # 比值与 outlier
+    ratios: dict[str, list[float]] = {t: [] for t in by_tier}
+    for i in range(n):
+        if not redraw[i]:
+            continue
+        em = max(1, orig_em[tiers[i]])
+        ratios[tiers[i]].append(fit_sizes[i] / em)
+
+    outliers: set[int] = set()
+    for t, idxs in by_tier.items():
+        rs = ratios.get(t) or []
+        if not rs:
+            continue
+        med = float(np.median(rs))
+        for i in idxs:
+            em = max(1, orig_em[t])
+            r = fit_sizes[i] / em
+            if med > 0 and r < TIER_OUTLIER_RATIO * med:
+                outliers.add(i)
+
+    # 全局 k
+    k_vals = []
+    for i in range(n):
+        if not redraw[i] or i in outliers:
+            continue
+        em = max(1, orig_em[tiers[i]])
+        k_vals.append(fit_sizes[i] / em)
+    k = min(k_vals) if k_vals else 1.0
+    k = max(0.15, min(1.0, k))
+
+    assigned = [0] * n
+    tier_size: dict[str, int] = {}
+    for t, em in orig_em.items():
+        tier_size[t] = max(10, int(round(k * em)))
+
+    for i in range(n):
+        if not redraw[i]:
+            continue
+        if i in outliers:
+            assigned[i] = fit_sizes[i]
+        else:
+            assigned[i] = tier_size[tiers[i]]
+
+    return {
+        "tiers": tiers,
+        "assigned": assigned,
+        "fit_sizes": fit_sizes,
+        "est_sizes": est_sizes,
+        "orig_em": orig_em,
+        "tier_size": tier_size,
+        "tier_bold": tier_bold,
+        "outliers": sorted(i + 1 for i in outliers),
+        "k": k,
+    }
+
+
 def _qc_report(
     *,
     out_path: Path,
@@ -666,8 +871,9 @@ def _qc_report(
     fonts: list,
     erased_bgr: np.ndarray,
     final_rgb: np.ndarray,
+    tier_meta: dict | None = None,
 ) -> dict:
-    """六项 QC：覆盖/绘制/墨迹实测/对比度/溢出/可读性。"""
+    """QC：覆盖/绘制/墨迹/对比度/溢出/可读性 + 层级一致与比例。"""
     issues: list[dict] = []
     warnings: list[dict] = []
 
@@ -694,7 +900,6 @@ def _qc_report(
         if not redraw[i]:
             continue
         x1, y1, x2, y2 = avails[i]
-        # 并上 OCR 擦除区，避免漏检
         ox1, oy1, ox2, oy2 = b[0], b[1], b[2], b[3]
         x1, y1 = min(x1, ox1), min(y1, oy1)
         x2, y2 = max(x2, ox2), max(y2, oy2)
@@ -752,6 +957,60 @@ def _qc_report(
                 }
             )
 
+    tiers_info: dict = {}
+    if tier_meta:
+        tiers = tier_meta.get("tiers") or []
+        orig_em = tier_meta.get("orig_em") or {}
+        tier_size = tier_meta.get("tier_size") or {}
+        outliers = set(tier_meta.get("outliers") or [])
+        k = float(tier_meta.get("k") or 1.0)
+        by_tier: dict[str, list[int]] = {}
+        for i, t in enumerate(tiers):
+            if redraw[i]:
+                by_tier.setdefault(t, []).append(i)
+
+        # C7a 组内一致
+        inconsistent = []
+        for t, idxs in by_tier.items():
+            members = [i for i in idxs if (i + 1) not in outliers]
+            if len(members) < 2:
+                continue
+            s0 = sizes[members[0]]
+            if any(sizes[i] != s0 for i in members[1:]):
+                inconsistent.append(t)
+        if inconsistent:
+            issues.append({"code": "C7a", "msg": f"tier size mismatch={inconsistent}"})
+
+        # C7b 组间比例
+        ratio_bad = []
+        for t, em in orig_em.items():
+            if em <= 0 or t not in tier_size:
+                continue
+            r = tier_size[t] / em
+            if abs(r - k) > TIER_RATIO_TOL * max(k, 1e-6) + 1e-6:
+                # 允许 ±1px 取整误差
+                expected = max(10, int(round(k * em)))
+                if tier_size[t] != expected:
+                    ratio_bad.append({"tier": t, "ratio": round(r, 4), "k": round(k, 4)})
+        if ratio_bad:
+            issues.append({"code": "C7b", "msg": "tier ratio drift", "detail": ratio_bad})
+
+        for t, idxs in by_tier.items():
+            tiers_info[t] = {
+                "orig_em": orig_em.get(t),
+                "size": tier_size.get(t),
+                "n": len(idxs),
+                "members": [i + 1 for i in idxs],
+            }
+        for ob in outliers:
+            warnings.append(
+                {
+                    "code": "C7o",
+                    "box": ob,
+                    "msg": "tier outlier; used private fit size",
+                }
+            )
+
     report = {
         "ok": not issues,
         "issues": issues,
@@ -759,6 +1018,9 @@ def _qc_report(
         "drawn": drawn,
         "boxes": len(boxes),
         "solid_count": sum(1 for st in styles if st.get("solid")),
+        "tiers": tiers_info,
+        "k": (tier_meta or {}).get("k"),
+        "outliers": (tier_meta or {}).get("outliers") or [],
     }
     qc_path = Path(str(out_path) + ".qc.json")
     try:
@@ -868,6 +1130,21 @@ def translate_image(
     if font_bold and not Path(font_bold).is_file():
         font_bold = None
 
+    tier_meta = _assign_tier_sizes(
+        boxes=boxes,
+        texts=texts,
+        finals=finals,
+        redraw=redraw,
+        styles=styles,
+        avails=avails,
+        orig=orig,
+        font_regular=font_regular,
+        font_bold=font_bold,
+    )
+    assigned = tier_meta["assigned"]
+    tier_bold = tier_meta["tier_bold"]
+    tiers = tier_meta["tiers"]
+
     drawn = 0
     min_contrast = 999.0
     sizes: list[int] = [0] * len(boxes)
@@ -883,11 +1160,33 @@ def translate_image(
         st = styles[i]
         box_w = max(8, ax2 - ax1)
         box_h = max(8, ay2 - ay1)
-        max_size = max(12, min(int(box_h * 0.9), 72))
-        use_path = font_bold if st["bold"] and font_bold else font_regular
-        font, lines, size, lh = _fit_font_and_lines(
-            text, box_w, box_h, use_path, max_size
-        )
+        size = max(10, int(assigned[i]))
+        use_bold = bool(tier_bold.get(tiers[i]))
+        use_path = font_bold if use_bold and font_bold else font_regular
+        if use_path:
+            font = ImageFont.truetype(use_path, size)
+        else:
+            font = ImageFont.load_default()
+        lh = _line_height(font, size)
+        lines = _wrap_text(text, font, max(8, box_w))
+        max_lines = max(1, box_h // max(1, lh))
+        lines = lines[:max_lines]
+        outlier_set = set(tier_meta.get("outliers") or [])
+        if (i + 1) in outlier_set:
+            while size > 10:
+                total_h = lh * len(lines) + max(1, size // 8) * max(0, len(lines) - 1)
+                max_tw = max((_text_size(font, ln)[0] for ln in lines), default=0)
+                if max_tw <= box_w * 1.05 and total_h <= box_h:
+                    break
+                size -= 1
+                if use_path:
+                    font = ImageFont.truetype(use_path, size)
+                lh = _line_height(font, size)
+                lines = _wrap_text(text, font, max(8, box_w))
+                max_lines = max(1, box_h // max(1, lh))
+                lines = lines[:max_lines]
+        # 非 outlier 不降字号，放不下由 C5 报告
+
         sizes[i] = size
         line_heights[i] = lh
         line_lists[i] = lines
@@ -938,6 +1237,7 @@ def translate_image(
         fonts=fonts,
         erased_bgr=erased_bgr,
         final_rgb=final_rgb,
+        tier_meta=tier_meta,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -946,7 +1246,7 @@ def translate_image(
     solid_n = sum(1 for st in styles if st.get("solid"))
     logger.info(
         "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d "
-        "solid=%d/%d min_contrast=%.1f",
+        "solid=%d/%d min_contrast=%.1f k=%.3f tiers=%d outliers=%s",
         len(boxes),
         sum(1 for i in range(len(boxes)) if trans.get(i + 1)),
         drawn,
@@ -954,6 +1254,9 @@ def translate_image(
         solid_n,
         len(boxes),
         min_contrast if drawn else 0.0,
+        float(tier_meta.get("k") or 0),
+        len(tier_meta.get("orig_em") or {}),
+        tier_meta.get("outliers") or [],
     )
     return drawn
 

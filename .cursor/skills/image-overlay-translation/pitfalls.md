@@ -18,10 +18,14 @@
 14. **用 `getbbox` 墨迹高判能否放下** → 真实行高更大，「16 weeks」第二行掉出框外；底部英文缩成两行小字像丢失（PLAN-023）。正解：`font.getmetrics()` ascent+descent；排版用 `_available_box` 扩到碰邻居为止。
 15. **框重叠 + 缺译不擦** → 邻框擦除矩形盖掉未译框原文，像素回不来（PLAN-023）。正解：擦前备份 `redraw=False` ROI，擦后回贴。
 16. **无 QC / 无 basicConfig** → 「擦了没画」静默出货，journalctl 看不到嵌字日志（PLAN-023）。正解：`_qc_report` 六项 + sidecar `basicConfig`。
+17. **全屏克隆嵌套 `.qy-viewer-inner`** → 中间层高度 auto，`max-height:100%` 退化，图片按宽铺满后底部被裁（访视轴/分层消失）（PLAN-024）。正解：搬子节点不嵌套；父级 `height:100%`；全屏 `max-height: calc(100vh - 72px)`。
+18. **逐框独立二分字号** → 同蓝框两行、同组脚注大小不一（PLAN-024）。正解：背景色桶 + 白底 y 行带分档；组内统一；组间 `k × orig_em`。
+19. **用墨迹高度分档** → `IGA` 拉丁 43 vs 汉字脚注 54 被当成两级（PLAN-024）。正解：反推渲染字号；组 orig_em 取 75 分位。
 
-## 定位手法（PLAN-023）
+## 定位手法（PLAN-023/024）
 
 - 逐框打印 `边框bg / 当前bg / solid / 通道std / frac`
 - 对照跨通道拍平 std vs 按通道 max std
 - 框重叠矩阵（IoU / cover_a / cover_b）
 - 原图与译图同区域裁剪对比（顶栏 16周、蓝框、底部分层）
+- 逐框打印 `ink / est_size / tier / assigned`（PLAN-024）
