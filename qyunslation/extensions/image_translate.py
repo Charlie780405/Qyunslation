@@ -59,6 +59,12 @@ RULE_ROW_H_FRAC = float(os.environ.get("QYUNSLATION_RULE_ROW_H_FRAC", "0.4"))
 # 跨框左对齐组：左墨迹边差与纵向间距上限
 LEFT_GROUP_TOL_PX = float(os.environ.get("QYUNSLATION_LEFT_GROUP_TOL_PX", "8"))
 LEFT_GROUP_GAP_MULT = float(os.environ.get("QYUNSLATION_LEFT_GROUP_GAP_MULT", "1.6"))
+# 实心填充纵向收敛到文字带时的上下 pad
+FILL_BAND_PAD = int(os.environ.get("QYUNSLATION_FILL_BAND_PAD", "2"))
+# 贯穿线保护核相对框宽/高的比例
+LINE_GUARD_FRAC = float(os.environ.get("QYUNSLATION_LINE_GUARD_FRAC", "0.6"))
+# C10：OCR 框内文字带外「原图非背景→成品背景」像素超此数即失败
+GRAPHICS_DAMAGE_MAX = int(os.environ.get("QYUNSLATION_GRAPHICS_DAMAGE_MAX", "40"))
 
 _RAPID_ENGINE = None
 
@@ -531,23 +537,86 @@ def _ink_geometry(roi: np.ndarray) -> dict:
     }
 
 
+def _is_rule_row(row: dict, h_max: int) -> bool:
+    """线状行：宽高比超阈值且高度不足最高行比例（括号线/色带）。"""
+    h = max(1, int(row["y2"]) - int(row["y1"]))
+    w = max(1, int(row["x2"]) - int(row["x1"]))
+    return w / h >= RULE_ROW_RATIO and h < h_max * RULE_ROW_H_FRAC
+
+
+def _text_rows(rows: list[dict]) -> list[dict]:
+    """排除线状行后的文字行；若全是线状行则回退全部行。"""
+    if not rows:
+        return []
+    heights = [max(1, int(r["y2"]) - int(r["y1"])) for r in rows]
+    h_max = max(heights)
+    texty = [r for r in rows if not _is_rule_row(r, h_max)]
+    return texty or list(rows)
+
+
 def _main_row(rows: list[dict]) -> dict | None:
     """锚点行：排除线状行（括号线/色带）后取最宽的一行。
 
     OCR 框常蹭到贯穿全宽的细线，若按「最宽」直接选行会锚到那条线上。
     """
-    if not rows:
+    pool = _text_rows(rows)
+    if not pool:
         return None
+    return max(pool, key=lambda r: int(r["x2"]) - int(r["x1"]))
+
+
+def _fill_band(roi: np.ndarray, *, pad: int = FILL_BAND_PAD) -> tuple[int, int]:
+    """实心填充纵向范围：非线状文字行 y 包络 ±pad；无文字行回退整框。
+
+    相对 ROI 顶部。OCR 框常比文字带宽，整框填充会抹掉框边缘的括号线。
+    """
+    h = int(roi.shape[0]) if roi.size else 0
+    if h <= 0:
+        return 0, 0
+    rows = (_ink_geometry(roi).get("rows") or [])
+    if not rows:
+        return 0, h
     heights = [max(1, int(r["y2"]) - int(r["y1"])) for r in rows]
     h_max = max(heights)
-    texty: list[dict] = []
-    for r, h in zip(rows, heights):
-        w = max(1, int(r["x2"]) - int(r["x1"]))
-        if w / h >= RULE_ROW_RATIO and h < h_max * RULE_ROW_H_FRAC:
-            continue
-        texty.append(r)
-    pool = texty or rows
-    return max(pool, key=lambda r: int(r["x2"]) - int(r["x1"]))
+    texty = [r for r in rows if not _is_rule_row(r, h_max)]
+    if not texty:
+        return 0, h
+    y1 = max(0, min(int(r["y1"]) for r in texty) - pad)
+    y2 = min(h, max(int(r["y2"]) for r in texty) + 1 + pad)
+    if y2 <= y1:
+        return 0, h
+    return y1, y2
+
+
+def _line_guard_mask(
+    roi: np.ndarray, bg_bgr: tuple[int, int, int], tm: np.ndarray | None = None
+) -> np.ndarray:
+    """贯穿性线条/色带保护掩膜（uint8 0/255）。
+
+    对「非背景且非文字」像素做 1×K / K×1 开运算，存活者即长线图元。
+    挡住填充/inpaint 抹掉穿过文字带的竖线或箭头杆。
+    """
+    if roi.size == 0:
+        return np.zeros((0, 0), np.uint8)
+    h, w = roi.shape[:2]
+    if tm is None:
+        tm = _text_mask_u8(roi)
+    text = tm > 0 if tm.size else np.zeros((h, w), bool)
+    bg = np.array(bg_bgr, dtype=np.int16)
+    diff = np.abs(roi.astype(np.int16) - bg).max(axis=2)
+    candidate = (diff > 40) & (~text)
+    u8 = (candidate.astype(np.uint8) * 255)
+    if not u8.any():
+        return np.zeros((h, w), np.uint8)
+    kx = max(3, int(round(w * LINE_GUARD_FRAC)))
+    ky = max(3, int(round(h * LINE_GUARD_FRAC)))
+    if kx % 2 == 0:
+        kx += 1
+    if ky % 2 == 0:
+        ky += 1
+    horiz = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((1, kx), np.uint8))
+    vert = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((ky, 1), np.uint8))
+    return np.maximum(horiz, vert)
 
 
 def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
@@ -1237,46 +1306,50 @@ def _qc_report(
             st = styles[i]
             # 用实际生效的锚定模式（左对齐组会覆盖逐框推断）
             align = planned.get("align") or st.get("align") or "center"
-            vertical_center = bool(planned.get("solid_colored", st.get("solid")))
-            if align == "center" and vertical_center:
+            vertical_mode = planned.get("vertical_mode")
+            if vertical_mode is None:
+                vertical_mode = (
+                    "center"
+                    if planned.get("solid_colored", st.get("solid_colored"))
+                    else "top"
+                )
+            vertical_center = vertical_mode == "center"
+            # 水平 / 竖直锚点口径彼此独立
+            if align == "left":
+                sx = float(db["x1"])
+                dx_abs = mx1 + float(dst_g["ink_x1"])
+            elif align == "right":
+                sx = float(db["x2"])
+                dx_abs = mx1 + float(dst_g["ink_x2"])
+            else:
                 sx = (int(db["x1"]) + int(db["x2"])) / 2.0
-                sy = (int(db["y1"]) + int(db["y2"])) / 2.0
                 dx_abs = mx1 + float(dst_g["ink_cx"])
+            if vertical_center:
+                sy = (int(db["y1"]) + int(db["y2"])) / 2.0
                 dy_abs = my1 + float(dst_g["ink_cy"])
             else:
                 sy = float(db["y1"])
                 dy_abs = my1 + float(dst_g["ink_y1"])
-                if align == "left":
-                    sx = float(db["x1"])
-                    dx_abs = mx1 + float(dst_g["ink_x1"])
-                elif align == "right":
-                    sx = float(db["x2"])
-                    dx_abs = mx1 + float(dst_g["ink_x2"])
-                else:
-                    sx = (int(db["x1"]) + int(db["x2"])) / 2.0
-                    dx_abs = mx1 + float(dst_g["ink_cx"])
             ddx = dx_abs - sx
             ddy = dy_abs - sy
             ink_src = planned.get("ink_src") or {}
             # 相对原文锚点的位移（审计用）
-            if align == "center" and vertical_center:
+            if align == "left":
+                src_ax = float(ink_src.get("x1") or ox1)
+            elif align == "right":
+                src_ax = float(ink_src.get("x2") or ox2)
+            else:
                 src_ax = float(ink_src.get("cx") or ((ox1 + ox2) / 2.0))
+            if vertical_center:
                 src_ay = float(ink_src.get("cy") or ((oy1 + oy2) / 2.0))
-                plan_dx = sx - src_ax
-                plan_dy = sy - src_ay
             else:
                 src_ay = float(ink_src.get("y1") or oy1)
-                plan_dy = sy - src_ay
-                if align == "left":
-                    src_ax = float(ink_src.get("x1") or ox1)
-                elif align == "right":
-                    src_ax = float(ink_src.get("x2") or ox2)
-                else:
-                    src_ax = float(ink_src.get("cx") or ((ox1 + ox2) / 2.0))
-                plan_dx = sx - src_ax
+            plan_dx = sx - src_ax
+            plan_dy = sy - src_ay
             entry = {
                 "box": i + 1,
                 "align": align,
+                "vertical_mode": vertical_mode,
                 "solid": bool(st.get("solid")),
                 "left_group_x": planned.get("left_group_x"),
                 "anchor_src": {"x": round(src_ax, 1), "y": round(src_ay, 1)},
@@ -1324,6 +1397,47 @@ def _qc_report(
     if ragged:
         issues.append({"code": "C9", "msg": "left group ragged", "detail": ragged})
 
+    # C10 图元损伤：OCR 框 − (文字带 ∪ draw_bbox) 内，原图非背景却被成品抹成背景
+    graphics_damage: list[dict] = []
+    if orig_bgr is not None:
+        final_bgr_chk = cv2.cvtColor(final_rgb, cv2.COLOR_RGB2BGR)
+        for i, b in enumerate(boxes):
+            if not redraw[i]:
+                continue
+            ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            roi_o = orig_bgr[oy1:oy2, ox1:ox2]
+            roi_f = final_bgr_chk[oy1:oy2, ox1:ox2]
+            if roi_o.size == 0:
+                continue
+            st = styles[i]
+            bg = np.array(st["bg_bgr"], dtype=np.int16)
+            by1, by2 = _fill_band(roi_o)
+            planned = (anchors[i] if anchors and i < len(anchors) else None) or {}
+            db = planned.get("draw_bbox") if isinstance(planned, dict) else None
+            protect = np.zeros(roi_o.shape[:2], bool)
+            protect[by1:by2, :] = True
+            if isinstance(db, dict):
+                lx1 = max(0, int(db["x1"]) - ox1)
+                ly1 = max(0, int(db["y1"]) - oy1)
+                lx2 = min(roi_o.shape[1], int(db["x2"]) - ox1)
+                ly2 = min(roi_o.shape[0], int(db["y2"]) - oy1)
+                if lx2 > lx1 and ly2 > ly1:
+                    protect[ly1:ly2, lx1:lx2] = True
+            diff_o = np.abs(roi_o.astype(np.int16) - bg).max(axis=2)
+            diff_f = np.abs(roi_f.astype(np.int16) - bg).max(axis=2)
+            damaged = (~protect) & (diff_o > 40) & (diff_f <= 15)
+            n = int(damaged.sum())
+            if n > GRAPHICS_DAMAGE_MAX:
+                graphics_damage.append({"box": i + 1, "pixels": n})
+    if graphics_damage:
+        issues.append(
+            {
+                "code": "C10",
+                "msg": f"graphics damage boxes={[d['box'] for d in graphics_damage]}",
+                "detail": graphics_damage[:12],
+            }
+        )
+
     report = {
         "ok": not issues,
         "issues": issues,
@@ -1341,6 +1455,8 @@ def _qc_report(
             for gx, members in groups.items()
             if len(members) >= 2
         },
+        "graphics_damage": graphics_damage,
+        "graphics_damage_max": GRAPHICS_DAMAGE_MAX,
     }
     qc_path = Path(str(out_path) + ".qc.json")
     try:
@@ -1354,7 +1470,9 @@ def _qc_report(
         logger.warning("image QC WARN: %s", json.dumps(warnings[:12], ensure_ascii=False))
     if QC_STRICT and issues:
         hard = [
-            x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4", "C8", "C9")
+            x
+            for x in issues
+            if x.get("code") in ("C1", "C2", "C3", "C4", "C8", "C9", "C10")
         ]
         if hard:
             raise RuntimeError(f"image QC strict fail: {hard}")
@@ -1421,25 +1539,62 @@ def translate_image(
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         kept_rois.append(((x1, y1, x2, y2), orig[y1:y2, x1:x2].copy()))
 
-    # 两趟擦除：纯色填充；非纯色局部邻域取色（保留色带），必要时一次 inpaint 收尾
+    # 两趟擦除：纯色只填文字带；非纯色局部取色；贯穿线图元先备份后回贴
     inpaint_mask = np.zeros(img_cv.shape[:2], np.uint8)
+    fill_bands: list[tuple[int, int, int, int, int, int] | None] = [None] * len(boxes)
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         st = styles[i]
+        roi = orig[y1:y2, x1:x2]
+        tm = _text_mask_u8(roi)
+        guard = _line_guard_mask(roi, st["bg_bgr"], tm)
+        guard_pix = None
+        if guard.size and int(guard.max()) > 0:
+            guard_pix = roi.copy()
         if st["solid"]:
-            cv2.rectangle(img_cv, (x1, y1), (x2, y2), st["bg_bgr"], -1)
+            by1, by2 = _fill_band(roi)
+            fill_bands[i] = (x1, y1, x2, y2, by1, by2)
+            fy1, fy2 = y1 + by1, y1 + by2
+            cv2.rectangle(img_cv, (x1, fy1), (x2, fy2), st["bg_bgr"], -1)
         else:
-            roi = orig[y1:y2, x1:x2]
-            tm = _text_mask_u8(roi)
             if tm.size:
-                _erase_text_local(img_cv, x1, y1, x2, y2, tm)
+                erase_tm = tm.copy()
+                if guard.size and int(guard.max()) > 0:
+                    erase_tm[guard > 0] = 0
+                _erase_text_local(img_cv, x1, y1, x2, y2, erase_tm)
+                masked = erase_tm.copy()
+                if guard.size and int(guard.max()) > 0:
+                    masked[guard > 0] = 0
                 inpaint_mask[y1:y2, x1:x2] = np.maximum(
-                    inpaint_mask[y1:y2, x1:x2], tm
+                    inpaint_mask[y1:y2, x1:x2], masked
                 )
+                fill_bands[i] = (x1, y1, x2, y2, 0, y2 - y1)
+        if guard_pix is not None:
+            g = guard > 0
+            img_cv[y1:y2, x1:x2][g] = guard_pix[g]
     if int(inpaint_mask.max()) > 0:
         img_cv = cv2.inpaint(img_cv, inpaint_mask, 2, cv2.INPAINT_TELEA)
+        for i, b in enumerate(boxes):
+            if not redraw[i]:
+                continue
+            x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+            roi = orig[y1:y2, x1:x2]
+            guard = _line_guard_mask(roi, styles[i]["bg_bgr"])
+            if guard.size and int(guard.max()) > 0:
+                g = guard > 0
+                img_cv[y1:y2, x1:x2][g] = roi[g]
+
+    # 文字带外整段回贴原图：挡住邻框填充/inpaint 越界抹掉的括号线、色带
+    for fb in fill_bands:
+        if not fb:
+            continue
+        x1, y1, x2, y2, by1, by2 = fb
+        if by1 > 0:
+            img_cv[y1 : y1 + by1, x1:x2] = orig[y1 : y1 + by1, x1:x2]
+        if y1 + by2 < y2:
+            img_cv[y1 + by2 : y2, x1:x2] = orig[y1 + by2 : y2, x1:x2]
 
     for (x1, y1, x2, y2), roi in kept_rois:
         img_cv[y1:y2, x1:x2] = roi
@@ -1547,11 +1702,19 @@ def translate_image(
         if group_x is not None:
             ink_x1 = int(round(group_x))
 
+        # 竖向三段式：可证明不越界
+        # - 实心彩色块：恒居中 ink_cy
+        # - 其余且渲染块高 ≤ 原文墨迹高：居中（落在原 footprint 内）
+        # - 其余且渲染块高 > 原文墨迹高：顶对齐向下生长
+        orig_ink_h = max(1, ink_y2 - ink_y1)
         if st.get("solid_colored"):
-            # 实心彩色块：整块墨迹垂直中心对齐原文 ink_cy，上下对称生长
+            vertical_mode = "center"
+            y0 = int(round(ink_cy - block_ink_h / 2.0))
+        elif block_ink_h <= orig_ink_h:
+            vertical_mode = "center"
             y0 = int(round(ink_cy - block_ink_h / 2.0))
         else:
-            # 自由文字：首行墨迹顶对齐原文 ink_y1，向下生长
+            vertical_mode = "top"
             y0 = ink_y1
 
         # 先按锚点算各行理想坐标；x 一律表示墨迹左缘
@@ -1569,10 +1732,13 @@ def translate_image(
             y_cursor += lh + line_gap
 
         # 整块最小平移 clamp：
-        # - 强锚（居中 / 实心彩色块 / 左对齐组成员）：禁止被不对称可用区推偏，仅钳图像边界
+        # - 强锚（居中 / 实心彩色块 / 左对齐组成员 / 竖向居中）：仅钳图像边界
         # - 其余左/右对齐：clamp 进可用区，避免压邻框
         strict_anchor = (
-            align_mode == "center" or st.get("solid_colored") or group_x is not None
+            align_mode == "center"
+            or st.get("solid_colored")
+            or group_x is not None
+            or vertical_mode == "center"
         )
         shift_x = 0
         shift_y = 0
@@ -1639,6 +1805,7 @@ def translate_image(
             "align": align_mode,
             "solid": bool(st.get("solid")),
             "solid_colored": bool(st.get("solid_colored")),
+            "vertical_mode": vertical_mode,
             "left_group_x": (round(group_x, 1) if group_x is not None else None),
             "ink_src": {
                 "x1": ink_x1,
