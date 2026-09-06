@@ -36,4 +36,4 @@ sudo systemctl restart qyunslation-office.service
 sudo systemctl restart pdf2zh.service
 ```
 
-部署 commit：（合并后回填）
+部署 commit：`4ee11a9d569dad5471e3d272f7e29b213ebec2c6`
