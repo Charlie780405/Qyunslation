@@ -17,4 +17,5 @@ bash scripts/verify-plan-026.sh
 
 ## 部署
 
-（合 main 并重启 sidecar 后回填哈希）
+main `5a1ff3c`，已重启 `qyunslation-office.service`（active），`https://translate.qyunsgen.com/` 返回 200。
+`verify-plan-026.sh` PASS=23 FAIL=0；括号线存活 100%；周数中心偏移 ≤0.5px。
