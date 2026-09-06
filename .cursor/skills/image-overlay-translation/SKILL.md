@@ -12,39 +12,39 @@ qyunslation 自治 Skill。管 `extensions/image_translate.py` 与预览 viewer�
 
 ## 铁律
 
-1. **流程图必须 RapidOCR**——HPD 把整图标成 `<BLOCK>image`，内部零 OCR。HPD 仅作扫描件回退。
-2. **关思考用 API 参数**——`think: false`；`/no_think` 前缀对 qwen3.6 无效。`num_predict` 耗尽时 `content` 空串。
-3. **禁止先全擦后条件画**——缺译回退原文、不擦不画；未翻译框像素擦后必须回贴。
-4. **取色禁止单侧灰度阈值**——必须 Otsu 分层取中位数；对比度 `< 60` 强制黑/白。
-5. **颜色判据一律按通道算**——禁止把 BGR 拍平求 std（彩底通道差会虚报非纯色）。
-6. **纯色判定用「通道 std + 贴近中位数占比」**——纯 std 会被括号线等边缘污染翻车。
-7. **纯色块用矩形填充**——`cv2.rectangle(..., -1)`；`inpaint` 全图只做一次，禁止循环内重算。
-8. **擦除按 OCR 框、排版按可用区域**——`_available_box` 向外扩到碰邻框/非背景为止。
-9. **行高用 `font.getmetrics()`**——禁止用 `getbbox` 墨迹高判断能否放下（会溢出）。
-10. **粗细与对齐从原图测**——面积比 ≥ 0.28 用 Bold；质心偏移判左/中/右。
-11. **批量翻译分批 + 单条重试**——每批 25；编号解析失败不得静默丢弃。
-12. **全屏预览整容器克隆**——禁止嵌套双命中叠图。
-13. **收工前必须跑 QC 六项**——覆盖/绘制/墨迹实测/对比度/溢出/可读性；`QYUNSLATION_IMAGE_QC_STRICT=1` 为发布门禁。
-14. **判据落 verify**——`scripts/verify-plan-023.sh`：OCR≥55、命中≥95%、solid≥55/60、QC 全绿。
+1. **流程图必须 RapidOCR**——HPD 把整图标成 `<BLOCK>image`。HPD 仅作扫描件回退。
+2. **关思考用 API 参数**——`think: false`；`/no_think` 对 qwen3.6 无效。
+3. **禁止先全擦后条件画**——缺译不擦不画；未译框像素擦后必须回贴。
+4. **取色禁止单侧灰度阈值**——Otsu 分层中位数；对比度 `< 60` 强制黑/白。
+5. **颜色判据一律按通道算**——禁止 BGR 拍平求 std。
+6. **纯色用「通道内点 std + 贴近中位数占比」**——边框内缩采样抗蹭线。
+7. **纯色块矩形填充**——`inpaint` 全图只一次。
+8. **擦除按 OCR 框、排版按可用区域**——`_available_box` 扩到碰邻居为止。
+9. **行高用 `font.getmetrics()`**——禁 `getbbox` 墨迹高判能否放下。
+10. **层级按「背景色桶 + 白底 y 行带」**——禁墨迹高度直接分档（字形差异会误判）。
+11. **原图标称字号用同一原文反推渲染墨迹高**——组内取 75 分位（OCR 裁切只会单侧偏小）。
+12. **组内字号统一、组间保持原图比例**——全局 `k=min(fit/orig_em)`；outlier 单独降级告警，不得拖垮 k。
+13. **粗细组内多数决**——同级条目不得有的 Bold 有的 Regular。
+14. **全屏克隆禁止嵌套 `.qy-viewer-inner`**——百分比 `max-height` 需要父级确定高度；全屏兜底 `calc(100vh-72px)`。
+15. **收工前 QC**——C1–C6 + C7a/C7b；`QYUNSLATION_IMAGE_QC_STRICT=1` 为门禁。
+16. **判据落 verify**——`scripts/verify-plan-024.sh`。
 
 ## 施工顺序
 
 ```
-RapidOCR → translate_texts(think:false, batch=25, retry)
-→ _analyze_box_style(按通道) → _available_box
-→ 纯色填充 / 一次 inpaint → 回贴未译框 → 嵌字 → _qc_report
+RapidOCR → translate_texts → _analyze_box_style → _available_box
+→ 擦除/一次 inpaint → 回贴 → _assign_tier_sizes → 嵌字 → _qc_report
 ```
 
 ## 排障
 
 | 现象 | 看 |
 | --- | --- |
-| 译文几乎原样 | HPD 只出 2 框；应走 RapidOCR |
-| 蓝/彩框内看不见字 | `_analyze_box_style` 对比度；禁 `vals<120` |
-| 框内花纹涂抹 / 16 周黑框 | solid 误判走了 inpaint；查通道 std + frac |
-| 底部英文像丢失 | 可用区域未扩 / 墨迹高溢出；查 QC C5/C6 |
-| 字太细 / 偏左 | Bold 面积比、align 质心 |
+| 全屏裁掉底部 | 嵌套 `.qy-viewer-inner` / 父高不确定 |
+| 同级字号不一 | `_assign_tiers` / C7a；禁按墨迹分档 |
+| 蓝框涂抹 / 16 周黑框 | solid 通道 std + frac |
+| 底部英文像丢失 | 可用区 / C5/C6 |
 | 全屏上下两份 | viewer 嵌套选择器 |
-| journalctl 无嵌字日志 | sidecar 缺 `basicConfig` |
+| journalctl 无嵌字日志 | sidecar `basicConfig` |
 
-详表与诊断脚本见 [reference.md](reference.md)；踩坑 SSOT 见 [pitfalls.md](pitfalls.md)。
+详表见 [reference.md](reference.md)；踩坑见 [pitfalls.md](pitfalls.md)。
