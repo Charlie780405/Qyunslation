@@ -27,8 +27,10 @@
 23. **白底也算 solid 就强制居中** → 脚注 bullet「·IGA 3…」「·既往是否…」原文左边同为 201，译文长短不同后各自居中，两条错开百余像素（PLAN-025b）。正解：只有非白底实心块强制 center；白底走推断 + 跨框左对齐组。
 24. **左对齐组只看左边一致** → W/V 刻度标签上下相邻且左边也一致，被误并成左对齐组（PLAN-025b）。正解：要求组内右端参差 ≥ 3×tol，等宽条目不成组。
 25. **用 `font.getbbox()` 定位水平** → 它返回布局盒（x0 恒 0、x2 为步进宽），「·」或前导空格的左边距吃不到，整行右移 13px（PLAN-025b）。正解：`font.getmask(text).getbbox()` 取真实墨迹范围。
+26. **纯色整 OCR 框 `rectangle` 填充** → 「16周」框顶蹭到青色括号线（`y=116-117`），整框白填把线抹成缺口；同图 #9/#18 框边色带也被邻框越界抹掉（PLAN-026）。正解：`_fill_band` 只填非线状文字行带；擦后回贴文字带外原图像素；贯穿线 `_line_guard_mask`；C10 守门。
+27. **白底一律顶对齐** → 原文墨迹高 51、译文渲染高 30 时顶对齐使视觉中心统一上移 `(51-30)/2≈10.5px`，「16W」看起来偏上（PLAN-026）。正解：竖向三段式——能放下就居中于 `ink_cy`，放不下才顶对齐向下生长。
 
-## 定位手法（PLAN-023/024/025）
+## 定位手法（PLAN-023/024/025/026）
 
 - 逐框打印 `边框bg / 当前bg / solid / 通道std / frac`
 - 对照跨通道拍平 std vs 按通道 max std
@@ -36,4 +38,6 @@
 - 原图与译图同区域裁剪对比（顶栏 16周、蓝框、底部分层）
 - 逐框打印 `ink / est_size / tier / assigned`（PLAN-024）
 - 逐框打印 `ink_cx/cy vs avail_cx/cy` 与 `plan_dx/plan_dy / render dx/dy`（PLAN-025）
-- qc.json `align[]`：`anchor_src` / `anchor_plan` / `anchor_dst`
+- qc.json `align[]`：`anchor_src` / `anchor_plan` / `anchor_dst` / `vertical_mode`
+- 文字带外非背景像素计数 + 括号线行非白存活率（PLAN-026）
+- qc.json `graphics_damage[]`（C10）
