@@ -301,6 +301,90 @@ PY
 grep -q "ocr_engine_status" qyunslation/app.py && ok "lifespan ocr status" || bad "lifespan ocr status"
 grep -q '"ocr_engine"' qyunslation/custom_api.py && ok "api ocr_engine field" || bad "api ocr_engine field"
 
+echo "=== 8e. PLAN-027g 300 DPI + 擦除残留 ==="
+"$PY" - <<'PY' && ok "027g dpi+erase" || bad "027g dpi+erase"
+import importlib.util
+import io
+import tempfile
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+# 矢量默认
+spec = importlib.util.spec_from_file_location(
+    "pdf_figure_crop", Path("scripts/pdf_figure_crop.py")
+)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+assert int(mod.VECTOR_CROP_DPI) == 300, mod.VECTOR_CROP_DPI
+assert int(mod.VECTOR_MAX_PX) >= 4000, mod.VECTOR_MAX_PX
+
+from qyunslation.extensions.doc_image_policy import ensure_display_dpi
+from qyunslation.extensions.image_translate import (
+    ERASE_PAD_PX,
+    FILL_BAND_PAD,
+    _clear_ocr_leftovers,
+    _expand_erase_rect,
+    ocr_image_rapid,
+    translate_image_with_qc,
+)
+
+assert FILL_BAND_PAD >= 4
+assert ERASE_PAD_PX >= 3
+
+# ensure_display_dpi：100×50 @ 72×36pt ≈100 DPI → 升到 ~300×150
+im = Image.new("RGB", (100, 50), "white")
+buf = io.BytesIO()
+im.save(buf, format="PNG")
+up = ensure_display_dpi(buf.getvalue(), 72, 36, target_dpi=300)
+wu, hu = Image.open(io.BytesIO(up)).size
+assert wu >= 280 and hu >= 140, (wu, hu)
+# 已 300 DPI 不缩小
+im2 = Image.new("RGB", (300, 150), "white")
+buf2 = io.BytesIO()
+im2.save(buf2, format="PNG")
+keep = ensure_display_dpi(buf2.getvalue(), 72, 36, target_dpi=300)
+wk, hk = Image.open(io.BytesIO(keep)).size
+assert (wk, hk) == (300, 150), (wk, hk)
+
+# 蓝底白字 + 偏紧 OCR 框：擦除后二次扫描该区应无字
+font = ImageFont.truetype(
+    "/home/dev/.cache/babeldoc/fonts/SourceHanSansCN-Regular.ttf", 36
+)
+canvas = Image.new("RGB", (400, 120), (40, 90, 180))
+d = ImageDraw.Draw(canvas)
+d.text((40, 35), "Loading phase", fill="white", font=font)
+raw = Path(tempfile.mktemp(suffix=".png"))
+canvas.save(raw)
+bgr = cv2.imread(str(raw))
+# 故意偏紧的框（略裁切笔画）
+boxes = [(45, 40, 300, 85, "Loading phase", 1.0)]
+styles = [{"bg_bgr": (180, 90, 40), "solid": True, "solid_colored": True, "contrast": 120}]
+# 先用扩框+文字带擦一遍
+x1, y1, x2, y2 = _expand_erase_rect(45, 40, 300, 85, img_h=120, img_w=400)
+from qyunslation.extensions.image_translate import _fill_band, _text_mask_u8
+
+roi = bgr[y1:y2, x1:x2]
+by1, by2 = _fill_band(roi)
+cv2.rectangle(bgr, (x1, y1 + by1), (x2, y1 + by2), (180, 90, 40), -1)
+tm = _text_mask_u8(roi)
+if tm.size:
+    bgr[y1:y2, x1:x2][tm > 0] = (180, 90, 40)
+n = _clear_ocr_leftovers(
+    bgr, boxes, styles, [True], orig_texts=["Loading phase"]
+)
+# 二次扫描该区
+tmp2 = Path(tempfile.mktemp(suffix=".png"))
+cv2.imwrite(str(tmp2), bgr[y1:y2, x1:x2])
+left = ocr_image_rapid(tmp2)
+raw.unlink(missing_ok=True)
+tmp2.unlink(missing_ok=True)
+assert len(left) == 0, f"leftover still visible: {[x[4] for x in left]} cleared={n}"
+print(f"027g ok dpi_up={wu}x{hu} leftover=0 cleared={n}")
+PY
+
 echo "=== 9. Skill 文档 ==="
 grep -q "文档内嵌图\|Occurrence\|共享" .cursor/skills/image-overlay-translation/SKILL.md && ok "skill section" || bad "skill section (will add)"
 

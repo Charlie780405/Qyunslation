@@ -122,6 +122,8 @@ for i,b in enumerate(ocr_image(path),1):
 33. **跨 venv 能力显式判定**——pdf2zh 进程无 RapidOCR 时，探针/嵌字必须走 sidecar；禁止本地静默弱回退。
 34. **HPD 仅限扫描件整页**——流程图 / 设计图主路径必须 RapidOCR；HPD 把整图标成 `<BLOCK>image`。
 35. **引擎降级必须可见**——`ocr_image_with_engine` 返回实际引擎名；`probe_image` / `/image-probe` 透传 `ocr_engine`；启动打印 `ocr_engine_status()`。
+36. **回嵌目标 300 DPI**——按显示 pt 用 `ensure_display_dpi` 仅上采样；矢量 `VECTOR_CROP_DPI=300`、`VECTOR_MAX_PX≥4000`；不改 EMU/bbox。
+37. **擦除后必须二次确认无原文残留**——扩框 + 加厚文字带；带外回贴避开文字 mask；`_clear_ocr_leftovers` 再扫一轮。
 
 ### 关键模块
 

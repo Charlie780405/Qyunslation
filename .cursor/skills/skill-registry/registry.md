@@ -20,3 +20,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-06 | SK-Q002 增补通用原则/自检清单；文字带填充、竖向三段式、C10（PLAN-026） |
 | 2026-09-06 | SK-Q002 增补文档内嵌图 Occurrence/Alpha/矢量 Fail-Closed/预扫描代际（PLAN-027） |
 | 2026-09-06 | SK-Q002 增补 OCR 依赖转正 / 引擎可观测 / 跨 venv 门控铁律（PLAN-027f） |
+| 2026-09-06 | SK-Q002 增补 300 DPI 回嵌与擦除残留铁律（PLAN-027g） |

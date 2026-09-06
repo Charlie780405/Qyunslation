@@ -231,8 +231,11 @@ def translate_pdf_images(
                     all_ok = False
                     break
 
-            new_png, n, qc = _translate_via_local(png, to_lang)
-            if n <= 0 or new_png == png:
+            new_png, n, qc = _translate_via_local(
+                policy.ensure_display_dpi(png, best["w"], best["h"]),
+                to_lang,
+            )
+            if n <= 0:
                 manifest.bitmap_skipped += 1
                 manifest.details.append(
                     {
@@ -244,7 +247,7 @@ def translate_pdf_images(
                 continue
             nw, nh = _png_size(new_png)
             if nw and oh and (nw != ow or nh != oh):
-                # 尺寸不一致：禁止 replace_image，改逐实例 overlay
+                # 尺寸不一致（含 300 DPI 升采样）：禁止 replace_image，改逐实例 overlay
                 all_ok = False
                 logger.warning(
                     "xref %s size changed %sx%s -> %sx%s, use overlay",

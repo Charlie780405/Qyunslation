@@ -59,8 +59,10 @@ RULE_ROW_H_FRAC = float(os.environ.get("QYUNSLATION_RULE_ROW_H_FRAC", "0.4"))
 # 跨框左对齐组：左墨迹边差与纵向间距上限
 LEFT_GROUP_TOL_PX = float(os.environ.get("QYUNSLATION_LEFT_GROUP_TOL_PX", "8"))
 LEFT_GROUP_GAP_MULT = float(os.environ.get("QYUNSLATION_LEFT_GROUP_GAP_MULT", "1.6"))
-# 实心填充纵向收敛到文字带时的上下 pad
-FILL_BAND_PAD = int(os.environ.get("QYUNSLATION_FILL_BAND_PAD", "2"))
+# 实心填充纵向收敛到文字带时的上下 pad（PLAN-027g：加厚覆盖抗锯齿）
+FILL_BAND_PAD = int(os.environ.get("QYUNSLATION_FILL_BAND_PAD", "4"))
+# 擦除前 OCR 框外扩像素，盖住抗锯齿环
+ERASE_PAD_PX = int(os.environ.get("QYUNSLATION_ERASE_PAD_PX", "3"))
 # 贯穿线保护核相对框宽/高的比例
 LINE_GUARD_FRAC = float(os.environ.get("QYUNSLATION_LINE_GUARD_FRAC", "0.6"))
 # C10：OCR 框内文字带外「原图非背景→成品背景」像素超此数即失败
@@ -766,17 +768,20 @@ def _line_guard_mask(
     diff = np.abs(roi.astype(np.int16) - bg).max(axis=2)
     candidate = (diff > 40) & (~text)
     u8 = (candidate.astype(np.uint8) * 255)
-    if not u8.any():
-        return np.zeros((h, w), np.uint8)
     kx = max(3, int(round(w * LINE_GUARD_FRAC)))
     ky = max(3, int(round(h * LINE_GUARD_FRAC)))
     if kx % 2 == 0:
         kx += 1
     if ky % 2 == 0:
         ky += 1
+    # 含文字 mask 的长横线（括号顶边常被 Otsu 标成字，排除后线保护为 0）
+    all_ink = ((diff > 40).astype(np.uint8) * 255)
+    horiz_ink = cv2.morphologyEx(all_ink, cv2.MORPH_OPEN, np.ones((1, kx), np.uint8))
+    if not u8.any():
+        return horiz_ink
     horiz = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((1, kx), np.uint8))
     vert = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((ky, 1), np.uint8))
-    return np.maximum(horiz, vert)
+    return np.maximum(np.maximum(horiz, vert), horiz_ink)
 
 
 def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
@@ -802,8 +807,14 @@ def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
     return best
 
 
-def _text_mask_u8(roi: np.ndarray) -> np.ndarray:
-    """Otsu 少数类作文字 mask（uint8 0/255），轻膨胀覆盖抗锯齿。"""
+def _text_mask_u8(
+    roi: np.ndarray, *, heavy: bool = False
+) -> np.ndarray:
+    """Otsu 少数类作文字 mask（uint8 0/255），轻膨胀覆盖抗锯齿。
+
+    heavy=True（PLAN-027g）：3×3 / 2 次，专打描边残留；线保护须用 light，
+    避免括号线被并入文字 mask 后失去 _line_guard 保护。
+    """
     if roi.size == 0:
         return np.zeros((0, 0), np.uint8)
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
@@ -813,8 +824,113 @@ def _text_mask_u8(roi: np.ndarray) -> np.ndarray:
     text = mask_hi if n_hi <= n_lo else ~mask_hi
     u8 = (text.astype(np.uint8) * 255)
     if u8.size:
-        u8 = cv2.dilate(u8, np.ones((2, 2), np.uint8), iterations=1)
+        if heavy:
+            u8 = cv2.dilate(u8, np.ones((3, 3), np.uint8), iterations=2)
+        else:
+            u8 = cv2.dilate(u8, np.ones((2, 2), np.uint8), iterations=1)
     return u8
+
+
+def _expand_erase_rect(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    *,
+    img_h: int,
+    img_w: int,
+    pad: int | None = None,
+) -> tuple[int, int, int, int]:
+    """擦除前扩框，夹在图像边界内。"""
+    p = int(ERASE_PAD_PX if pad is None else pad)
+    return (
+        max(0, x1 - p),
+        max(0, y1 - p),
+        min(img_w, x2 + p),
+        min(img_h, y2 + p),
+    )
+
+
+def _clear_ocr_leftovers(
+    img_cv: np.ndarray,
+    boxes: list,
+    styles: list[dict],
+    redraw: list[bool],
+    *,
+    orig_texts: list[str] | None = None,
+) -> int:
+    """擦除后二次 OCR：仍检出原文类墨迹则只擦原框内文字像素。返回清理框数。
+
+    上限一轮。扩框只用于检出抗锯齿环上的残字；落笔仍限原 OCR 框，避免抹括号线。
+    """
+    import tempfile
+
+    cleared = 0
+    img_h, img_w = img_cv.shape[:2]
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        x1, y1, x2, y2 = _expand_erase_rect(
+            ox1, oy1, ox2, oy2, img_h=img_h, img_w=img_w
+        )
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            continue
+        roi = img_cv[y1:y2, x1:x2]
+        if roi.size == 0:
+            continue
+        bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
+        leftover_need = int(
+            (np.abs(roi.astype(np.int16) - np.array(bg, dtype=np.int16)).max(axis=2) > 40).sum()
+        )
+        if leftover_need < 12:
+            continue
+        leftover = []
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+                cv2.imwrite(tmp_path, roi)
+            leftover = ocr_image_rapid(tmp_path)
+        except Exception as exc:
+            logger.debug("leftover OCR failed box %s: %s", i, exc)
+            leftover = []
+        finally:
+            if tmp_path:
+                try:
+                    Path(tmp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        if not leftover:
+            continue
+        src_hint = ""
+        if orig_texts and i < len(orig_texts):
+            src_hint = (orig_texts[i] or "").strip().lower()
+        need = False
+        for lb in leftover:
+            t = (lb[4] or "").strip()
+            if not t:
+                continue
+            tl = t.lower()
+            if src_hint and (tl in src_hint or src_hint in tl):
+                need = True
+                break
+            if any(ch.isalpha() or ("\u4e00" <= ch <= "\u9fff") for ch in t):
+                need = True
+                break
+        if not need:
+            continue
+        # 只在原 OCR 框内擦文字像素（heavy mask，线保护用 light）
+        roi0 = img_cv[oy1:oy2, ox1:ox2]
+        tm = _text_mask_u8(roi0, heavy=True)
+        g = _line_guard_mask(roi0, bg, _text_mask_u8(roi0, heavy=False))
+        if tm.size and int(tm.max()) > 0:
+            m = tm > 0
+            if g.size and int(g.max()) > 0:
+                m = m & (g == 0)
+            img_cv[oy1:oy2, ox1:ox2][m] = bg
+            cleared += 1
+    return cleared
 
 
 def _erase_text_local(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, tm: np.ndarray) -> None:
@@ -1557,7 +1673,8 @@ def _qc_report(
     if ragged:
         issues.append({"code": "C9", "msg": "left group ragged", "detail": ragged})
 
-    # C10 图元损伤：OCR 框 − (文字带 ∪ draw_bbox) 内，原图非背景却被成品抹成背景
+    # C10 图元损伤：OCR 框 − (文字带 ∪ 文字 mask ∪ draw_bbox) 内，
+    # 原图非背景却被成品抹成背景。027g 故意擦掉的带外残字计入文字 mask，不算图元损伤。
     graphics_damage: list[dict] = []
     if orig_bgr is not None:
         final_bgr_chk = cv2.cvtColor(final_rgb, cv2.COLOR_RGB2BGR)
@@ -1576,6 +1693,15 @@ def _qc_report(
             db = planned.get("draw_bbox") if isinstance(planned, dict) else None
             protect = np.zeros(roi_o.shape[:2], bool)
             protect[by1:by2, :] = True
+            tm_light = _text_mask_u8(roi_o, heavy=False)
+            tm = _text_mask_u8(roi_o, heavy=True)
+            if tm.size and int(tm.max()) > 0:
+                # 贯穿线不算文字：从保护里剔除，仍受 C10 约束
+                guard = _line_guard_mask(roi_o, st["bg_bgr"], tm_light)
+                text_only = tm > 0
+                if guard.size and int(guard.max()) > 0:
+                    text_only = text_only & (guard == 0)
+                protect |= text_only
             if isinstance(db, dict):
                 lx1 = max(0, int(db["x1"]) - ox1)
                 ly1 = max(0, int(db["y1"]) - oy1)
@@ -1860,37 +1986,50 @@ def translate_image_with_qc(
         kept_rois.append(((x1, y1, x2, y2), orig[y1:y2, x1:x2].copy()))
 
     # 两趟擦除：纯色只填文字带；非纯色局部取色；贯穿线图元先备份后回贴
+    # PLAN-027g：擦除仍限原 OCR 框（保括号线/C10）；加厚文字带与 mask；
+    # 带外回贴避开文字 mask（贯穿线强制回贴）；擦后再扫残留。
+    img_h, img_w = img_cv.shape[:2]
     inpaint_mask = np.zeros(img_cv.shape[:2], np.uint8)
-    fill_bands: list[tuple[int, int, int, int, int, int] | None] = [None] * len(boxes)
+    fill_bands: list[tuple[int, int, int, int, int, int, np.ndarray | None] | None] = [
+        None
+    ] * len(boxes)
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
-        x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
         st = styles[i]
         roi = orig[y1:y2, x1:x2]
-        tm = _text_mask_u8(roi)
-        guard = _line_guard_mask(roi, st["bg_bgr"], tm)
+        tm_light = _text_mask_u8(roi, heavy=False)
+        tm = _text_mask_u8(roi, heavy=True)
+        guard = _line_guard_mask(roi, st["bg_bgr"], tm_light)
         guard_pix = None
         if guard.size and int(guard.max()) > 0:
             guard_pix = roi.copy()
         if st["solid"]:
+            # 核心带（pad=2）整框填，加厚圈（pad=4）只擦文字 mask，避免涂掉括号线
+            ty1, ty2 = _fill_band(roi, pad=2)
             by1, by2 = _fill_band(roi)
-            fill_bands[i] = (x1, y1, x2, y2, by1, by2)
-            fy1, fy2 = y1 + by1, y1 + by2
+            fill_bands[i] = (x1, y1, x2, y2, by1, by2, tm.copy() if tm.size else None)
+            fy1, fy2 = y1 + ty1, y1 + ty2
             cv2.rectangle(img_cv, (x1, fy1), (x2, fy2), st["bg_bgr"], -1)
+            if tm.size and int(tm.max()) > 0:
+                m = tm > 0
+                if guard.size and int(guard.max()) > 0:
+                    m = m & (guard == 0)
+                # 加厚圈 + 带外残字：只按 mask 擦
+                ring = np.ones(m.shape, bool)
+                ring[ty1:ty2, :] = False
+                img_cv[y1:y2, x1:x2][m & ring] = st["bg_bgr"]
         else:
             if tm.size:
                 erase_tm = tm.copy()
                 if guard.size and int(guard.max()) > 0:
                     erase_tm[guard > 0] = 0
                 _erase_text_local(img_cv, x1, y1, x2, y2, erase_tm)
-                masked = erase_tm.copy()
-                if guard.size and int(guard.max()) > 0:
-                    masked[guard > 0] = 0
                 inpaint_mask[y1:y2, x1:x2] = np.maximum(
-                    inpaint_mask[y1:y2, x1:x2], masked
+                    inpaint_mask[y1:y2, x1:x2], erase_tm
                 )
-                fill_bands[i] = (x1, y1, x2, y2, 0, y2 - y1)
+                fill_bands[i] = (x1, y1, x2, y2, 0, y2 - y1, tm.copy() if tm.size else None)
         if guard_pix is not None:
             g = guard > 0
             img_cv[y1:y2, x1:x2][g] = guard_pix[g]
@@ -1899,7 +2038,7 @@ def translate_image_with_qc(
         for i, b in enumerate(boxes):
             if not redraw[i]:
                 continue
-            x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+            x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
             roi = orig[y1:y2, x1:x2]
             guard = _line_guard_mask(roi, styles[i]["bg_bgr"])
             if guard.size and int(guard.max()) > 0:
@@ -1907,14 +2046,48 @@ def translate_image_with_qc(
                 img_cv[y1:y2, x1:x2][g] = roi[g]
 
     # 文字带外整段回贴原图：挡住邻框填充/inpaint 越界抹掉的括号线、色带
-    for fb in fill_bands:
+    # PLAN-027g：回贴时排除文字 mask（但贯穿线强制回贴），禁止把残字贴回
+    for i, fb in enumerate(fill_bands):
         if not fb:
             continue
-        x1, y1, x2, y2, by1, by2 = fb
+        x1, y1, x2, y2, by1, by2, tm = fb
+        avoid = None
+        if tm is not None and tm.size and int(tm.max()) > 0:
+            roi_o = orig[y1:y2, x1:x2]
+            bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
+            guard = _line_guard_mask(roi_o, bg, _text_mask_u8(roi_o, heavy=False))
+            avoid = tm > 0
+            if guard.size and int(guard.max()) > 0:
+                avoid = avoid & (guard == 0)
         if by1 > 0:
-            img_cv[y1 : y1 + by1, x1:x2] = orig[y1 : y1 + by1, x1:x2]
+            band = slice(y1, y1 + by1)
+            if avoid is not None:
+                m = ~avoid[:by1, :]
+                img_cv[band, x1:x2][m] = orig[band, x1:x2][m]
+            else:
+                img_cv[band, x1:x2] = orig[band, x1:x2]
         if y1 + by2 < y2:
-            img_cv[y1 + by2 : y2, x1:x2] = orig[y1 + by2 : y2, x1:x2]
+            band = slice(y1 + by2, y2)
+            if avoid is not None:
+                m = ~avoid[by2:, :]
+                img_cv[band, x1:x2][m] = orig[band, x1:x2][m]
+            else:
+                img_cv[band, x1:x2] = orig[band, x1:x2]
+
+    # PLAN-027g：擦除后二次扫描残留；仍检出则只擦文字像素（上限 1）
+    leftover_cleared = _clear_ocr_leftovers(
+        img_cv, boxes, styles, redraw, orig_texts=texts
+    )
+    if leftover_cleared:
+        logger.info("cleared leftover OCR ink in %d boxes", leftover_cleared)
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        roi = orig[y1:y2, x1:x2]
+        guard = _line_guard_mask(roi, styles[i]["bg_bgr"])
+        if guard.size and int(guard.max()) > 0:
+            img_cv[y1:y2, x1:x2][guard > 0] = roi[guard > 0]
 
     for (x1, y1, x2, y2), roi in kept_rois:
         img_cv[y1:y2, x1:x2] = roi
