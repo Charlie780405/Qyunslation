@@ -811,6 +811,7 @@ def apply(text: str) -> str:
         min-height: 0 !important;
         display: flex !important;
         flex-direction: column !important;
+        flex-wrap: nowrap !important;
         gap: 8px !important;
     }
     .qy-col-right > * {

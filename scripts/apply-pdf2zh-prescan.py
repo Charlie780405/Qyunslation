@@ -85,13 +85,48 @@ HELPER = r'''
                 entry["summary_text"] = text
                 return gr.update(value=text, visible=True), st
 
-            # 直接本地 OCR 探针（避免依赖 sidecar 网络）；失败不抛
+            # 探针优先走 sidecar：pdf2zh 与 qyunslation 是两个独立 venv，只有后者
+            # 装了 rapidocr。本地 probe_image 在缺失时会静默回退到弱检测器，把
+            # 满是中文的流程图误报成「无可译文字」，所以无 OCR 能力就交给 sidecar。
             translatable = 0
             errors = 0
             try:
                 _sys.path.insert(0, "/home/dev/qyunslation")
-                from qyunslation.extensions.image_translate import probe_image
+                import os as _os
                 import tempfile, zipfile
+                from importlib.util import find_spec as _find_spec
+
+                _local_ocr = _find_spec("rapidocr") is not None
+                _sidecar = _os.environ.get(
+                    "QYUNSLATION_OFFICE_URL", "http://127.0.0.1:8010"
+                )
+
+                def probe_image(img_path, **kw):
+                    if _local_ocr:
+                        from qyunslation.extensions.image_translate import (
+                            probe_image as _local_probe,
+                        )
+
+                        return _local_probe(img_path, **kw)
+                    import requests as _rq
+
+                    _pf = kw.get("page_frac")
+                    form = {
+                        "to_lang": str(kw.get("to_lang") or "简体中文"),
+                        "display_width_pt": float(kw.get("display_width_pt") or 0),
+                        "display_height_pt": float(kw.get("display_height_pt") or 0),
+                        "page_frac": -1.0 if _pf is None else float(_pf),
+                        "is_header": bool(kw.get("is_header") or False),
+                    }
+                    blob = _P(img_path).read_bytes()
+                    resp = _rq.post(
+                        f"{_sidecar}/service/image-probe",
+                        files={"file": (_P(img_path).name, blob, "image/png")},
+                        data=form,
+                        timeout=120,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
                 f0 = files[0] if files else None
                 path = _P(f0.name if hasattr(f0, "name") else f0) if f0 else None
@@ -229,12 +264,18 @@ def apply(text: str) -> str:
 '''
         text = text.replace(anchor, insert, 1)
 
-    # Helpers — always insert if missing, regardless of UI marker
-    if "def _qy_prescan_tier1(" not in text:
-        state_anchor = "        state = gr.State("
-        if state_anchor not in text:
-            raise RuntimeError("找不到 state = gr.State 锚点")
-        text = text.replace(state_anchor, HELPER + "\n        state = gr.State(", 1)
+    # Helpers — 先摘掉旧块再重插，脚本才能作为 SSOT 持续演进。
+    # 空白一律规范化，否则每次重插都会多留空行，破坏幂等。
+    state_anchor = "        state = gr.State("
+    pos = text.find(state_anchor)
+    if pos < 0:
+        raise RuntimeError("找不到 state = gr.State 锚点")
+    helper_start = "        # _qy_prescan\n        def _qy_prescan_bump("
+    start = text.find(helper_start)
+    if 0 <= start < pos:
+        text = text[:start] + text[pos:]
+        pos = text.find(state_anchor)
+    text = text[:pos].rstrip("\n") + "\n\n" + HELPER.strip("\n") + "\n\n" + text[pos:]
 
     # CSS
     if CSS_MARKER not in text and "/* _qy_dual_preview_css */" in text:

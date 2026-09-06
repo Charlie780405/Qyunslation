@@ -21,6 +21,15 @@
 | `archive/legacy/image_replace.py` | 旧 zip 方案归档 |
 | SK-Q002 | 文档内嵌图铁律 23–31 |
 
+## 上线后修正（PLAN-027f）
+
+| 症状 | 根因 | 修法 |
+| --- | --- | --- |
+| 上传后原文预览渲染进「译文」栏，中栏空白 | Gradio `.column` 默认 `flex-wrap: wrap`，长预览超出剩余高度后另起一列，落到右邻栏坐标 | 中右栏补 `flex-wrap: nowrap` |
+| 满是中文的流程图被预扫描报成「无可译文字」 | pdf2zh venv 无 `rapidocr`，`probe_image` 静默回退弱检测器（43 块→0 块） | Tier-2 探针改走 sidecar `/service/image-probe` |
+| PDF 内嵌图嵌字质量劣化且从不回退 | 同一根因，本地 OCR 不抛异常所以 sidecar 分支永不触发 | `has_local_ocr()` 能力门控，无能力直接走 sidecar |
+| `apply-pdf2zh-prescan.py` 改动不生效 | 补丁「已存在即跳过」，无法随脚本演进 | 改为删旧重插 + 空白规范化，保持幂等 |
+
 ## 验收
 
 ```bash
