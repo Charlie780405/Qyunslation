@@ -38,7 +38,17 @@ TRANSLATE_BATCH = int(os.environ.get("QYUNSLATION_TRANSLATE_BATCH", "25"))
 NUM_PREDICT = int(os.environ.get("QYUNSLATION_NUM_PREDICT", "4096"))
 CONTRAST_MIN = float(os.environ.get("QYUNSLATION_CONTRAST_MIN", "60"))
 SOLID_STD_MAX = float(os.environ.get("QYUNSLATION_SOLID_STD_MAX", "12"))
+SOLID_FRAC_MIN = float(os.environ.get("QYUNSLATION_SOLID_FRAC_MIN", "0.80"))
 BOLD_AREA_RATIO = float(os.environ.get("QYUNSLATION_BOLD_AREA_RATIO", "0.28"))
+AVAIL_W_MULT = float(os.environ.get("QYUNSLATION_AVAIL_W_MULT", "3.0"))
+AVAIL_H_MULT = float(os.environ.get("QYUNSLATION_AVAIL_H_MULT", "1.6"))
+AVAIL_BG_DELTA = float(os.environ.get("QYUNSLATION_AVAIL_BG_DELTA", "28"))
+QC_STRICT = os.environ.get("QYUNSLATION_IMAGE_QC_STRICT", "0").lower() in (
+    "1",
+    "true",
+    "on",
+)
+QC_INK_MIN = float(os.environ.get("QYUNSLATION_QC_INK_MIN", "0.005"))
 
 _RAPID_ENGINE = None
 
@@ -345,11 +355,12 @@ def _gray_of(bgr: tuple[int, int, int]) -> float:
 
 
 def _analyze_box_style(roi: np.ndarray) -> dict:
-    """Otsu 分层取背景/文字色、纯色判定、粗细与水平对齐（PLAN-022）。"""
+    """Otsu 分层取背景/文字色、按通道纯色判定、粗细与水平对齐（PLAN-022/023）。"""
     if roi.size == 0:
         return {
             "bg_bgr": (240, 240, 240),
             "fg_bgr": (17, 17, 17),
+            "border_bgr": (240, 240, 240),
             "solid": True,
             "bold": False,
             "align": "left",
@@ -358,15 +369,32 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
 
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape[:2]
+    # 内缩采样，避开 OCR 框蹭到的括号线/色带边缘
+    pad = 2 if min(h, w) > 10 else 0
+    y0, y1b, x0, x1b = pad, h - pad, pad, w - pad
+    if y1b <= y0 + 2 or x1b <= x0 + 2:
+        y0, y1b, x0, x1b = 0, h, 0, w
+    band = max(1, min(2, (y1b - y0) // 4, (x1b - x0) // 4))
     border = np.concatenate(
         [
-            roi[0 : min(2, h), :, :].reshape(-1, 3),
-            roi[max(0, h - 2) : h, :, :].reshape(-1, 3),
-            roi[:, 0 : min(2, w), :].reshape(-1, 3),
-            roi[:, max(0, w - 2) : w, :].reshape(-1, 3),
+            roi[y0 : y0 + band, x0:x1b, :].reshape(-1, 3),
+            roi[y1b - band : y1b, x0:x1b, :].reshape(-1, 3),
+            roi[y0:y1b, x0 : x0 + band, :].reshape(-1, 3),
+            roi[y0:y1b, x1b - band : x1b, :].reshape(-1, 3),
         ]
     )
-    solid = float(np.std(border.astype(np.float32))) < SOLID_STD_MAX
+    border_f = border.astype(np.float32)
+    border_bgr = _median_bgr(border)
+    # 按通道：先取贴近中位数的内点再算 std，避免少数蹭线像素抬高 std
+    med = np.array(border_bgr, dtype=np.float32)
+    deltas = np.abs(border_f - med).max(axis=1)
+    inliers = border_f[deltas <= 18]
+    frac = float(len(inliers) / max(1, len(border_f)))
+    if len(inliers) >= 8:
+        chan_std = float(np.std(inliers, axis=0).max())
+    else:
+        chan_std = float(np.std(border_f, axis=0).max())
+    solid = chan_std < SOLID_STD_MAX and frac >= SOLID_FRAC_MIN
 
     _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     mask_hi = th > 0
@@ -380,7 +408,11 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
     else:
         text_mask, bg_mask = mask_lo, mask_hi
 
-    bg_bgr = _median_bgr(roi[bg_mask]) if bg_mask.any() else _median_bgr(border)
+    # 纯色：边框中位数抗文字污染；非纯色：Otsu 背景类
+    if solid:
+        bg_bgr = border_bgr
+    else:
+        bg_bgr = _median_bgr(roi[bg_mask]) if bg_mask.any() else border_bgr
     fg_bgr = _median_bgr(roi[text_mask]) if text_mask.any() else (17, 17, 17)
 
     contrast = abs(_gray_of(fg_bgr) - _gray_of(bg_bgr))
@@ -407,11 +439,53 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
     return {
         "bg_bgr": bg_bgr,
         "fg_bgr": fg_bgr,
+        "border_bgr": border_bgr,
         "solid": solid,
         "bold": bold,
         "align": align,
         "contrast": contrast,
     }
+
+
+def _text_mask_u8(roi: np.ndarray) -> np.ndarray:
+    """Otsu 少数类作文字 mask（uint8 0/255），轻膨胀覆盖抗锯齿。"""
+    if roi.size == 0:
+        return np.zeros((0, 0), np.uint8)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask_hi = th > 0
+    n_hi, n_lo = int(mask_hi.sum()), int((~mask_hi).sum())
+    text = mask_hi if n_hi <= n_lo else ~mask_hi
+    u8 = (text.astype(np.uint8) * 255)
+    if u8.size:
+        u8 = cv2.dilate(u8, np.ones((2, 2), np.uint8), iterations=1)
+    return u8
+
+
+def _erase_text_local(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, tm: np.ndarray) -> None:
+    """非纯色：文字像素用邻域非文字中位数替换，保留色带/括号线。"""
+    if tm.size == 0 or not (tm > 0).any():
+        return
+    roi = img[y1:y2, x1:x2]
+    h, w = roi.shape[:2]
+    text = tm > 0
+    bg_mask = ~text
+    if not bg_mask.any():
+        return
+    # 全局回退色
+    fallback = _median_bgr(roi[bg_mask])
+    ys, xs = np.where(text)
+    out = roi.copy()
+    for yy, xx in zip(ys, xs):
+        y0, y1b = max(0, yy - 3), min(h, yy + 4)
+        x0, x1b = max(0, xx - 3), min(w, xx + 4)
+        patch = roi[y0:y1b, x0:x1b]
+        local_bg = bg_mask[y0:y1b, x0:x1b]
+        if local_bg.any():
+            out[yy, xx] = _median_bgr(patch[local_bg])
+        else:
+            out[yy, xx] = fallback
+    img[y1:y2, x1:x2] = out
 
 
 def _bgr_to_rgb(bgr: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -423,6 +497,16 @@ def _text_size(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
         bbox = font.getbbox(text)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
     return font.getsize(text)  # type: ignore[attr-defined]
+
+
+def _line_height(font: ImageFont.ImageFont, size_hint: int = 0) -> int:
+    """真实行高：ascent+descent，禁止用 getbbox 墨迹高判能否放下。"""
+    if hasattr(font, "getmetrics"):
+        ascent, descent = font.getmetrics()
+        return int(ascent + descent)
+    if size_hint > 0:
+        return int(size_hint * 1.2)
+    return max(12, _text_size(font, "Ag")[1])
 
 
 def _wrap_text(text: str, font: ImageFont.ImageFont, max_w: int) -> list[str]:
@@ -458,35 +542,239 @@ def _fit_font_and_lines(
     font_path: str | None,
     max_size: int,
     min_size: int = 10,
-) -> tuple[ImageFont.ImageFont, list[str], int]:
-    """二分字号：优先单行，放不下则换行；返回 (font, lines, size)。"""
+) -> tuple[ImageFont.ImageFont, list[str], int, int]:
+    """二分字号：优先单行，放不下则换行；返回 (font, lines, size, line_h)。"""
     lo, hi = min_size, max(min_size, max_size)
     best_font = ImageFont.load_default()
     best_lines = [text]
     best_size = min_size
+    best_lh = _line_height(best_font, best_size)
 
     while lo <= hi:
         mid = (lo + hi) // 2
         font = ImageFont.truetype(font_path, mid) if font_path else ImageFont.load_default()
-        tw, th = _text_size(font, text)
-        if tw <= box_w and th <= box_h:
-            best_font, best_lines, best_size = font, [text], mid
+        lh = _line_height(font, mid)
+        tw, _ = _text_size(font, text)
+        if tw <= box_w and lh <= box_h:
+            best_font, best_lines, best_size, best_lh = font, [text], mid, lh
             lo = mid + 1
             continue
         lines = _wrap_text(text, font, max(8, box_w))
-        line_h = max((_text_size(font, ln)[1] for ln in lines), default=th)
-        total_h = line_h * len(lines) + max(0, len(lines) - 1) * max(1, mid // 8)
+        max_lines = max(1, box_h // max(1, lh))
+        if len(lines) > max_lines:
+            hi = mid - 1
+            continue
+        total_h = lh * len(lines) + max(0, len(lines) - 1) * max(1, mid // 8)
         max_line_w = max((_text_size(font, ln)[0] for ln in lines), default=tw)
         if max_line_w <= box_w * 1.05 and total_h <= box_h:
-            best_font, best_lines, best_size = font, lines, mid
+            best_font, best_lines, best_size, best_lh = font, lines, mid, lh
             lo = mid + 1
         else:
             hi = mid - 1
 
     if best_size == min_size and font_path:
         best_font = ImageFont.truetype(font_path, min_size)
+        best_lh = _line_height(best_font, min_size)
         best_lines = _wrap_text(text, best_font, max(8, box_w))
-    return best_font, best_lines, best_size
+        max_lines = max(1, box_h // max(1, best_lh))
+        best_lines = best_lines[:max_lines]
+    return best_font, best_lines, best_size, best_lh
+
+
+def _rects_overlap(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _available_box(
+    box: tuple[int, int, int, int],
+    all_boxes: list[tuple[int, int, int, int]],
+    img: np.ndarray,
+    bg_bgr: tuple[int, int, int],
+) -> tuple[int, int, int, int]:
+    """从 OCR 框向外扩到碰邻框或非背景像素为止；擦除仍用原框，排版用本框。"""
+    h, w = img.shape[:2]
+    x1, y1, x2, y2 = box
+    ow, oh = max(1, x2 - x1), max(1, y2 - y1)
+    max_w = int(ow * AVAIL_W_MULT)
+    max_h = int(oh * AVAIL_H_MULT)
+    bg = np.array(bg_bgr, dtype=np.float32)
+
+    others = [b for b in all_boxes if b != box]
+
+    def hits_other(r: tuple[int, int, int, int]) -> bool:
+        return any(_rects_overlap(r, o) for o in others)
+
+    def col_ok(x: int, ya: int, yb: int) -> bool:
+        if x < 0 or x >= w:
+            return False
+        strip = img[ya:yb, x : x + 1].reshape(-1, 3).astype(np.float32)
+        if strip.size == 0:
+            return False
+        return float(np.abs(strip - bg).max(axis=1).mean()) <= AVAIL_BG_DELTA
+
+    def row_ok(y: int, xa: int, xb: int) -> bool:
+        if y < 0 or y >= h:
+            return False
+        strip = img[y : y + 1, xa:xb].reshape(-1, 3).astype(np.float32)
+        if strip.size == 0:
+            return False
+        return float(np.abs(strip - bg).max(axis=1).mean()) <= AVAIL_BG_DELTA
+
+    # 向右
+    while (x2 - x1) < max_w and x2 < w:
+        cand = (x1, y1, x2 + 1, y2)
+        if hits_other(cand) or not col_ok(x2, y1, y2):
+            break
+        x2 += 1
+    # 向左
+    while (x2 - x1) < max_w and x1 > 0:
+        cand = (x1 - 1, y1, x2, y2)
+        if hits_other(cand) or not col_ok(x1 - 1, y1, y2):
+            break
+        x1 -= 1
+    # 向下
+    while (y2 - y1) < max_h and y2 < h:
+        cand = (x1, y1, x2, y2 + 1)
+        if hits_other(cand) or not row_ok(y2, x1, x2):
+            break
+        y2 += 1
+    # 向上
+    while (y2 - y1) < max_h and y1 > 0:
+        cand = (x1, y1 - 1, x2, y2)
+        if hits_other(cand) or not row_ok(y1 - 1, x1, x2):
+            break
+        y1 -= 1
+
+    return (x1, y1, x2, y2)
+
+
+def _qc_report(
+    *,
+    out_path: Path,
+    boxes: list,
+    texts: list[str],
+    trans: dict[int, str],
+    redraw: list[bool],
+    drawn: int,
+    styles: list[dict],
+    avails: list[tuple[int, int, int, int]],
+    sizes: list[int],
+    line_heights: list[int],
+    line_lists: list[list[str]],
+    fonts: list,
+    erased_bgr: np.ndarray,
+    final_rgb: np.ndarray,
+) -> dict:
+    """六项 QC：覆盖/绘制/墨迹实测/对比度/溢出/可读性。"""
+    issues: list[dict] = []
+    warnings: list[dict] = []
+
+    # C1 覆盖
+    missing = [i + 1 for i in range(len(boxes)) if not (trans.get(i + 1) or "").strip()]
+    if missing:
+        issues.append(
+            {
+                "code": "C1",
+                "msg": f"untranslated boxes={missing}",
+                "samples": [texts[i - 1][:40] for i in missing[:8]],
+            }
+        )
+
+    # C2 绘制
+    expect = sum(1 for r in redraw if r)
+    if drawn != expect:
+        issues.append({"code": "C2", "msg": f"drawn={drawn} expect={expect}"})
+
+    # C3 墨迹实测：最终相对只擦未写的变化像素（按可用区，因排版可能外扩）
+    final_bgr = cv2.cvtColor(final_rgb, cv2.COLOR_RGB2BGR)
+    blanks: list[int] = []
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        x1, y1, x2, y2 = avails[i]
+        # 并上 OCR 擦除区，避免漏检
+        ox1, oy1, ox2, oy2 = b[0], b[1], b[2], b[3]
+        x1, y1 = min(x1, ox1), min(y1, oy1)
+        x2, y2 = max(x2, ox2), max(y2, oy2)
+        a = erased_bgr[y1:y2, x1:x2]
+        c = final_bgr[y1:y2, x1:x2]
+        if a.size == 0 or c.size == 0:
+            blanks.append(i + 1)
+            continue
+        diff = np.abs(a.astype(np.int16) - c.astype(np.int16)).max(axis=2) > 8
+        ratio = float(diff.mean()) if diff.size else 0.0
+        if ratio < QC_INK_MIN:
+            blanks.append(i + 1)
+    if blanks:
+        issues.append({"code": "C3", "msg": f"blank boxes={blanks}"})
+
+    # C4 对比度
+    low_c = [
+        i + 1
+        for i, st in enumerate(styles)
+        if redraw[i] and float(st.get("contrast", 0)) < CONTRAST_MIN
+    ]
+    if low_c:
+        issues.append({"code": "C4", "msg": f"low contrast boxes={low_c}"})
+
+    # C5 溢出
+    overflows: list[int] = []
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        ax1, ay1, ax2, ay2 = avails[i]
+        aw, ah = max(1, ax2 - ax1), max(1, ay2 - ay1)
+        lines = line_lists[i]
+        font = fonts[i]
+        lh = line_heights[i]
+        gap = max(1, sizes[i] // 8)
+        total_h = lh * len(lines) + gap * max(0, len(lines) - 1)
+        max_tw = max((_text_size(font, ln)[0] for ln in lines), default=0)
+        if max_tw > aw + 1 or total_h > ah + 1:
+            overflows.append(i + 1)
+    if overflows:
+        issues.append({"code": "C5", "msg": f"overflow boxes={overflows}"})
+
+    # C6 可读性（WARN）
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        oh = max(1, b[3] - b[1])
+        if sizes[i] < 0.6 * oh:
+            warnings.append(
+                {
+                    "code": "C6",
+                    "box": i + 1,
+                    "msg": f"size={sizes[i]} < 0.6*ocr_h={oh}",
+                    "text": (trans.get(i + 1) or "")[:40],
+                }
+            )
+
+    report = {
+        "ok": not issues,
+        "issues": issues,
+        "warnings": warnings,
+        "drawn": drawn,
+        "boxes": len(boxes),
+        "solid_count": sum(1 for st in styles if st.get("solid")),
+    }
+    qc_path = Path(str(out_path) + ".qc.json")
+    try:
+        qc_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("qc json write failed: %s", exc)
+
+    if issues:
+        logger.warning("image QC FAIL: %s", json.dumps(issues, ensure_ascii=False))
+    if warnings:
+        logger.warning("image QC WARN: %s", json.dumps(warnings[:12], ensure_ascii=False))
+    if QC_STRICT and issues:
+        hard = [x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4")]
+        if hard:
+            raise RuntimeError(f"image QC strict fail: {hard}")
+    return report
 
 
 def translate_image(
@@ -527,6 +815,28 @@ def translate_image(
         roi = orig[max(0, y1):y2, max(0, x1):x2]
         styles.append(_analyze_box_style(roi))
 
+    ocr_rects = [(b[0], b[1], b[2], b[3]) for b in boxes]
+    avails: list[tuple[int, int, int, int]] = []
+    for i, b in enumerate(boxes):
+        avails.append(
+            _available_box(
+                (b[0], b[1], b[2], b[3]),
+                ocr_rects,
+                orig,
+                styles[i]["bg_bgr"],
+            )
+        )
+
+    # 备份未翻译框像素，防邻框擦除误伤
+    kept_rois: list[tuple[tuple[int, int, int, int], np.ndarray]] = []
+    for i, b in enumerate(boxes):
+        if redraw[i]:
+            continue
+        x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+        kept_rois.append(((x1, y1, x2, y2), orig[y1:y2, x1:x2].copy()))
+
+    # 两趟擦除：纯色填充；非纯色局部邻域取色（保留色带），必要时一次 inpaint 收尾
+    inpaint_mask = np.zeros(img_cv.shape[:2], np.uint8)
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
@@ -535,48 +845,66 @@ def translate_image(
         if st["solid"]:
             cv2.rectangle(img_cv, (x1, y1), (x2, y2), st["bg_bgr"], -1)
         else:
-            mask = np.zeros(img_cv.shape[:2], np.uint8)
-            cv2.rectangle(
-                mask,
-                (x1 + 1, y1 + 1),
-                (max(x1 + 2, x2 - 1), max(y1 + 2, y2 - 1)),
-                255,
-                -1,
-            )
-            img_cv = cv2.inpaint(img_cv, mask, 3, cv2.INPAINT_TELEA)
+            roi = orig[y1:y2, x1:x2]
+            tm = _text_mask_u8(roi)
+            if tm.size:
+                _erase_text_local(img_cv, x1, y1, x2, y2, tm)
+                inpaint_mask[y1:y2, x1:x2] = np.maximum(
+                    inpaint_mask[y1:y2, x1:x2], tm
+                )
+    if int(inpaint_mask.max()) > 0:
+        img_cv = cv2.inpaint(img_cv, inpaint_mask, 2, cv2.INPAINT_TELEA)
+
+    for (x1, y1, x2, y2), roi in kept_rois:
+        img_cv[y1:y2, x1:x2] = roi
+
+    erased_bgr = img_cv.copy()
 
     result = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(result)
     font_regular = _font()
     font_regular = font_regular if Path(font_regular).is_file() else None
     font_bold = _font_bold()
+    if font_bold and not Path(font_bold).is_file():
+        font_bold = None
+
     drawn = 0
     min_contrast = 999.0
+    sizes: list[int] = [0] * len(boxes)
+    line_heights: list[int] = [0] * len(boxes)
+    line_lists: list[list[str]] = [[] for _ in boxes]
+    fonts: list = [None] * len(boxes)
+
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
-        x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+        ax1, ay1, ax2, ay2 = avails[i]
         text = finals[i]
         st = styles[i]
-        box_w = max(8, x2 - x1)
-        box_h = max(8, y2 - y1)
-        max_size = max(12, min(int(box_h * 0.9), 40))
+        box_w = max(8, ax2 - ax1)
+        box_h = max(8, ay2 - ay1)
+        max_size = max(12, min(int(box_h * 0.9), 72))
         use_path = font_bold if st["bold"] and font_bold else font_regular
-        font, lines, size = _fit_font_and_lines(text, box_w, box_h, use_path, max_size)
+        font, lines, size, lh = _fit_font_and_lines(
+            text, box_w, box_h, use_path, max_size
+        )
+        sizes[i] = size
+        line_heights[i] = lh
+        line_lists[i] = lines
+        fonts[i] = font
         line_gap = max(1, size // 8)
-        line_h = max((_text_size(font, ln)[1] for ln in lines), default=size)
-        total_h = line_h * len(lines) + line_gap * max(0, len(lines) - 1)
-        y = y1 + max(0, (box_h - total_h) // 2)
+        total_h = lh * len(lines) + line_gap * max(0, len(lines) - 1)
+        y = ay1 + max(0, (box_h - total_h) // 2)
         fill = _bgr_to_rgb(st["fg_bgr"])
         min_contrast = min(min_contrast, float(st["contrast"]))
         for ln in lines:
             tw, _ = _text_size(font, ln)
             if st["align"] == "center":
-                x = x1 + max(0, (box_w - tw) // 2)
+                x = ax1 + max(0, (box_w - tw) // 2)
             elif st["align"] == "right":
-                x = max(x1, x2 - tw)
+                x = max(ax1, ax2 - tw)
             else:
-                x = x1
+                x = ax1
             if tw > box_w * 1.15:
                 logger.warning(
                     "text overflow box#%d w=%d need≈%d align=%s: %s",
@@ -591,18 +919,40 @@ def translate_image(
                 bb = font.getbbox(ln)
                 top = bb[1]
             d.text((x, y - top), ln, fill=fill, font=font)
-            y += line_h + line_gap
+            y += lh + line_gap
         drawn += 1
+
+    final_rgb = np.array(result)
+    _qc_report(
+        out_path=out_path,
+        boxes=boxes,
+        texts=texts,
+        trans=trans,
+        redraw=redraw,
+        drawn=drawn,
+        styles=styles,
+        avails=avails,
+        sizes=sizes,
+        line_heights=line_heights,
+        line_lists=line_lists,
+        fonts=fonts,
+        erased_bgr=erased_bgr,
+        final_rgb=final_rgb,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(out_path)
     kept = sum(1 for r in redraw if not r)
+    solid_n = sum(1 for st in styles if st.get("solid"))
     logger.info(
-        "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d min_contrast=%.1f",
+        "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d "
+        "solid=%d/%d min_contrast=%.1f",
         len(boxes),
         sum(1 for i in range(len(boxes)) if trans.get(i + 1)),
         drawn,
         kept,
+        solid_n,
+        len(boxes),
         min_contrast if drawn else 0.0,
     )
     return drawn
