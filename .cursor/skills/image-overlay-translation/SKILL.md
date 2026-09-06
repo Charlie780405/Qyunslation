@@ -3,7 +3,7 @@ name: image-overlay-translation
 description: >-
   图片嵌字翻译：RapidOCR 检测、think:false 分批翻译、Otsu 配色、纯色遮盖、字体粗细对齐、QC 关卡。
   触发：图片翻译、嵌字、流程图翻译、译文丢字、OCR 没检出、文字看不见、遮盖、图层、
-  image_translate、RapidOCR、ImageOverlayWorkflow、对比度、蓝框白字、涂抹痕迹、黑框。
+  image_translate、RapidOCR、ImageOverlayWorkflow、对比度、蓝框白字、涂抹痕迹、黑框、对齐。
 ---
 
 # 图片嵌字翻译（SK-Q002）
@@ -19,32 +19,33 @@ qyunslation 自治 Skill。管 `extensions/image_translate.py` 与预览 viewer�
 5. **颜色判据一律按通道算**——禁止 BGR 拍平求 std。
 6. **纯色用「通道内点 std + 贴近中位数占比」**——边框内缩采样抗蹭线。
 7. **纯色块矩形填充**——`inpaint` 全图只一次。
-8. **擦除按 OCR 框、排版按可用区域**——`_available_box` 扩到碰邻居为止。
-9. **行高用 `font.getmetrics()`**——禁 `getbbox` 墨迹高判能否放下。
-10. **层级按「背景色桶 + 白底 y 行带」**——禁墨迹高度直接分档（字形差异会误判）。
-11. **原图标称字号用同一原文反推渲染墨迹高**——组内取 75 分位（OCR 裁切只会单侧偏小）。
-12. **组内字号统一、组间保持原图比例**——全局 `k=min(fit/orig_em)`；outlier 单独降级告警，不得拖垮 k。
-13. **粗细组内多数决**——同级条目不得有的 Bold 有的 Regular。
-14. **全屏克隆禁止嵌套 `.qy-viewer-inner`**——百分比 `max-height` 需要父级确定高度；全屏兜底 `calc(100vh-72px)`。
-15. **收工前 QC**——C1–C6 + C7a/C7b；`QYUNSLATION_IMAGE_QC_STRICT=1` 为门禁。
-16. **判据落 verify**——`scripts/verify-plan-024.sh`。
+8. **擦除按 OCR 框；排版锚原文墨迹**——可用区只做换行宽度与溢出余量，禁止当排版框居中。
+9. **对齐从行间一致性推断**——比各行 `x1/cx/x2` 标准差；实心色块强制 center；禁质心对框中心三分桶。
+10. **锚点用主行墨迹**——最宽 y 投影行，避开括号线把整体 ink bbox 拉歪。
+11. **实心/居中仅钳图像边界**——禁止被不对称可用区左右/上下推偏。
+12. **行高用 `font.getmetrics()`**——禁 `getbbox` 墨迹高判能否放下。
+13. **层级按「背景色桶 + 白底 y 行带」**——组内统一字号；组间 `k × orig_em`。
+14. **全屏克隆禁止嵌套 `.qy-viewer-inner`**——全屏兜底 `calc(100vh-72px)`。
+15. **收工前 QC**——C1–C6 + C7a/C7b + C8（成品 vs 计划绘制锚点）；`ALIGN_TOL_PX` 默认 12。
+16. **判据落 verify**——`scripts/verify-plan-025.sh`。
 
 ## 施工顺序
 
 ```
-RapidOCR → translate_texts → _analyze_box_style → _available_box
-→ 擦除/一次 inpaint → 回贴 → _assign_tier_sizes → 嵌字 → _qc_report
+RapidOCR → translate_texts → _analyze_box_style/_ink_geometry
+→ _available_box → 擦除/一次 inpaint → 回贴
+→ _assign_tier_sizes → 墨迹锚点嵌字 → _qc_report
 ```
 
 ## 排障
 
 | 现象 | 看 |
 | --- | --- |
-| 全屏裁掉底部 | 嵌套 `.qy-viewer-inner` / 父高不确定 |
-| 同级字号不一 | `_assign_tiers` / C7a；禁按墨迹分档 |
+| 译文整体右移/下沉 | 是否用可用区当排版框；C8 `plan_dx/plan_dy` |
+| 同级字号不一 | `_assign_tiers` / C7a |
 | 蓝框涂抹 / 16 周黑框 | solid 通道 std + frac |
-| 底部英文像丢失 | 可用区 / C5/C6 |
-| 全屏上下两份 | viewer 嵌套选择器 |
+| 周数竖向偏 | 是否用整体 ink 含括号线；改主行 |
+| 全屏裁底部 | 嵌套 `.qy-viewer-inner` |
 | journalctl 无嵌字日志 | sidecar `basicConfig` |
 
 详表见 [reference.md](reference.md)；踩坑见 [pitfalls.md](pitfalls.md)。
