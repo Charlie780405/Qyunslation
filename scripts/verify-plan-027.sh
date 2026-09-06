@@ -184,6 +184,37 @@ assert "_pre_imgtr_origin_path" in t
 print("gui ok")
 PY
 
+echo "=== 8b. 预览双栏 flex-wrap 防回归 ==="
+"$PY" - <<PY && ok "preview nowrap" || bad "preview nowrap"
+import re
+from pathlib import Path
+t = Path("$GUI").read_text()
+# Gradio .column 默认 flex-wrap:wrap，长预览会另起一列跑进右邻栏。
+for sel in (".qy-col-mid", ".qy-col-right"):
+    blocks = re.findall(re.escape(sel) + r"[^{]*\{[^}]*\}", t)
+    owning = [b for b in blocks if "flex-direction: column" in b]
+    assert owning, f"no column rule for {sel}"
+    # 层叠后生效的是最后一条，它必须显式关掉换行。
+    assert "flex-wrap: nowrap" in owning[-1], f"{sel} missing nowrap"
+print("nowrap ok")
+PY
+
+echo "=== 8c. 跨 venv OCR 能力门控 ==="
+"$PY" - <<'PY' && ok "ocr capability gate" || bad "ocr capability gate"
+from pathlib import Path
+
+# pdf2zh venv 无 rapidocr，本地 OCR 会静默退化到弱检测器；两条链路都必须
+# 先判定能力，无能力时把活交给 qyunslation sidecar。
+pit = Path("scripts/pdf_image_translate.py").read_text()
+assert "def has_local_ocr()" in pit, "pdf path missing capability probe"
+assert "if has_local_ocr():" in pit, "pdf path does not gate local translate"
+
+pre = Path("scripts/apply-pdf2zh-prescan.py").read_text()
+assert "_local_ocr = _find_spec(\"rapidocr\")" in pre, "prescan missing capability probe"
+assert "/service/image-probe" in pre, "prescan missing sidecar fallback"
+print("ocr gate ok")
+PY
+
 echo "=== 9. Skill 文档 ==="
 grep -q "文档内嵌图\|Occurrence\|共享" .cursor/skills/image-overlay-translation/SKILL.md && ok "skill section" || bad "skill section (will add)"
 

@@ -59,14 +59,32 @@ def _load_policy():
     return mod
 
 
-def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, dict]:
-    """优先本地 translate_image_bytes；失败则尝试 sidecar HTTP。"""
-    try:
-        from qyunslation.extensions.image_translate import translate_image_bytes
+def has_local_ocr() -> bool:
+    """RapidOCR 是否可用。
 
-        return translate_image_bytes(png_bytes, suffix=".png", to_lang=to_lang)
-    except Exception as exc:
-        logger.warning("local translate failed, try sidecar: %s", exc)
+    pdf2zh 与 qyunslation 是两个独立 venv，只有后者装了 rapidocr。缺失时
+    image_translate 会静默回退到弱得多的 HPD 检测器（不抛异常），导致嵌字
+    结果劣化却无人察觉，因此这里显式判定能力，无能力就交给 sidecar。
+    """
+    from importlib.util import find_spec
+
+    try:
+        return find_spec("rapidocr") is not None
+    except Exception:
+        return False
+
+
+def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, dict]:
+    """有本地 OCR 能力时就地翻译；否则（或失败时）走 sidecar HTTP。"""
+    if has_local_ocr():
+        try:
+            from qyunslation.extensions.image_translate import translate_image_bytes
+
+            return translate_image_bytes(png_bytes, suffix=".png", to_lang=to_lang)
+        except Exception as exc:
+            logger.warning("local translate failed, try sidecar: %s", exc)
+    else:
+        logger.info("no local rapidocr, routing image translate to sidecar")
     try:
         import requests
 

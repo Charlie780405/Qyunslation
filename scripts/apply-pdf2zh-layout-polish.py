@@ -92,6 +92,9 @@ CSS_BLOCK = """
         min-height: 0 !important;
         display: flex !important;
         flex-direction: column !important;
+        /* Gradio .column 默认 flex-wrap:wrap；长预览会另起一列，
+           视觉上落进右邻栏（原文跑到译文栏）。 */
+        flex-wrap: nowrap !important;
         gap: 8px !important;
     }
     .qy-col-mid > *,
