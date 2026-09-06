@@ -13,4 +13,4 @@
 - 分支：`feat/plan-023-overlay-qc`
 - 合并：`--no-ff` → `main`
 - 服务：`pdf2zh.service` + `qyunslation-office.service` 已重启
-- 生产哈希：`accbbd8`（merge `8f809ca` + WT 回填）
+- 生产哈希：`ba1017e`（功能 `8f809ca`，服务已按此树重启）
