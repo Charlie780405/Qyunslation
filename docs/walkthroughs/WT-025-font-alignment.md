@@ -38,6 +38,8 @@ bash scripts/verify-plan-025.sh   # PASS=18 FAIL=0
 
 验收：`verify-plan-025.sh` PASS=28 FAIL=0，中→英与英→中 QC 全绿，最大渲染偏移 1px。
 
+部署：main `e7f71e1`，重启 `qyunslation-office.service`，`https://translate.qyunsgen.com/` 返回 200。
+
 ## 已知边界
 
 超长英文贴图像左缘时（如「分层因素」→ Stratification factors）会水平 clamp，`plan_dx` 可 > tol，C8 仍以计划锚点为准。
