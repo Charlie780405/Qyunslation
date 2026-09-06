@@ -118,6 +118,10 @@ for i,b in enumerate(ocr_image(path),1):
 29. **预扫描代际锁**——`_prescan_generation` + per-file hash；过期 Tier-2 回调丢弃。
 30. **HPD 回退用原稿**——PDF 插图前置后若报 Scanned PDF，HPD 必须吃 `_pre_imgtr_origin_path`。
 31. **单图熔断**——超时/QC 失败保留原图；交付 `<stem>.imgtr.json`。
+32. **依赖声明 = import 名**——`from rapidocr import RapidOCR` 必须对应 `rapidocr` 包（另显式声明 `onnxruntime`）；禁止靠 docling 传递依赖撑主链路。
+33. **跨 venv 能力显式判定**——pdf2zh 进程无 RapidOCR 时，探针/嵌字必须走 sidecar；禁止本地静默弱回退。
+34. **HPD 仅限扫描件整页**——流程图 / 设计图主路径必须 RapidOCR；HPD 把整图标成 `<BLOCK>image`。
+35. **引擎降级必须可见**——`ocr_image_with_engine` 返回实际引擎名；`probe_image` / `/image-probe` 透传 `ocr_engine`；启动打印 `ocr_engine_status()`。
 
 ### 关键模块
 

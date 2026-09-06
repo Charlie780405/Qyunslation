@@ -17,6 +17,7 @@
 | **027c** | DOCX 实例级嵌字与回填 | DrawingML XML 树尺寸/裁剪解析、共享 ImagePart 克隆解耦、进度上报、Manifest 生成 | `docx_translator.py` 重构 | 027a |
 | **027d** | PDF 双策略与安全原位贴片 | 页面实例表构建、共享 XObject 解耦、去整页回退的矢量安全聚类、透明贴片覆盖 | `pdf_figure_crop.py`<br>`pdf_image_translate.py`<br>`apply-pdf2zh-docimg.py` | 027a, 027b |
 | **027e** | 自动化验证、Skill 沉淀与发布 | 多文件并发、透明度、共享引用、双向语言门控与 026 视觉回归测试、WT-027 报告 | `verify-plan-027.sh`<br>`SKILL.md` (SK-Q002) | 027a~027d |
+| **027f** | OCR 引擎可观测与依赖转正 | RapidOCR 依赖转正、引擎注册表、探针/启动暴露 `ocr_engine`、合成图基线块数断言；归档预览 nowrap 与跨 venv 门控热修 | `image_translate.py`<br>`pyproject.toml`<br>`verify-plan-027.sh` | 027e |
 
 ```mermaid
 flowchart LR
@@ -26,6 +27,7 @@ flowchart LR
     B --> D
     C --> E[027e 验证与交付]
     D --> E
+    E --> F[027f OCR 可观测与依赖转正]
 ```
 
 ---

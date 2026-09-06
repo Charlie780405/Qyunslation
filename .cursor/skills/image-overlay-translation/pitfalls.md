@@ -48,3 +48,6 @@
 36. **预扫描无代际锁** → 切换文件后旧 Tier-2 覆写 UI（PLAN-027）。正解：`_prescan_generation` + per-file hash。
 37. **已是目标语种/纯数字仍送 LLM** → 幻觉或浪费（PLAN-027）。正解：`filter_translatable_texts`。
 38. **HPD fallback 吃 `.imgtr.pdf`** → 已嵌字图被二次 OCR（PLAN-027）。正解：`_pre_imgtr_origin_path`。
+39. **`rapidocr-onnxruntime` 声明但代码 `from rapidocr`** → 真正跑的是 docling 传递的 `rapidocr 3.x`；docling 一撤，OCR 静默退化（PLAN-027f）。正解：显式 `rapidocr>=3.6.0` + `onnxruntime`。
+40. **RapidOCR 缺失仍本地 `probe_image`** → pdf2zh venv 无 rapidocr，同图 43→0 块，预扫描误报「无可译文字」（PLAN-027f）。正解：`has_local_ocr()` / sidecar；`ocr_engine` 字段暴露实际引擎。
+41. **Gradio `.column` 默认 `flex-wrap:wrap`** → 长预览另起一列落到右邻栏，原文跑进「译文」（PLAN-027 热修）。正解：中右栏 `flex-wrap: nowrap`。

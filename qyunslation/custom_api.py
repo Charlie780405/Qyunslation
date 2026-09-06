@@ -63,6 +63,7 @@ async def image_probe_endpoint(
                 "translatable_blocks": 0,
                 "detected_lang": "unknown",
                 "text_samples": [],
+                "ocr_engine": "none",
             }
         )
     tmp_in = None
@@ -89,6 +90,7 @@ async def image_probe_endpoint(
                 "translatable_blocks": 0,
                 "detected_lang": "unknown",
                 "text_samples": [],
+                "ocr_engine": "none",
             }
         )
     finally:

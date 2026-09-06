@@ -215,6 +215,92 @@ assert "/service/image-probe" in pre, "prescan missing sidecar fallback"
 print("ocr gate ok")
 PY
 
+echo "=== 8d. PLAN-027f OCR 引擎可观测 ==="
+"$PY" - <<'PY' && ok "027f dep+status+vision" || bad "027f dep+status+vision"
+from pathlib import Path
+import re
+import tempfile
+
+pyproj = Path("pyproject.toml").read_text()
+assert "rapidocr>=" in pyproj or 'rapidocr>=' in pyproj, "rapidocr not declared"
+assert "rapidocr-onnxruntime" not in pyproj, "dead rapidocr-onnxruntime still declared"
+assert "onnxruntime" in pyproj, "onnxruntime (RapidOCR runtime) not declared"
+src = Path("qyunslation/extensions/image_translate.py").read_text()
+assert "from rapidocr import RapidOCR" in src
+assert "def ocr_engine_status" in src
+assert "def ocr_image_with_engine" in src
+assert "def ocr_image_vision" in src
+assert "QYUNSLATION_OCR_ENGINE" in src
+
+from qyunslation.extensions.image_translate import (
+    ocr_engine_status,
+    ocr_image_vision,
+    ocr_image_with_engine,
+    probe_image,
+)
+
+st = ocr_engine_status(refresh=True)
+assert "engines" in st and "rapidocr" in st["engines"]
+assert st["engines"]["rapidocr"]["status"] in {"ok", "unavailable", "failed"}
+assert st["engines"]["vision"]["status"] == "stub"
+
+raised = False
+try:
+    ocr_image_vision("/tmp/nope.png")
+except NotImplementedError:
+    raised = True
+assert raised, "vision stub must raise NotImplementedError, not return empty"
+
+# 合成确定性图：用系统中文字体画 12 个标签，断言 RapidOCR 检出达标
+from PIL import Image, ImageDraw, ImageFont
+
+labels = [
+    "诱导期", "维持期", "负荷期", "筛选期",
+    "随访期", "主要终点", "EASI75", "IGA0/1",
+    "随机化", "安全随访", "安慰剂", "开放标签",
+]
+font = None
+for fp in (
+    "/home/dev/.cache/babeldoc/fonts/SourceHanSansCN-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+):
+    if Path(fp).is_file():
+        try:
+            font = ImageFont.truetype(fp, 28)
+            break
+        except Exception:
+            pass
+assert font is not None, "no CJK font for baseline synthetic image"
+
+im = Image.new("RGB", (900, 480), "white")
+d = ImageDraw.Draw(im)
+for i, lab in enumerate(labels):
+    x = 40 + (i % 4) * 210
+    y = 40 + (i // 4) * 140
+    d.rectangle([x - 8, y - 8, x + 180, y + 48], outline="black", width=2)
+    d.text((x, y), lab, fill="black", font=font)
+with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+    path = tmp.name
+    im.save(path)
+try:
+    boxes, engine = ocr_image_with_engine(path)
+    pr = probe_image(path, to_lang="English", display_width_pt=400, display_height_pt=220)
+finally:
+    Path(path).unlink(missing_ok=True)
+
+assert engine == "rapidocr", f"expected rapidocr, got {engine}"
+assert len(boxes) >= 8, f"baseline boxes too low: {len(boxes)} (engine degraded?)"
+assert pr.get("ocr_engine") == "rapidocr", pr
+assert "ocr_engine" in pr
+print(f"027f ok engine={engine} boxes={len(boxes)} probe_engine={pr['ocr_engine']}")
+PY
+
+# lifespan 启动自检接线
+grep -q "ocr_engine_status" qyunslation/app.py && ok "lifespan ocr status" || bad "lifespan ocr status"
+grep -q '"ocr_engine"' qyunslation/custom_api.py && ok "api ocr_engine field" || bad "api ocr_engine field"
+
 echo "=== 9. Skill 文档 ==="
 grep -q "文档内嵌图\|Occurrence\|共享" .cursor/skills/image-overlay-translation/SKILL.md && ok "skill section" || bad "skill section (will add)"
 
