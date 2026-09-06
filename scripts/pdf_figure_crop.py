@@ -13,8 +13,8 @@ except ImportError:  # pragma: no cover
 MAX_AREA_FRAC = float(os.environ.get("QYUNSLATION_VECTOR_MAX_AREA_FRAC", "0.80"))
 TEXT_OVERLAP_MAX = float(os.environ.get("QYUNSLATION_VECTOR_TEXT_OVERLAP", "0.10"))
 MIN_DRAWINGS = int(os.environ.get("QYUNSLATION_VECTOR_MIN_DRAWINGS", "8"))
-VECTOR_CROP_DPI = int(os.environ.get("QYUNSLATION_VECTOR_CROP_DPI", "200"))
-VECTOR_MAX_PX = int(os.environ.get("QYUNSLATION_VECTOR_MAX_PX", "2400"))
+VECTOR_CROP_DPI = int(os.environ.get("QYUNSLATION_VECTOR_CROP_DPI", "300"))
+VECTOR_MAX_PX = int(os.environ.get("QYUNSLATION_VECTOR_MAX_PX", "4000"))
 
 
 def _union_rects(rects: list) -> object | None:

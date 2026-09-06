@@ -23,6 +23,8 @@ BANNER_SHORT_PT = float(os.environ.get("QYUNSLATION_DOC_IMAGE_BANNER_SHORT_PT", 
 # 像素几何兜底（无显示尺寸时）
 MIN_EDGE_PX = int(os.environ.get("QYUNSLATION_DOC_IMAGE_MIN_PX", "200"))
 MIN_AREA_PX = int(os.environ.get("QYUNSLATION_DOC_IMAGE_MIN_AREA_PX", "40000"))
+# 按显示尺寸回嵌目标 DPI（仅上采样，不缩小高清源）
+TARGET_DPI = int(os.environ.get("QYUNSLATION_IMAGE_TARGET_DPI", "300"))
 
 _NUM_ONLY_RE = re.compile(
     r"^[\d\s\.\,\+\-\*\/\=\%\:\;\(\)\[\]\{\}℃°\<\>\±×÷~～]+$"
@@ -51,6 +53,63 @@ class ImageDecision:
 
 def feature_hash(img_bytes: bytes) -> str:
     return hashlib.sha256(img_bytes).hexdigest()[:16]
+
+
+def ensure_display_dpi(
+    img_bytes: bytes,
+    width_pt: float,
+    height_pt: float,
+    *,
+    target_dpi: int | None = None,
+) -> bytes:
+    """按显示尺寸把图升到 target_dpi；已足够清晰则原样返回。
+
+    有效 DPI ≈ px * 72 / pt。只上采样、不缩小，避免把高清源压糊。
+    width_pt/height_pt ≤ 0 或无法解码时原样返回。
+    """
+    if not img_bytes or width_pt <= 0 or height_pt <= 0:
+        return img_bytes
+    if Image is None:
+        return img_bytes
+    dpi = int(target_dpi if target_dpi is not None else TARGET_DPI)
+    if dpi <= 0:
+        return img_bytes
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as im:
+            im.load()
+            w_px, h_px = im.size
+            if w_px <= 0 or h_px <= 0:
+                return img_bytes
+            need_w = max(1, int(round(width_pt * dpi / 72.0)))
+            need_h = max(1, int(round(height_pt * dpi / 72.0)))
+            # 任一边已达目标则不缩小；仅当两边都低于目标才升
+            if w_px >= need_w and h_px >= need_h:
+                return img_bytes
+            # 按较大缺口等比放大，保持纵横比
+            scale = max(need_w / w_px, need_h / h_px)
+            nw = max(1, int(round(w_px * scale)))
+            nh = max(1, int(round(h_px * scale)))
+            if nw == w_px and nh == h_px:
+                return img_bytes
+            out = im.convert("RGBA") if ("A" in (im.mode or "") or im.mode == "P") else im.convert("RGB")
+            if im.mode == "P" and "transparency" in im.info:
+                out = im.convert("RGBA")
+            resized = out.resize((nw, nh), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            fmt = (im.format or "PNG").upper()
+            if fmt in ("JPG", "JPEG") and resized.mode == "RGBA":
+                resized = resized.convert("RGB")
+                fmt = "JPEG"
+            if fmt not in ("PNG", "JPEG", "WEBP", "BMP"):
+                fmt = "PNG"
+            save_kw: dict = {}
+            if fmt == "JPEG":
+                save_kw["quality"] = 95
+                save_kw["optimize"] = True
+            resized.save(buf, format=fmt, **save_kw)
+            return buf.getvalue()
+    except Exception:
+        return img_bytes
 
 
 def _target_is_chinese(target_lang: str) -> bool:

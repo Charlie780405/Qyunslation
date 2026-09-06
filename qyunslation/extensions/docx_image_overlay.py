@@ -275,7 +275,10 @@ def overlay_docx_embedded_images(
         ctype = getattr(occ.image_part, "content_type", "") or ""
         suffix = _ctype_suffix(ctype)
         t0 = time.time()
-        new_blob, n, qc = translate_image_bytes(blob, suffix=suffix, to_lang=to_lang)
+        from qyunslation.extensions.doc_image_policy import ensure_display_dpi
+
+        work_blob = ensure_display_dpi(blob, occ.width_pt, occ.height_pt)
+        new_blob, n, qc = translate_image_bytes(work_blob, suffix=suffix, to_lang=to_lang)
         elapsed = time.time() - t0
         result = (new_blob, n, {**(qc or {}), "elapsed": round(elapsed, 2)})
         blob_cache[fhash] = result

@@ -51,3 +51,5 @@
 39. **`rapidocr-onnxruntime` 声明但代码 `from rapidocr`** → 真正跑的是 docling 传递的 `rapidocr 3.x`；docling 一撤，OCR 静默退化（PLAN-027f）。正解：显式 `rapidocr>=3.6.0` + `onnxruntime`。
 40. **RapidOCR 缺失仍本地 `probe_image`** → pdf2zh venv 无 rapidocr，同图 43→0 块，预扫描误报「无可译文字」（PLAN-027f）。正解：`has_local_ocr()` / sidecar；`ocr_engine` 字段暴露实际引擎。
 41. **Gradio `.column` 默认 `flex-wrap:wrap`** → 长预览另起一列落到右邻栏，原文跑进「译文」（PLAN-027 热修）。正解：中右栏 `flex-wrap: nowrap`。
+42. **源像素低于显示尺寸仍原样嵌字** → 回嵌拉伸发糊（PLAN-027g）。正解：`ensure_display_dpi` 升到 300 DPI；矢量默认 300/`MAX_PX=4000`。
+43. **文字带外整段回贴原图** → OCR 框内带外的残画（`c`/`OL`）贴回，译文叠字（PLAN-027g）。正解：回贴避开文字 mask；擦后 `_clear_ocr_leftovers`。
