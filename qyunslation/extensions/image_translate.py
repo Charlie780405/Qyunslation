@@ -53,6 +53,12 @@ TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
 TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
 TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
 ALIGN_TOL_PX = float(os.environ.get("QYUNSLATION_ALIGN_TOL_PX", "12"))
+# 线状行判据：宽高比超此值且高度不足最高行此比例，视为括号线/色带而非文字
+RULE_ROW_RATIO = float(os.environ.get("QYUNSLATION_RULE_ROW_RATIO", "8.0"))
+RULE_ROW_H_FRAC = float(os.environ.get("QYUNSLATION_RULE_ROW_H_FRAC", "0.4"))
+# 跨框左对齐组：左墨迹边差与纵向间距上限
+LEFT_GROUP_TOL_PX = float(os.environ.get("QYUNSLATION_LEFT_GROUP_TOL_PX", "8"))
+LEFT_GROUP_GAP_MULT = float(os.environ.get("QYUNSLATION_LEFT_GROUP_GAP_MULT", "1.6"))
 
 _RAPID_ENGINE = None
 
@@ -429,13 +435,15 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
 
     # 对齐从行间一致性推断，禁止质心对框中心三分桶（密排图几乎全判 center）
     geom = _ink_geometry(roi)
-    align = _infer_align(geom.get("rows") or [], solid=solid)
+    solid_colored = solid and not _is_near_white(_quantize_bgr(bg_bgr))
+    align = _infer_align(geom.get("rows") or [], solid=solid_colored)
 
     return {
         "bg_bgr": bg_bgr,
         "fg_bgr": fg_bgr,
         "border_bgr": border_bgr,
         "solid": solid,
+        "solid_colored": solid_colored,
         "bold": bold,
         "align": align,
         "contrast": contrast,
@@ -523,9 +531,29 @@ def _ink_geometry(roi: np.ndarray) -> dict:
     }
 
 
+def _main_row(rows: list[dict]) -> dict | None:
+    """锚点行：排除线状行（括号线/色带）后取最宽的一行。
+
+    OCR 框常蹭到贯穿全宽的细线，若按「最宽」直接选行会锚到那条线上。
+    """
+    if not rows:
+        return None
+    heights = [max(1, int(r["y2"]) - int(r["y1"])) for r in rows]
+    h_max = max(heights)
+    texty: list[dict] = []
+    for r, h in zip(rows, heights):
+        w = max(1, int(r["x2"]) - int(r["x1"]))
+        if w / h >= RULE_ROW_RATIO and h < h_max * RULE_ROW_H_FRAC:
+            continue
+        texty.append(r)
+    pool = texty or rows
+    return max(pool, key=lambda r: int(r["x2"]) - int(r["x1"]))
+
+
 def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
     """多行比各行 x1/cx/x2 标准差，最小者即原文对齐；单行/实心色块取 center。"""
-    # 实心色块上的标签在设计上几乎总是居中（流程图蓝框等）
+    # 实心「彩色」块上的标签在设计上几乎总是居中（流程图蓝框等）；
+    # 白底 solid 只是底色干净，不代表居中，须走正常推断
     if solid:
         return "center"
     if len(rows) < 2:
@@ -595,6 +623,22 @@ def _text_size(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
         bbox = font.getbbox(text)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
     return font.getsize(text)  # type: ignore[attr-defined]
+
+
+def _ink_x_metrics(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
+    """真实墨迹水平范围 (左边距, 墨迹宽)。
+
+    `font.getbbox()` 返回布局盒（x0 恒 0、x2 为步进宽），拿不到左边距；
+    「·」或前导空格会让文字整体右移。`getmask().getbbox()` 才是实际墨迹。
+    """
+    try:
+        mask = font.getmask(text)
+        bb = mask.getbbox()
+        if bb:
+            return int(bb[0]), max(1, int(bb[2]) - int(bb[0]))
+    except (AttributeError, OSError, ValueError):
+        pass
+    return 0, _text_size(font, text)[0]
 
 
 def _line_height(font: ImageFont.ImageFont, size_hint: int = 0) -> int:
@@ -792,6 +836,67 @@ def _estimate_orig_size(
         else:
             hi = mid - 1
     return best
+
+
+def _assign_left_groups(
+    boxes: list,
+    styles: list[dict],
+    redraw: list[bool],
+    orig: np.ndarray,
+) -> dict[int, float]:
+    """跨框左对齐组：纵向邻接且原文左墨迹边一致的框（项目符号列表/条目块）。
+
+    单行框各自看都是「居中」，只有放在一起才看得出是左对齐；译文长短不一时
+    逐框居中会让 bullet 参差。返回 {box_index: 共同左锚 x}。
+    """
+    items: list[dict] = []
+    for i, b in enumerate(boxes):
+        if not redraw[i] or styles[i].get("solid_colored"):
+            continue
+        ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        row = _main_row((_ink_geometry(orig[oy1:oy2, ox1:ox2]).get("rows") or []))
+        if not row:
+            continue
+        items.append(
+            {
+                "i": i,
+                "x1": ox1 + float(row["x1"]),
+                "x2": ox1 + float(row["x2"]),
+                "y1": oy1,
+                "y2": oy2,
+                "h": max(1, oy2 - oy1),
+            }
+        )
+    items.sort(key=lambda t: t["y1"])
+
+    out: dict[int, float] = {}
+    used = [False] * len(items)
+    for a in range(len(items)):
+        if used[a]:
+            continue
+        group = [items[a]]
+        used[a] = True
+        for b_i in range(a + 1, len(items)):
+            if used[b_i]:
+                continue
+            prev, cur = group[-1], items[b_i]
+            if abs(cur["x1"] - prev["x1"]) > LEFT_GROUP_TOL_PX:
+                continue
+            if cur["y1"] - prev["y2"] > prev["h"] * LEFT_GROUP_GAP_MULT:
+                continue
+            group.append(cur)
+            used[b_i] = True
+        if len(group) < 2:
+            continue
+        # 等宽条目（刻度标签之类）左/中/右无从区分，居中更稳；
+        # 只有右端明显参差才构成「左对齐」的证据
+        x2s = [g["x2"] for g in group]
+        if max(x2s) - min(x2s) < LEFT_GROUP_TOL_PX * 3:
+            continue
+        anchor = float(np.median([g["x1"] for g in group]))
+        for g in group:
+            out[g["i"]] = anchor
+    return out
 
 
 def _assign_tiers(
@@ -1130,9 +1235,10 @@ def _qc_report(
             dst_roi = final_bgr[my1:my2, mx1:mx2]
             dst_g = _ink_geometry(dst_roi)
             st = styles[i]
-            align = st.get("align") or "center"
-            # 计划锚点
-            if st.get("solid"):
+            # 用实际生效的锚定模式（左对齐组会覆盖逐框推断）
+            align = planned.get("align") or st.get("align") or "center"
+            vertical_center = bool(planned.get("solid_colored", st.get("solid")))
+            if align == "center" and vertical_center:
                 sx = (int(db["x1"]) + int(db["x2"])) / 2.0
                 sy = (int(db["y1"]) + int(db["y2"])) / 2.0
                 dx_abs = mx1 + float(dst_g["ink_cx"])
@@ -1153,7 +1259,7 @@ def _qc_report(
             ddy = dy_abs - sy
             ink_src = planned.get("ink_src") or {}
             # 相对原文锚点的位移（审计用）
-            if st.get("solid"):
+            if align == "center" and vertical_center:
                 src_ax = float(ink_src.get("cx") or ((ox1 + ox2) / 2.0))
                 src_ay = float(ink_src.get("cy") or ((oy1 + oy2) / 2.0))
                 plan_dx = sx - src_ax
@@ -1172,6 +1278,7 @@ def _qc_report(
                 "box": i + 1,
                 "align": align,
                 "solid": bool(st.get("solid")),
+                "left_group_x": planned.get("left_group_x"),
                 "anchor_src": {"x": round(src_ax, 1), "y": round(src_ay, 1)},
                 "anchor_plan": {"x": round(sx, 1), "y": round(sy, 1)},
                 "anchor_dst": {"x": round(dx_abs, 1), "y": round(dy_abs, 1)},
@@ -1193,6 +1300,30 @@ def _qc_report(
             }
         )
 
+    # C9 左对齐组：同组成品左墨迹边必须齐（bullet 列表不得参差）
+    groups: dict[float, list[dict]] = {}
+    for a in align_details:
+        gx = a.get("left_group_x")
+        if gx is None:
+            continue
+        groups.setdefault(float(gx), []).append(a)
+    ragged = []
+    for gx, members in groups.items():
+        if len(members) < 2:
+            continue
+        xs = [float(m["anchor_dst"]["x"]) for m in members]
+        spread = max(xs) - min(xs)
+        if spread > ALIGN_TOL_PX:
+            ragged.append(
+                {
+                    "group_x": gx,
+                    "boxes": [m["box"] for m in members],
+                    "spread": round(spread, 1),
+                }
+            )
+    if ragged:
+        issues.append({"code": "C9", "msg": "left group ragged", "detail": ragged})
+
     report = {
         "ok": not issues,
         "issues": issues,
@@ -1205,6 +1336,11 @@ def _qc_report(
         "outliers": (tier_meta or {}).get("outliers") or [],
         "align": align_details,
         "align_tol_px": ALIGN_TOL_PX,
+        "left_groups": {
+            str(gx): [m["box"] for m in members]
+            for gx, members in groups.items()
+            if len(members) >= 2
+        },
     }
     qc_path = Path(str(out_path) + ".qc.json")
     try:
@@ -1217,7 +1353,9 @@ def _qc_report(
     if warnings:
         logger.warning("image QC WARN: %s", json.dumps(warnings[:12], ensure_ascii=False))
     if QC_STRICT and issues:
-        hard = [x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4", "C8")]
+        hard = [
+            x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4", "C8", "C9")
+        ]
         if hard:
             raise RuntimeError(f"image QC strict fail: {hard}")
     return report
@@ -1272,6 +1410,8 @@ def translate_image(
                 styles[i]["bg_bgr"],
             )
         )
+
+    left_groups = _assign_left_groups(boxes, styles, redraw, orig)
 
     # 备份未翻译框像素，防邻框擦除误伤
     kept_rois: list[tuple[tuple[int, int, int, int], np.ndarray]] = []
@@ -1348,10 +1488,9 @@ def translate_image(
         box_w = max(8, ax2 - ax1)
         box_h = max(8, ay2 - ay1)
         geom = _ink_geometry(orig[oy1:oy2, ox1:ox2])
-        # 主行：最宽墨迹行，避开括号线/色带把整体 ink bbox 拉歪
-        rows = geom.get("rows") or []
-        if rows:
-            main = max(rows, key=lambda r: int(r["x2"]) - int(r["x1"]))
+        # 主行：排除线状行后最宽的墨迹行，避开括号线/色带把整体 ink bbox 拉歪
+        main = _main_row(geom.get("rows") or [])
+        if main:
             ink_x1 = ox1 + int(main["x1"])
             ink_y1 = oy1 + int(main["y1"])
             ink_x2 = ox1 + int(main["x2"])
@@ -1402,31 +1541,39 @@ def translate_image(
         last_ink_h = _text_size(font, lines[-1])[1] if lines else lh
         block_ink_h = (n_lines - 1) * (lh + line_gap) + max(1, last_ink_h)
 
-        if st.get("solid"):
-            # 实心块：整块墨迹垂直中心对齐原文 ink_cy，上下对称生长
+        # 跨框左对齐组优先于逐框推断
+        group_x = left_groups.get(i)
+        align_mode = "left" if group_x is not None else st["align"]
+        if group_x is not None:
+            ink_x1 = int(round(group_x))
+
+        if st.get("solid_colored"):
+            # 实心彩色块：整块墨迹垂直中心对齐原文 ink_cy，上下对称生长
             y0 = int(round(ink_cy - block_ink_h / 2.0))
         else:
             # 自由文字：首行墨迹顶对齐原文 ink_y1，向下生长
             y0 = ink_y1
 
-        # 先按锚点算各行理想坐标
-        placements: list[tuple[int, int, str, int]] = []  # x, y_ink_top, ln, tw
+        # 先按锚点算各行理想坐标；x 一律表示墨迹左缘
+        placements: list[tuple[int, int, str, int, int]] = []
         y_cursor = y0
         for ln in lines:
-            tw, _ = _text_size(font, ln)
-            if st["align"] == "left":
+            bear_x, tw = _ink_x_metrics(font, ln)
+            if align_mode == "left":
                 x = ink_x1
-            elif st["align"] == "right":
+            elif align_mode == "right":
                 x = ink_x2 - tw
             else:
                 x = int(round(ink_cx - tw / 2.0))
-            placements.append((x, y_cursor, ln, tw))
+            placements.append((x, y_cursor, ln, tw, bear_x))
             y_cursor += lh + line_gap
 
         # 整块最小平移 clamp：
-        # - 居中（含实心色块）：禁止被不对称可用区推偏，仅钳到图像边界
-        # - 左/右对齐：clamp 进可用区，避免压邻框
-        # - 非居中纵向：clamp 进可用区
+        # - 强锚（居中 / 实心彩色块 / 左对齐组成员）：禁止被不对称可用区推偏，仅钳图像边界
+        # - 其余左/右对齐：clamp 进可用区，避免压邻框
+        strict_anchor = (
+            align_mode == "center" or st.get("solid_colored") or group_x is not None
+        )
         shift_x = 0
         shift_y = 0
         img_w = int(orig.shape[1])
@@ -1436,7 +1583,7 @@ def translate_image(
             right = max(p[0] + p[3] for p in placements)
             top = placements[0][1]
             bottom = placements[0][1] + block_ink_h
-            if st["align"] == "center" or st.get("solid"):
+            if strict_anchor:
                 if left < 0:
                     shift_x = -left
                 elif right > img_w:
@@ -1460,12 +1607,13 @@ def translate_image(
                     shift_y = img_h - bottom
             if shift_x or shift_y:
                 placements = [
-                    (p[0] + shift_x, p[1] + shift_y, p[2], p[3]) for p in placements
+                    (p[0] + shift_x, p[1] + shift_y, p[2], p[3], p[4])
+                    for p in placements
                 ]
 
         fill = _bgr_to_rgb(st["fg_bgr"])
         min_contrast = min(min_contrast, float(st["contrast"]))
-        for x, y_ink, ln, tw in placements:
+        for x, y_ink, ln, tw, bear_x in placements:
             if tw > box_w * 1.15:
                 logger.warning(
                     "text overflow box#%d w=%d need≈%d align=%s: %s",
@@ -1475,11 +1623,10 @@ def translate_image(
                     st["align"],
                     ln[:40],
                 )
-            top = 0
-            if hasattr(font, "getbbox"):
-                bb = font.getbbox(ln)
-                top = bb[1]
-            d.text((x, y_ink - top), ln, fill=fill, font=font)
+            # placements 里的 x/y 是墨迹左上角；扣掉左/上边距，否则「·」这类
+            # 左边距大的字形会整体右移
+            bear_y = font.getbbox(ln)[1] if hasattr(font, "getbbox") else 0
+            d.text((x - bear_x, y_ink - bear_y), ln, fill=fill, font=font)
         draw_bbox = None
         if placements:
             draw_bbox = {
@@ -1489,8 +1636,10 @@ def translate_image(
                 "y2": placements[0][1] + block_ink_h,
             }
         anchors[i] = {
-            "align": st["align"],
+            "align": align_mode,
             "solid": bool(st.get("solid")),
+            "solid_colored": bool(st.get("solid_colored")),
+            "left_group_x": (round(group_x, 1) if group_x is not None else None),
             "ink_src": {
                 "x1": ink_x1,
                 "y1": ink_y1,

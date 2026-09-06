@@ -53,7 +53,11 @@ for i, b in enumerate(ocr_image(path), 1):
 | `QYUNSLATION_IMAGE_QC_STRICT` | QC 硬失败抛错 | 0 |
 | `QYUNSLATION_TIER_OUTLIER_RATIO` | 比值低于组中位此倍视为 outlier | 0.6 |
 | `QYUNSLATION_TIER_RATIO_TOL` | 组间比例允许偏差 | 0.02 |
-| `QYUNSLATION_ALIGN_TOL_PX` | C8 成品 vs 计划锚点容差 | 12 |
+| `QYUNSLATION_ALIGN_TOL_PX` | C8/C9 容差 | 12 |
+| `QYUNSLATION_RULE_ROW_RATIO` | 线状行宽高比下限 | 8.0 |
+| `QYUNSLATION_RULE_ROW_H_FRAC` | 线状行高度占最高行上限 | 0.4 |
+| `QYUNSLATION_LEFT_GROUP_TOL_PX` | 左对齐组左边差上限 | 8 |
+| `QYUNSLATION_LEFT_GROUP_GAP_MULT` | 左对齐组纵向间距倍数 | 1.6 |
 | `QYUNSLATION_BOLD_AREA_RATIO` | 粗体面积比 | 0.28 |
 | `QYUNSLATION_TRANSLATE_BATCH` | 批大小 | 25 |
 
@@ -64,3 +68,13 @@ for i, b in enumerate(ocr_image(path), 1):
 | 随访期/维持期/筛选期/诱导期 | ~182, 0 | ~0, 0 |
 | 主要终点 / 分层因素 | 460 / 1125, ~16 | ~0 / 图边界 clamp |
 | W12–W52 一行 | dy≈18 统一下沉 | 竖向方差 ≤2px |
+| 16周（蹭括号线） | 锚 cy=117（线状行） | 锚 y=126（真文字行） |
+| ·IGA / ·既往 bullet | 各自居中，x1 差 143 | 同组锚 x1=201，C9 通过 |
+
+### 文字度量口径（易错）
+
+| 方法 | 返回 | 用途 |
+| --- | --- | --- |
+| `font.getbbox(s)` | `(0, ink_top, advance_w, ink_bottom)` | 行高/竖向偏移；**x 不可用** |
+| `font.getmask(s).getbbox()` | 真实墨迹 `(x0, 0, x1, h)` | 水平定位 `_ink_x_metrics` |
+| `font.getmetrics()` | `(ascent, descent)` | 判能否放下 |
