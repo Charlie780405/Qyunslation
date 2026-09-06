@@ -52,6 +52,7 @@ QC_INK_MIN = float(os.environ.get("QYUNSLATION_QC_INK_MIN", "0.005"))
 TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
 TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
 TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
+ALIGN_TOL_PX = float(os.environ.get("QYUNSLATION_ALIGN_TOL_PX", "12"))
 
 _RAPID_ENGINE = None
 
@@ -426,18 +427,9 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
     area_ratio = float(text_mask.sum()) / float(max(1, h * w))
     bold = area_ratio >= BOLD_AREA_RATIO
 
-    align = "center"
-    if text_mask.any():
-        ys, xs = np.where(text_mask)
-        cx = float(xs.mean())
-        mid = w / 2.0
-        offset = (cx - mid) / max(1.0, w)
-        if offset < -0.12:
-            align = "left"
-        elif offset > 0.12:
-            align = "right"
-        else:
-            align = "center"
+    # 对齐从行间一致性推断，禁止质心对框中心三分桶（密排图几乎全判 center）
+    geom = _ink_geometry(roi)
+    align = _infer_align(geom.get("rows") or [], solid=solid)
 
     return {
         "bg_bgr": bg_bgr,
@@ -448,6 +440,109 @@ def _analyze_box_style(roi: np.ndarray) -> dict:
         "align": align,
         "contrast": contrast,
     }
+
+
+def _ink_geometry(roi: np.ndarray) -> dict:
+    """原文墨迹几何：整体 ink bbox + 按 y 投影空行切出的每行 x1/cx/x2。
+
+    坐标相对 ROI 左上角。排版锚点必须用这套几何，禁止用可用区中心。
+    """
+    tm = _text_mask_u8(roi)
+    if tm.size == 0:
+        return {
+            "ink_x1": 0,
+            "ink_y1": 0,
+            "ink_x2": 0,
+            "ink_y2": 0,
+            "ink_cx": 0.0,
+            "ink_cy": 0.0,
+            "rows": [],
+        }
+    h, w = tm.shape[:2]
+    mask = tm > 0
+    if not mask.any():
+        return {
+            "ink_x1": 0,
+            "ink_y1": 0,
+            "ink_x2": max(0, w - 1),
+            "ink_y2": max(0, h - 1),
+            "ink_cx": w / 2.0,
+            "ink_cy": h / 2.0,
+            "rows": [],
+        }
+    ys, xs = np.where(mask)
+    ink_x1, ink_x2 = int(xs.min()), int(xs.max())
+    ink_y1, ink_y2 = int(ys.min()), int(ys.max())
+    rows: list[dict] = []
+    y_proj = mask.any(axis=1)
+    in_run = False
+    start = 0
+    for y in range(h):
+        if y_proj[y] and not in_run:
+            in_run = True
+            start = y
+        elif (not y_proj[y]) and in_run:
+            in_run = False
+            band = mask[start:y, :]
+            if band.any():
+                rxs = np.where(band.any(axis=0))[0]
+                rys = np.where(band.any(axis=1))[0]
+                rx1, rx2 = int(rxs.min()), int(rxs.max())
+                rows.append(
+                    {
+                        "x1": rx1,
+                        "x2": rx2,
+                        "cx": (rx1 + rx2) / 2.0,
+                        "y1": start + int(rys.min()),
+                        "y2": start + int(rys.max()),
+                    }
+                )
+    if in_run:
+        band = mask[start:h, :]
+        if band.any():
+            rxs = np.where(band.any(axis=0))[0]
+            rys = np.where(band.any(axis=1))[0]
+            rx1, rx2 = int(rxs.min()), int(rxs.max())
+            rows.append(
+                {
+                    "x1": rx1,
+                    "x2": rx2,
+                    "cx": (rx1 + rx2) / 2.0,
+                    "y1": start + int(rys.min()),
+                    "y2": start + int(rys.max()),
+                }
+            )
+    return {
+        "ink_x1": ink_x1,
+        "ink_y1": ink_y1,
+        "ink_x2": ink_x2,
+        "ink_y2": ink_y2,
+        "ink_cx": (ink_x1 + ink_x2) / 2.0,
+        "ink_cy": (ink_y1 + ink_y2) / 2.0,
+        "rows": rows,
+    }
+
+
+def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
+    """多行比各行 x1/cx/x2 标准差，最小者即原文对齐；单行/实心色块取 center。"""
+    # 实心色块上的标签在设计上几乎总是居中（流程图蓝框等）
+    if solid:
+        return "center"
+    if len(rows) < 2:
+        return "center"
+    x1s = [float(r["x1"]) for r in rows]
+    cxs = [float(r["cx"]) for r in rows]
+    x2s = [float(r["x2"]) for r in rows]
+    stds = {
+        "left": float(np.std(x1s)),
+        "center": float(np.std(cxs)),
+        "right": float(np.std(x2s)),
+    }
+    best = min(stds, key=stds.get)  # type: ignore[arg-type]
+    # 标准差接近时偏向 center，避免长短行把居中误判成右/左对齐
+    if best != "center" and stds[best] >= stds["center"] * 0.85:
+        return "center"
+    return best
 
 
 def _text_mask_u8(roi: np.ndarray) -> np.ndarray:
@@ -872,8 +967,10 @@ def _qc_report(
     erased_bgr: np.ndarray,
     final_rgb: np.ndarray,
     tier_meta: dict | None = None,
+    orig_bgr: np.ndarray | None = None,
+    anchors: list[dict | None] | None = None,
 ) -> dict:
-    """QC：覆盖/绘制/墨迹/对比度/溢出/可读性 + 层级一致与比例。"""
+    """QC：覆盖/绘制/墨迹/对比度/溢出/可读性 + 层级一致与比例 + 对齐。"""
     issues: list[dict] = []
     warnings: list[dict] = []
 
@@ -1011,6 +1108,91 @@ def _qc_report(
                 }
             )
 
+    # C8 对齐：成品墨迹 vs 计划绘制锚点（draw_bbox），验证「画到了该画的位置」。
+    # 相对原文的漂移在 planned.shift / ink_src 里可审计；图像边界 clamp 不算 C8 失败。
+    align_details: list[dict] = []
+    misaligned: list[dict] = []
+    if orig_bgr is not None:
+        ih, iw = final_bgr.shape[:2]
+        for i, b in enumerate(boxes):
+            if not redraw[i]:
+                continue
+            ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            planned = (anchors[i] if anchors and i < len(anchors) else None) or {}
+            db = planned.get("draw_bbox") if isinstance(planned, dict) else None
+            if not isinstance(db, dict):
+                continue
+            pad = 4
+            mx1 = max(0, int(db["x1"]) - pad)
+            my1 = max(0, int(db["y1"]) - pad)
+            mx2 = min(iw, int(db["x2"]) + pad)
+            my2 = min(ih, int(db["y2"]) + pad)
+            dst_roi = final_bgr[my1:my2, mx1:mx2]
+            dst_g = _ink_geometry(dst_roi)
+            st = styles[i]
+            align = st.get("align") or "center"
+            # 计划锚点
+            if st.get("solid"):
+                sx = (int(db["x1"]) + int(db["x2"])) / 2.0
+                sy = (int(db["y1"]) + int(db["y2"])) / 2.0
+                dx_abs = mx1 + float(dst_g["ink_cx"])
+                dy_abs = my1 + float(dst_g["ink_cy"])
+            else:
+                sy = float(db["y1"])
+                dy_abs = my1 + float(dst_g["ink_y1"])
+                if align == "left":
+                    sx = float(db["x1"])
+                    dx_abs = mx1 + float(dst_g["ink_x1"])
+                elif align == "right":
+                    sx = float(db["x2"])
+                    dx_abs = mx1 + float(dst_g["ink_x2"])
+                else:
+                    sx = (int(db["x1"]) + int(db["x2"])) / 2.0
+                    dx_abs = mx1 + float(dst_g["ink_cx"])
+            ddx = dx_abs - sx
+            ddy = dy_abs - sy
+            ink_src = planned.get("ink_src") or {}
+            # 相对原文锚点的位移（审计用）
+            if st.get("solid"):
+                src_ax = float(ink_src.get("cx") or ((ox1 + ox2) / 2.0))
+                src_ay = float(ink_src.get("cy") or ((oy1 + oy2) / 2.0))
+                plan_dx = sx - src_ax
+                plan_dy = sy - src_ay
+            else:
+                src_ay = float(ink_src.get("y1") or oy1)
+                plan_dy = sy - src_ay
+                if align == "left":
+                    src_ax = float(ink_src.get("x1") or ox1)
+                elif align == "right":
+                    src_ax = float(ink_src.get("x2") or ox2)
+                else:
+                    src_ax = float(ink_src.get("cx") or ((ox1 + ox2) / 2.0))
+                plan_dx = sx - src_ax
+            entry = {
+                "box": i + 1,
+                "align": align,
+                "solid": bool(st.get("solid")),
+                "anchor_src": {"x": round(src_ax, 1), "y": round(src_ay, 1)},
+                "anchor_plan": {"x": round(sx, 1), "y": round(sy, 1)},
+                "anchor_dst": {"x": round(dx_abs, 1), "y": round(dy_abs, 1)},
+                "dx": round(ddx, 1),
+                "dy": round(ddy, 1),
+                "plan_dx": round(plan_dx, 1),
+                "plan_dy": round(plan_dy, 1),
+                "planned": planned,
+            }
+            align_details.append(entry)
+            if abs(ddx) > ALIGN_TOL_PX or abs(ddy) > ALIGN_TOL_PX:
+                misaligned.append(entry)
+    if misaligned:
+        issues.append(
+            {
+                "code": "C8",
+                "msg": f"align drift boxes={[m['box'] for m in misaligned]}",
+                "detail": misaligned[:12],
+            }
+        )
+
     report = {
         "ok": not issues,
         "issues": issues,
@@ -1021,6 +1203,8 @@ def _qc_report(
         "tiers": tiers_info,
         "k": (tier_meta or {}).get("k"),
         "outliers": (tier_meta or {}).get("outliers") or [],
+        "align": align_details,
+        "align_tol_px": ALIGN_TOL_PX,
     }
     qc_path = Path(str(out_path) + ".qc.json")
     try:
@@ -1033,7 +1217,7 @@ def _qc_report(
     if warnings:
         logger.warning("image QC WARN: %s", json.dumps(warnings[:12], ensure_ascii=False))
     if QC_STRICT and issues:
-        hard = [x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4")]
+        hard = [x for x in issues if x.get("code") in ("C1", "C2", "C3", "C4", "C8")]
         if hard:
             raise RuntimeError(f"image QC strict fail: {hard}")
     return report
@@ -1151,15 +1335,36 @@ def translate_image(
     line_heights: list[int] = [0] * len(boxes)
     line_lists: list[list[str]] = [[] for _ in boxes]
     fonts: list = [None] * len(boxes)
+    anchors: list[dict | None] = [None] * len(boxes)
 
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
         ax1, ay1, ax2, ay2 = avails[i]
+        ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
         text = finals[i]
         st = styles[i]
+        # 可用区只做换行宽度与溢出余量，排版基准改为原文墨迹
         box_w = max(8, ax2 - ax1)
         box_h = max(8, ay2 - ay1)
+        geom = _ink_geometry(orig[oy1:oy2, ox1:ox2])
+        # 主行：最宽墨迹行，避开括号线/色带把整体 ink bbox 拉歪
+        rows = geom.get("rows") or []
+        if rows:
+            main = max(rows, key=lambda r: int(r["x2"]) - int(r["x1"]))
+            ink_x1 = ox1 + int(main["x1"])
+            ink_y1 = oy1 + int(main["y1"])
+            ink_x2 = ox1 + int(main["x2"])
+            ink_y2 = oy1 + int(main["y2"])
+            ink_cx = ox1 + float(main["cx"])
+            ink_cy = oy1 + (int(main["y1"]) + int(main["y2"])) / 2.0
+        else:
+            ink_x1 = ox1 + int(geom["ink_x1"])
+            ink_y1 = oy1 + int(geom["ink_y1"])
+            ink_x2 = ox1 + int(geom["ink_x2"])
+            ink_y2 = oy1 + int(geom["ink_y2"])
+            ink_cx = ox1 + float(geom["ink_cx"])
+            ink_cy = oy1 + float(geom["ink_cy"])
         size = max(10, int(assigned[i]))
         use_bold = bool(tier_bold.get(tiers[i]))
         use_path = font_bold if use_bold and font_bold else font_regular
@@ -1192,18 +1397,75 @@ def translate_image(
         line_lists[i] = lines
         fonts[i] = font
         line_gap = max(1, size // 8)
-        total_h = lh * len(lines) + line_gap * max(0, len(lines) - 1)
-        y = ay1 + max(0, (box_h - total_h) // 2)
-        fill = _bgr_to_rgb(st["fg_bgr"])
-        min_contrast = min(min_contrast, float(st["contrast"]))
+        n_lines = max(1, len(lines))
+        # 块墨迹高：行间距按 line box，末行只用墨迹高（避免 ascent/descent 空白偏移）
+        last_ink_h = _text_size(font, lines[-1])[1] if lines else lh
+        block_ink_h = (n_lines - 1) * (lh + line_gap) + max(1, last_ink_h)
+
+        if st.get("solid"):
+            # 实心块：整块墨迹垂直中心对齐原文 ink_cy，上下对称生长
+            y0 = int(round(ink_cy - block_ink_h / 2.0))
+        else:
+            # 自由文字：首行墨迹顶对齐原文 ink_y1，向下生长
+            y0 = ink_y1
+
+        # 先按锚点算各行理想坐标
+        placements: list[tuple[int, int, str, int]] = []  # x, y_ink_top, ln, tw
+        y_cursor = y0
         for ln in lines:
             tw, _ = _text_size(font, ln)
-            if st["align"] == "center":
-                x = ax1 + max(0, (box_w - tw) // 2)
+            if st["align"] == "left":
+                x = ink_x1
             elif st["align"] == "right":
-                x = max(ax1, ax2 - tw)
+                x = ink_x2 - tw
             else:
-                x = ax1
+                x = int(round(ink_cx - tw / 2.0))
+            placements.append((x, y_cursor, ln, tw))
+            y_cursor += lh + line_gap
+
+        # 整块最小平移 clamp：
+        # - 居中（含实心色块）：禁止被不对称可用区推偏，仅钳到图像边界
+        # - 左/右对齐：clamp 进可用区，避免压邻框
+        # - 非居中纵向：clamp 进可用区
+        shift_x = 0
+        shift_y = 0
+        img_w = int(orig.shape[1])
+        img_h = int(orig.shape[0])
+        if placements:
+            left = min(p[0] for p in placements)
+            right = max(p[0] + p[3] for p in placements)
+            top = placements[0][1]
+            bottom = placements[0][1] + block_ink_h
+            if st["align"] == "center" or st.get("solid"):
+                if left < 0:
+                    shift_x = -left
+                elif right > img_w:
+                    shift_x = img_w - right
+                if top < 0:
+                    shift_y = -top
+                elif bottom > img_h:
+                    shift_y = img_h - bottom
+            else:
+                if left < ax1:
+                    shift_x = ax1 - left
+                elif right > ax2:
+                    shift_x = ax2 - right
+                if top < ay1:
+                    shift_y = ay1 - top
+                elif bottom > ay2:
+                    shift_y = ay2 - bottom
+                if top + shift_y < 0:
+                    shift_y = -top
+                elif bottom + shift_y > img_h:
+                    shift_y = img_h - bottom
+            if shift_x or shift_y:
+                placements = [
+                    (p[0] + shift_x, p[1] + shift_y, p[2], p[3]) for p in placements
+                ]
+
+        fill = _bgr_to_rgb(st["fg_bgr"])
+        min_contrast = min(min_contrast, float(st["contrast"]))
+        for x, y_ink, ln, tw in placements:
             if tw > box_w * 1.15:
                 logger.warning(
                     "text overflow box#%d w=%d need≈%d align=%s: %s",
@@ -1217,8 +1479,29 @@ def translate_image(
             if hasattr(font, "getbbox"):
                 bb = font.getbbox(ln)
                 top = bb[1]
-            d.text((x, y - top), ln, fill=fill, font=font)
-            y += lh + line_gap
+            d.text((x, y_ink - top), ln, fill=fill, font=font)
+        draw_bbox = None
+        if placements:
+            draw_bbox = {
+                "x1": min(p[0] for p in placements),
+                "y1": placements[0][1],
+                "x2": max(p[0] + p[3] for p in placements),
+                "y2": placements[0][1] + block_ink_h,
+            }
+        anchors[i] = {
+            "align": st["align"],
+            "solid": bool(st.get("solid")),
+            "ink_src": {
+                "x1": ink_x1,
+                "y1": ink_y1,
+                "x2": ink_x2,
+                "y2": ink_y2,
+                "cx": round(ink_cx, 1),
+                "cy": round(ink_cy, 1),
+            },
+            "draw_bbox": draw_bbox,
+            "shift": {"x": shift_x, "y": shift_y},
+        }
         drawn += 1
 
     final_rgb = np.array(result)
@@ -1238,6 +1521,8 @@ def translate_image(
         erased_bgr=erased_bgr,
         final_rgb=final_rgb,
         tier_meta=tier_meta,
+        orig_bgr=orig,
+        anchors=anchors,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
