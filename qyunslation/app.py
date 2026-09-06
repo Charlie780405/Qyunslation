@@ -111,6 +111,12 @@ async def lifespan(app: FastAPI):
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
     logging.getLogger("qyunslation.extensions.image_translate").setLevel(logging.INFO)
+    try:
+        from qyunslation.extensions.image_translate import ocr_engine_status
+
+        global_logger.info("OCR capability: %s", ocr_engine_status())
+    except Exception as exc:
+        global_logger.warning("OCR capability probe failed: %s", exc)
     print("应用启动完成，多任务状态已初始化。")
     if hasattr(app.state, "port_to_use"):
         if getattr(app.state, "with_mcp", False) and MCP_AVAILABLE:

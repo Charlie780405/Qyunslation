@@ -65,6 +65,8 @@ for i, b in enumerate(ocr_image(path), 1):
 | `QYUNSLATION_GRAPHICS_DAMAGE_MAX` | C10 损伤像素上限 | 40 |
 | `QYUNSLATION_BOLD_AREA_RATIO` | 粗体面积比 | 0.28 |
 | `QYUNSLATION_TRANSLATE_BATCH` | 批大小 | 25 |
+| `QYUNSLATION_OCR_MIN_SCORE` | RapidOCR 置信阈值 | 0.5 |
+| `QYUNSLATION_OCR_ENGINE` | OCR 后端：`auto` / `rapidocr` / `hpd` / `vision` | auto |
 
 ### 竖向三段式（PLAN-026）
 

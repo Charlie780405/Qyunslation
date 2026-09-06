@@ -66,7 +66,10 @@ LINE_GUARD_FRAC = float(os.environ.get("QYUNSLATION_LINE_GUARD_FRAC", "0.6"))
 # C10：OCR 框内文字带外「原图非背景→成品背景」像素超此数即失败
 GRAPHICS_DAMAGE_MAX = int(os.environ.get("QYUNSLATION_GRAPHICS_DAMAGE_MAX", "40"))
 
+OCR_ENGINE = (os.environ.get("QYUNSLATION_OCR_ENGINE") or "auto").strip().lower()
+
 _RAPID_ENGINE = None
+_OCR_STATUS_CACHE: dict | None = None
 
 
 def _require_env(name: str, value: str) -> str:
@@ -222,23 +225,180 @@ def ocr_image_rapid(img_path: str | Path) -> list[tuple[int, int, int, int, str,
     return out
 
 
-def ocr_image(img_path: str | Path) -> list[tuple[int, int, int, int, str, float]]:
-    """主 OCR：RapidOCR；零框时回退 HPD。"""
+def ocr_image_vision(img_path: str | Path) -> list[tuple[int, int, int, int, str, float]]:
+    """Vision OCR 接口位（PLAN-027f）。
+
+    接入契约（未实现，禁止静默返回空列表）：
+    - DeepSeek grounding / VL2 返回 ``<|det|>[[x1,y1,x2,y2]]``，坐标归一化到 0–999；
+    - 换算：``px = int(coord / 999 * dim)``，dim 为原图宽或高；
+    - 本机无 GPU，Ollama 仅有纯文本模型，故本函数当前固定抛 ``NotImplementedError``。
+    """
+    raise NotImplementedError(
+        "ocr_image_vision is a PLAN-027f stub; set QYUNSLATION_OCR_ENGINE=auto|rapidocr|hpd"
+    )
+
+
+def ocr_engine_status(*, refresh: bool = False) -> dict:
+    """探测各 OCR 后端能力。状态：ok / unavailable / failed / stub。
+
+    RapidOCR 未安装（ImportError）与装了但运行失败必须分开，避免静默降级不可见。
+    """
+    global _OCR_STATUS_CACHE
+    if _OCR_STATUS_CACHE is not None and not refresh:
+        return dict(_OCR_STATUS_CACHE)
+
+    status: dict = {
+        "preferred": OCR_ENGINE or "auto",
+        "engines": {},
+    }
+
+    # rapidocr
     try:
-        boxes = ocr_image_rapid(img_path)
+        from importlib.util import find_spec
+
+        if find_spec("rapidocr") is None:
+            status["engines"]["rapidocr"] = {
+                "status": "unavailable",
+                "detail": "module rapidocr not installed",
+            }
+        else:
+            try:
+                # 仅构造引擎，不跑图；构造失败（缺 onnxruntime 等）记为 failed
+                _get_rapid_engine()
+                status["engines"]["rapidocr"] = {"status": "ok", "detail": ""}
+            except ImportError as exc:
+                status["engines"]["rapidocr"] = {
+                    "status": "unavailable",
+                    "detail": str(exc),
+                }
+            except Exception as exc:
+                status["engines"]["rapidocr"] = {
+                    "status": "failed",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+    except Exception as exc:
+        status["engines"]["rapidocr"] = {
+            "status": "failed",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    # hpd：远程服务，有 URL 配置即视为可用入口（连通性在调用时判定）
+    if HPD_URL:
+        status["engines"]["hpd"] = {
+            "status": "ok",
+            "detail": f"endpoint configured: {HPD_URL}",
+        }
+    else:
+        status["engines"]["hpd"] = {
+            "status": "unavailable",
+            "detail": "QYUNSLATION_HPD_BASE_URL not set",
+        }
+
+    status["engines"]["vision"] = {
+        "status": "stub",
+        "detail": "NotImplementedError until Vision grounding is wired",
+    }
+
+    _OCR_STATUS_CACHE = dict(status)
+    return status
+
+
+def ocr_image_with_engine(
+    img_path: str | Path,
+) -> tuple[list[tuple[int, int, int, int, str, float]], str]:
+    """返回 (boxes, engine_actually_used)。
+
+    QYUNSLATION_OCR_ENGINE:
+      auto（默认）| rapidocr | hpd | vision
+    auto：RapidOCR →（零块/不可用/失败）HPD；降级写 warning，不再静默。
+    """
+    img_path = Path(img_path)
+    preferred = OCR_ENGINE or "auto"
+
+    def _run_rapid() -> list[tuple[int, int, int, int, str, float]]:
+        return ocr_image_rapid(img_path)
+
+    def _run_hpd() -> list[tuple[int, int, int, int, str, float]]:
+        return ocr_image_hpd(img_path)
+
+    if preferred == "vision":
+        # 绝不吞 NotImplementedError
+        boxes = ocr_image_vision(img_path)
+        return boxes, "vision"
+
+    if preferred == "rapidocr":
+        boxes = _run_rapid()
+        logger.info("OCR RapidOCR (forced): %d boxes", len(boxes))
+        return boxes, "rapidocr"
+
+    if preferred == "hpd":
+        boxes = _run_hpd()
+        logger.info("OCR HPD (forced): %d boxes", len(boxes))
+        return boxes, "hpd"
+
+    # auto
+    st = ocr_engine_status()
+    rapid = (st.get("engines") or {}).get("rapidocr") or {}
+    rapid_st = rapid.get("status")
+
+    if rapid_st == "unavailable":
+        logger.warning(
+            "RapidOCR unavailable (%s); falling back to HPD",
+            rapid.get("detail") or "not installed",
+        )
+        try:
+            boxes = _run_hpd()
+            logger.info("OCR HPD fallback: %d boxes", len(boxes))
+            return boxes, "hpd"
+        except Exception as exc:
+            logger.warning("HPD OCR also failed: %s", exc)
+            return [], "none"
+
+    if rapid_st == "failed":
+        logger.warning(
+            "RapidOCR failed at init (%s); falling back to HPD",
+            rapid.get("detail") or "unknown",
+        )
+        try:
+            boxes = _run_hpd()
+            logger.info("OCR HPD fallback: %d boxes", len(boxes))
+            return boxes, "hpd"
+        except Exception as exc:
+            logger.warning("HPD OCR also failed: %s", exc)
+            return [], "none"
+
+    try:
+        boxes = _run_rapid()
     except Exception as exc:
         logger.warning("RapidOCR failed, fallback HPD: %s", exc)
         boxes = []
+        try:
+            boxes = _run_hpd()
+            logger.info("OCR HPD fallback: %d boxes", len(boxes))
+            return boxes, "hpd"
+        except Exception as exc2:
+            logger.warning("HPD OCR also failed: %s", exc2)
+            return [], "none"
+
     if boxes:
         logger.info("OCR RapidOCR: %d boxes", len(boxes))
-        return boxes
+        return boxes, "rapidocr"
+
+    # 零块：仍尝试 HPD（扫描件场景），但显式记录降级
+    logger.warning("RapidOCR returned 0 boxes; trying HPD fallback")
     try:
-        boxes = ocr_image_hpd(img_path)
+        boxes = _run_hpd()
         logger.info("OCR HPD fallback: %d boxes", len(boxes))
-        return boxes
+        return boxes, "hpd"
     except Exception as exc:
         logger.warning("HPD OCR also failed: %s", exc)
-        return []
+        return [], "rapidocr"
+
+
+def ocr_image(img_path: str | Path) -> list[tuple[int, int, int, int, str, float]]:
+    """主 OCR：兼容旧签名。内部走 ocr_image_with_engine。"""
+    boxes, _engine = ocr_image_with_engine(img_path)
+    return boxes
 
 
 def _load_glossary() -> dict[str, str]:
@@ -1532,7 +1692,7 @@ def probe_image(
     page_frac: float | None = None,
     is_header: bool = False,
 ) -> dict:
-    """PLAN-027a：仅 OCR + 策略判定，不调 LLM。"""
+    """PLAN-027a：仅 OCR + 策略判定，不调 LLM。PLAN-027f：透传 ocr_engine。"""
     from qyunslation.extensions.doc_image_policy import evaluate_image_candidate
 
     img_path = Path(img_path)
@@ -1547,9 +1707,22 @@ def probe_image(
             "translatable_blocks": 0,
             "detected_lang": "unknown",
             "text_samples": [],
+            "ocr_engine": "none",
         }
+    engine = "none"
     try:
-        boxes = ocr_image(img_path)
+        boxes, engine = ocr_image_with_engine(img_path)
+    except NotImplementedError as exc:
+        return {
+            "status": "error",
+            "should_translate": False,
+            "reason": f"ocr_engine_unimplemented:{exc}",
+            "detected_blocks": 0,
+            "translatable_blocks": 0,
+            "detected_lang": "unknown",
+            "text_samples": [],
+            "ocr_engine": OCR_ENGINE or "vision",
+        }
     except Exception as exc:
         return {
             "status": "error",
@@ -1559,6 +1732,7 @@ def probe_image(
             "translatable_blocks": 0,
             "detected_lang": "unknown",
             "text_samples": [],
+            "ocr_engine": engine,
         }
     texts = [b[4] for b in boxes]
     decision = evaluate_image_candidate(
@@ -1581,6 +1755,7 @@ def probe_image(
         "detected_lang": decision.source_lang,
         "text_samples": samples,
         "feature_hash": decision.feature_hash,
+        "ocr_engine": engine,
     }
 
 
