@@ -41,3 +41,10 @@
 - qc.json `align[]`：`anchor_src` / `anchor_plan` / `anchor_dst` / `vertical_mode`
 - 文字带外非背景像素计数 + 括号线行非白存活率（PLAN-026）
 - qc.json `graphics_damage[]`（C10）
+32. **`page.replace_image(xref)` 全局污染** → 页眉 Logo 与正文设计图共用 xref 时，一次替换全改（PLAN-027）。正解：多引用则逐实例 `insert_image` overlay，或先克隆资源。
+33. **`package.iter_parts()` 当显示语义** → 取不到 EMU 尺寸/页眉身份，小 Logo 被翻或大图被漏（PLAN-027）。正解：DrawingML 枚举 `<wp:extent>` + occurrence 克隆。
+34. **`cv2.imread` 丢 Alpha** → 透明 PNG 回嵌黑底（PLAN-027）。正解：`_load_image_bgr_alpha` / `_save_with_alpha`。
+35. **Hermes `figure_clip` 退回整页** → 正文被压成位图（PLAN-027）。正解：面积>80% 或正文重叠>10% Fail-Closed，禁止整页回退。
+36. **预扫描无代际锁** → 切换文件后旧 Tier-2 覆写 UI（PLAN-027）。正解：`_prescan_generation` + per-file hash。
+37. **已是目标语种/纯数字仍送 LLM** → 幻觉或浪费（PLAN-027）。正解：`filter_translatable_texts`。
+38. **HPD fallback 吃 `.imgtr.pdf`** → 已嵌字图被二次 OCR（PLAN-027）。正解：`_pre_imgtr_origin_path`。

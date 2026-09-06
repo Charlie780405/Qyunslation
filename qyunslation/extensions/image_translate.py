@@ -1479,30 +1479,175 @@ def _qc_report(
     return report
 
 
+def _load_image_bgr_alpha(img_path: Path) -> tuple[np.ndarray, np.ndarray | None, str]:
+    """PLAN-027a：加载 BGR 工作图 + 可选 Alpha；保留原模式以便导出。
+
+    OCR/擦除在 RGB/BGR 三通道上进行；输出时把原始 Alpha 贴回。
+    """
+    with Image.open(img_path) as im:
+        mode = im.mode
+        has_alpha = mode in ("RGBA", "LA") or (
+            mode == "P" and "transparency" in im.info
+        )
+        alpha = None
+        if has_alpha:
+            rgba = im.convert("RGBA")
+            alpha = np.array(rgba.split()[-1])
+            rgb = rgba.convert("RGB")
+        else:
+            rgb = im.convert("RGB")
+        bgr = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+        return bgr, alpha, mode
+
+
+def _save_with_alpha(
+    result_rgb: Image.Image,
+    out_path: Path,
+    alpha: np.ndarray | None,
+    *,
+    draw_mask: np.ndarray | None = None,
+) -> None:
+    """保存时恢复 Alpha；译文墨迹处强制不透明。"""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if alpha is None:
+        result_rgb.save(out_path)
+        return
+    rgba = result_rgb.convert("RGBA")
+    arr = np.array(rgba)
+    a = alpha.copy()
+    if a.shape[:2] != arr.shape[:2]:
+        a = cv2.resize(a, (arr.shape[1], arr.shape[0]), interpolation=cv2.INTER_NEAREST)
+    if draw_mask is not None and draw_mask.shape[:2] == a.shape[:2]:
+        a = np.where(draw_mask > 0, np.uint8(255), a)
+    arr[:, :, 3] = a
+    Image.fromarray(arr, "RGBA").save(out_path)
+
+
+def probe_image(
+    img_path: str | Path,
+    *,
+    to_lang: str = "简体中文",
+    display_width_pt: float = 0.0,
+    display_height_pt: float = 0.0,
+    page_frac: float | None = None,
+    is_header: bool = False,
+) -> dict:
+    """PLAN-027a：仅 OCR + 策略判定，不调 LLM。"""
+    from qyunslation.extensions.doc_image_policy import evaluate_image_candidate
+
+    img_path = Path(img_path)
+    try:
+        data = img_path.read_bytes()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "should_translate": False,
+            "reason": f"read_failed:{exc}",
+            "detected_blocks": 0,
+            "translatable_blocks": 0,
+            "detected_lang": "unknown",
+            "text_samples": [],
+        }
+    try:
+        boxes = ocr_image(img_path)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "should_translate": False,
+            "reason": f"ocr_failed:{exc}",
+            "detected_blocks": 0,
+            "translatable_blocks": 0,
+            "detected_lang": "unknown",
+            "text_samples": [],
+        }
+    texts = [b[4] for b in boxes]
+    decision = evaluate_image_candidate(
+        data,
+        display_width_pt=display_width_pt,
+        display_height_pt=display_height_pt,
+        target_lang=to_lang,
+        page_frac=page_frac,
+        is_header=is_header,
+        ocr_texts=texts,
+    )
+    samples = [t.strip() for t in texts if t and t.strip()][:8]
+    status = "ok" if decision.should_translate else "skip"
+    return {
+        "status": status,
+        "should_translate": decision.should_translate,
+        "reason": decision.reason,
+        "detected_blocks": decision.detected_blocks or len(texts),
+        "translatable_blocks": decision.translatable_blocks,
+        "detected_lang": decision.source_lang,
+        "text_samples": samples,
+        "feature_hash": decision.feature_hash,
+    }
+
+
 def translate_image(
     img_path: str | Path, out_path: str | Path, to_lang: str = "简体中文"
 ) -> int:
     """完整图片嵌字翻译。返回实际绘制块数；失败返回 0（调用方应保留原图）。"""
+    n, _qc = translate_image_with_qc(img_path, out_path, to_lang=to_lang)
+    return n
+
+
+def translate_image_with_qc(
+    img_path: str | Path, out_path: str | Path, to_lang: str = "简体中文"
+) -> tuple[int, dict]:
+    """完整图片嵌字翻译。返回 (绘制块数, qc_report)。失败返回 (0, {})。"""
     img_path = Path(img_path)
     out_path = Path(out_path)
     if os.environ.get("QYUNSLATION_IMAGE_OVERLAY", "1").lower() in ("0", "false", "off"):
         logger.info("image overlay disabled")
-        return 0
+        return 0, {}
 
-    img_cv = cv2.imread(str(img_path))
+    try:
+        img_cv, alpha, _mode = _load_image_bgr_alpha(img_path)
+    except Exception as exc:
+        # 回退 cv2
+        logger.warning("PIL load failed, fallback cv2: %s", exc)
+        img_cv = cv2.imread(str(img_path))
+        alpha = None
     if img_cv is None:
         raise RuntimeError(f"cannot read image: {img_path}")
     orig = img_cv.copy()
     boxes = ocr_image(img_path)
     if not boxes:
-        return 0
+        return 0, {}
 
     texts = [b[4] for b in boxes]
+    # PLAN-027a：跳过纯数字/已是目标语种块（不送 LLM，保留原文）
+    try:
+        from qyunslation.extensions.doc_image_policy import (
+            filter_translatable_texts,
+            is_numeric_or_unit,
+        )
+
+        kept, _lang, skip_all = filter_translatable_texts(texts, target_lang=to_lang)
+        if skip_all == "already_target_lang" or (
+            skip_all == "no_translatable_text" and not any(
+                t.strip() and not is_numeric_or_unit(t) for t in texts
+            )
+        ):
+            return 0, {"ok": True, "skipped": skip_all or "no_translatable_text"}
+    except Exception:
+        kept = texts
+
     trans = translate_texts(texts, to_lang=to_lang)
 
     finals: list[str] = []
     redraw: list[bool] = []
     for i, src in enumerate(texts):
+        try:
+            from qyunslation.extensions.doc_image_policy import is_numeric_or_unit
+
+            if is_numeric_or_unit(src):
+                finals.append(src)
+                redraw.append(False)
+                continue
+        except Exception:
+            pass
         zh = (trans.get(i + 1) or "").strip()
         if zh:
             finals.append(zh)
@@ -1821,7 +1966,7 @@ def translate_image(
         drawn += 1
 
     final_rgb = np.array(result)
-    _qc_report(
+    qc = _qc_report(
         out_path=out_path,
         boxes=boxes,
         texts=texts,
@@ -1841,13 +1986,27 @@ def translate_image(
         anchors=anchors,
     )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    result.save(out_path)
+    # PLAN-027a：译文墨迹区强制不透明，其余恢复原 Alpha
+    draw_mask = None
+    if alpha is not None:
+        draw_mask = np.zeros(alpha.shape[:2], np.uint8)
+        for anc in anchors:
+            if not anc or not anc.get("draw_bbox"):
+                continue
+            bb = anc["draw_bbox"]
+            x1 = max(0, int(bb["x1"]) - 1)
+            y1 = max(0, int(bb["y1"]) - 1)
+            x2 = min(draw_mask.shape[1], int(bb["x2"]) + 1)
+            y2 = min(draw_mask.shape[0], int(bb["y2"]) + 1)
+            if x2 > x1 and y2 > y1:
+                draw_mask[y1:y2, x1:x2] = 255
+
+    _save_with_alpha(result, out_path, alpha, draw_mask=draw_mask)
     kept = sum(1 for r in redraw if not r)
     solid_n = sum(1 for st in styles if st.get("solid"))
     logger.info(
         "translate_image: ocr=%d translated=%d drawn=%d kept_original=%d "
-        "solid=%d/%d min_contrast=%.1f k=%.3f tiers=%d outliers=%s",
+        "solid=%d/%d min_contrast=%.1f k=%.3f tiers=%d outliers=%s alpha=%s",
         len(boxes),
         sum(1 for i in range(len(boxes)) if trans.get(i + 1)),
         drawn,
@@ -1858,14 +2017,15 @@ def translate_image(
         float(tier_meta.get("k") or 0),
         len(tier_meta.get("orig_em") or {}),
         tier_meta.get("outliers") or [],
+        alpha is not None,
     )
-    return drawn
+    return drawn, qc if isinstance(qc, dict) else {}
 
 
 def translate_image_bytes(
     data: bytes, suffix: str = ".png", to_lang: str = "简体中文"
-) -> tuple[bytes, int]:
-    """嵌字内存版，供 Word 内嵌图调用。失败则返回原字节、0。"""
+) -> tuple[bytes, int, dict]:
+    """嵌字内存版，供 Word 内嵌图调用。返回 (bytes, blocks, qc)；失败则返回原字节、0、{}。"""
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="img_ov_") as td:
@@ -1873,13 +2033,13 @@ def translate_image_bytes(
         dst = Path(td) / f"out{suffix}"
         src.write_bytes(data)
         try:
-            n = translate_image(src, dst, to_lang=to_lang)
+            n, qc = translate_image_with_qc(src, dst, to_lang=to_lang)
         except Exception as exc:
             logger.warning("image overlay failed, keep original: %s", exc)
-            return data, 0
+            return data, 0, {}
         if n <= 0 or not dst.is_file():
-            return data, 0
-        return dst.read_bytes(), n
+            return data, 0, qc if isinstance(qc, dict) else {}
+        return dst.read_bytes(), n, qc if isinstance(qc, dict) else {}
 
 
 if __name__ == "__main__":

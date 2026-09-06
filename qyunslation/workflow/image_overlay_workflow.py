@@ -25,7 +25,7 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
             self.document_original.content,
             suffix=suffix,
             to_lang=self.config.to_lang,
-        )
+        )[:2]
         stem = self.document_original.stem or "image"
         self.document_translated = Document.from_bytes(
             content=data, suffix=suffix, stem=f"{stem}.zh"

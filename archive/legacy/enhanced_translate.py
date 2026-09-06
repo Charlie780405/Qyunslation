@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from qyunslation.extensions.glossary_db import build_glossary_prompt, load_glossary
-from qyunslation.extensions.image_replace import translate_docx_images
+from image_replace import translate_docx_images
 
 DOCUTRANSLATE_API = "http://127.0.0.1:8010"
 
