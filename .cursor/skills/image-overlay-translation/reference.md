@@ -2,12 +2,13 @@
 
 ## 方案设计图-20260728.jpg（4353×2132）
 
-| 指标 | HPD | RapidOCR + PLAN-021 | PLAN-022 目标 |
-| --- | --- | --- | --- |
-| OCR 框 | 2 | 60 | ≥55 |
-| 译文命中 | 0/60 | 60/60 | ≥95% |
-| 蓝框对比度 | — | 1（旧取色） | ≥60 |
-| 安慰剂灰框对比度 | — | 12 | ≥60 |
+| 指标 | HPD | PLAN-021 | PLAN-022 | PLAN-023 目标 |
+| --- | --- | --- | --- | --- |
+| OCR 框 | 2 | 60 | ≥55 | ≥55 |
+| 译文命中 | 0/60 | 60/60 | ≥95% | ≥95% |
+| 蓝框对比度 | — | 1（旧取色） | ≥60 | ≥60 |
+| solid 命中 | — | 白底约 8/60 | 同左 | ≥55/60 |
+| QC | — | — | — | 六项全绿 |
 
 ### 取色反例（旧 `vals<120`）
 
@@ -16,6 +17,13 @@
 | QX027N 蓝 | 84 | 243（白） | 83 | 1 |
 | 安慰剂灰 | 129 | 246 | 117 | 12 |
 | 筛选期白底 | 248 | 12 | 10 | 238 |
+
+### 纯色误判反例（旧拍平 std）
+
+| 框 | 边框 bg | 拍平 std | 通道 max std | 旧 solid | 新 solid |
+| --- | --- | --- | --- | --- | --- |
+| QX027N 蓝 | (154,95,33) | ~50 | ~0 | False | True |
+| 16周（蹭括号线） | 白+青边 | >12 | 小但 frac 低 | False | True（frac≥0.80） |
 
 ## 诊断片段
 
@@ -35,6 +43,10 @@ for i, b in enumerate(ocr_image(path), 1):
 | `QYUNSLATION_FONT` | Regular 字面 | `NotoSansSC-Regular.otf` |
 | `QYUNSLATION_FONT_BOLD` | Bold 字面 | `NotoSansSC-Bold.otf` |
 | `QYUNSLATION_CONTRAST_MIN` | 强制黑白阈值 | 60 |
-| `QYUNSLATION_SOLID_STD_MAX` | 纯色判定 | 12 |
+| `QYUNSLATION_SOLID_STD_MAX` | 按通道纯色 std | 12 |
+| `QYUNSLATION_SOLID_FRAC_MIN` | 贴近中位数占比 | 0.80 |
+| `QYUNSLATION_AVAIL_W_MULT` | 可用区横向上限倍数 | 3.0 |
+| `QYUNSLATION_AVAIL_H_MULT` | 可用区纵向上限倍数 | 1.6 |
+| `QYUNSLATION_IMAGE_QC_STRICT` | QC 硬失败抛错 | 0 |
 | `QYUNSLATION_BOLD_AREA_RATIO` | 粗体面积比 | 0.28 |
 | `QYUNSLATION_TRANSLATE_BATCH` | 批大小 | 25 |

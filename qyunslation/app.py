@@ -104,6 +104,13 @@ async def lifespan(app: FastAPI):
 
     global_logger.propagate = False
     global_logger.setLevel(logging.INFO)
+    # PLAN-023: 确保 image_translate 等模块 logger 能进 journalctl
+    if not logging.root.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    logging.getLogger("qyunslation.extensions.image_translate").setLevel(logging.INFO)
     print("应用启动完成，多任务状态已初始化。")
     if hasattr(app.state, "port_to_use"):
         if getattr(app.state, "with_mcp", False) and MCP_AVAILABLE:

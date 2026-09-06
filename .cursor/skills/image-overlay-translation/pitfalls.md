@@ -6,9 +6,22 @@
 2. **`/no_think` 前缀无效** → qwen3.6 仍输出 thinking，`num_predict=2000` 耗尽后 `content=""`（PLAN-021）。正解：`think: false` API 参数。
 3. **先全擦后 `trans.get` 条件画** → `trans` 空时净删字（PLAN-021）。正解：缺译不擦不画。
 4. **`vals = vals[vals < 120]` 单侧取色** → 蓝底白字框对比度塌到 1，译文「看不见」（PLAN-022）。正解：Otsu 分层中位数 + 对比度兑底。
-5. **纯色框用 TELEA inpaint** → 边缘涂抹成花纹（PLAN-022）。正解：边框 std `< 12` 时 `cv2.rectangle` 纯色填充。
+5. **纯色框用 TELEA inpaint** → 边缘涂抹成花纹（PLAN-022）。正解：纯色时 `cv2.rectangle` 填充。
 6. **`QYUNSLATION_FONT` 指向 Thin TTF** → 嵌字偏细（PLAN-022）。正解：Regular.otf + Bold.otf，粗细从面积比推断。
 7. **无条件左对齐** → 流程图标签偏左（PLAN-022）。正解：文字像素质心判 left/center/right。
 8. **viewer `querySelectorAll('img, .prose')`** → `.prose > img` 双命中，全屏叠两张（PLAN-022）。正解：整容器 `cloneNode` + canvas 位图重绘。
 9. **返回 `len(boxes)` 当绘制数** → 日志虚报（PLAN-021）。正解：返回实际 `drawn`。
 10. **docx/custom_api 未传 `to_lang`** → 永远简体中文（PLAN-019/021）。正解：透传。
+11. **BGR 拍平求 std 判纯色** → 蓝底 `(154,95,33)` 通道间差把 std 抬到 ~50，全部误判非纯色走 inpaint，框内涂抹痕迹（PLAN-023）。正解：对内点 `np.std(..., axis=0).max()` 按通道。
+12. **纯 std 阈值不抗边缘蹭线** → 右上「16周」OCR 框蹭到青色括号线，solid 翻车，inpaint 扩散成黑/青梯形（PLAN-023）。正解：边框内缩 2px 采样 + 通道内点 std + 贴近中位数占比 `>= 0.80`。
+13. **循环内逐框 `cv2.inpaint` 整图** → 涂抹层层叠加放大痕迹（PLAN-023）。正解：非纯色累加 mask，全图只 inpaint 一次；非纯色优先邻域取色擦字。
+14. **用 `getbbox` 墨迹高判能否放下** → 真实行高更大，「16 weeks」第二行掉出框外；底部英文缩成两行小字像丢失（PLAN-023）。正解：`font.getmetrics()` ascent+descent；排版用 `_available_box` 扩到碰邻居为止。
+15. **框重叠 + 缺译不擦** → 邻框擦除矩形盖掉未译框原文，像素回不来（PLAN-023）。正解：擦前备份 `redraw=False` ROI，擦后回贴。
+16. **无 QC / 无 basicConfig** → 「擦了没画」静默出货，journalctl 看不到嵌字日志（PLAN-023）。正解：`_qc_report` 六项 + sidecar `basicConfig`。
+
+## 定位手法（PLAN-023）
+
+- 逐框打印 `边框bg / 当前bg / solid / 通道std / frac`
+- 对照跨通道拍平 std vs 按通道 max std
+- 框重叠矩阵（IoU / cover_a / cover_b）
+- 原图与译图同区域裁剪对比（顶栏 16周、蓝框、底部分层）
