@@ -638,8 +638,9 @@ class DocxTranslator(AiTranslator):
         return doc_output_stream.getvalue()
 
     def _overlay_embedded_images(self, doc: DocumentObject) -> None:
-        """PLAN-005c：对 Word 内嵌图做 HPD+35b 嵌字；单图失败保留原图。"""
+        """PLAN-027c：DrawingML 实例级嵌字；共享 ImagePart 克隆解耦；单图失败保留原图。"""
         import os
+        from pathlib import Path
 
         if os.environ.get("QYUNSLATION_IMAGE_OVERLAY", "1").lower() in (
             "0",
@@ -648,36 +649,50 @@ class DocxTranslator(AiTranslator):
         ):
             return
         try:
-            from qyunslation.extensions.image_translate import translate_image_bytes
+            from qyunslation.extensions.docx_image_overlay import (
+                overlay_docx_embedded_images,
+            )
         except Exception as exc:
-            self.logger.warning("image overlay import failed: %s", exc)
+            self.logger.warning("docx image overlay import failed: %s", exc)
             return
 
-        ctype_suffix = {
-            "image/png": ".png",
-            "image/jpeg": ".jpg",
-            "image/jpg": ".jpg",
-            "image/webp": ".webp",
-        }
-        try:
-            rels = list(doc.part.rels.values())
-        except Exception:
-            return
-        for rel in rels:
+        def _progress(cur: int, total: int) -> None:
+            if not self.progress_tracker or total <= 0:
+                return
+            pct = 88 + int(6.0 * cur / total)
+            self.progress_tracker.update(
+                percent=min(94, pct),
+                message=f"正在翻译文档内插图 ({cur}/{total})...",
+            )
+
+        out_dir = os.environ.get("QYUNSLATION_OFFICE_OUT") or ""
+        manifest_path = None
+        doc_name = getattr(getattr(self, "config", None), "to_lang", "") and ""
+        # 尽量落盘到 office_out
+        if out_dir:
             try:
-                if "image" not in getattr(rel, "reltype", ""):
-                    continue
-                part = rel.target_part
-                ctype = getattr(part, "content_type", "") or ""
-                suffix = ctype_suffix.get(ctype, ".png")
-                new_blob, n = translate_image_bytes(
-                    part.blob, suffix=suffix, to_lang=self.config.to_lang
-                )
-                if n > 0 and new_blob:
-                    part._blob = new_blob
-                    self.logger.info("embedded image overlay ok (%s blocks)", n)
-            except Exception as exc:
-                self.logger.warning("embedded image overlay failed, keep original: %s", exc)
+                stem = "docx"
+                manifest_path = Path(out_dir) / f"{stem}.imgtr.json"
+            except Exception:
+                manifest_path = None
+
+        try:
+            manifest = overlay_docx_embedded_images(
+                doc,
+                to_lang=self.config.to_lang,
+                progress_cb=_progress,
+                document_name=doc_name or "document.docx",
+                manifest_path=manifest_path,
+            )
+            self.logger.info(
+                "embedded image overlay done: processed=%s skipped=%s vector_skipped=%s",
+                manifest.processed_images,
+                manifest.skipped_images,
+                manifest.vector_skipped,
+            )
+            self._last_imgtr_manifest = manifest.to_dict()
+        except Exception as exc:
+            self.logger.warning("embedded image overlay failed, keep originals: %s", exc)
 
 
     def translate(self, document: Document) -> Self:

@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
-"""自定义扩展 API：图片嵌字 + 术语表管理。"""
+"""自定义扩展 API：图片嵌字 + 探针 + 术语表管理。"""
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from qyunslation.extensions.glossary_db import load_glossary, merge_glossary, save_glossary
-from qyunslation.extensions.image_translate import translate_image
+from qyunslation.extensions.image_translate import probe_image, translate_image
 
 router = APIRouter(tags=["Custom Extensions"])
 
@@ -40,6 +40,60 @@ async def image_translate_endpoint(
         if tmp_out:
             Path(tmp_out).unlink(missing_ok=True)
     return Response(content=data, media_type="image/png", headers={"X-Translated-Blocks": str(n)})
+
+
+@router.post("/image-probe", summary="文档内嵌图片轻量探针（仅OCR不调LLM）")
+async def image_probe_endpoint(
+    file: UploadFile = File(...),
+    to_lang: str = Form("简体中文", description="目标语言"),
+    display_width_pt: float = Form(0.0),
+    display_height_pt: float = Form(0.0),
+    page_frac: float = Form(-1.0),
+    is_header: bool = Form(False),
+):
+    """PLAN-027a：仅 OCR + 策略判定，供预扫描 Tier-2 使用。失败返回 status=error，不抛 500。"""
+    suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+        return JSONResponse(
+            {
+                "status": "error",
+                "should_translate": False,
+                "reason": f"unsupported_format:{suffix}",
+                "detected_blocks": 0,
+                "translatable_blocks": 0,
+                "detected_lang": "unknown",
+                "text_samples": [],
+            }
+        )
+    tmp_in = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(await file.read())
+            tmp_in = f.name
+        result = probe_image(
+            tmp_in,
+            to_lang=to_lang,
+            display_width_pt=display_width_pt,
+            display_height_pt=display_height_pt,
+            page_frac=(None if page_frac < 0 else page_frac),
+            is_header=is_header,
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse(
+            {
+                "status": "error",
+                "should_translate": False,
+                "reason": f"probe_failed:{e}",
+                "detected_blocks": 0,
+                "translatable_blocks": 0,
+                "detected_lang": "unknown",
+                "text_samples": [],
+            }
+        )
+    finally:
+        if tmp_in:
+            Path(tmp_in).unlink(missing_ok=True)
 
 
 @router.get("/glossary", summary="获取术语表")

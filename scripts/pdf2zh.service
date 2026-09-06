@@ -12,6 +12,7 @@ Environment=PDF2ZH_LLM_BATCH_TOKENS=120
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-throughput.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-brand.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-hpd.py
+ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-docimg.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-ocr-base.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-office-route.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-docprofile.py
@@ -22,6 +23,7 @@ ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-dual-pr
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-layout-polish.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-adv-options.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-left-dock.py
+ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-prescan.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-stale-guard.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-preview-url.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-glossary-encoding.py

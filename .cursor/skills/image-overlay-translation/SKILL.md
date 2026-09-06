@@ -2,8 +2,10 @@
 name: image-overlay-translation
 description: >-
   图片嵌字翻译：RapidOCR 检测、think:false 分批翻译、Otsu 配色、纯色遮盖、字号层级、墨迹锚点对齐、QC 关卡。
+  文档内嵌图：DOCX DrawingML 实例解耦、PDF 共享 XObject 隔离、矢量安全覆盖、上传预扫描代际防线。
   触发：图片翻译、嵌字、流程图翻译、译文丢字、OCR 没检出、文字看不见、遮盖、图层、
-  image_translate、RapidOCR、ImageOverlayWorkflow、对比度、蓝框白字、涂抹痕迹、黑框、对齐、错位。
+  image_translate、RapidOCR、ImageOverlayWorkflow、对比度、蓝框白字、涂抹痕迹、黑框、对齐、错位、
+  文档内嵌图、docx 图片、pdf 插图、imgtr。
 ---
 
 # 图片嵌字翻译（SK-Q002）
@@ -100,6 +102,35 @@ for i,b in enumerate(ocr_image(path),1):
     n=int(((np.abs(roi.astype(int)-bg).max(2)>40)&outside).sum())
     if n>20: print(i,b[4][:24], "outside_gfx", n, "band", by1, by2)
 ```
+
+## 文档内嵌图接入（PLAN-027）
+
+单图流水线之上，DOCX/PDF 文档内插图走「实例优先」：
+
+### 铁律（文档级）
+
+23. **Occurrence-First**——以显示实例（DrawingML / 页面 xref+bbox）为主键，不以物理 part/xref 全局替换。
+24. **共享资源先克隆**——同一 ImagePart / XObject 被多处引用时，只对目标实例克隆新资源并重定向；禁止直接改共享 blob/xref。
+25. **Alpha / SMask 保真**——`_load_image_bgr_alpha` + `_save_with_alpha`；译文墨迹处强制不透明，其余恢复原 Alpha。
+26. **几何用显示尺寸**——DOCX 读 `<wp:extent>`（EMU→pt）；PDF 用页面 bbox；禁止只看源像素。
+27. **语种与数字门控**——`doc_image_policy.filter_translatable_texts`：纯数字/单位跳过；已是目标语种跳过。
+28. **矢量覆盖 Fail-Closed**——`find_safe_vector_figures`：面积 >80% 页或与长正文重叠 >10% 或撞表格 → 放弃，**绝不退回整页**。
+29. **预扫描代际锁**——`_prescan_generation` + per-file hash；过期 Tier-2 回调丢弃。
+30. **HPD 回退用原稿**——PDF 插图前置后若报 Scanned PDF，HPD 必须吃 `_pre_imgtr_origin_path`。
+31. **单图熔断**——超时/QC 失败保留原图；交付 `<stem>.imgtr.json`。
+
+### 关键模块
+
+| 模块 | 职责 |
+| --- | --- |
+| `doc_image_policy.py` | 几何/语种/数字判定（stdlib+PIL） |
+| `docx_image_overlay.py` | DrawingML 枚举 + 克隆回填 |
+| `pdf_figure_crop.py` / `pdf_image_translate.py` | 矢量安全聚类 + 位图/矢量双策略 |
+| `doc_image_prescan.py` + `apply-pdf2zh-prescan.py` | Tier-1/2 预扫描 |
+| `apply-pdf2zh-docimg.py` | PDF 前置嵌字补丁 |
+| `/service/image-probe` | 纯 OCR 探针 |
+
+验收：`scripts/verify-plan-027.sh`。
 
 ## 排障
 

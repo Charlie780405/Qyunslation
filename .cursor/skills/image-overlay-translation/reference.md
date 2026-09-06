@@ -92,3 +92,18 @@ for i, b in enumerate(ocr_image(path), 1):
 | `font.getbbox(s)` | `(0, ink_top, advance_w, ink_bottom)` | 行高/竖向偏移；**x 不可用** |
 | `font.getmask(s).getbbox()` | 真实墨迹 `(x0, 0, x1, h)` | 水平定位 `_ink_x_metrics` |
 | `font.getmetrics()` | `(ascent, descent)` | 判能否放下 |
+
+## PLAN-027 文档内嵌图旋钮
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `QYUNSLATION_DOC_IMAGE_MIN_LONG_PT` | 150 | 显示长边下限（pt） |
+| `QYUNSLATION_DOC_IMAGE_MIN_AREA_PT` | 25000 | 显示面积下限 |
+| `QYUNSLATION_DOC_IMAGE_MAX_PAGE_FRAC` | 0.90 | 整页扫描图上限 |
+| `QYUNSLATION_DOC_IMAGE_WORKERS` | 3 | DOCX 并发 |
+| `QYUNSLATION_DOC_IMAGE_TIMEOUT` | 300 | 单图超时（s） |
+| `QYUNSLATION_VECTOR_CROP_DPI` | 200 | 矢量栅格化 DPI |
+| `QYUNSLATION_VECTOR_MAX_PX` | 2400 | 矢量长边像素上限 |
+| `QYUNSLATION_VECTOR_MAX_AREA_FRAC` | 0.80 | 矢量区最大页面积比 |
+| `QYUNSLATION_VECTOR_TEXT_OVERLAP` | 0.10 | 与长正文重叠上限 |
+| `QYUNSLATION_PDF_IMAGE_OVERLAY` | 1 | PDF 插图总开关 |
