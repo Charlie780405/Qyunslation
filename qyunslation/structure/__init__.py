@@ -54,6 +54,14 @@ from .models import (
     build_manifest_id,
     build_object_id,
 )
+from .profiles import (
+    ProfileDecision,
+    ProfileSpec,
+    ReadingStrategy,
+    all_content_profiles,
+    profile_for,
+    resolve_profile,
+)
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -87,6 +95,9 @@ __all__ = [
     "ProcessingMode",
     "ProducerInfo",
     "ProfileSource",
+    "ProfileDecision",
+    "ProfileSpec",
+    "ReadingStrategy",
     "Representation",
     "RequirementLevel",
     "RuntimeFeature",
@@ -107,4 +118,7 @@ __all__ = [
     "capability_for",
     "source_format_for_extension",
     "source_formats_for_mime",
+    "all_content_profiles",
+    "profile_for",
+    "resolve_profile",
 ]
