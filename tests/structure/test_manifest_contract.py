@@ -358,6 +358,52 @@ def test_asset_graph_integrity_fails_closed(mutation: str, error_code: str):
     assert error_code in str(exc_info.value)
 
 
+def test_caption_ids_must_reference_caption_objects():
+    payload = _full_manifest()
+    body = next(item for item in payload["objects"] if item["type"] == "BODY")
+    figure = next(item for item in payload["objects"] if item["type"] == "FIGURE")
+    figure["caption_ids"] = [body["object_id"]]
+
+    with pytest.raises(ValidationError) as exc_info:
+        DocumentStructureManifest.model_validate(payload)
+
+    assert "MANIFEST_CAPTION_TYPE_INVALID" in str(exc_info.value)
+
+
+def test_conversion_lineage_must_be_acyclic():
+    payload = _full_manifest()
+    payload["document"]["derived_assets"].append(
+        {
+            "asset_id": "intermediate",
+            "role": "NORMALIZED",
+            "sha256": "e" * 64,
+            "media_type": "application/pdf",
+            "locator": "external:intermediate.pdf",
+        }
+    )
+    payload["document"]["conversion_lineage"] = [
+        {
+            "step_id": "cycle:1",
+            "source_asset_id": "translated",
+            "output_asset_id": "intermediate",
+            "converter": "test",
+            "converter_version": "1",
+        },
+        {
+            "step_id": "cycle:2",
+            "source_asset_id": "intermediate",
+            "output_asset_id": "translated",
+            "converter": "test",
+            "converter_version": "1",
+        },
+    ]
+
+    with pytest.raises(ValidationError) as exc_info:
+        DocumentStructureManifest.model_validate(payload)
+
+    assert "MANIFEST_LINEAGE_CYCLE" in str(exc_info.value)
+
+
 def test_contradictory_caller_summary_is_rejected():
     payload = _minimal_manifest()
     payload["summary"] = {"figure_count": 7, "table_count": 0}

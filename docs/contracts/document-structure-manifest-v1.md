@@ -63,11 +63,11 @@ canonical 坐标以左上角为原点。每个 canvas 显式提供：
 
 Figure/Table 可以带 `semantic_id`、`semantic_occurrence_index`、题注关联和子对象。IMAGE 代表未被语义归并的独立图片 occurrence，不能自动计为 Figure。
 
-`reading_order`、题注关系、子对象关系、问题对象和输出证据必须引用清单中已存在且位于正确画布的对象/资产；悬空、自引用、重复 reading-order 或未知 output asset 均 fail closed。
+`reading_order`、题注关系、子对象关系、问题对象和输出证据必须引用清单中已存在且位于正确画布的对象/资产；`caption_ids` 只能引用 CAPTION 对象。悬空、自引用、重复 reading-order、错误关系类型或未知 output asset 均 fail closed。
 
 ## 资产与转换血缘
 
-输入资产必须使用 `INPUT` role 且 hash 与 `document.source_sha256` 一致。输入与派生资产 ID 全局唯一；转换步骤 ID 唯一，source/output 均引用已登记资产且不得自引用。知识库只可作为开发夹具来源，生产扫描和翻译仍以用户上传资产为输入。
+输入资产必须使用 `INPUT` role 且 hash 与 `document.source_sha256` 一致。输入与派生资产 ID 全局唯一；转换步骤 ID 唯一，source/output 均引用已登记资产，不得自引用或形成环。知识库只可作为开发夹具来源，生产扫描和翻译仍以用户上传资产为输入。
 
 ## 状态和问题
 

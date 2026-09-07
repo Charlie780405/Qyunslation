@@ -564,6 +564,30 @@ class DocumentStructureManifest(ContractModel):
                 raise ValueError(
                     "MANIFEST_LINEAGE_SELF_REFERENCE: conversion source and output must differ"
                 )
+        lineage_graph: dict[str, set[str]] = {}
+        for step in self.document.conversion_lineage:
+            lineage_graph.setdefault(step.source_asset_id, set()).add(
+                step.output_asset_id
+            )
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit_asset(asset_id: str) -> None:
+            if asset_id in visiting:
+                raise ValueError(
+                    "MANIFEST_LINEAGE_CYCLE: conversion lineage must be acyclic"
+                )
+            if asset_id in visited:
+                return
+            visiting.add(asset_id)
+            for output_id in lineage_graph.get(asset_id, set()):
+                visit_asset(output_id)
+            visiting.remove(asset_id)
+            visited.add(asset_id)
+
+        for asset_id in known_assets:
+            visit_asset(asset_id)
 
         canvases = {canvas.canvas_id: canvas for canvas in self.canvases}
         if len(canvases) != len(self.canvases):
@@ -630,6 +654,13 @@ class DocumentStructureManifest(ContractModel):
             if item.object_id in relationship_ids:
                 raise ValueError(
                     "MANIFEST_RELATION_SELF_REFERENCE: object cannot reference itself"
+                )
+            if isinstance(item, (FigureObject, TableObject)) and any(
+                objects_by_id[caption_id].type is not ObjectType.CAPTION
+                for caption_id in item.caption_ids
+            ):
+                raise ValueError(
+                    "MANIFEST_CAPTION_TYPE_INVALID: caption_ids must reference CAPTION objects"
                 )
             if item.output_evidence and any(
                 asset_id not in known_assets for asset_id in item.output_evidence.asset_ids
