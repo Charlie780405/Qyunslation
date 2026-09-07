@@ -36,7 +36,7 @@ async def image_translate_endpoint(
         n = translate_image(tmp_in, tmp_out, to_lang=to_lang)
         data = Path(tmp_out).read_bytes()
     except InputPreparationError as e:
-        raise HTTPException(e.http_status, e.message) from e
+        raise HTTPException(e.http_status, str(e)) from e
     except Exception as e:
         raise HTTPException(500, f"图片嵌字失败: {e}") from e
     finally:
@@ -87,7 +87,7 @@ async def image_probe_endpoint(
         )
         return JSONResponse(result)
     except InputPreparationError as e:
-        raise HTTPException(e.http_status, e.message) from e
+        raise HTTPException(e.http_status, str(e)) from e
     except Exception as e:
         return JSONResponse(
             {

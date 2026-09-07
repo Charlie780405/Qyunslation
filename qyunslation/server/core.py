@@ -465,7 +465,7 @@ class TranslationService:
                 declared_mime=declared_mime,
             )
         except InputPreparationError as exc:
-            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+            raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 
         original_filename = prepared_input.original_filename
         file_contents = prepared_input.file_contents

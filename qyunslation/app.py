@@ -410,7 +410,7 @@ async def service_translate_file(
     try:
         file_contents = await read_upload_limited(file)
     except InputPreparationError as e:
-        raise HTTPException(status_code=e.http_status, detail=e.message) from e
+        raise HTTPException(status_code=e.http_status, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取上传文件失败: {mask_secrets(str(e))}")
 
@@ -1000,7 +1000,7 @@ async def service_flat_translate(
         file_contents = await read_upload_limited(file)
         original_filename = file.filename or "uploaded_file"
     except InputPreparationError as e:
-        raise HTTPException(status_code=e.http_status, detail=e.message) from e
+        raise HTTPException(status_code=e.http_status, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件读取失败: {mask_secrets(str(e))}")
 

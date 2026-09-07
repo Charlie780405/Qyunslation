@@ -140,6 +140,7 @@ def test_file_upload_endpoint_returns_413_before_task_creation(
     )
 
     assert response.status_code == 413
+    assert response.json()["detail"].startswith("UPLOAD_TOO_LARGE:")
     assert "超过 3 字节" in response.json()["detail"]
 
 
@@ -156,4 +157,4 @@ def test_file_upload_endpoint_rejects_declared_mime_mismatch(
     )
 
     assert response.status_code == 415
-    assert "MIME" in response.json()["detail"]
+    assert response.json()["detail"].startswith("MIME_MISMATCH:")
