@@ -3,8 +3,10 @@
   "document_id": "doi:10.1093/bjd/ljae439",
   "title": "Predicting success with reduced dosing frequency of tralokinumab in patients with moderate-to-severe atopic dermatitis",
   "scope": "MAIN_ARTICLE",
+  "usage_scope": "TEST_FIXTURE_ONLY",
   "source": {
     "kind": "KNOWLEDGE_BASE",
+    "runtime_dependency": false,
     "locator": "knowledge-base://documents/ljae439.pdf",
     "publisher_url": "https://academic.oup.com/bjd/article/192/3/410/7917393",
     "import_state": "PENDING",

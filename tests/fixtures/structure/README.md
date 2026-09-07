@@ -19,3 +19,7 @@ knowledge base rather than committed to this repository. Until it is imported,
 the truth remains executable for counting tests and the source SHA-256 is null.
 When materialized, set `import_state` to `IMPORTED` and record the full lowercase
 SHA-256 before running byte-level scanner acceptance in PLAN-030b.
+
+The knowledge base is a development-fixture source only. Production ingestion
+remains user upload of arbitrary supported documents; no scanner, translator,
+router, or deployment may depend on the fixture knowledge base.

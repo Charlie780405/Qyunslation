@@ -122,7 +122,9 @@ def test_ljae439_truth_reserves_exact_semantic_ids_for_knowledge_base_import():
 
     assert truth["document_id"] == "doi:10.1093/bjd/ljae439"
     assert truth["scope"] == "MAIN_ARTICLE"
+    assert truth["usage_scope"] == "TEST_FIXTURE_ONLY"
     assert truth["source"]["kind"] == "KNOWLEDGE_BASE"
+    assert truth["source"]["runtime_dependency"] is False
     assert truth["source"]["locator"].startswith("knowledge-base://")
     assert truth["source"]["import_state"] in {"PENDING", "IMPORTED"}
     assert truth["semantic_ids"]["figures"] == [
