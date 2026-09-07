@@ -8,10 +8,11 @@
     "kind": "KNOWLEDGE_BASE",
     "runtime_dependency": false,
     "locator": "knowledge-base://documents/ljae439.pdf",
+    "materialized_path": "tests/fixtures/structure/reference/ljae439.pdf",
     "publisher_url": "https://academic.oup.com/bjd/article/192/3/410/7917393",
-    "import_state": "PENDING",
-    "sha256": null,
-    "integrity_policy": "Set import_state=IMPORTED and record the full lowercase SHA-256 when the knowledge-base file is materialized."
+    "import_state": "IMPORTED",
+    "sha256": "8e9893b21e6aab4a057ba730eba40f6a9bd696f3538ed05ffc3fc5eb8470f10c",
+    "integrity_policy": "The committed TEST_FIXTURE_ONLY copy must match this full lowercase SHA-256."
   },
   "semantic_ids": {
     "figures": ["figure:1", "figure:2", "figure:3", "figure:4", "figure:5"],

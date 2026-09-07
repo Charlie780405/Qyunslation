@@ -1,7 +1,7 @@
 # PLAN-030 structure fixtures
 
-Binary fixtures are generated into a temporary directory and are not committed.
-Run:
+Synthetic binary fixtures are generated into a temporary directory and are not
+committed. Run:
 
 ```bash
 .venv/bin/python tests/fixtures/structure/generate_synthetic.py --output /tmp/plan030-fixtures
@@ -13,12 +13,11 @@ turn the fixture into a green end-to-end test.
 
 ## ljae439 knowledge-base slot
 
-`ljae439.truth.json` reserves the semantic truth required by PLAN-030:
-Figure 1–5 and Table 1–3 in the main article. The PDF is supplied by the managed
-knowledge base rather than committed to this repository. Until it is imported,
-the truth remains executable for counting tests and the source SHA-256 is null.
-When materialized, set `import_state` to `IMPORTED` and record the full lowercase
-SHA-256 before running byte-level scanner acceptance in PLAN-030b.
+`reference/ljae439.pdf` is a development copy imported from the managed knowledge
+base. `ljae439.truth.json` pins its full SHA-256 and the semantic truth required by
+PLAN-030: Figure 1–5 and Table 1–3 in the main article. PLAN-030b verifies the
+real bytes and ten canonical page canvases; semantic Figure/Table reconciliation
+remains owned by PLAN-030c.
 
 The knowledge base is a development-fixture source only. Production ingestion
 remains user upload of arbitrary supported documents; no scanner, translator,

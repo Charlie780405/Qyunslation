@@ -97,8 +97,10 @@
       "origin": "KNOWLEDGE_BASE",
       "source_format": "PDF",
       "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "reference/ljae439.pdf",
+      "sha256": "8e9893b21e6aab4a057ba730eba40f6a9bd696f3538ed05ffc3fc5eb8470f10c",
       "truth_file": "tests/fixtures/structure/ljae439.truth.json",
-      "fixture_state": "RESERVED",
+      "fixture_state": "MATERIALIZED",
       "future_owner": "PLAN-030c"
     }
   ]

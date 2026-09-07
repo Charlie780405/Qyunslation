@@ -156,6 +156,10 @@ def test_every_catalog_entry_has_truth_or_deterministic_generation_evidence():
             assert item["relative_path"]
         elif item["origin"] == "KNOWLEDGE_BASE":
             assert item["truth_file"] == TRUTH_PATH.relative_to(ROOT).as_posix()
-            assert item["fixture_state"] == "RESERVED"
+            assert item["fixture_state"] == "MATERIALIZED"
+            fixture_path = FIXTURE_ROOT / item["relative_path"]
+            assert fixture_path.is_file()
+            actual_hash = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+            assert actual_hash == item["sha256"]
         else:
             raise AssertionError(f"unsupported fixture origin: {item['origin']}")

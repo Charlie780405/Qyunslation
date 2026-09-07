@@ -128,4 +128,3 @@ def test_snapshot_rejects_duplicate_or_missing_features():
         assert "RUNTIME_FEATURE_INCOMPLETE" in str(exc)
     else:
         raise AssertionError("missing feature must fail")
-
