@@ -11,6 +11,9 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from qyunslation.structure.ingest import InputPreparationError, detect_input
+from qyunslation.structure.models import SourceFormat
+
 
 @dataclass
 class PrescanCandidate:
@@ -23,6 +26,7 @@ class PrescanCandidate:
     page_no: int | None = None
     xref: int | None = None
     part_name: str | None = None
+    occurrence_index: int | None = None
     reason_hint: str = "ok"
 
 
@@ -34,6 +38,7 @@ class Tier1Result:
     candidate_count: int = 0
     emf_count: int = 0
     vector_count: int = 0
+    frame_count: int = 0
     summary_text: str = ""
     candidates: list[PrescanCandidate] = field(default_factory=list)
     error: str | None = None
@@ -55,16 +60,16 @@ class Tier3Result:
         return asdict(self)
 
 
-def file_sha256(path: Path, *, limit: int = 32 * 1024 * 1024) -> str:
+def file_sha256(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    """Hash the complete file; callers use this as a stable asset identity."""
+
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        remaining = limit
-        while remaining > 0:
-            chunk = f.read(min(65536, remaining))
+        while True:
+            chunk = f.read(chunk_size)
             if not chunk:
                 break
             h.update(chunk)
-            remaining -= len(chunk)
     return h.hexdigest()
 
 
@@ -83,7 +88,13 @@ def _px_to_pt_guess(w: int, h: int) -> tuple[float, float]:
     return w * 72.0 / 96.0, h * 72.0 / 96.0
 
 
-def scan_docx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
+def _scan_ooxml_tier1(
+    path: Path,
+    *,
+    file_type: str,
+    media_prefix: str,
+    max_candidates: int = 20,
+) -> Tier1Result:
     name = path.name
     fh = file_sha256(path)
     try:
@@ -99,7 +110,11 @@ def scan_docx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
     cands: list[PrescanCandidate] = []
     emf = 0
     with z:
-        media = [n for n in z.namelist() if n.startswith("word/media/") and not n.endswith("/")]
+        media = [
+            item
+            for item in z.namelist()
+            if item.startswith(media_prefix) and not item.endswith("/")
+        ]
         for i, name_m in enumerate(sorted(media)):
             low = name_m.lower()
             if low.endswith((".emf", ".wmf")):
@@ -130,6 +145,7 @@ def scan_docx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
                     display_width_pt=dw,
                     display_height_pt=dh,
                     part_name=name_m,
+                    occurrence_index=i + 1,
                     reason_hint=reason,
                 )
             )
@@ -142,11 +158,29 @@ def scan_docx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
     return Tier1Result(
         file_hash=fh,
         file_name=name,
-        file_type="docx",
+        file_type=file_type,
         candidate_count=len(cands),
         emf_count=emf,
         summary_text=summary,
         candidates=cands,
+    )
+
+
+def scan_docx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
+    return _scan_ooxml_tier1(
+        path,
+        file_type="docx",
+        media_prefix="word/media/",
+        max_candidates=max_candidates,
+    )
+
+
+def scan_pptx_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
+    return _scan_ooxml_tier1(
+        path,
+        file_type="pptx",
+        media_prefix="ppt/media/",
+        max_candidates=max_candidates,
     )
 
 
@@ -242,7 +276,21 @@ def scan_pdf_tier1(path: Path, *, max_candidates: int = 20) -> Tier1Result:
 def scan_image_tier1(path: Path) -> Tier1Result:
     fh = file_sha256(path)
     data = path.read_bytes()
-    pw, ph = _png_jpeg_size(data)
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            pw, ph = map(int, image.size)
+            frame_count = int(getattr(image, "n_frames", 1))
+            image.verify()
+    except Exception as exc:
+        return Tier1Result(
+            file_hash=fh,
+            file_name=path.name,
+            file_type="corrupt",
+            summary_text="图片损坏或当前运行时无法解码",
+            error=f"image_decode_failed:{type(exc).__name__}",
+        )
     dw, dh = _px_to_pt_guess(pw, ph)
     from qyunslation.extensions.doc_image_policy import evaluate_geometry
 
@@ -263,6 +311,7 @@ def scan_image_tier1(path: Path) -> Tier1Result:
         file_name=path.name,
         file_type="image",
         candidate_count=len(cands),
+        frame_count=frame_count,
         summary_text=("检测到 1 处图片，正在检测文本…" if cands else "图片过小，跳过嵌字。"),
         candidates=cands,
     )
@@ -270,23 +319,64 @@ def scan_image_tier1(path: Path) -> Tier1Result:
 
 def scan_file_tier1(path: str | Path) -> Tier1Result:
     path = Path(path)
-    suf = path.suffix.lower()
-    if suf in {".docx"}:
-        return scan_docx_tier1(path)
-    if suf == ".doc":
+    if not path.is_file():
+        return Tier1Result(
+            file_hash="",
+            file_name=path.name,
+            file_type="unsupported",
+            summary_text="文件不存在或不可读取",
+            error="FILE_NOT_FOUND",
+        )
+    try:
+        detected = detect_input(path.name, path.read_bytes())
+    except InputPreparationError as exc:
+        corrupt_codes = {"INVALID_CONTAINER", "FORMAT_CONTENT_INVALID"}
         return Tier1Result(
             file_hash=file_sha256(path),
             file_name=path.name,
-            file_type="unsupported",
-            summary_text=".doc 请另存为 .docx 后再做内嵌图翻译",
-            error="doc_not_supported",
+            file_type="corrupt" if exc.code in corrupt_codes else "unsupported",
+            summary_text=exc.message,
+            error=exc.code,
         )
-    if suf == ".pdf":
+
+    source_format = detected.source_format
+    if source_format is SourceFormat.DOCX:
+        return scan_docx_tier1(path)
+    if source_format is SourceFormat.PPTX:
+        return scan_pptx_tier1(path)
+    if source_format is SourceFormat.DOC:
+        return Tier1Result(
+            file_hash=file_sha256(path),
+            file_name=path.name,
+            file_type="normalize_docx",
+            summary_text=".doc 需要先规范化为 .docx",
+            error="normalization_required",
+        )
+    if source_format is SourceFormat.PPT:
+        return Tier1Result(
+            file_hash=file_sha256(path),
+            file_name=path.name,
+            file_type="normalize_pptx",
+            summary_text=".ppt 需要先规范化为 .pptx",
+            error="normalization_required",
+        )
+    if source_format is SourceFormat.PDF:
         return scan_pdf_tier1(path)
-    if suf in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+    if source_format in {
+        SourceFormat.PNG,
+        SourceFormat.JPEG,
+        SourceFormat.WEBP,
+        SourceFormat.BMP,
+        SourceFormat.TIFF,
+        SourceFormat.SVG,
+        SourceFormat.GIF,
+        SourceFormat.HEIF,
+        SourceFormat.HEIC,
+        SourceFormat.AVIF,
+    }:
         return scan_image_tier1(path)
     return Tier1Result(
-        file_hash=file_sha256(path) if path.is_file() else "",
+        file_hash=file_sha256(path),
         file_name=path.name,
         file_type="unsupported",
         summary_text="不支持的文件类型",

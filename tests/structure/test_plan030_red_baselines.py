@@ -61,11 +61,6 @@ def test_user_summary_reports_ljae439_semantic_figures_not_physical_regions():
     assert "7 处插图" not in summary
 
 
-@expected_gap(
-    "QY030-FMT-001",
-    "PLAN-030b",
-    "TIFF is a core format contract but the current prescanner rejects it",
-)
 def test_core_tiff_is_accepted_by_the_shared_prescan_route(
     generated_structure_fixtures: Path,
 ):
@@ -116,11 +111,6 @@ def test_pptx_picture_shape_is_emitted_as_a_translatable_object(
     assert pictures[0]["execution_status"] == "PENDING"
 
 
-@expected_gap(
-    "QY030-PPT-002",
-    "PLAN-030b",
-    "PPTX is absent from the shared structure prescan despite being core",
-)
 def test_core_pptx_is_accepted_by_the_shared_prescan_route(
     generated_structure_fixtures: Path,
 ):
