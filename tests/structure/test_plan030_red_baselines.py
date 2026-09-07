@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from qyunslation.ir.document import Document
-from qyunslation.server.core import get_workflow_type_from_filename
 from qyunslation.translator.ai_translator.pptx_translator import (
     PPTXTranslator,
     PPTXTranslatorConfig,
@@ -20,6 +21,27 @@ def expected_gap(issue_code: str, owner: str, description: str):
         strict=True,
         reason=f"{issue_code} owner={owner}: {description}",
     )
+
+
+def current_workflow_route(filename: str) -> str:
+    """Probe the legacy router without leaking its import side effects."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from qyunslation.server.core import "
+                "get_workflow_type_from_filename as route; "
+                f"print(route({filename!r}))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.stdout.strip()
 
 
 @expected_gap(
@@ -59,7 +81,7 @@ def test_core_tiff_is_accepted_by_the_shared_prescan_route(
     "unknown binary suffixes still silently fall back to the text workflow",
 )
 def test_unknown_binary_format_fails_explicitly_instead_of_becoming_text():
-    route = get_workflow_type_from_filename("opaque-payload.unknown")
+    route = current_workflow_route("opaque-payload.unknown")
 
     assert route != "txt"
 
@@ -70,7 +92,7 @@ def test_unknown_binary_format_fails_explicitly_instead_of_becoming_text():
     "legacy PPT is routed directly to a workflow that only accepts PPTX",
 )
 def test_legacy_ppt_routes_through_explicit_normalization():
-    route = get_workflow_type_from_filename("legacy-deck.ppt")
+    route = current_workflow_route("legacy-deck.ppt")
 
     assert route != "pptx"
 
