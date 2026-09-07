@@ -1,10 +1,11 @@
 # PLAN-030a 子计划：跨格式契约与红色基线
 
-> 状态：**已批准，实施中**
+> 状态：**已完成**
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030a
+> 完成记录：[WT-030a](../../walkthroughs/WT-030a-contract-baselines.md)
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
-> 阶段门：只实施 030a 的契约、夹具、测试与文档；不接入生产入口、不部署。030a 验收完成前不得进入 030b。
+> 阶段门：030a 仅交付契约、夹具、测试与文档，未接入生产入口、未部署；下一步须单独编写并审批 030b。
 
 ## 一、目标
 
@@ -184,9 +185,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] ADR 包含背景、决策、备选方案、后果、迁移与回滚，状态与 PLAN-030/030a 批准记录一致。
-- [ ] 契约术语文档对 Figure、Table、physical resource、canvas、occurrence、profile、mode 给出无歧义定义。
-- [ ] 明确拒绝“扩展名即题材”“候选框即 Figure”“supported 布尔值即运行可用”三种旧模式。
+- [x] ADR 包含背景、决策、备选方案、后果、迁移与回滚，状态与 PLAN-030/030a 批准记录一致。
+- [x] 契约术语文档对 Figure、Table、physical resource、canvas、occurrence、profile、mode 给出无歧义定义。
+- [x] 明确拒绝“扩展名即题材”“候选框即 Figure”“supported 布尔值即运行可用”三种旧模式。
 
 **验证：** 文档链接可解析；ADR/术语中的枚举与 Task 2–4 类型测试一致。
 
@@ -205,9 +206,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] 最小及全类型 manifest 可序列化往返，派生 summary、bbox、ID、版本和状态不变量均有测试。
-- [ ] 未知 major、非法 bbox、重复 ID、矛盾 summary 和无原因失败状态被结构化拒绝。
-- [ ] 同 major 未知可选字段前向兼容；生成 Schema 与提交文件无漂移。
+- [x] 最小及全类型 manifest 可序列化往返，派生 summary、bbox、ID、版本和状态不变量均有测试。
+- [x] 未知 major、非法 bbox、重复 ID、矛盾 summary 和无原因失败状态被结构化拒绝。
+- [x] 同 major 未知可选字段前向兼容；生成 Schema 与提交文件无漂移。
 
 **验证：** `uv run pytest -q tests/structure/test_manifest_contract.py --no-cov`；`uv run python -m compileall -q qyunslation/structure`。
 
@@ -229,9 +230,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] PDF/DOCX/PNG/JPEG/WebP/BMP/TIFF/PPTX 为 CORE，DOC/PPT 为 NORMALIZE，扩展图片格式为 CONDITIONAL。
-- [ ] 扩展名、MIME、魔数族、允许模式、输出可编辑性与所需 runtime feature 可机读查询。
-- [ ] 未知格式返回 `UNSUPPORTED_FORMAT`，不回退为 TXT；产品要求和 runtime state 可独立变化。
+- [x] PDF/DOCX/PNG/JPEG/WebP/BMP/TIFF/PPTX 为 CORE，DOC/PPT 为 NORMALIZE，扩展图片格式为 CONDITIONAL。
+- [x] 扩展名、MIME、魔数族、允许模式、输出可编辑性与所需 runtime feature 可机读查询。
+- [x] 未知格式返回 `UNSUPPORTED_FORMAT`，不回退为 TXT；产品要求和 runtime state 可独立变化。
 
 **验证：** `uv run pytest -q tests/structure/test_format_capabilities.py --no-cov`。
 
@@ -250,9 +251,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] 七个首批画像均可与全部 CORE 格式构造合法决策，不存在扩展名条件分支。
-- [ ] `AUTO` 画像要求 confidence/evidence；`USER_OVERRIDE` 保留原自动建议但以用户选择为最终值。
-- [ ] Poster/Presentation 使用 freeform 空间先验，Article/Review 使用阅读顺序和 Figure/Table 先验。
+- [x] 七个首批画像均可与全部 CORE 格式构造合法决策，不存在扩展名条件分支。
+- [x] `AUTO` 画像要求 confidence/evidence；`USER_OVERRIDE` 保留原自动建议但以用户选择为最终值。
+- [x] Poster/Presentation 使用 freeform 空间先验，Article/Review 使用阅读顺序和 Figure/Table 先验。
 
 **验证：** `uv run pytest -q tests/structure/test_content_profiles.py --no-cov`。
 
@@ -271,9 +272,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] 矩阵覆盖 PDF、DOCX、核心图片、PPTX 及 research/review/presentation/poster 关键组合。
-- [ ] `ljae439.truth.json` 精确列出 Figure 1–5、Table 1–3、正文 scope、知识库 locator；实体导入后要求完整文件 SHA-256。
-- [ ] 合成夹具可重复生成且内容 hash 稳定；任何缺失必选夹具都会让目录校验失败。
+- [x] 矩阵覆盖 PDF、DOCX、核心图片、PPTX 及 research/review/presentation/poster 关键组合。
+- [x] `ljae439.truth.json` 精确列出 Figure 1–5、Table 1–3、正文 scope、知识库 locator；实体导入后要求完整文件 SHA-256。
+- [x] 合成夹具可重复生成且内容 hash 稳定；任何缺失必选夹具都会让目录校验失败。
 
 **验证：** `uv run pytest -q tests/structure/test_fixture_catalog.py --no-cov`；连续生成两次比较 hash。
 
@@ -295,9 +296,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] 每项红色测试绑定唯一 issue code 和负责它转绿的 030b–030g 子计划。
-- [ ] 默认运行只出现预期 XFAIL、无 SKIP；任一 XPASS 按失败处理并要求立即取消对应 xfail。
-- [ ] `--runxfail` 当前返回非零，且失败信息直接表达期望契约而非实现细节。
+- [x] 每项红色测试绑定唯一 issue code 和负责它转绿的 030b–030g 子计划。
+- [x] 默认运行只出现预期 XFAIL、无 SKIP；任一 XPASS 按失败处理并要求立即取消对应 xfail。
+- [x] `--runxfail` 当前返回非零，且失败信息直接表达期望契约而非实现细节。
 
 **验证：** `uv run pytest -q tests/structure/test_plan030_red_baselines.py -rxX --no-cov`；再用 `--runxfail` 证明当前失败。
 
@@ -316,9 +317,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] 脚本区分 PASS、EXPECTED_RED、BLOCKED、FAIL；BLOCKED/FAIL 均返回非零。
-- [ ] `ljae439` 缺失知识库 locator 时失败；状态为 `IMPORTED` 却缺失完整 hash 时失败，不使用 sample-missing skip。
-- [ ] 脚本不依赖 `/home/dev/Hermes`、安装包 `site-packages` 或生产网络。
+- [x] 脚本区分 PASS、EXPECTED_RED、BLOCKED、FAIL；BLOCKED/FAIL 均返回非零。
+- [x] `ljae439` 缺失知识库 locator 时失败；状态为 `IMPORTED` 却缺失完整 hash 时失败，不使用 sample-missing skip。
+- [x] 脚本不依赖 `/home/dev/Hermes`、安装包 `site-packages` 或生产网络。
 
 **验证：** `bash scripts/verify-plan-030a.sh`；删除/篡改临时夹具配置时必须 fail closed。
 
@@ -336,9 +337,9 @@ REGULATORY | LETTER | GENERIC
 
 **验收标准：**
 
-- [ ] Walkthrough 包含真实输出摘要，不以“代码存在”代替行为验证。
-- [ ] PLAN-030/030a 状态、ADR 状态和 xfail owner 一致；没有提前创建 030b 业务实现。
-- [ ] 工作区差异仅包含 030a 已批准范围，现有全量测试无新增非预期失败。
+- [x] Walkthrough 包含真实输出摘要，不以“代码存在”代替行为验证。
+- [x] PLAN-030/030a 状态、ADR 状态和 xfail owner 一致；没有提前创建 030b 业务实现。
+- [x] 工作区差异仅包含 030a 已批准范围，现有全量测试无新增非预期失败。
 
 **验证：** `git diff --check`、`git status --short`、`bash scripts/verify-plan-030a.sh`、`uv run pytest -q`。
 
@@ -398,7 +399,8 @@ uv run pytest -q tests/structure/test_format_capabilities.py --no-cov
 uv run pytest -q tests/structure/test_content_profiles.py --no-cov
 uv run pytest -q tests/structure/test_fixture_catalog.py --no-cov
 uv run pytest -q tests/structure/test_plan030_red_baselines.py -rxX --no-cov
-uv run pytest -q
+uv run pytest -q --ignore=tests/test_pdf2zh_archive.py --no-cov
+uv run pytest -q tests/test_pdf2zh_archive.py --no-cov  # 预期仅 3 个实施前既有失败
 bash scripts/verify-plan-030a.sh
 ```
 
@@ -411,7 +413,7 @@ bash scripts/verify-plan-030a.sh
 | v1 字段过早冻结 | 030a 只冻结跨模块最小契约；实验性 detector 数据进入 evidence/extensions |
 | Pydantic 模型与 JSON Schema 漂移 | Schema 由模型确定性生成并做字节/结构漂移测试 |
 | `strict xfail` 变成永久债务 | 每条绑定 owner 子计划和 issue code；XPASS 失败；030i 前不得残留核心 xfail |
-| 私有/版权样本不可提交 | 仓内只放 truth、hash、生成器和许可说明；完整文件走外部夹具路径 |
+| 知识库样本未物化 | 仓内保存 truth、locator 和导入完整性策略；030b/030c 字节级验收前补完整 SHA-256 |
 | 新契约影响线上 | 030a 禁止生产接线；删除新增 `qyunslation/structure` 和测试/文档即可完整回滚 |
 
 ## 十一、批准记录
@@ -424,3 +426,5 @@ bash scripts/verify-plan-030a.sh
 4. 核心格式、规范化格式和条件图片格式按本计划分级。
 5. 用严格 XFAIL 保存 030b–030g 的当前红灯，并禁止样本缺失型假绿。
 6. 030a 通过单命令门禁后，才编写 030b 的详细计划。
+
+实施于 2026-09-07 完成；验收证据见 [WT-030a](../../walkthroughs/WT-030a-contract-baselines.md)。下一步仅编写并单独审批 PLAN-030b，不在本子计划中接入生产。
