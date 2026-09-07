@@ -6,17 +6,33 @@ import hashlib
 import io
 import re
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
 
 from .capabilities import (
+    CapabilityDecision,
     RequirementLevel,
+    RuntimeState,
     capability_for,
     source_format_for_extension,
     source_formats_for_mime,
 )
-from .models import ContractModel, SourceFormat
+from .models import (
+    AssetRef,
+    AssetRole,
+    Canvas,
+    ConversionStep,
+    ContractModel,
+    ProcessingMode,
+    SourceFormat,
+)
+
+if TYPE_CHECKING:
+    from .canvases import CanvasLimits
+    from .runtime import RuntimeCapabilitySnapshot
 
 
 DEFAULT_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -55,6 +71,49 @@ class DetectedInput(ContractModel):
     magic_family: str = Field(min_length=1)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(gt=0)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedDocument:
+    """Validated bytes plus immutable provenance for downstream workflows."""
+
+    source_name: str
+    normalized_name: str
+    source_format: SourceFormat
+    normalized_format: SourceFormat
+    detected_mime: str
+    source_sha256: str
+    normalized_sha256: str
+    content: bytes = field(repr=False)
+    input_asset: AssetRef
+    derived_assets: tuple[AssetRef, ...]
+    conversion_lineage: tuple[ConversionStep, ...]
+    canvases: tuple[Canvas, ...]
+    capability: CapabilityDecision
+    workflow_type: str
+
+    def audit_dict(self) -> dict[str, Any]:
+        """Return metadata safe for task state and logs; never include payload bytes."""
+
+        return {
+            "source_name": self.source_name,
+            "normalized_name": self.normalized_name,
+            "source_format": self.source_format.value,
+            "normalized_format": self.normalized_format.value,
+            "detected_mime": self.detected_mime,
+            "source_sha256": self.source_sha256,
+            "normalized_sha256": self.normalized_sha256,
+            "workflow_type": self.workflow_type,
+            "canvas_count": len(self.canvases),
+            "capability": self.capability.model_dump(mode="json"),
+            "input_asset": self.input_asset.model_dump(mode="json"),
+            "derived_assets": [
+                asset.model_dump(mode="json") for asset in self.derived_assets
+            ],
+            "conversion_lineage": [
+                step.model_dump(mode="json") for step in self.conversion_lineage
+            ],
+        }
 
 
 def sanitize_upload_name(filename: str | None) -> str:
@@ -288,3 +347,161 @@ def detect_input(
         size_bytes=len(content),
     )
 
+
+_IMAGE_FORMATS = {
+    SourceFormat.PNG,
+    SourceFormat.JPEG,
+    SourceFormat.WEBP,
+    SourceFormat.BMP,
+    SourceFormat.TIFF,
+    SourceFormat.SVG,
+    SourceFormat.GIF,
+    SourceFormat.HEIF,
+    SourceFormat.HEIC,
+    SourceFormat.AVIF,
+}
+
+
+def workflow_for_source_format(source_format: SourceFormat) -> str:
+    """Map only normalized formats to an existing translation workflow."""
+
+    if source_format is SourceFormat.PDF:
+        return "markdown_based"
+    if source_format is SourceFormat.DOCX:
+        return "docx"
+    if source_format is SourceFormat.PPTX:
+        return "pptx"
+    if source_format in _IMAGE_FORMATS:
+        return "image_overlay"
+    raise InputPreparationError(
+        "WORKFLOW_ROUTE_UNSUPPORTED",
+        f"{source_format.value} 尚无可执行翻译工作流",
+        http_status=415,
+    )
+
+
+def _asset_id(role: AssetRole, sha256: str) -> str:
+    return f"asset:{role.value.lower()}:{sha256}"
+
+
+def prepare_document(
+    filename: str | None,
+    content: bytes,
+    *,
+    declared_mime: str | None = None,
+    requested_mode: ProcessingMode | None = None,
+    runtime_snapshot: RuntimeCapabilitySnapshot | None = None,
+    office_converter: Any | None = None,
+    canvas_limits: CanvasLimits | None = None,
+    max_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+) -> PreparedDocument:
+    """Validate, normalize and describe one supported upload before task creation."""
+
+    # Local imports avoid the deliberate adapter -> ingest error dependency cycle.
+    from qyunslation.converter.office import LibreOfficeConverter
+
+    from .canvases import extract_canvases
+    from .runtime import decide_runtime_capability
+
+    detected = detect_input(
+        filename,
+        content,
+        declared_mime=declared_mime,
+        max_bytes=max_bytes,
+    )
+    capability = decide_runtime_capability(
+        detected.source_format,
+        requested_mode=requested_mode,
+        snapshot=runtime_snapshot,
+    )
+    if capability.runtime_state is RuntimeState.UNAVAILABLE:
+        missing = ", ".join(feature.value for feature in capability.missing_features)
+        detail = f"（缺少：{missing}）" if missing else ""
+        raise InputPreparationError(
+            "RUNTIME_CAPABILITY_UNAVAILABLE",
+            f"当前运行环境不能处理 {detected.source_format.value}{detail}",
+            http_status=503,
+        )
+
+    input_asset = AssetRef(
+        asset_id=_asset_id(AssetRole.INPUT, detected.source_sha256),
+        role=AssetRole.INPUT,
+        sha256=detected.source_sha256,
+        media_type=detected.detected_mime,
+        locator=f"upload://{detected.source_name}",
+    )
+    normalized_name = detected.normalized_name
+    normalized_format = detected.source_format
+    normalized_content = content
+    normalized_mime = detected.detected_mime
+    derived_assets: tuple[AssetRef, ...] = ()
+    conversion_lineage: tuple[ConversionStep, ...] = ()
+
+    if detected.source_format in {SourceFormat.DOC, SourceFormat.PPT}:
+        converter = office_converter or LibreOfficeConverter()
+        conversion = converter.convert(
+            detected.source_name,
+            content,
+            detected.source_format,
+        )
+        normalized = detect_input(
+            conversion.output_name,
+            conversion.content,
+            max_bytes=max_bytes,
+        )
+        expected_format = capability_for(detected.source_format).normalizes_to
+        if normalized.source_format is not expected_format:
+            raise InputPreparationError(
+                "OFFICE_OUTPUT_INVALID",
+                "Office 规范化结果与产品格式契约不一致",
+            )
+        normalized_name = normalized.normalized_name
+        normalized_format = normalized.source_format
+        normalized_content = conversion.content
+        normalized_mime = normalized.detected_mime
+        normalized_asset = AssetRef(
+            asset_id=_asset_id(AssetRole.NORMALIZED, normalized.source_sha256),
+            role=AssetRole.NORMALIZED,
+            sha256=normalized.source_sha256,
+            media_type=normalized.detected_mime,
+            locator=f"normalized://{normalized.normalized_name}",
+        )
+        derived_assets = (normalized_asset,)
+        conversion_lineage = (
+            ConversionStep(
+                step_id=(
+                    "normalize:"
+                    f"{detected.source_sha256[:16]}:{normalized.source_sha256[:16]}"
+                ),
+                source_asset_id=input_asset.asset_id,
+                output_asset_id=normalized_asset.asset_id,
+                converter=conversion.converter,
+                converter_version=conversion.converter_version,
+                parameters=dict(conversion.parameters),
+            ),
+        )
+
+    normalized_sha256 = hashlib.sha256(normalized_content).hexdigest()
+    canvases = tuple(
+        extract_canvases(
+            normalized_format,
+            normalized_content,
+            limits=canvas_limits,
+        )
+    )
+    return PreparedDocument(
+        source_name=detected.source_name,
+        normalized_name=normalized_name,
+        source_format=detected.source_format,
+        normalized_format=normalized_format,
+        detected_mime=normalized_mime,
+        source_sha256=detected.source_sha256,
+        normalized_sha256=normalized_sha256,
+        content=normalized_content,
+        input_asset=input_asset,
+        derived_assets=derived_assets,
+        conversion_lineage=conversion_lineage,
+        canvases=canvases,
+        capability=capability,
+        workflow_type=workflow_for_source_format(normalized_format),
+    )

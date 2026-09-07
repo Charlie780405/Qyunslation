@@ -66,8 +66,11 @@ from .ingest import (
     DEFAULT_MAX_UPLOAD_BYTES,
     DetectedInput,
     InputPreparationError,
+    PreparedDocument,
     detect_input,
+    prepare_document,
     sanitize_upload_name,
+    workflow_for_source_format,
 )
 from .runtime import (
     FeatureProbe,
@@ -138,8 +141,11 @@ __all__ = [
     "DEFAULT_MAX_UPLOAD_BYTES",
     "DetectedInput",
     "InputPreparationError",
+    "PreparedDocument",
     "detect_input",
+    "prepare_document",
     "sanitize_upload_name",
+    "workflow_for_source_format",
     "FeatureProbe",
     "RuntimeCapabilitySnapshot",
     "decide_runtime_capability",
