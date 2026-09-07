@@ -69,6 +69,12 @@ from .ingest import (
     detect_input,
     sanitize_upload_name,
 )
+from .runtime import (
+    FeatureProbe,
+    RuntimeCapabilitySnapshot,
+    decide_runtime_capability,
+    probe_runtime_capabilities,
+)
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -133,4 +139,8 @@ __all__ = [
     "InputPreparationError",
     "detect_input",
     "sanitize_upload_name",
+    "FeatureProbe",
+    "RuntimeCapabilitySnapshot",
+    "decide_runtime_capability",
+    "probe_runtime_capabilities",
 ]
