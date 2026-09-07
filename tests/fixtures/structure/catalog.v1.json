@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0.0",
+  "generator": "tests/fixtures/structure/generate_synthetic.py",
+  "fixtures": [
+    {
+      "id": "synthetic-pdf-single-column",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "single-column.pdf",
+      "sha256": "215d93d086a7c406df93996df9e93f1ecfa5da64fbc793731c508a0680618394",
+      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE"],
+      "future_owner": "PLAN-030b"
+    },
+    {
+      "id": "synthetic-pdf-double-column",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "REVIEW_ARTICLE",
+      "relative_path": "double-column.pdf",
+      "sha256": "f22ac26e148d41ee3ea2971f6c6a49836693d36b0a7d2f43e7107ce4d6cb7777",
+      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE"],
+      "future_owner": "PLAN-030b"
+    },
+    {
+      "id": "synthetic-docx-review",
+      "origin": "GENERATED",
+      "source_format": "DOCX",
+      "content_profile": "REVIEW_ARTICLE",
+      "relative_path": "review.docx",
+      "sha256": "4626d65a392a277f0a2ec4de86a74df7ac5e52afa755e4225c2e1f315ec6d7b3",
+      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE", "IMAGE"],
+      "future_owner": "PLAN-030d"
+    },
+    {
+      "id": "synthetic-image-poster",
+      "origin": "GENERATED",
+      "source_format": "PNG",
+      "content_profile": "POSTER",
+      "relative_path": "poster.png",
+      "sha256": "0be4affaa9a930101bcf16efc5b7443778f7133e4f00e9daae499aa0af3a3b07",
+      "expected_objects": ["POSTER_SECTION", "FIGURE", "TABLE"],
+      "future_owner": "PLAN-030e"
+    },
+    {
+      "id": "synthetic-image-exif",
+      "origin": "GENERATED",
+      "source_format": "JPEG",
+      "content_profile": "GENERIC",
+      "relative_path": "photo.jpg",
+      "sha256": "783b993e64972d033dc3c27b87685a0d6d55968c667c04339bff532af07555b9",
+      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "future_owner": "PLAN-030e"
+    },
+    {
+      "id": "synthetic-image-webp",
+      "origin": "GENERATED",
+      "source_format": "WEBP",
+      "content_profile": "GENERIC",
+      "relative_path": "diagram.webp",
+      "sha256": "9e6fcba25d14b248be799d9b55be6563a338d82ddfeaf2c1c0bd9b3cb9c245e8",
+      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "future_owner": "PLAN-030e"
+    },
+    {
+      "id": "synthetic-image-bmp",
+      "origin": "GENERATED",
+      "source_format": "BMP",
+      "content_profile": "POSTER",
+      "relative_path": "scan.bmp",
+      "sha256": "31beaaa9f7d6ea06ec8728bbee9bed1d0c6dcc87b4a75792c1830a6e6c25fa7c",
+      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "future_owner": "PLAN-030e"
+    },
+    {
+      "id": "synthetic-image-multipage-tiff",
+      "origin": "GENERATED",
+      "source_format": "TIFF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "multipage.tiff",
+      "sha256": "828e1e8f7f35d6e2504f42f30d428ad5b07c4fedba20cbf001019e26357e3ffa",
+      "expected_objects": ["IMAGE", "FIGURE", "TABLE"],
+      "future_owner": "PLAN-030e"
+    },
+    {
+      "id": "synthetic-pptx-presentation",
+      "origin": "GENERATED",
+      "source_format": "PPTX",
+      "content_profile": "PRESENTATION",
+      "relative_path": "presentation.pptx",
+      "sha256": "67846cffae7d565c42da6e7b294177b4b648ced5a620fd8ef8a4831c52b2ea4d",
+      "expected_objects": ["TEXT_BOX", "TABLE", "IMAGE"],
+      "future_owner": "PLAN-030f"
+    },
+    {
+      "id": "ljae439-knowledge-base",
+      "origin": "KNOWLEDGE_BASE",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "truth_file": "tests/fixtures/structure/ljae439.truth.json",
+      "fixture_state": "RESERVED",
+      "future_owner": "PLAN-030b"
+    }
+  ]
+}

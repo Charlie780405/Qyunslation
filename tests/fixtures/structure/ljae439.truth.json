@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "document_id": "doi:10.1093/bjd/ljae439",
+  "title": "Predicting success with reduced dosing frequency of tralokinumab in patients with moderate-to-severe atopic dermatitis",
+  "scope": "MAIN_ARTICLE",
+  "source": {
+    "kind": "KNOWLEDGE_BASE",
+    "locator": "knowledge-base://documents/ljae439.pdf",
+    "publisher_url": "https://academic.oup.com/bjd/article/192/3/410/7917393",
+    "import_state": "PENDING",
+    "sha256": null,
+    "integrity_policy": "Set import_state=IMPORTED and record the full lowercase SHA-256 when the knowledge-base file is materialized."
+  },
+  "semantic_ids": {
+    "figures": ["figure:1", "figure:2", "figure:3", "figure:4", "figure:5"],
+    "tables": ["table:1", "table:2", "table:3"]
+  },
+  "counting_rules": [
+    "Count semantic Figure identifiers, not bitmap/vector regions.",
+    "Count semantic Table identifiers independently from figures.",
+    "Exclude supplementary-material identifiers from MAIN_ARTICLE counts.",
+    "Multiple physical resources or occurrences may belong to one semantic identifier."
+  ]
+}

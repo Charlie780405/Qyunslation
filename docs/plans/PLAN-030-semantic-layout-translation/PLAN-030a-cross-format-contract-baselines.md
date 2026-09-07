@@ -153,13 +153,13 @@ REGULATORY | LETTER | GENERIC
 
 | 夹具 | 形式 | 030a 真值 |
 | --- | --- | --- |
-| `ljae439` | 外部、许可可追踪 PDF + 仓内 truth JSON | `figure:1..5`、`table:1..3`，正文范围，不把物理区域数当主计数 |
+| `ljae439` | 知识库 PDF 槽位 + 仓内 truth JSON | `figure:1..5`、`table:1..3`，正文范围，不把物理区域数当主计数 |
 | synthetic PDF | 测试时确定性生成 | 单/双栏、跨栏 Figure、原生/扫描 Table、共享图资源 |
 | synthetic DOCX | 测试时确定性生成 | 分节多栏、表格、文本框、页眉页脚、同图多 occurrence |
 | synthetic images | 小型仓内或测试时生成 | PNG/JPEG/WebP/BMP/TIFF、透明通道、EXIF 旋转、长图/Poster |
 | synthetic PPTX | 测试时确定性生成 | 文本框、表格、组合形状、母版/备注、含文字嵌图 |
 
-`ljae439` 完整 PDF 不直接提交仓库。030a 完成前必须记录合法外部位置和完整 SHA-256；缺失时验证结果为 **BLOCKED** 而不是 SKIP，030b 不得启动。
+`ljae439` 完整 PDF 不直接提交仓库。根据用户 2026-09-07 的范围调整，030a 记录稳定的知识库 locator 与语义 truth 即可；文件实体导入时再写入完整 SHA-256，并在 030b 字节级扫描验收前 fail closed。实体尚未导入不阻塞 030a 契约阶段。
 
 ### 5.2 红色基线
 
@@ -265,12 +265,12 @@ REGULATORY | LETTER | GENERIC
 
 ### Task 5：建立格式×题材金标目录
 
-**说明：** 创建不依赖生产服务的确定性合成夹具清单和 `ljae439` 外部真值记录，所有夹具带来源、许可、hash、预期对象和后续所属子计划。
+**说明：** 创建不依赖生产服务的确定性合成夹具清单和 `ljae439` 知识库真值记录；合成夹具带 hash、预期对象和后续所属子计划，知识库夹具带稳定 locator 与导入完整性策略。
 
 **验收标准：**
 
 - [ ] 矩阵覆盖 PDF、DOCX、核心图片、PPTX 及 research/review/presentation/poster 关键组合。
-- [ ] `ljae439.truth.json` 精确列出 Figure 1–5、Table 1–3、正文 scope、来源和完整文件 SHA-256。
+- [ ] `ljae439.truth.json` 精确列出 Figure 1–5、Table 1–3、正文 scope、知识库 locator；实体导入后要求完整文件 SHA-256。
 - [ ] 合成夹具可重复生成且内容 hash 稳定；任何缺失必选夹具都会让目录校验失败。
 
 **验证：** `uv run pytest -q tests/structure/test_fixture_catalog.py --no-cov`；连续生成两次比较 hash。
@@ -310,12 +310,12 @@ REGULATORY | LETTER | GENERIC
 
 ### Task 7：建立单命令阶段门
 
-**说明：** 新增 030a 验证脚本，统一执行 Schema 漂移、契约测试、夹具目录、预期红灯、全量回归和版权夹具门禁。
+**说明：** 新增 030a 验证脚本，统一执行 Schema 漂移、契约测试、夹具目录、预期红灯、全量回归和知识库夹具完整性门禁。
 
 **验收标准：**
 
 - [ ] 脚本区分 PASS、EXPECTED_RED、BLOCKED、FAIL；BLOCKED/FAIL 均返回非零。
-- [ ] 缺失 `ljae439` 合法外部位置或 hash 时不得输出成功，不使用 sample-missing skip。
+- [ ] `ljae439` 缺失知识库 locator 时失败；状态为 `IMPORTED` 却缺失完整 hash 时失败，不使用 sample-missing skip。
 - [ ] 脚本不依赖 `/home/dev/Hermes`、安装包 `site-packages` 或生产网络。
 
 **验证：** `bash scripts/verify-plan-030a.sh`；删除/篡改临时夹具配置时必须 fail closed。
@@ -365,7 +365,7 @@ Task 4 ────────────────────┘          
                                                 └── Task 8 交接
 ```
 
-Task 3、Task 4 可在 Task 2 契约冻结后并行；Task 5 可并行准备无版权争议的合成夹具，但 `ljae439` hash 必须在 Checkpoint B 前确认。Task 6–8 必须顺序执行。
+Task 3、Task 4 可在 Task 2 契约冻结后并行；Task 5 可并行准备确定性合成夹具与 `ljae439` 知识库槽位。Task 6–8 必须顺序执行。
 
 ## 八、检查点
 
@@ -379,7 +379,7 @@ Task 3、Task 4 可在 Task 2 契约冻结后并行；Task 5 可并行准备无�
 
 - 格式与画像注册表正交，能力与运行状态分离。
 - 金标矩阵无必选空洞；合成夹具确定性生成。
-- `ljae439` 外部位置、许可依据和完整 SHA-256 已记录；否则 030a BLOCKED。
+- `ljae439` 知识库 locator、精确语义 truth 与实体导入后的 SHA-256 策略已记录。
 
 ### Checkpoint C：Task 6–8 后
 
