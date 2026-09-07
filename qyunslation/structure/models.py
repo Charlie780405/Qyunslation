@@ -1,0 +1,565 @@
+"""Versioned public models for cross-format document structure manifests."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from collections import Counter
+from datetime import datetime
+from enum import Enum
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+CURRENT_SCHEMA_VERSION = "1.0.0"
+SUPPORTED_SCHEMA_MAJOR = 1
+_SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_MANIFEST_ID_RE = re.compile(r"^manifest:[0-9a-f]{64}$")
+_OBJECT_ID_RE = re.compile(r"^obj:[0-9a-f]{64}$")
+
+
+class ContractEnum(str, Enum):
+    """String enum with stable wire values."""
+
+
+class SourceFormat(ContractEnum):
+    PDF = "PDF"
+    DOCX = "DOCX"
+    DOC = "DOC"
+    PNG = "PNG"
+    JPEG = "JPEG"
+    WEBP = "WEBP"
+    BMP = "BMP"
+    TIFF = "TIFF"
+    PPTX = "PPTX"
+    PPT = "PPT"
+    SVG = "SVG"
+    GIF = "GIF"
+    HEIF = "HEIF"
+    HEIC = "HEIC"
+    AVIF = "AVIF"
+    UNKNOWN = "UNKNOWN"
+
+
+class ContentProfile(ContractEnum):
+    RESEARCH_ARTICLE = "RESEARCH_ARTICLE"
+    REVIEW_ARTICLE = "REVIEW_ARTICLE"
+    PRESENTATION = "PRESENTATION"
+    POSTER = "POSTER"
+    REGULATORY = "REGULATORY"
+    LETTER = "LETTER"
+    GENERIC = "GENERIC"
+
+
+class ProfileSource(ContractEnum):
+    AUTO = "AUTO"
+    USER_OVERRIDE = "USER_OVERRIDE"
+
+
+class ProcessingMode(ContractEnum):
+    NATIVE = "NATIVE"
+    RENDERED = "RENDERED"
+    HYBRID = "HYBRID"
+
+
+class OutputEditability(ContractEnum):
+    EDITABLE = "EDITABLE"
+    MIXED = "MIXED"
+    RASTERIZED = "RASTERIZED"
+
+
+class CanvasKind(ContractEnum):
+    PAGE = "PAGE"
+    SECTION = "SECTION"
+    SLIDE = "SLIDE"
+    POSTER = "POSTER"
+
+
+class CoordinateUnit(ContractEnum):
+    PT = "PT"
+    PX = "PX"
+    EMU = "EMU"
+
+
+class LayoutMode(ContractEnum):
+    SINGLE = "SINGLE"
+    DOUBLE = "DOUBLE"
+    MULTI = "MULTI"
+    MIXED = "MIXED"
+    FREEFORM = "FREEFORM"
+
+
+class ObjectType(ContractEnum):
+    BODY = "BODY"
+    CAPTION = "CAPTION"
+    FIGURE = "FIGURE"
+    TABLE = "TABLE"
+    TEXT_BOX = "TEXT_BOX"
+    SHAPE = "SHAPE"
+    IMAGE = "IMAGE"
+    POSTER_SECTION = "POSTER_SECTION"
+
+
+class Representation(ContractEnum):
+    BITMAP = "BITMAP"
+    VECTOR = "VECTOR"
+    HYBRID = "HYBRID"
+    NATIVE_TEXT = "NATIVE_TEXT"
+    NATIVE_OBJECT = "NATIVE_OBJECT"
+    SCANNED = "SCANNED"
+
+
+class ExecutionStatus(ContractEnum):
+    PENDING = "PENDING"
+    TRANSLATING = "TRANSLATING"
+    TRANSLATED = "TRANSLATED"
+    EXPLICITLY_SKIPPED = "EXPLICITLY_SKIPPED"
+    FAILED_SOFT = "FAILED_SOFT"
+    FAILED_HARD = "FAILED_HARD"
+
+
+class IssueSeverity(ContractEnum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+
+
+class PipelineStage(ContractEnum):
+    INGEST = "INGEST"
+    NORMALIZE = "NORMALIZE"
+    SCAN = "SCAN"
+    TRANSLATE = "TRANSLATE"
+    RENDER = "RENDER"
+    PACKAGE = "PACKAGE"
+    VALIDATE = "VALIDATE"
+
+
+class AssetRole(ContractEnum):
+    INPUT = "INPUT"
+    NORMALIZED = "NORMALIZED"
+    RENDERED = "RENDERED"
+    TRANSLATED = "TRANSLATED"
+    OUTPUT = "OUTPUT"
+
+
+class SourceRefKind(ContractEnum):
+    PDF_XREF = "PDF_XREF"
+    PDF_DRAWING = "PDF_DRAWING"
+    PDF_TEXT_BLOCK = "PDF_TEXT_BLOCK"
+    DOCX_PART = "DOCX_PART"
+    DOCX_RELATIONSHIP = "DOCX_RELATIONSHIP"
+    PPTX_SLIDE = "PPTX_SLIDE"
+    PPTX_SHAPE = "PPTX_SHAPE"
+    IMAGE_OCR_BLOCK = "IMAGE_OCR_BLOCK"
+    GENERATED_ASSET = "GENERATED_ASSET"
+
+
+class ContractModel(BaseModel):
+    """Forward-compatible reader model for Manifest v1."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ProducerInfo(ContractModel):
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+
+
+class BoundingBox(ContractModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+    @model_validator(mode="after")
+    def validate_box(self) -> BoundingBox:
+        values = (self.x0, self.y0, self.x1, self.y1)
+        if (
+            not all(math.isfinite(value) for value in values)
+            or self.x0 < 0
+            or self.y0 < 0
+            or self.x1 <= self.x0
+            or self.y1 <= self.y0
+        ):
+            raise ValueError("MANIFEST_BBOX_INVALID: bbox must have positive finite area")
+        return self
+
+
+class SourceGeometry(ContractModel):
+    unit: CoordinateUnit | str
+    bbox: tuple[float, float, float, float] | None = None
+    transform: tuple[float, ...] | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssetRef(ContractModel):
+    asset_id: str = Field(min_length=1)
+    role: AssetRole
+    sha256: str
+    media_type: str = Field(min_length=1)
+    locator: str = Field(min_length=1)
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        if not _SHA256_RE.fullmatch(value):
+            raise ValueError("MANIFEST_SHA256_INVALID: expected full lowercase SHA-256")
+        return value
+
+
+class ConversionStep(ContractModel):
+    step_id: str = Field(min_length=1)
+    source_asset_id: str = Field(min_length=1)
+    output_asset_id: str = Field(min_length=1)
+    converter: str = Field(min_length=1)
+    converter_version: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentInfo(ContractModel):
+    source_sha256: str
+    fast_fingerprint: str | None = None
+    source_name: str = Field(min_length=1)
+    source_format: SourceFormat
+    detected_mime: str = Field(min_length=1)
+    content_profile: ContentProfile
+    profile_source: ProfileSource
+    profile_confidence: float | None = Field(default=None, ge=0, le=1)
+    profile_evidence: list[str] = Field(default_factory=list)
+    auto_profile_suggestion: ContentProfile | None = None
+    requested_mode: ProcessingMode
+    selected_mode: ProcessingMode
+    output_editability: OutputEditability
+    input_asset: AssetRef
+    derived_assets: list[AssetRef] = Field(default_factory=list)
+    conversion_lineage: list[ConversionStep] = Field(default_factory=list)
+
+    @field_validator("source_sha256")
+    @classmethod
+    def validate_source_sha256(cls, value: str) -> str:
+        if not _SHA256_RE.fullmatch(value):
+            raise ValueError("MANIFEST_SHA256_INVALID: expected full lowercase SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def validate_profile_provenance(self) -> DocumentInfo:
+        if self.profile_source is ProfileSource.AUTO:
+            if self.profile_confidence is None or not self.profile_evidence:
+                raise ValueError(
+                    "MANIFEST_PROFILE_EVIDENCE_REQUIRED: AUTO profile needs confidence and evidence"
+                )
+        elif self.auto_profile_suggestion is None:
+            raise ValueError(
+                "MANIFEST_PROFILE_SUGGESTION_REQUIRED: USER_OVERRIDE must retain the auto suggestion"
+            )
+        return self
+
+
+class Canvas(ContractModel):
+    canvas_id: str = Field(min_length=1)
+    kind: CanvasKind
+    source_index: int = Field(ge=1)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    unit: CoordinateUnit
+    rotation: Literal[0, 90, 180, 270] = 0
+    layout_mode: LayoutMode
+    reading_order: list[str] = Field(default_factory=list)
+    source_geometry: SourceGeometry | None = None
+
+    @field_validator("unit")
+    @classmethod
+    def validate_canonical_unit(cls, value: CoordinateUnit) -> CoordinateUnit:
+        if value is CoordinateUnit.EMU:
+            raise ValueError("MANIFEST_CANVAS_UNIT_INVALID: canonical unit must be PT or PX")
+        return value
+
+
+class SourceRef(ContractModel):
+    kind: SourceRefKind
+    ref: str = Field(min_length=1)
+    occurrence_index: int | None = Field(default=None, ge=1)
+    source_geometry: SourceGeometry | None = None
+
+
+class DetectorEvidence(ContractModel):
+    detector: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    bbox: BoundingBox | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class TranslatableBlock(ContractModel):
+    block_id: str = Field(min_length=1)
+    source_text: str
+    bbox: BoundingBox | None = None
+    source_language: str | None = None
+
+
+class OutputEvidence(ContractModel):
+    asset_ids: list[str] = Field(default_factory=list)
+    checks: dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticObjectBase(ContractModel):
+    type: ObjectType
+    object_id: str
+    canvas_id: str = Field(min_length=1)
+    bbox: BoundingBox
+    representation: Representation
+    source_refs: list[SourceRef] = Field(default_factory=list)
+    detector_evidence: list[DetectorEvidence] = Field(default_factory=list)
+    translatable_blocks: list[TranslatableBlock] = Field(default_factory=list)
+    execution_status: ExecutionStatus = ExecutionStatus.PENDING
+    reason_code: str | None = None
+    planned_action: str | None = None
+    output_evidence: OutputEvidence | None = None
+    semantic_id: str | None = None
+    semantic_scope: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source_geometry: SourceGeometry | None = None
+
+    @field_validator("object_id")
+    @classmethod
+    def validate_object_id(cls, value: str) -> str:
+        if not _OBJECT_ID_RE.fullmatch(value):
+            raise ValueError("MANIFEST_OBJECT_ID_INVALID: expected obj:<sha256>")
+        return value
+
+    @model_validator(mode="after")
+    def validate_terminal_reason(self) -> SemanticObjectBase:
+        needs_reason = {
+            ExecutionStatus.EXPLICITLY_SKIPPED,
+            ExecutionStatus.FAILED_SOFT,
+            ExecutionStatus.FAILED_HARD,
+        }
+        if self.execution_status in needs_reason and not self.reason_code:
+            raise ValueError(
+                "MANIFEST_REASON_REQUIRED: skipped and failed objects need a reason code"
+            )
+        return self
+
+
+class BodyObject(SemanticObjectBase):
+    type: Literal[ObjectType.BODY]
+    reading_order: int | None = Field(default=None, ge=0)
+
+
+class CaptionObject(SemanticObjectBase):
+    type: Literal[ObjectType.CAPTION]
+    caption_for: list[str] = Field(default_factory=list)
+
+
+class FigureObject(SemanticObjectBase):
+    type: Literal[ObjectType.FIGURE]
+    caption_ids: list[str] = Field(default_factory=list)
+    child_object_ids: list[str] = Field(default_factory=list)
+
+
+class TableObject(SemanticObjectBase):
+    type: Literal[ObjectType.TABLE]
+    caption_ids: list[str] = Field(default_factory=list)
+    row_count: int | None = Field(default=None, ge=0)
+    column_count: int | None = Field(default=None, ge=0)
+
+
+class TextBoxObject(SemanticObjectBase):
+    type: Literal[ObjectType.TEXT_BOX]
+    z_order: int | None = None
+
+
+class ShapeObject(SemanticObjectBase):
+    type: Literal[ObjectType.SHAPE]
+    z_order: int | None = None
+
+
+class ImageObject(SemanticObjectBase):
+    type: Literal[ObjectType.IMAGE]
+    occurrence_key: str | None = None
+
+
+class PosterSectionObject(SemanticObjectBase):
+    type: Literal[ObjectType.POSTER_SECTION]
+    section_role: str | None = None
+
+
+SemanticObject = Annotated[
+    BodyObject
+    | CaptionObject
+    | FigureObject
+    | TableObject
+    | TextBoxObject
+    | ShapeObject
+    | ImageObject
+    | PosterSectionObject,
+    Field(discriminator="type"),
+]
+
+
+class ManifestIssue(ContractModel):
+    code: str = Field(min_length=1)
+    severity: IssueSeverity
+    stage: PipelineStage
+    object_id: str | None = None
+    retryable: bool = False
+    message: str = Field(min_length=1)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ManifestSummary(ContractModel):
+    figure_count: int = Field(default=0, ge=0)
+    table_count: int = Field(default=0, ge=0)
+    object_counts: dict[str, int] = Field(default_factory=dict)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    issue_counts: dict[str, int] = Field(default_factory=dict)
+
+
+def _schema_major(version: str) -> int:
+    match = _SEMVER_RE.fullmatch(version)
+    if not match or int(match.group(1)) != SUPPORTED_SCHEMA_MAJOR:
+        raise ValueError(
+            f"MANIFEST_VERSION_UNSUPPORTED: expected major {SUPPORTED_SCHEMA_MAJOR}, got {version!r}"
+        )
+    return int(match.group(1))
+
+
+def _require_sha256(value: str) -> str:
+    if not _SHA256_RE.fullmatch(value):
+        raise ValueError("expected full lowercase SHA-256")
+    return value
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def build_manifest_id(source_sha256: str, schema_version: str = CURRENT_SCHEMA_VERSION) -> str:
+    """Build a stable manifest identity from the source and schema major."""
+
+    source_sha256 = _require_sha256(source_sha256)
+    major = _schema_major(schema_version)
+    digest = hashlib.sha256(f"{major}:{source_sha256}".encode()).hexdigest()
+    return f"manifest:{digest}"
+
+
+def build_object_id(
+    source_sha256: str,
+    canvas_id: str,
+    object_type: ObjectType | str,
+    semantic_key: str,
+    source_refs: list[dict[str, Any]],
+) -> str:
+    """Build an order-independent deterministic identity for a semantic object."""
+
+    source_sha256 = _require_sha256(source_sha256)
+    refs = sorted(_canonical_json(ref) for ref in source_refs)
+    payload = {
+        "source_sha256": source_sha256,
+        "canvas_id": canvas_id,
+        "object_type": str(
+            object_type.value if isinstance(object_type, ObjectType) else object_type
+        ),
+        "semantic_key": semantic_key,
+        "source_refs": refs,
+    }
+    return f"obj:{hashlib.sha256(_canonical_json(payload).encode()).hexdigest()}"
+
+
+def _derive_summary(
+    objects: list[SemanticObject], issues: list[ManifestIssue]
+) -> ManifestSummary:
+    object_counts = Counter(item.type.value for item in objects)
+    status_counts = Counter(item.execution_status.value for item in objects)
+    issue_counts = Counter(issue.severity.value for issue in issues)
+    return ManifestSummary(
+        figure_count=object_counts.get(ObjectType.FIGURE.value, 0),
+        table_count=object_counts.get(ObjectType.TABLE.value, 0),
+        object_counts=dict(sorted(object_counts.items())),
+        status_counts=dict(sorted(status_counts.items())),
+        issue_counts=dict(sorted(issue_counts.items())),
+    )
+
+
+class DocumentStructureManifest(ContractModel):
+    schema_version: str = CURRENT_SCHEMA_VERSION
+    manifest_id: str
+    created_at: datetime
+    producer: ProducerInfo
+    document: DocumentInfo
+    canvases: list[Canvas]
+    objects: list[SemanticObject] = Field(default_factory=list)
+    issues: list[ManifestIssue] = Field(default_factory=list)
+    summary: ManifestSummary | None = None
+    extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("schema_version")
+    @classmethod
+    def validate_schema_version(cls, value: str) -> str:
+        _schema_major(value)
+        return value
+
+    @field_validator("manifest_id")
+    @classmethod
+    def validate_manifest_id_shape(cls, value: str) -> str:
+        if not _MANIFEST_ID_RE.fullmatch(value):
+            raise ValueError("MANIFEST_ID_INVALID: expected manifest:<sha256>")
+        return value
+
+    @model_validator(mode="after")
+    def validate_manifest_invariants(self) -> DocumentStructureManifest:
+        expected_manifest_id = build_manifest_id(
+            self.document.source_sha256, self.schema_version
+        )
+        if self.manifest_id != expected_manifest_id:
+            raise ValueError("MANIFEST_ID_MISMATCH: identity does not match source")
+        if self.document.input_asset.sha256 != self.document.source_sha256:
+            raise ValueError("MANIFEST_SOURCE_ASSET_MISMATCH: input hash differs")
+
+        canvases = {canvas.canvas_id: canvas for canvas in self.canvases}
+        if len(canvases) != len(self.canvases):
+            raise ValueError("MANIFEST_CANVAS_ID_DUPLICATE: canvas IDs must be unique")
+
+        object_ids = [item.object_id for item in self.objects]
+        if len(set(object_ids)) != len(object_ids):
+            raise ValueError("MANIFEST_OBJECT_ID_DUPLICATE: object IDs must be unique")
+
+        semantic_keys: set[tuple[str, str, str]] = set()
+        for item in self.objects:
+            canvas = canvases.get(item.canvas_id)
+            if canvas is None:
+                raise ValueError(
+                    f"MANIFEST_CANVAS_UNKNOWN: object references {item.canvas_id!r}"
+                )
+            if item.bbox.x1 > canvas.width or item.bbox.y1 > canvas.height:
+                raise ValueError(
+                    "MANIFEST_BBOX_INVALID: object bbox exceeds its canvas"
+                )
+            if item.type in {ObjectType.FIGURE, ObjectType.TABLE} and item.semantic_id:
+                key = (item.type.value, item.semantic_scope or "", item.semantic_id)
+                if key in semantic_keys:
+                    raise ValueError(
+                        "MANIFEST_SEMANTIC_ID_DUPLICATE: semantic IDs must be unique within scope"
+                    )
+                semantic_keys.add(key)
+
+        known_objects = set(object_ids)
+        for issue in self.issues:
+            if issue.object_id and issue.object_id not in known_objects:
+                raise ValueError(
+                    "MANIFEST_ISSUE_OBJECT_UNKNOWN: issue references an unknown object"
+                )
+
+        derived = _derive_summary(self.objects, self.issues)
+        if self.summary is not None:
+            for field_name in self.summary.model_fields_set:
+                if getattr(self.summary, field_name) != getattr(derived, field_name):
+                    raise ValueError(
+                        f"MANIFEST_SUMMARY_MISMATCH: {field_name} is not derived from objects/issues"
+                    )
+        object.__setattr__(self, "summary", derived)
+        return self
