@@ -1,6 +1,18 @@
 """Stable public contract for cross-format document structure."""
 
 from .interfaces import ManifestConsumer, StructureScanner
+from .capabilities import (
+    CapabilityDecision,
+    FormatCapability,
+    ModeCapability,
+    RequirementLevel,
+    RuntimeFeature,
+    RuntimeState,
+    all_format_capabilities,
+    capability_for,
+    source_format_for_extension,
+    source_formats_for_mime,
+)
 from .models import (
     CURRENT_SCHEMA_VERSION,
     AssetRef,
@@ -45,6 +57,7 @@ from .models import (
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
+    "CapabilityDecision",
     "AssetRef",
     "AssetRole",
     "BodyObject",
@@ -59,12 +72,14 @@ __all__ = [
     "DocumentStructureManifest",
     "ExecutionStatus",
     "FigureObject",
+    "FormatCapability",
     "ImageObject",
     "IssueSeverity",
     "LayoutMode",
     "ManifestConsumer",
     "ManifestIssue",
     "ManifestSummary",
+    "ModeCapability",
     "ObjectType",
     "OutputEditability",
     "PipelineStage",
@@ -73,6 +88,9 @@ __all__ = [
     "ProducerInfo",
     "ProfileSource",
     "Representation",
+    "RequirementLevel",
+    "RuntimeFeature",
+    "RuntimeState",
     "SemanticObject",
     "ShapeObject",
     "SourceFormat",
@@ -85,4 +103,8 @@ __all__ = [
     "TranslatableBlock",
     "build_manifest_id",
     "build_object_id",
+    "all_format_capabilities",
+    "capability_for",
+    "source_format_for_extension",
+    "source_formats_for_mime",
 ]
