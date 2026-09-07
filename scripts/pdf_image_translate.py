@@ -160,7 +160,14 @@ def translate_pdf_images(
 ) -> Path:
     """位图 replace_image（单引用）+ 矢量 crop/insert_image；无可译图则原样返回 src。"""
     import pymupdf
-    from pdf_figure_crop import crop_png, find_safe_vector_figures
+    from pdf_figure_crop import (
+        SLIDE_MAX_AREA_FRAC,
+        SLIDE_MIN_DRAWINGS,
+        SLIDE_TEXT_OVERLAP,
+        crop_png,
+        find_safe_vector_figures,
+        is_slide_page,
+    )
 
     src = Path(src)
     if not PDF_IMAGE_OVERLAY:
@@ -331,7 +338,15 @@ def translate_pdf_images(
                 if info.get("bbox"):
                     exclude.append(info["bbox"])
             try:
-                figures = find_safe_vector_figures(page, exclude_rects=exclude)
+                slide = is_slide_page(page)
+                figures = find_safe_vector_figures(
+                    page,
+                    exclude_rects=exclude,
+                    tables=[] if slide else None,
+                    text_overlap_max=SLIDE_TEXT_OVERLAP if slide else None,
+                    max_area_frac=SLIDE_MAX_AREA_FRAC if slide else None,
+                    min_drawings=SLIDE_MIN_DRAWINGS if slide else None,
+                )
             except Exception as exc:
                 logger.warning("vector detect page %s: %s", pno, exc)
                 continue

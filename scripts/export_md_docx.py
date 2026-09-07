@@ -107,6 +107,19 @@ def _translate_markdown(en_md: str) -> str:
     return "\n\n".join(blocks).rstrip() + "\n"
 
 
+def _maybe_inject_tables(zh_md: str, src_pdf: Path) -> str:
+    try:
+        from md_tables import inject_translated_tables
+
+        new_md, stats = inject_translated_tables(zh_md, src_pdf)
+        if stats.get("injected"):
+            logger.info("table inject: %s", stats)
+        return new_md
+    except Exception as exc:
+        logger.warning("table inject skipped: %s", exc)
+        return zh_md
+
+
 def export_formats(
     *,
     session_dir: Path,
@@ -139,6 +152,11 @@ def export_formats(
             dest_md=md_dest,
             dest_docx=docx_dest if want_docx else False,
         )
+        src = _find_source_pdf(session_dir, stem)
+        if want_md and md_path and md_path.is_file() and src:
+            zh_md = md_path.read_text(encoding="utf-8")
+            zh_md = _maybe_inject_tables(zh_md, src)
+            md_path.write_text(zh_md, encoding="utf-8")
         result["md"] = md_path if want_md else None
         result["docx"] = docx_path if want_docx else None
         _tick(1.0, "Markdown/DOCX 完成")
@@ -160,6 +178,7 @@ def export_formats(
     en_md = ConverterHpd(ConverterHpdConfig()).convert(doc).content.decode("utf-8")
     _tick(0.4, "翻译 Markdown")
     zh_md = _translate_markdown(en_md)
+    zh_md = _maybe_inject_tables(zh_md, src)
     base = re.sub(r"\.hpd-ocr$", "", stem, flags=re.I)
     md_path = session_dir / f"{base}.zh.md"
     if want_md:

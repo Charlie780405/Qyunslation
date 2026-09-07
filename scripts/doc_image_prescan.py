@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-027b：文档内嵌图 Tier-1 快速结构扫描（stdlib + 可选 pymupdf/PIL）。"""
+"""PLAN-027b/028a：文档内嵌图 Tier-1/3 结构扫描（stdlib + 可选 pymupdf/PIL）。"""
 from __future__ import annotations
 
 import hashlib
 import io
+import os
+import time
 import zipfile
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -38,6 +41,18 @@ class Tier1Result:
     def to_dict(self) -> dict:
         d = asdict(self)
         return d
+
+
+@dataclass
+class Tier3Result:
+    vector_count: int = 0
+    table_count: int = 0
+    pages_scanned: int = 0
+    truncated: bool = False
+    error: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 def file_sha256(path: Path, *, limit: int = 32 * 1024 * 1024) -> str:
@@ -277,6 +292,130 @@ def scan_file_tier1(path: str | Path) -> Tier1Result:
         summary_text="不支持的文件类型",
         error="unsupported",
     )
+
+
+def scan_pdf_tier3(
+    path: str | Path,
+    *,
+    max_pages: int | None = None,
+    deadline_s: float | None = None,
+    should_abort: Callable[[], bool] | None = None,
+) -> Tier3Result:
+    """PLAN-028a：PDF 矢量插图 + 表格结构扫描（共享 find_tables 结果）。"""
+    path = Path(path)
+    if path.suffix.lower() != ".pdf":
+        return Tier3Result()
+
+    max_pages = int(
+        max_pages if max_pages is not None else os.environ.get("QYUNSLATION_PRESCAN_TIER3_MAX_PAGES", "40")
+    )
+    deadline_s = float(
+        deadline_s if deadline_s is not None else os.environ.get("QYUNSLATION_PRESCAN_TIER3_DEADLINE", "25")
+    )
+
+    try:
+        import pymupdf
+    except ImportError:
+        return Tier3Result(error="pymupdf_missing")
+
+    try:
+        from pdf_figure_crop import find_safe_vector_figures, table_rects
+    except ImportError:
+        return Tier3Result(error="pdf_figure_crop_missing")
+
+    try:
+        doc = pymupdf.open(path)
+    except Exception as exc:
+        return Tier3Result(error=str(exc))
+
+    if getattr(doc, "is_encrypted", False) and not doc.authenticate(""):
+        doc.close()
+        return Tier3Result(error="encrypted")
+
+    started = time.monotonic()
+    vector_count = 0
+    table_count = 0
+    pages_scanned = 0
+    truncated = False
+
+    try:
+        total = len(doc)
+        limit = min(total, max_pages)
+        for pno in range(limit):
+            if should_abort and should_abort():
+                truncated = True
+                break
+            if time.monotonic() - started > deadline_s:
+                truncated = True
+                break
+            page = doc[pno]
+            tables = table_rects(page)
+            table_count += len(tables)
+            vector_count += len(find_safe_vector_figures(page, tables=tables))
+            pages_scanned += 1
+        if limit < total and pages_scanned >= limit:
+            truncated = truncated or limit < total
+    finally:
+        doc.close()
+
+    return Tier3Result(
+        vector_count=vector_count,
+        table_count=table_count,
+        pages_scanned=pages_scanned,
+        truncated=truncated,
+    )
+
+
+def format_tier3_summary(
+    entry: dict,
+    *,
+    vector_count: int,
+    table_count: int,
+    truncated: bool = False,
+    pages_scanned: int = 0,
+) -> str:
+    """PLAN-028a：合并 Tier-2 位图结论与 Tier-3 矢量/表格计数。"""
+    bitmap_n = int(entry.get("candidate_count") or 0)
+    translatable = int(entry.get("translatable_count") or 0)
+    vector_n = int(vector_count or 0)
+    table_n = int(table_count or 0)
+    total_illust = bitmap_n + vector_n
+
+    if total_illust == 0 and table_n == 0:
+        text = "未检测到需要嵌字的插图。"
+    elif total_illust == 0:
+        text = f"未检测到需要嵌字的插图；另有 {table_n} 处表格，按文字层翻译。"
+    elif bitmap_n and vector_n:
+        text = (
+            f"检测到 {total_illust} 处插图（{bitmap_n} 处位图、{vector_n} 处矢量图），"
+            f"将随文档一并翻译"
+        )
+        if translatable and translatable < bitmap_n:
+            text = (
+                f"检测到 {total_illust} 处插图（{bitmap_n} 处位图、{vector_n} 处矢量图），"
+                f"其中 {translatable} 处位图含待译文字，将随文档一并翻译"
+            )
+        if table_n:
+            text += f"；另有 {table_n} 处表格，按文字层翻译"
+        text += "。"
+    elif vector_n:
+        text = f"检测到 {vector_n} 处矢量插图，将随文档一并翻译"
+        if table_n:
+            text += f"；另有 {table_n} 处表格，按文字层翻译"
+        text += "。"
+    else:
+        text = f"检测到 {bitmap_n} 处插图"
+        if translatable:
+            text += f"，其中 {translatable} 处含待译文字，将随文档一并翻译"
+        elif bitmap_n:
+            text += "，将随文档一并翻译"
+        if table_n:
+            text += f"；另有 {table_n} 处表格，按文字层翻译"
+        text += "。"
+
+    if truncated and pages_scanned:
+        text = text.rstrip("。") + f"（仅扫描前 {pages_scanned} 页）。"
+    return text
 
 
 def format_tier2_summary(tier1, *, translatable: int, errors: int = 0) -> str:

@@ -15,6 +15,16 @@ TEXT_OVERLAP_MAX = float(os.environ.get("QYUNSLATION_VECTOR_TEXT_OVERLAP", "0.10
 MIN_DRAWINGS = int(os.environ.get("QYUNSLATION_VECTOR_MIN_DRAWINGS", "8"))
 VECTOR_CROP_DPI = int(os.environ.get("QYUNSLATION_VECTOR_CROP_DPI", "300"))
 VECTOR_MAX_PX = int(os.environ.get("QYUNSLATION_VECTOR_MAX_PX", "4000"))
+# PLAN-029b：幻灯页 profile（17 页 16:9 样本标定：8→12 区域，无整页覆盖）
+SLIDE_TEXT_OVERLAP = float(os.environ.get("QYUNSLATION_SLIDE_TEXT_OVERLAP", "0.50"))
+SLIDE_MAX_AREA_FRAC = float(os.environ.get("QYUNSLATION_SLIDE_MAX_AREA_FRAC", "0.80"))
+SLIDE_MIN_DRAWINGS = int(os.environ.get("QYUNSLATION_SLIDE_MIN_DRAWINGS", "6"))
+
+
+def is_slide_page(page) -> bool:
+    """16:9 / 4:3 幻灯；与 Hermes lit_tables.is_slide_page 口径一致。"""
+    r = page.rect
+    return bool(r.height) and r.width / r.height >= 1.55
 
 
 def _union_rects(rects: list) -> object | None:
@@ -42,7 +52,7 @@ def _long_text_rects(page) -> list:
     return out
 
 
-def _table_rects(page) -> list:
+def table_rects(page) -> list:
     out = []
     try:
         finder = page.find_tables()
@@ -56,6 +66,9 @@ def _table_rects(page) -> list:
     return out
 
 
+_table_rects = table_rects  # backward compat
+
+
 def _overlap_ratio(a, b) -> float:
     inter = pymupdf.Rect(a) & pymupdf.Rect(b)
     if inter.is_empty:
@@ -64,16 +77,27 @@ def _overlap_ratio(a, b) -> float:
     return abs(inter.width * inter.height) / area_a
 
 
-def find_safe_vector_figures(page, exclude_rects: Iterable | None = None) -> list:
+def find_safe_vector_figures(
+    page,
+    exclude_rects: Iterable | None = None,
+    *,
+    tables: list | None = None,
+    text_overlap_max: float | None = None,
+    max_area_frac: float | None = None,
+    min_drawings: int | None = None,
+) -> list:
     """定位可安全栅格化覆盖的矢量设计图区域。不确定则返回空（Fail-Closed）。"""
     if pymupdf is None:
         return []
+    overlap_max = TEXT_OVERLAP_MAX if text_overlap_max is None else text_overlap_max
+    area_max = MAX_AREA_FRAC if max_area_frac is None else max_area_frac
+    min_dr = MIN_DRAWINGS if min_drawings is None else min_drawings
     exclude = [pymupdf.Rect(r) for r in (exclude_rects or [])]
     try:
         drawings = page.get_drawings() or []
     except Exception:
         return []
-    if len(drawings) < MIN_DRAWINGS:
+    if len(drawings) < min_dr:
         return []
 
     # 收集 drawing rects，去掉与已处理位图大幅重叠的
@@ -92,7 +116,7 @@ def find_safe_vector_figures(page, exclude_rects: Iterable | None = None) -> lis
                 break
         if not skip:
             rects.append(rr)
-    if len(rects) < MIN_DRAWINGS:
+    if len(rects) < min_dr:
         return []
 
     # 简单聚类：按纵向邻近合并
@@ -112,7 +136,8 @@ def find_safe_vector_figures(page, exclude_rects: Iterable | None = None) -> lis
 
     page_area = abs(page.rect.width * page.rect.height) or 1.0
     long_texts = _long_text_rects(page)
-    tables = _table_rects(page)
+    if tables is None:
+        tables = table_rects(page)
     safe: list = []
     for c in clusters:
         u = _union_rects(c)
@@ -121,13 +146,13 @@ def find_safe_vector_figures(page, exclude_rects: Iterable | None = None) -> lis
         # 轻微外扩
         u = pymupdf.Rect(u.x0 - 2, u.y0 - 2, u.x1 + 2, u.y1 + 2) & page.rect
         area_frac = abs(u.width * u.height) / page_area
-        if area_frac > MAX_AREA_FRAC:
+        if area_frac > area_max:
             continue  # 绝不退回整页
         # 正文防触碰
         text_hit = 0.0
         for tr in long_texts:
             text_hit = max(text_hit, _overlap_ratio(u, tr))
-        if text_hit > TEXT_OVERLAP_MAX:
+        if text_hit > overlap_max:
             continue
         # 表格避让
         table_hit = any(_overlap_ratio(u, tb) > 0.2 for tb in tables)

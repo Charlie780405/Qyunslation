@@ -16,8 +16,65 @@ IL = SITE / "babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"
 
 MARKER_UNLOAD = "_cancel_active_translation_on_unload"
 TASK_GLOBAL = "_ACTIVE_TRANSLATION_TASK"
+GRACE_MARKER = "_UNLOAD_GRACE_SECONDS"
 MARKER_SKIP = "_pdf2zh_skip_already_target_lang"
 MARKER_BATCH = "_PDF2ZH_LLM_BATCH_TOKENS"
+
+GRACE_BLOCK = f"""{TASK_GLOBAL}: asyncio.Task | None = None
+_UNLOAD_CANCEL_HANDLE: asyncio.TimerHandle | None = None
+{GRACE_MARKER} = 90
+
+
+def _revoke_unload_cancel() -> None:
+    global _UNLOAD_CANCEL_HANDLE
+    handle = _UNLOAD_CANCEL_HANDLE
+    if handle is not None and not handle.cancelled():
+        handle.cancel()
+    _UNLOAD_CANCEL_HANDLE = None
+
+
+def _do_unload_cancel() -> None:
+    global {TASK_GLOBAL}, _UNLOAD_CANCEL_HANDLE
+    _UNLOAD_CANCEL_HANDLE = None
+    task = {TASK_GLOBAL}
+    if task is not None and not task.done():
+        logger.info("Browser unload grace expired: cancelling active translation task")
+        task.cancel()
+
+
+def {MARKER_UNLOAD}() -> None:
+    \"\"\"PLAN-003c: defer cancel after browser disconnect (grace for reconnect).\"\"\"
+    global _UNLOAD_CANCEL_HANDLE
+    _revoke_unload_cancel()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            logger.warning("Browser unload: no event loop; cancelling immediately")
+            _do_unload_cancel()
+            return
+    if {TASK_GLOBAL} is None or {TASK_GLOBAL}.done():
+        return
+    logger.info("Browser unload: scheduling cancel in %ss", {GRACE_MARKER})
+    _UNLOAD_CANCEL_HANDLE = loop.call_later({GRACE_MARKER}, _do_unload_cancel)
+
+
+"""
+
+OLD_UNLOAD_BLOCK_RE = re.compile(
+    rf"{TASK_GLOBAL}: asyncio\.Task \| None = None\n\n\n"
+    rf"def {MARKER_UNLOAD}\(\) -> None:\n"
+    r'    """PLAN-003c: cancel active translation when browser refreshes/closes\."""\n'
+    rf"    global {TASK_GLOBAL}\n"
+    rf"    task = {TASK_GLOBAL}\n"
+    r"    if task is not None and not task\.done\(\):\n"
+    r'        logger\.info\("Browser unload: cancelling active translation task"\)\n'
+    r"        task\.cancel\(\)\n"
+    rf"    {TASK_GLOBAL} = None\n\n\n",
+    re.MULTILINE,
+)
 
 
 def patch_gui(text: str) -> tuple[str, bool]:
@@ -35,36 +92,49 @@ def patch_gui(text: str) -> tuple[str, bool]:
         text = broken.sub("", text, count=1)
         changed = True
 
-    if MARKER_UNLOAD not in text:
-        anchor = "async def stop_translate_file(state: dict) -> None:"
-        helper = (
-            f"{TASK_GLOBAL}: asyncio.Task | None = None\n\n\n"
-            f"def {MARKER_UNLOAD}() -> None:\n"
-            '    """PLAN-003c: cancel active translation when browser refreshes/closes."""\n'
-            f"    global {TASK_GLOBAL}\n"
-            f"    task = {TASK_GLOBAL}\n"
-            "    if task is not None and not task.done():\n"
-            '        logger.info("Browser unload: cancelling active translation task")\n'
-            "        task.cancel()\n"
-            f"    {TASK_GLOBAL} = None\n\n\n"
-        )
-        if anchor not in text:
-            print("ERROR: stop_translate_file anchor not found", file=sys.stderr)
-            return text, changed
-        text = text.replace(anchor, helper + anchor, 1)
-        changed = True
+    if GRACE_MARKER not in text:
+        if OLD_UNLOAD_BLOCK_RE.search(text):
+            text = OLD_UNLOAD_BLOCK_RE.sub(GRACE_BLOCK, text, count=1)
+            changed = True
+        elif MARKER_UNLOAD not in text:
+            anchor = "async def stop_translate_file(state: dict) -> None:"
+            if anchor not in text:
+                print("ERROR: stop_translate_file anchor not found", file=sys.stderr)
+                return text, changed
+            text = text.replace(anchor, GRACE_BLOCK + anchor, 1)
+            changed = True
 
     assign = '            state["current_task"] = task'
     assign_patch = (
         assign + "\n"
         f"            global {TASK_GLOBAL}\n"
-        f"            {TASK_GLOBAL} = task"
+        f"            {TASK_GLOBAL} = task\n"
+        "            _revoke_unload_cancel()"
     )
-    if assign in text and assign_patch not in text:
+    if assign in text and "_revoke_unload_cancel()" not in text.split(assign)[1][:120]:
+        if assign_patch not in text:
+            text = text.replace(
+                assign + "\n"
+                f"            global {TASK_GLOBAL}\n"
+                f"            {TASK_GLOBAL} = task",
+                assign_patch,
+                1,
+            )
+            changed = True
+    elif assign in text and assign_patch not in text:
         text = text.replace(assign, assign_patch, 1)
         changed = True
 
-    if (
+    stop_finally_old = (
+        '    finally:\n        state["current_task"] = None\n'
+        f"        global {TASK_GLOBAL}\n"
+        f"        {TASK_GLOBAL} = None"
+    )
+    stop_finally_new = stop_finally_old + "\n        _revoke_unload_cancel()"
+    if stop_finally_old in text and "_revoke_unload_cancel()" not in text.split("stop_translate_file")[1][:900]:
+        text = text.replace(stop_finally_old, stop_finally_new, 1)
+        changed = True
+    elif (
         '        state["current_task"] = None' in text
         and f"global {TASK_GLOBAL}" not in text.split("stop_translate_file")[1][:800]
     ):
@@ -72,7 +142,8 @@ def patch_gui(text: str) -> tuple[str, bool]:
             '    finally:\n        state["current_task"] = None',
             '    finally:\n        state["current_task"] = None\n'
             f"        global {TASK_GLOBAL}\n"
-            f"        {TASK_GLOBAL} = None",
+            f"        {TASK_GLOBAL} = None\n"
+            "        _revoke_unload_cancel()",
             1,
         )
         changed = True

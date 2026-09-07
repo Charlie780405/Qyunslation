@@ -219,6 +219,63 @@ HELPER = r'''
             return gr.update(value=text, visible=True), st
 
 
+        def _qy_prescan_tier3(files, state):
+            """PLAN-028b：Tier-3 矢量插图 + 表格结构扫描（线程池执行，带代际守卫）。"""
+            import sys as _sys
+            from pathlib import Path as _P
+
+            _sys.path.insert(0, "/home/dev/qyunslation/scripts")
+            from doc_image_prescan import format_tier3_summary, scan_pdf_tier3
+
+            st = dict(state or {})
+            gen = int(st.get("_prescan_generation") or 0)
+            meta = st.get("_prescan_meta") or {}
+            fh = st.get("_prescan_active_hash")
+            entry = (meta.get("files") or {}).get(fh) if fh else None
+            if not entry or int(entry.get("generation") or -1) != gen:
+                return gr.update(), st
+            if entry.get("file_type") not in ("pdf",):
+                return gr.update(), st
+            if entry.get("tier3_done"):
+                return gr.update(value=entry.get("summary_text"), visible=True), st
+
+            f0 = files[0] if files else None
+            path = _P(f0.name if hasattr(f0, "name") else f0) if f0 else None
+            if not path or not path.is_file():
+                return gr.update(), st
+
+            def _abort() -> bool:
+                return int(st.get("_prescan_generation") or 0) != gen
+
+            if _abort():
+                return gr.update(), st
+
+            try:
+                t3 = scan_pdf_tier3(path, should_abort=_abort)
+            except Exception as exc:
+                logger.warning("prescan tier3 failed: %s", exc)
+                return gr.update(), st
+
+            if _abort():
+                return gr.update(), st
+
+            text = format_tier3_summary(
+                entry,
+                vector_count=t3.vector_count,
+                table_count=t3.table_count,
+                truncated=t3.truncated,
+                pages_scanned=t3.pages_scanned,
+            )
+            entry["tier3_done"] = True
+            entry["vector_count"] = t3.vector_count
+            entry["table_count"] = t3.table_count
+            entry["tier3_truncated"] = t3.truncated
+            entry["summary_text"] = text
+            meta.setdefault("files", {})[fh] = entry
+            st["_prescan_meta"] = meta
+            return gr.update(value=text, visible=True), st
+
+
         def _qy_prescan_clear(state):
             st = dict(state or {})
             _qy_prescan_bump(st)
@@ -307,11 +364,34 @@ def apply(text: str) -> str:
             _qy_prescan_tier2,
             inputs=[file_input, state, lang_to],
             outputs=[qy_prescan_status, state],
+        ).then(
+            _qy_prescan_tier3,
+            inputs=[file_input, state],
+            outputs=[qy_prescan_status, state],
         )
 '''
         if old_then not in text:
             raise RuntimeError("找不到 _qy_upload_evt.then dual_payload 锚点")
         text = text.replace(old_then, new_then, 1)
+    elif "_qy_prescan_tier3," not in text and "_qy_prescan_tier2," in text:
+        old_t2_end = """        ).then(
+            _qy_prescan_tier2,
+            inputs=[file_input, state, lang_to],
+            outputs=[qy_prescan_status, state],
+        )
+"""
+        new_t2_t3 = """        ).then(
+            _qy_prescan_tier2,
+            inputs=[file_input, state, lang_to],
+            outputs=[qy_prescan_status, state],
+        ).then(
+            _qy_prescan_tier3,
+            inputs=[file_input, state],
+            outputs=[qy_prescan_status, state],
+        )
+"""
+        if old_t2_end in text:
+            text = text.replace(old_t2_end, new_t2_t3, 1)
 
     # Clear binding
     clear_marker = "# _qy_prescan_clear_bind"
@@ -349,8 +429,11 @@ def verify(text: str) -> int:
     need("qy_prescan_status" in text, "status component missing")
     need("def _qy_prescan_tier1(" in text, "tier1 missing")
     need("def _qy_prescan_tier2(" in text, "tier2 missing")
+    need("def _qy_prescan_tier3(" in text, "tier3 missing")
     need("_prescan_generation" in text, "generation guard missing")
     need("_qy_prescan_tier1," in text, "tier1 not wired")
+    need("_qy_prescan_tier3," in text, "tier3 not wired")
+    need("vector_count" in text, "vector_count missing")
     need("def _qy_prescan_clear(" in text, "clear helper missing")
     try:
         compile(text, str(GUI), "exec")
