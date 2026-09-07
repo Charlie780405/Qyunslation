@@ -83,6 +83,111 @@ def _minimal_manifest() -> dict:
     }
 
 
+def _full_manifest() -> dict:
+    payload = _minimal_manifest()
+    object_ids = {name: f"obj:{index:x}".ljust(68, f"{index:x}") for index, name in enumerate(
+        ("body", "caption", "figure", "table", "text_box", "shape", "image", "poster"),
+        start=1,
+    )}
+    common = {
+        "canvas_id": "page:1",
+        "bbox": {"x0": 20, "y0": 20, "x1": 120, "y1": 80},
+        "source_refs": [],
+        "execution_status": "PENDING",
+    }
+    payload["document"]["derived_assets"] = [
+        {
+            "asset_id": "translated",
+            "role": "OUTPUT",
+            "sha256": "d" * 64,
+            "media_type": "application/pdf",
+            "locator": "external:translated.pdf",
+        }
+    ]
+    payload["document"]["conversion_lineage"] = [
+        {
+            "step_id": "translate:1",
+            "source_asset_id": "source",
+            "output_asset_id": "translated",
+            "converter": "qyunslation",
+            "converter_version": "test",
+        }
+    ]
+    payload["canvases"][0]["reading_order"] = [
+        object_ids["body"],
+        object_ids["figure"],
+        object_ids["caption"],
+        object_ids["table"],
+    ]
+    payload["objects"] = [
+        {
+            **common,
+            "type": "BODY",
+            "object_id": object_ids["body"],
+            "representation": "NATIVE_TEXT",
+            "reading_order": 0,
+        },
+        {
+            **common,
+            "type": "CAPTION",
+            "object_id": object_ids["caption"],
+            "representation": "NATIVE_TEXT",
+            "caption_for": [object_ids["figure"]],
+        },
+        {
+            **common,
+            "type": "FIGURE",
+            "object_id": object_ids["figure"],
+            "representation": "HYBRID",
+            "semantic_id": "figure:1",
+            "semantic_scope": "main",
+            "caption_ids": [object_ids["caption"]],
+            "child_object_ids": [object_ids["image"]],
+            "output_evidence": {"asset_ids": ["translated"]},
+        },
+        {
+            **common,
+            "type": "TABLE",
+            "object_id": object_ids["table"],
+            "representation": "NATIVE_OBJECT",
+            "semantic_id": "table:1",
+            "semantic_scope": "main",
+            "caption_ids": [],
+            "row_count": 2,
+            "column_count": 2,
+        },
+        {
+            **common,
+            "type": "TEXT_BOX",
+            "object_id": object_ids["text_box"],
+            "representation": "NATIVE_TEXT",
+            "z_order": 1,
+        },
+        {
+            **common,
+            "type": "SHAPE",
+            "object_id": object_ids["shape"],
+            "representation": "VECTOR",
+            "z_order": 2,
+        },
+        {
+            **common,
+            "type": "IMAGE",
+            "object_id": object_ids["image"],
+            "representation": "BITMAP",
+            "occurrence_key": "image-part:1#occurrence:1",
+        },
+        {
+            **common,
+            "type": "POSTER_SECTION",
+            "object_id": object_ids["poster"],
+            "representation": "NATIVE_OBJECT",
+            "section_role": "methods",
+        },
+    ]
+    return payload
+
+
 def test_manifest_round_trip_uses_discriminated_objects_and_derived_summary():
     manifest = DocumentStructureManifest.model_validate(_minimal_manifest())
 
@@ -90,6 +195,26 @@ def test_manifest_round_trip_uses_discriminated_objects_and_derived_summary():
     assert manifest.summary.figure_count == 1
     assert manifest.summary.table_count == 0
     assert manifest.summary.object_counts == {"FIGURE": 1}
+    assert DocumentStructureManifest.model_validate_json(
+        manifest.model_dump_json()
+    ) == manifest
+
+
+def test_full_manifest_round_trip_covers_every_v1_object_and_relation():
+    manifest = DocumentStructureManifest.model_validate(_full_manifest())
+
+    assert {item.type.value for item in manifest.objects} == {
+        "BODY",
+        "CAPTION",
+        "FIGURE",
+        "TABLE",
+        "TEXT_BOX",
+        "SHAPE",
+        "IMAGE",
+        "POSTER_SECTION",
+    }
+    assert manifest.summary.figure_count == 1
+    assert manifest.summary.table_count == 1
     assert DocumentStructureManifest.model_validate_json(
         manifest.model_dump_json()
     ) == manifest
@@ -162,6 +287,75 @@ def test_duplicate_object_ids_and_semantic_ids_fail_closed():
     with pytest.raises(ValidationError) as semantic_error:
         DocumentStructureManifest.model_validate(duplicate_semantic)
     assert "MANIFEST_SEMANTIC_ID_DUPLICATE" in str(semantic_error.value)
+
+
+def test_semantic_continuations_have_distinct_occurrences_but_count_once():
+    payload = _minimal_manifest()
+    continuation = deepcopy(payload["objects"][0])
+    continuation.update(
+        {
+            "object_id": "obj:" + "c" * 64,
+            "semantic_occurrence_index": 2,
+            "bbox": {"x0": 36, "y0": 400, "x1": 576, "y1": 640},
+        }
+    )
+    payload["objects"].append(continuation)
+
+    manifest = DocumentStructureManifest.model_validate(payload)
+
+    assert manifest.summary.figure_count == 1
+    assert manifest.summary.object_counts["FIGURE"] == 2
+    assert manifest.objects[1].semantic_occurrence_index == 2
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "error_code"),
+    [
+        ("reading_order", "obj:" + "f" * 64, "MANIFEST_READING_ORDER_UNKNOWN"),
+        ("caption_ids", "obj:" + "f" * 64, "MANIFEST_RELATION_OBJECT_UNKNOWN"),
+        ("output_asset", "missing-asset", "MANIFEST_OUTPUT_ASSET_UNKNOWN"),
+    ],
+)
+def test_dangling_object_and_output_references_fail_closed(
+    target: str, value: str, error_code: str
+):
+    payload = _full_manifest()
+    if target == "reading_order":
+        payload["canvases"][0]["reading_order"].append(value)
+    elif target == "caption_ids":
+        figure = next(item for item in payload["objects"] if item["type"] == "FIGURE")
+        figure["caption_ids"].append(value)
+    else:
+        figure = next(item for item in payload["objects"] if item["type"] == "FIGURE")
+        figure["output_evidence"]["asset_ids"].append(value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        DocumentStructureManifest.model_validate(payload)
+
+    assert error_code in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_code"),
+    [
+        ("duplicate_asset", "MANIFEST_ASSET_ID_DUPLICATE"),
+        ("unknown_lineage_source", "MANIFEST_LINEAGE_ASSET_UNKNOWN"),
+        ("input_role", "MANIFEST_INPUT_ASSET_ROLE_INVALID"),
+    ],
+)
+def test_asset_graph_integrity_fails_closed(mutation: str, error_code: str):
+    payload = _full_manifest()
+    if mutation == "duplicate_asset":
+        payload["document"]["derived_assets"][0]["asset_id"] = "source"
+    elif mutation == "unknown_lineage_source":
+        payload["document"]["conversion_lineage"][0]["source_asset_id"] = "missing"
+    else:
+        payload["document"]["input_asset"]["role"] = "OUTPUT"
+
+    with pytest.raises(ValidationError) as exc_info:
+        DocumentStructureManifest.model_validate(payload)
+
+    assert error_code in str(exc_info.value)
 
 
 def test_contradictory_caller_summary_is_rejected():

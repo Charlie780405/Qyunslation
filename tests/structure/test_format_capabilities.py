@@ -143,6 +143,51 @@ def test_unavailable_or_degraded_decisions_require_a_reason():
         )
 
 
+def test_runtime_decision_rejects_contradictory_availability_state():
+    with pytest.raises(ValidationError) as available_error:
+        CapabilityDecision(
+            source_format=SourceFormat.PDF,
+            requirement_level=RequirementLevel.CORE,
+            runtime_state=RuntimeState.AVAILABLE,
+            requested_mode=ProcessingMode.NATIVE,
+            selected_mode=ProcessingMode.NATIVE,
+            missing_features=[RuntimeFeature.PDF_ENGINE],
+        )
+    assert "CAPABILITY_AVAILABLE_HAS_MISSING_FEATURES" in str(available_error.value)
+
+    with pytest.raises(ValidationError) as unavailable_error:
+        CapabilityDecision(
+            source_format=SourceFormat.PDF,
+            requirement_level=RequirementLevel.CORE,
+            runtime_state=RuntimeState.UNAVAILABLE,
+            requested_mode=ProcessingMode.NATIVE,
+            selected_mode=ProcessingMode.NATIVE,
+            missing_features=[RuntimeFeature.PDF_ENGINE],
+            reason_code="RUNTIME_FEATURE_MISSING",
+        )
+    assert "CAPABILITY_UNAVAILABLE_HAS_MODE" in str(unavailable_error.value)
+
+
+def test_runtime_decision_must_match_registered_policy_and_modes():
+    with pytest.raises(ValidationError) as level_error:
+        CapabilityDecision(
+            source_format=SourceFormat.PDF,
+            requirement_level=RequirementLevel.CONDITIONAL,
+            runtime_state=RuntimeState.UNKNOWN,
+        )
+    assert "CAPABILITY_REQUIREMENT_MISMATCH" in str(level_error.value)
+
+    with pytest.raises(ValidationError) as mode_error:
+        CapabilityDecision(
+            source_format=SourceFormat.DOCX,
+            requirement_level=RequirementLevel.CORE,
+            runtime_state=RuntimeState.AVAILABLE,
+            requested_mode=ProcessingMode.RENDERED,
+            selected_mode=ProcessingMode.RENDERED,
+        )
+    assert "CAPABILITY_MODE_UNSUPPORTED" in str(mode_error.value)
+
+
 def test_unknown_format_is_an_explicit_fail_fast_capability():
     unknown = capability_for(SourceFormat.UNKNOWN)
 

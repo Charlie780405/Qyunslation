@@ -321,6 +321,7 @@ class SemanticObjectBase(ContractModel):
     output_evidence: OutputEvidence | None = None
     semantic_id: str | None = None
     semantic_scope: str | None = None
+    semantic_occurrence_index: int = Field(default=1, ge=1)
     confidence: float | None = Field(default=None, ge=0, le=1)
     source_geometry: SourceGeometry | None = None
 
@@ -476,9 +477,20 @@ def _derive_summary(
     object_counts = Counter(item.type.value for item in objects)
     status_counts = Counter(item.execution_status.value for item in objects)
     issue_counts = Counter(issue.severity.value for issue in issues)
+
+    def semantic_count(object_type: ObjectType) -> int:
+        matching = [item for item in objects if item.type is object_type]
+        numbered = {
+            (item.semantic_scope or "", item.semantic_id)
+            for item in matching
+            if item.semantic_id
+        }
+        unnumbered = sum(item.semantic_id is None for item in matching)
+        return len(numbered) + unnumbered
+
     return ManifestSummary(
-        figure_count=object_counts.get(ObjectType.FIGURE.value, 0),
-        table_count=object_counts.get(ObjectType.TABLE.value, 0),
+        figure_count=semantic_count(ObjectType.FIGURE),
+        table_count=semantic_count(ObjectType.TABLE),
         object_counts=dict(sorted(object_counts.items())),
         status_counts=dict(sorted(status_counts.items())),
         issue_counts=dict(sorted(issue_counts.items())),
@@ -519,6 +531,39 @@ class DocumentStructureManifest(ContractModel):
             raise ValueError("MANIFEST_ID_MISMATCH: identity does not match source")
         if self.document.input_asset.sha256 != self.document.source_sha256:
             raise ValueError("MANIFEST_SOURCE_ASSET_MISMATCH: input hash differs")
+        if self.document.input_asset.role is not AssetRole.INPUT:
+            raise ValueError(
+                "MANIFEST_INPUT_ASSET_ROLE_INVALID: input asset must use INPUT role"
+            )
+
+        assets = [self.document.input_asset, *self.document.derived_assets]
+        asset_ids = [asset.asset_id for asset in assets]
+        if len(set(asset_ids)) != len(asset_ids):
+            raise ValueError("MANIFEST_ASSET_ID_DUPLICATE: asset IDs must be unique")
+        if any(asset.role is AssetRole.INPUT for asset in self.document.derived_assets):
+            raise ValueError(
+                "MANIFEST_DERIVED_ASSET_ROLE_INVALID: derived assets cannot use INPUT role"
+            )
+        known_assets = set(asset_ids)
+        lineage_step_ids = [
+            step.step_id for step in self.document.conversion_lineage
+        ]
+        if len(set(lineage_step_ids)) != len(lineage_step_ids):
+            raise ValueError(
+                "MANIFEST_LINEAGE_STEP_ID_DUPLICATE: conversion step IDs must be unique"
+            )
+        for step in self.document.conversion_lineage:
+            if (
+                step.source_asset_id not in known_assets
+                or step.output_asset_id not in known_assets
+            ):
+                raise ValueError(
+                    "MANIFEST_LINEAGE_ASSET_UNKNOWN: conversion step references an unknown asset"
+                )
+            if step.source_asset_id == step.output_asset_id:
+                raise ValueError(
+                    "MANIFEST_LINEAGE_SELF_REFERENCE: conversion source and output must differ"
+                )
 
         canvases = {canvas.canvas_id: canvas for canvas in self.canvases}
         if len(canvases) != len(self.canvases):
@@ -528,7 +573,7 @@ class DocumentStructureManifest(ContractModel):
         if len(set(object_ids)) != len(object_ids):
             raise ValueError("MANIFEST_OBJECT_ID_DUPLICATE: object IDs must be unique")
 
-        semantic_keys: set[tuple[str, str, str]] = set()
+        semantic_occurrences: set[tuple[str, str, str, int]] = set()
         for item in self.objects:
             canvas = canvases.get(item.canvas_id)
             if canvas is None:
@@ -540,14 +585,59 @@ class DocumentStructureManifest(ContractModel):
                     "MANIFEST_BBOX_INVALID: object bbox exceeds its canvas"
                 )
             if item.type in {ObjectType.FIGURE, ObjectType.TABLE} and item.semantic_id:
-                key = (item.type.value, item.semantic_scope or "", item.semantic_id)
-                if key in semantic_keys:
+                occurrence = (
+                    item.type.value,
+                    item.semantic_scope or "",
+                    item.semantic_id,
+                    item.semantic_occurrence_index,
+                )
+                if occurrence in semantic_occurrences:
                     raise ValueError(
-                        "MANIFEST_SEMANTIC_ID_DUPLICATE: semantic IDs must be unique within scope"
+                        "MANIFEST_SEMANTIC_ID_DUPLICATE: semantic occurrence must be unique within scope"
                     )
-                semantic_keys.add(key)
+                semantic_occurrences.add(occurrence)
 
         known_objects = set(object_ids)
+        objects_by_id = {item.object_id: item for item in self.objects}
+        for canvas in self.canvases:
+            if len(set(canvas.reading_order)) != len(canvas.reading_order):
+                raise ValueError(
+                    "MANIFEST_READING_ORDER_DUPLICATE: reading order cannot repeat objects"
+                )
+            for ordered_id in canvas.reading_order:
+                ordered = objects_by_id.get(ordered_id)
+                if ordered is None:
+                    raise ValueError(
+                        "MANIFEST_READING_ORDER_UNKNOWN: reading order references an unknown object"
+                    )
+                if ordered.canvas_id != canvas.canvas_id:
+                    raise ValueError(
+                        "MANIFEST_READING_ORDER_CANVAS_MISMATCH: object belongs to another canvas"
+                    )
+
+        for item in self.objects:
+            relationship_ids: list[str] = []
+            if isinstance(item, CaptionObject):
+                relationship_ids.extend(item.caption_for)
+            if isinstance(item, (FigureObject, TableObject)):
+                relationship_ids.extend(item.caption_ids)
+            if isinstance(item, FigureObject):
+                relationship_ids.extend(item.child_object_ids)
+            if any(related_id not in known_objects for related_id in relationship_ids):
+                raise ValueError(
+                    "MANIFEST_RELATION_OBJECT_UNKNOWN: object relationship is dangling"
+                )
+            if item.object_id in relationship_ids:
+                raise ValueError(
+                    "MANIFEST_RELATION_SELF_REFERENCE: object cannot reference itself"
+                )
+            if item.output_evidence and any(
+                asset_id not in known_assets for asset_id in item.output_evidence.asset_ids
+            ):
+                raise ValueError(
+                    "MANIFEST_OUTPUT_ASSET_UNKNOWN: output evidence references an unknown asset"
+                )
+
         for issue in self.issues:
             if issue.object_id and issue.object_id not in known_objects:
                 raise ValueError(

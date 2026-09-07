@@ -94,11 +94,32 @@ class CapabilityDecision(ContractModel):
 
     @model_validator(mode="after")
     def validate_decision(self) -> CapabilityDecision:
+        capability = _BY_FORMAT[self.source_format]
+        if self.requirement_level is not capability.requirement_level:
+            raise ValueError(
+                "CAPABILITY_REQUIREMENT_MISMATCH: decision must match the product policy"
+            )
+        allowed_modes = {item.mode for item in capability.modes}
+        if self.requested_mode is not None and self.requested_mode not in allowed_modes:
+            raise ValueError(
+                "CAPABILITY_MODE_UNSUPPORTED: requested mode is not declared for the format"
+            )
+        if self.selected_mode is not None and self.selected_mode not in allowed_modes:
+            raise ValueError(
+                "CAPABILITY_MODE_UNSUPPORTED: selected mode is not declared for the format"
+            )
         if self.runtime_state in {RuntimeState.DEGRADED, RuntimeState.UNAVAILABLE}:
             if not self.reason_code:
                 raise ValueError("CAPABILITY_REASON_REQUIRED")
-        if self.runtime_state is RuntimeState.AVAILABLE and self.selected_mode is None:
-            raise ValueError("CAPABILITY_MODE_REQUIRED")
+        if self.runtime_state is RuntimeState.AVAILABLE:
+            if self.selected_mode is None:
+                raise ValueError("CAPABILITY_MODE_REQUIRED")
+            if self.missing_features:
+                raise ValueError("CAPABILITY_AVAILABLE_HAS_MISSING_FEATURES")
+        if self.runtime_state is RuntimeState.DEGRADED and self.selected_mode is None:
+            raise ValueError("CAPABILITY_DEGRADED_MODE_REQUIRED")
+        if self.runtime_state is RuntimeState.UNAVAILABLE and self.selected_mode is not None:
+            raise ValueError("CAPABILITY_UNAVAILABLE_HAS_MODE")
         return self
 
 

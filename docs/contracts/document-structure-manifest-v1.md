@@ -8,7 +8,8 @@
 | --- | --- |
 | semantic object | 用户可理解且可独立规划/审计的对象，如 Figure、Table、文本框或 Poster 分区 |
 | physical resource | PDF xref/drawing、OOXML part/relationship、shape、像素块等底层资源 |
-| occurrence | 同一底层资源在特定画布位置的一次显示；共享资源可以有多个 occurrence |
+| physical occurrence | 同一底层资源在特定画布位置的一次显示；共享资源可以有多个 occurrence |
+| semantic occurrence | 同一 Figure/Table 语义对象的一次版面出现，例如跨页续表；由 `semantic_occurrence_index` 区分，但主计数仍为 1 |
 | canvas | 带尺寸、坐标空间和阅读规则的页面、节、幻灯片或 Poster 画布 |
 | content profile | 与文件格式无关的内容结构先验 |
 | processing mode | `NATIVE`、`RENDERED` 或 `HYBRID` 执行方式 |
@@ -31,6 +32,7 @@ Figure/Table 主计数来自去重后的语义对象，不来自 bitmap、xref�
 - `canvas_id` 在文档内唯一，例如 `page:1`、`slide:2`、`poster:1`。
 - `object_id` 在文档内唯一且确定性生成；不得仅使用 detector 返回顺序。
 - `semantic_id` 可选且供人阅读，例如 `figure:5`；`semantic_scope` 区分正文、补充材料等编号域。
+- 同一语义对象可跨画布或分区出现多次；每次使用唯一 `semantic_occurrence_index` 和自身 bbox/object_id。相同 type + scope + semantic_id 的多次出现只计一个 Figure/Table。
 
 ## 坐标
 
@@ -59,7 +61,13 @@ canonical 坐标以左上角为原点。每个 canvas 显式提供：
 
 首批对象类型：`BODY / CAPTION / FIGURE / TABLE / TEXT_BOX / SHAPE / IMAGE / POSTER_SECTION`。
 
-Figure/Table 可以带 `semantic_id`、题注关联和子对象。IMAGE 代表未被语义归并的独立图片 occurrence，不能自动计为 Figure。
+Figure/Table 可以带 `semantic_id`、`semantic_occurrence_index`、题注关联和子对象。IMAGE 代表未被语义归并的独立图片 occurrence，不能自动计为 Figure。
+
+`reading_order`、题注关系、子对象关系、问题对象和输出证据必须引用清单中已存在且位于正确画布的对象/资产；悬空、自引用、重复 reading-order 或未知 output asset 均 fail closed。
+
+## 资产与转换血缘
+
+输入资产必须使用 `INPUT` role 且 hash 与 `document.source_sha256` 一致。输入与派生资产 ID 全局唯一；转换步骤 ID 唯一，source/output 均引用已登记资产且不得自引用。知识库只可作为开发夹具来源，生产扫描和翻译仍以用户上传资产为输入。
 
 ## 状态和问题
 
@@ -78,7 +86,7 @@ Figure/Table 可以带 `semantic_id`、题注关联和子对象。IMAGE 代表�
 
 ## 摘要
 
-`summary` 是 `objects[]` 与 issues 的派生视图。模型必须拒绝调用方提供的矛盾摘要；UI 不得直接相加 physical resource 数形成 Figure/Table 主计数。
+`summary` 是 `objects[]` 与 issues 的派生视图。`object_counts` 记录物理对象条目数；`figure_count/table_count` 按 `type + semantic_scope + semantic_id` 去重，未编号对象逐个计数。模型必须拒绝调用方提供的矛盾摘要；UI 不得直接相加 physical resource 数形成 Figure/Table 主计数。
 
 ## 扩展
 

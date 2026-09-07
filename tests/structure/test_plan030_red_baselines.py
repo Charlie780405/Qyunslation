@@ -46,7 +46,7 @@ def current_workflow_route(filename: str) -> str:
 
 @expected_gap(
     "QY030-SEM-001",
-    "PLAN-030b",
+    "PLAN-030c",
     "physical bitmap/vector regions are still summed as user-facing figures",
 )
 def test_user_summary_reports_ljae439_semantic_figures_not_physical_regions():
@@ -63,7 +63,7 @@ def test_user_summary_reports_ljae439_semantic_figures_not_physical_regions():
 
 @expected_gap(
     "QY030-FMT-001",
-    "PLAN-030c",
+    "PLAN-030b",
     "TIFF is a core format contract but the current prescanner rejects it",
 )
 def test_core_tiff_is_accepted_by_the_shared_prescan_route(
@@ -77,7 +77,7 @@ def test_core_tiff_is_accepted_by_the_shared_prescan_route(
 
 @expected_gap(
     "QY030-FMT-002",
-    "PLAN-030c",
+    "PLAN-030b",
     "unknown binary suffixes still silently fall back to the text workflow",
 )
 def test_unknown_binary_format_fails_explicitly_instead_of_becoming_text():
@@ -88,7 +88,7 @@ def test_unknown_binary_format_fails_explicitly_instead_of_becoming_text():
 
 @expected_gap(
     "QY030-NORM-001",
-    "PLAN-030c",
+    "PLAN-030b",
     "legacy PPT is routed directly to a workflow that only accepts PPTX",
 )
 def test_legacy_ppt_routes_through_explicit_normalization():
@@ -99,7 +99,7 @@ def test_legacy_ppt_routes_through_explicit_normalization():
 
 @expected_gap(
     "QY030-PPT-001",
-    "PLAN-030f",
+    "PLAN-030g",
     "PPTX picture shapes have no translatable image object or execution state",
 )
 def test_pptx_picture_shape_is_emitted_as_a_translatable_object(
@@ -118,7 +118,7 @@ def test_pptx_picture_shape_is_emitted_as_a_translatable_object(
 
 @expected_gap(
     "QY030-PPT-002",
-    "PLAN-030f",
+    "PLAN-030b",
     "PPTX is absent from the shared structure prescan despite being core",
 )
 def test_core_pptx_is_accepted_by_the_shared_prescan_route(

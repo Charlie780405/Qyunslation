@@ -150,6 +150,12 @@
           "default": null,
           "title": "Semantic Id"
         },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
+        },
         "semantic_scope": {
           "anyOf": [
             {
@@ -412,6 +418,12 @@
           ],
           "default": null,
           "title": "Semantic Id"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "semantic_scope": {
           "anyOf": [
@@ -811,6 +823,12 @@
           "default": null,
           "title": "Semantic Id"
         },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
+        },
         "semantic_scope": {
           "anyOf": [
             {
@@ -965,6 +983,12 @@
           ],
           "default": null,
           "title": "Semantic Id"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "semantic_scope": {
           "anyOf": [
@@ -1273,6 +1297,12 @@
           "default": null,
           "title": "Semantic Id"
         },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
+        },
         "semantic_scope": {
           "anyOf": [
             {
@@ -1465,6 +1495,12 @@
           ],
           "default": null,
           "title": "Semantic Id"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "semantic_scope": {
           "anyOf": [
@@ -1803,6 +1839,12 @@
           "default": null,
           "title": "Semantic Id"
         },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
+        },
         "semantic_scope": {
           "anyOf": [
             {
@@ -1945,6 +1987,12 @@
           ],
           "default": null,
           "title": "Semantic Id"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "semantic_scope": {
           "anyOf": [
