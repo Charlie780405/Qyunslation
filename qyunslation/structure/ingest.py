@@ -82,6 +82,7 @@ class PreparedDocument:
     source_format: SourceFormat
     normalized_format: SourceFormat
     detected_mime: str
+    normalized_mime: str
     source_sha256: str
     normalized_sha256: str
     content: bytes = field(repr=False)
@@ -101,6 +102,7 @@ class PreparedDocument:
             "source_format": self.source_format.value,
             "normalized_format": self.normalized_format.value,
             "detected_mime": self.detected_mime,
+            "normalized_mime": self.normalized_mime,
             "source_sha256": self.source_sha256,
             "normalized_sha256": self.normalized_sha256,
             "workflow_type": self.workflow_type,
@@ -494,7 +496,8 @@ def prepare_document(
         normalized_name=normalized_name,
         source_format=detected.source_format,
         normalized_format=normalized_format,
-        detected_mime=normalized_mime,
+        detected_mime=detected.detected_mime,
+        normalized_mime=normalized_mime,
         source_sha256=detected.source_sha256,
         normalized_sha256=normalized_sha256,
         content=normalized_content,

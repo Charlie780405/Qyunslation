@@ -59,6 +59,8 @@ from qyunslation.server import (
     get_translation_service,
     MEDIA_TYPES,
 )
+from qyunslation.server.uploads import read_upload_limited
+from qyunslation.structure.ingest import InputPreparationError
 from qyunslation.translator import default_params
 from qyunslation.utils.resource_utils import resource_path
 from qyunslation.utils.utils import mask_secrets
@@ -406,7 +408,9 @@ async def service_translate_file(
     task_id = uuid.uuid4().hex[:16]
 
     try:
-        file_contents = await file.read()
+        file_contents = await read_upload_limited(file)
+    except InputPreparationError as e:
+        raise HTTPException(status_code=e.http_status, detail=e.message) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取上传文件失败: {mask_secrets(str(e))}")
 
@@ -416,6 +420,7 @@ async def service_translate_file(
             payload=payload,
             file_contents=file_contents,
             original_filename=file.filename or "uploaded_file",
+            declared_mime=file.content_type,
         )
         return JSONResponse(content=response_data)
     except HTTPException as e:
@@ -992,8 +997,10 @@ async def service_flat_translate(
     task_id = uuid.uuid4().hex[:16]
 
     try:
-        file_contents = await file.read()
+        file_contents = await read_upload_limited(file)
         original_filename = file.filename or "uploaded_file"
+    except InputPreparationError as e:
+        raise HTTPException(status_code=e.http_status, detail=e.message) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件读取失败: {mask_secrets(str(e))}")
 
@@ -1090,8 +1097,11 @@ async def service_flat_translate(
             task_id=task_id,
             payload=payload_obj,
             file_contents=file_contents,
-            original_filename=original_filename
+            original_filename=original_filename,
+            declared_mime=file.content_type,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"内部翻译错误: {mask_secrets(str(e))}")
 

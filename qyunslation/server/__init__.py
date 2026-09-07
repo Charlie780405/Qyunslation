@@ -27,6 +27,8 @@ from qyunslation.server.core import (
     WORKFLOW_DICT,
     MEDIA_TYPES,
     MAX_LOG_HISTORY,
+    PreparedTranslationInput,
+    prepare_translation_input,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "WORKFLOW_DICT",
     "MEDIA_TYPES",
     "MAX_LOG_HISTORY",
+    "PreparedTranslationInput",
+    "prepare_translation_input",
 ]

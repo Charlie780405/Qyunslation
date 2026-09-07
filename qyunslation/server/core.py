@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
     List,
@@ -93,6 +94,15 @@ from qyunslation.translator.ai_translator.ass_translator import AssTranslatorCon
 from qyunslation.exporter.ass.ass2html_exporter import Ass2HTMLExporterConfig
 from qyunslation.translator.ai_translator.pptx_translator import PPTXTranslatorConfig
 from qyunslation.exporter.pptx.pptx2html_exporter import PPTX2HTMLExporterConfig
+from qyunslation.structure.capabilities import source_format_for_extension
+from qyunslation.structure.ingest import (
+    DEFAULT_MAX_UPLOAD_BYTES,
+    InputPreparationError,
+    prepare_document,
+    sanitize_upload_name,
+)
+from qyunslation.structure.models import ProcessingMode, SourceFormat
+from qyunslation.structure.runtime import RuntimeCapabilitySnapshot
 
 
 MAX_LOG_HISTORY = 200
@@ -193,35 +203,108 @@ class QueueAndHistoryHandler(logging.Handler):
             pass
 
 
+_LEGACY_WORKFLOWS = {
+    ".md": "markdown_based",
+    ".markdown": "markdown_based",
+    ".csv": "xlsx",
+    ".xlsx": "xlsx",
+    ".xls": "xlsx",
+    ".json": "json",
+    ".srt": "srt",
+    ".ass": "ass",
+    ".epub": "epub",
+    ".html": "html",
+    ".htm": "html",
+    ".txt": "txt",
+}
+
+
 def get_workflow_type_from_filename(filename: str) -> str:
-    """Get workflow type based on file extension."""
+    """Return an explicit extension route; never guess unknown data is text."""
+
     ext = Path(filename).suffix.lower()
-    if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+    if ext in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".svg",
+        ".gif",
+        ".heif",
+        ".heic",
+        ".avif",
+    }:
         return "image_overlay"
-    if ext in [".pdf"]:
+    if ext == ".pdf":
         return "markdown_based"
-    elif ext in [".md", ".markdown"]:
-        return "markdown_based"
-    elif ext in [".docx", ".doc"]:
+    if ext == ".docx":
         return "docx"
-    elif ext in [".csv", ".xlsx", ".xls"]:
-        return "xlsx"
-    elif ext in [".pptx", ".ppt"]:
+    if ext == ".doc":
+        return "normalize_docx"
+    if ext == ".pptx":
         return "pptx"
-    elif ext in [".json"]:
-        return "json"
-    elif ext in [".srt"]:
-        return "srt"
-    elif ext in [".ass"]:
-        return "ass"
-    elif ext in [".epub"]:
-        return "epub"
-    elif ext in [".html", ".htm"]:
-        return "html"
-    elif ext in [".txt"]:
-        return "txt"
-    else:
-        return "txt"
+    if ext == ".ppt":
+        return "normalize_pptx"
+    return _LEGACY_WORKFLOWS.get(ext, "unsupported")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTranslationInput:
+    original_filename: str
+    file_contents: bytes = field(repr=False)
+    workflow_type: str
+    ingest_audit: dict[str, Any] | None
+    is_structured_input: bool
+
+
+def prepare_translation_input(
+    original_filename: str,
+    file_contents: bytes,
+    *,
+    declared_mime: str | None = None,
+    requested_mode: ProcessingMode | None = None,
+    runtime_snapshot: RuntimeCapabilitySnapshot | None = None,
+    office_converter: Any | None = None,
+    max_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+) -> PreparedTranslationInput:
+    """Prepare PLAN-030 inputs while preserving established legacy workflows."""
+
+    extension_format = source_format_for_extension(original_filename)
+    extension_route = get_workflow_type_from_filename(original_filename)
+    if extension_format is SourceFormat.UNKNOWN and extension_route != "unsupported":
+        if len(file_contents) > max_bytes:
+            raise InputPreparationError(
+                "UPLOAD_TOO_LARGE",
+                f"上传文件超过 {max_bytes} 字节限制",
+                http_status=413,
+            )
+        return PreparedTranslationInput(
+            original_filename=sanitize_upload_name(original_filename),
+            file_contents=file_contents,
+            workflow_type=extension_route,
+            ingest_audit=None,
+            is_structured_input=False,
+        )
+
+    prepared = prepare_document(
+        original_filename,
+        file_contents,
+        declared_mime=declared_mime,
+        requested_mode=requested_mode,
+        runtime_snapshot=runtime_snapshot,
+        office_converter=office_converter,
+        max_bytes=max_bytes,
+    )
+    return PreparedTranslationInput(
+        original_filename=prepared.normalized_name,
+        file_contents=prepared.content,
+        workflow_type=prepared.workflow_type,
+        ingest_audit=prepared.audit_dict(),
+        is_structured_input=True,
+    )
 
 
 def _create_default_task_state() -> Dict[str, Any]:
@@ -242,6 +325,7 @@ def _create_default_task_state() -> Dict[str, Any]:
         "downloadable_files": {},
         "attachment_files": {},
         "statistics": None,  # 翻译完成后填充
+        "ingest": None,
     }
 
 
@@ -360,6 +444,7 @@ class TranslationService:
         payload: TranslatePayload,
         file_contents: bytes,
         original_filename: str,
+        declared_mime: str | None = None,
     ) -> Dict[str, Any]:
         """
         Start a translation task.
@@ -373,17 +458,33 @@ class TranslationService:
         Returns:
             Response dict with task_id and status
         """
-        # PLAN-005b: .doc → .docx
-        if Path(original_filename).suffix.lower() == ".doc":
-            from qyunslation.converter.doc2docx import ensure_docx
+        try:
+            prepared_input = prepare_translation_input(
+                original_filename,
+                file_contents,
+                declared_mime=declared_mime,
+            )
+        except InputPreparationError as exc:
+            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
 
-            original_filename, file_contents = ensure_docx(
-                original_filename, file_contents
+        original_filename = prepared_input.original_filename
+        file_contents = prepared_input.file_contents
+        if (
+            payload.workflow_type != "auto"
+            and prepared_input.is_structured_input
+            and payload.workflow_type != prepared_input.workflow_type
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"工作流 {payload.workflow_type} 与输入格式不匹配；"
+                    f"应使用 {prepared_input.workflow_type}"
+                ),
             )
 
         # Auto workflow routing
         if payload.workflow_type == "auto":
-            detected_type = get_workflow_type_from_filename(original_filename)
+            detected_type = prepared_input.workflow_type
             print(f"[{task_id}] 自动识别工作流: {original_filename} -> {detected_type}")
 
             # 关键修复：完全手动构造 payload_data，不依赖 model_dump
@@ -432,7 +533,7 @@ class TranslationService:
             print(f"[{task_id}] payload_data keys: {sorted(payload_data.keys())}")
             if "mineru_token" in payload_data:
                 token = payload_data["mineru_token"]
-                print(f"[{task_id}] mineru_token in payload_data (length: {len(token)}, starts with: {token[:20] if len(token) > 20 else token}...)")
+                print(f"[{task_id}] mineru_token configured (length: {len(token)})")
             if "convert_engine" in payload_data:
                 print(f"[{task_id}] convert_engine: {payload_data['convert_engine']}")
 
@@ -451,8 +552,6 @@ class TranslationService:
                 if hasattr(payload, "mineru_token"):
                     token = payload.mineru_token
                     print(f"[{task_id}] After validation: mineru_token present (length: {len(token) if token else 0})")
-                    if token:
-                        print(f"[{task_id}] mineru_token starts with: {token[:20] if len(token) > 20 else token}")
                 if hasattr(payload, "convert_engine"):
                     print(f"[{task_id}] After validation: convert_engine={payload.convert_engine}")
             except Exception as e:
@@ -495,6 +594,7 @@ class TranslationService:
                 "temp_dir": None,
                 "downloadable_files": {},
                 "attachment_files": {},
+                "ingest": prepared_input.ingest_audit,
             }
         )
 
@@ -837,8 +937,6 @@ class TranslationService:
             if payload.convert_engine == "mineru":
                 token = payload.mineru_token or ""
                 task_logger.info(f"Creating ConverterMineruConfig with mineru_token (length: {len(token)})")
-                if token:
-                    task_logger.info(f"mineru_token starts with: {token[:20] if len(token) > 20 else token}")
                 converter_config = ConverterMineruConfig(
                     logger=task_logger,
                     mineru_token=token,

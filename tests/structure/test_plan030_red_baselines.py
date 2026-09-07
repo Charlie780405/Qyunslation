@@ -70,22 +70,12 @@ def test_core_tiff_is_accepted_by_the_shared_prescan_route(
     assert result.error is None
 
 
-@expected_gap(
-    "QY030-FMT-002",
-    "PLAN-030b",
-    "unknown binary suffixes still silently fall back to the text workflow",
-)
 def test_unknown_binary_format_fails_explicitly_instead_of_becoming_text():
     route = current_workflow_route("opaque-payload.unknown")
 
     assert route != "txt"
 
 
-@expected_gap(
-    "QY030-NORM-001",
-    "PLAN-030b",
-    "legacy PPT is routed directly to a workflow that only accepts PPTX",
-)
 def test_legacy_ppt_routes_through_explicit_normalization():
     route = current_workflow_route("legacy-deck.ppt")
 

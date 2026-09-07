@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from qyunslation.converter.office import OfficeConversion
-from qyunslation.structure.capabilities import RuntimeFeature, RuntimeState
+from qyunslation.structure.capabilities import (
+    RuntimeFeature,
+    RuntimeState,
+    capability_for,
+)
 from qyunslation.structure.ingest import (
     InputPreparationError,
     PreparedDocument,
@@ -133,6 +137,8 @@ def test_prepares_legacy_office_with_hash_linked_lineage(
 
     assert prepared.source_format is source_format
     assert prepared.normalized_format is target_format
+    assert prepared.detected_mime == capability_for(source_format).mime_types[0]
+    assert prepared.normalized_mime == capability_for(target_format).mime_types[0]
     assert prepared.workflow_type == workflow_type
     assert prepared.input_asset.sha256 == hashlib.sha256(source).hexdigest()
     assert len(prepared.derived_assets) == 1

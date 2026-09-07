@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 from qyunslation.extensions.glossary_db import load_glossary, merge_glossary, save_glossary
 from qyunslation.extensions.image_translate import probe_image, translate_image
+from qyunslation.server.uploads import read_upload_limited
+from qyunslation.structure.ingest import InputPreparationError
 
 router = APIRouter(tags=["Custom Extensions"])
 
@@ -26,12 +28,15 @@ async def image_translate_endpoint(
     tmp_out = None
     n = 0
     try:
+        data = await read_upload_limited(file)
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-            f.write(await file.read())
+            f.write(data)
             tmp_in = f.name
         tmp_out = tmp_in.replace(suffix, f"_zh{suffix}")
         n = translate_image(tmp_in, tmp_out, to_lang=to_lang)
         data = Path(tmp_out).read_bytes()
+    except InputPreparationError as e:
+        raise HTTPException(e.http_status, e.message) from e
     except Exception as e:
         raise HTTPException(500, f"图片嵌字失败: {e}") from e
     finally:
@@ -68,8 +73,9 @@ async def image_probe_endpoint(
         )
     tmp_in = None
     try:
+        data = await read_upload_limited(file)
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-            f.write(await file.read())
+            f.write(data)
             tmp_in = f.name
         result = probe_image(
             tmp_in,
@@ -80,6 +86,8 @@ async def image_probe_endpoint(
             is_header=is_header,
         )
         return JSONResponse(result)
+    except InputPreparationError as e:
+        raise HTTPException(e.http_status, e.message) from e
     except Exception as e:
         return JSONResponse(
             {
