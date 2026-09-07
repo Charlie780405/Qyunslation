@@ -75,6 +75,7 @@ from .runtime import (
     decide_runtime_capability,
     probe_runtime_capabilities,
 )
+from .canvases import CanvasLimits, extract_canvases
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -143,4 +144,6 @@ __all__ = [
     "RuntimeCapabilitySnapshot",
     "decide_runtime_capability",
     "probe_runtime_capabilities",
+    "CanvasLimits",
+    "extract_canvases",
 ]
