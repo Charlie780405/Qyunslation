@@ -81,5 +81,7 @@ def test_slide_prescan_matches_execution_regions():
     result = scan_pdf_tier3(SLIDE)
 
     assert result.translatable_count == execution_n
-    assert result.figure_caption_count == execution_n
+    # PLAN-030d：幻灯确实没有题注，12 处区域记在无编号计数下，不伪造 Figure 编号
+    assert result.figure_caption_count == 0
+    assert result.unnumbered_count == execution_n
     assert result.table_caption_count == 0

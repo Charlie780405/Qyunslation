@@ -268,6 +268,7 @@ HELPER = r'''
                 figure_caption_count=getattr(t3, "figure_caption_count", None),
                 table_caption_count=getattr(t3, "table_caption_count", None),
                 translatable_count=getattr(t3, "translatable_count", None),
+                unnumbered_count=getattr(t3, "unnumbered_count", None),
             )
             entry["tier3_done"] = True
             entry["vector_count"] = t3.vector_count
@@ -275,6 +276,7 @@ HELPER = r'''
             entry["figure_caption_count"] = getattr(t3, "figure_caption_count", 0)
             entry["table_caption_count"] = getattr(t3, "table_caption_count", 0)
             entry["translatable_count"] = getattr(t3, "translatable_count", 0)
+            entry["unnumbered_count"] = getattr(t3, "unnumbered_count", 0)
             entry["tier3_truncated"] = t3.truncated
             entry["summary_text"] = text
             meta.setdefault("files", {})[fh] = entry

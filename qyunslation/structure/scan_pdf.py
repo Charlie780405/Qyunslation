@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -108,7 +110,15 @@ class PdfStructureScanner:
         *,
         content_profile: ContentProfile | None = None,
         processing_mode: ProcessingMode | None = None,
+        max_pages: int | None = None,
+        deadline_s: float | None = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> DocumentStructureManifest:
+        """扫描 PDF 结构。
+
+        max_pages / deadline_s / should_abort 供 Tier-3 预扫描控制预算；触发任一
+        限制时 manifest 标 truncated，调用方不应缓存不完整结果。
+        """
         path = Path(source)
         content = path.read_bytes()
         mode = processing_mode or ProcessingMode.NATIVE
@@ -133,12 +143,29 @@ class PdfStructureScanner:
         figure_seen: set[int] = set()
         table_seen: set[int] = set()
 
+        started = time.monotonic()
+        pages_scanned = 0
+        truncated = False
+
         doc = pymupdf.open(stream=prepared.content, filetype="pdf")
         try:
+            total = len(doc)
+            limit = total if max_pages is None else min(total, max(int(max_pages), 0))
+            if limit < total:
+                truncated = True
             for i, page in enumerate(doc, start=1):
+                if i > limit:
+                    break
+                if should_abort is not None and should_abort():
+                    truncated = True
+                    break
+                if deadline_s is not None and time.monotonic() - started > deadline_s:
+                    truncated = True
+                    break
                 canvas = canvases.get(i)
                 if canvas is None:
                     continue
+                pages_scanned += 1
                 anchors = caption_anchors(page)
                 labeled = labeled_figure_regions(page)
                 if not labeled:
@@ -314,6 +341,8 @@ class PdfStructureScanner:
                     for item in objects
                     if isinstance(item, (FigureObject, ImageObject))
                     and item.execution_status is ExecutionStatus.PENDING
-                )
+                ),
+                "truncated": truncated,
+                "pages_scanned": pages_scanned,
             },
         )

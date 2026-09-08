@@ -55,6 +55,8 @@ class Tier3Result:
     figure_caption_count: int = 0
     table_caption_count: int = 0
     translatable_count: int = 0
+    # PLAN-030d：无题注可译区域（幻灯、无编号插图页），不占 Figure 编号
+    unnumbered_count: int = 0
     pages_scanned: int = 0
     truncated: bool = False
     error: str | None = None
@@ -412,69 +414,60 @@ def scan_pdf_tier3(
         return Tier3Result(error="pymupdf_missing")
 
     try:
-        from pdf_figure_crop import (
-            is_slide_page,
-            labeled_figure_regions,
-            translatable_regions,
-        )
-        from qyunslation.structure.captions import caption_anchors
+        from qyunslation.structure import ManifestStore, PdfStructureScanner
+        from qyunslation.structure.models import ExecutionStatus, ObjectType
     except ImportError:
         return Tier3Result(error="pdf_figure_crop_missing")
 
     try:
         doc = pymupdf.open(path)
+        encrypted = bool(getattr(doc, "is_encrypted", False)) and not doc.authenticate("")
+        doc.close()
     except Exception as exc:
         return Tier3Result(error=str(exc))
-
-    if getattr(doc, "is_encrypted", False) and not doc.authenticate(""):
-        doc.close()
+    if encrypted:
         return Tier3Result(error="encrypted")
 
-    started = time.monotonic()
-    figure_ids: set[int] = set()
-    table_ids: set[int] = set()
-    translatable_ids: set[int] = set()
-    unlabeled_regions = 0
-    pages_scanned = 0
-    truncated = False
-
+    store = ManifestStore()
+    manifest = None
     try:
-        total = len(doc)
-        limit = min(total, max_pages)
-        for pno in range(limit):
-            if should_abort and should_abort():
-                truncated = True
-                break
-            if time.monotonic() - started > deadline_s:
-                truncated = True
-                break
-            page = doc[pno]
-            for kind, num, _y, _bb in caption_anchors(page):
-                if kind == "figure":
-                    figure_ids.add(num)
-                else:
-                    table_ids.add(num)
-            if is_slide_page(page):
-                unlabeled_regions += len(translatable_regions(page))
-            else:
-                translatable_ids.update(labeled_figure_regions(page))
-            pages_scanned += 1
-        if limit < total and pages_scanned >= limit:
-            truncated = truncated or limit < total
-    finally:
-        doc.close()
+        digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        manifest = store.get(digest)
+    except Exception:
+        digest = None
 
-    fig_n = len(figure_ids) + unlabeled_regions
-    tab_n = len(table_ids)
-    trans_n = len(translatable_ids) + unlabeled_regions
+    if manifest is None:
+        try:
+            manifest = PdfStructureScanner().scan(
+                Path(path),
+                max_pages=max_pages,
+                deadline_s=deadline_s,
+                should_abort=should_abort,
+            )
+        except Exception as exc:
+            return Tier3Result(error=str(exc))
+        # 不完整结构不得固化，否则后续执行会读到截断的对象集
+        if not manifest.extensions.get("truncated"):
+            store.put(manifest)
+
+    fig_n = manifest.summary.figure_count
+    tab_n = manifest.summary.table_count
+    trans_n = sum(
+        1
+        for item in manifest.objects
+        if item.type in (ObjectType.FIGURE, ObjectType.IMAGE)
+        and item.execution_status is ExecutionStatus.PENDING
+    )
+    unnumbered = sum(1 for item in manifest.objects if item.type is ObjectType.IMAGE)
     return Tier3Result(
         vector_count=trans_n,
         table_count=tab_n,
         figure_caption_count=fig_n,
         table_caption_count=tab_n,
         translatable_count=trans_n,
-        pages_scanned=pages_scanned,
-        truncated=truncated,
+        unnumbered_count=unnumbered,
+        pages_scanned=int(manifest.extensions.get("pages_scanned") or 0),
+        truncated=bool(manifest.extensions.get("truncated")),
     )
 
 
@@ -488,15 +481,26 @@ def format_tier3_summary(
     figure_caption_count: int | None = None,
     table_caption_count: int | None = None,
     translatable_count: int | None = None,
+    unnumbered_count: int | None = None,
 ) -> str:
-    """PLAN-030c：按语义题注计数，不再把位图+矢量相加。"""
-    fig_n = int(
+    """PLAN-030c：按语义题注计数，不再把位图+矢量相加。
+
+    PLAN-030d：插图总数 = 有编号 Figure + 无编号可译区域，保证不小于将要 OCR
+    嵌字的区域数。
+    """
+    numbered_n = int(
         figure_caption_count
         if figure_caption_count is not None
         else entry.get("figure_caption_count")
         or vector_count
         or 0
     )
+    unnumbered_n = int(
+        unnumbered_count
+        if unnumbered_count is not None
+        else entry.get("unnumbered_count") or 0
+    )
+    fig_n = numbered_n + unnumbered_n
     table_n = int(
         table_caption_count
         if table_caption_count is not None
