@@ -1,34 +1,37 @@
-# PLAN-030d 子计划：manifest SSOT 贯通与 PDF 执行对账
+# PLAN-030d 子计划：PDF 纵向闭环（SSOT 贯通、正文、多栏、表格）
 
-> 状态：**待批准**
+> 状态：**已批准，实施中**
 > 日期：2026-09-08
+> 批准记录：用户于 2026-09-08 批准全量范围（含正文 DocLayout、多栏保真、PDF 表格原位重建）
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
 > 前置阶段：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md)、[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md)、[PLAN-030c](./PLAN-030c-unified-semantic-scan.md)（均已完成）
-> 阶段边界：交付 manifest 持久化、预扫描与执行共用同一份结构结果、无编号对象建模、执行状态回写与对账、Tier-3 错误如实上报；**不接入 DocLayout、不做正文 BODY 对象、不做多栏保真、不做 PDF 表格原位重建**（见 §五）。
-
-批准前不修改业务代码、不部署、不重启 pdf2zh 服务。
+> 阶段边界：交付父纲领定义的 PDF 纵向闭环——原生/扫描/混合 PDF 的正文、Figure、Table、单/双/多栏的检测—翻译—回写—审计；不迁移 DOCX/PPTX/图片语义对象（030e–030g）。
 
 ## 一、目标
 
-关闭 Checkpoint B 的未竟条款：**「UI 预扫与执行读取同一 `schema_version + document_hash`」**。
+交付父纲领 030d：**PDF 纵向闭环**。在 030c 的语义扫描之上，让 manifest 成为真正贯通预扫描、执行与审计的 SSOT，并把正文、多栏与表格纳入语义对象与原位回写。
 
-PLAN-030c 已经让预扫描与执行的**算法口径**一致（共用 `translatable_regions`），但两者仍是两次独立检测，`PdfStructureScanner` 产出的 manifest 在生产代码里零调用方。030d 把 manifest 从「孤岛 SSOT」变成真正贯通预扫描、执行与审计的单一事实源。
-
-030d 要回答五个问题：
+030d 要回答八个问题：
 
 1. manifest 如何在预扫描与执行之间传递？（缓存键、失效、并发）
 2. 幻灯等无题注页的可译区域如何进入 manifest 而不伪造 Figure 编号？
-3. 执行结果如何回写到 manifest，使每个对象都有可解释的终态？
+3. 执行结果如何回写，使每个对象都有可解释的终态？
 4. 预扫描 Tier-3 出错时如何如实上报，而不是伪装成「没有插图」？
-5. 三条链路（scanner / prescan / execute）如何收敛为一次扫描？
+5. 正文如何成为 `BODY` 语义对象，而不是 BabelDOC 内部的黑盒？
+6. 单/双/多栏如何检测，阅读顺序如何断言，跨栏串接如何防护？
+7. PDF 表格如何原位重建，同时保证数字、单位、统计符号不变？
+8. 原生、扫描、混合三类 PDF 如何走同一套语义对象与审计口径？
 
 ### 完成定义
 
 - `scan_pdf_tier3` 与 `translate_pdf_images` 消费同一份 manifest，不再各自重新检测。
-- 幻灯样本三方一致：`manifest.summary.figure_count == Tier3Result.translatable_count == 执行区域数 == 12`。
-- 每个 `FIGURE` 对象执行后终态为 `TRANSLATED`、`EXPLICITLY_SKIPPED` 或 `FAILED_SOFT` 之一，无 `PENDING` 残留。
+- 幻灯样本三方一致：`manifest` 可译对象数 `== Tier3Result.translatable_count ==` 执行区域数 `== 12`。
+- 每个可执行对象终态为 `TRANSLATED`、`EXPLICITLY_SKIPPED` 或 `FAILED_SOFT`，无 `PENDING` 残留。
 - Tier-3 的 `error` 进入 UI 文案与 `ManifestIssue`，不再显示为「未检测到需要嵌字的插图」。
-- 新增 `scripts/verify-plan-030d.sh`；030c 的三个门保持 PASS。
+- `BODY` 对象进入 manifest，带 `reading_order`；`Canvas.layout_mode` 与 `column_count` 按实际版面填充。
+- 双栏金样阅读顺序断言通过，跨栏串接为 0。
+- 原生表格原位重建后数字集合不变，表格不被误判为 Figure。
+- 新增 `scripts/verify-plan-030d.sh`；028/029/030c 三个门保持 PASS。
 
 ## 二、问题证据
 
@@ -107,28 +110,31 @@ flowchart TD
 
 ## 四、非目标
 
-- 不接入 BabelDOC DocLayout；正文版面仍是 BabelDOC 黑盒。
-- 不产出 `BODY` 对象、不做正文翻译回写。
-- 不做单/双/多栏检测、阅读顺序断言或跨栏串接防护。
-- 不做 PDF 表格原位重建；`TableObject` 仍为 `planned_action="text_layer"`。
-- 不统一 GUI（BabelDOC 原位）与 API（mineru/docling → Markdown）两条 PDF 入口。
-- 不改扫描件 HPD / `letter_pipeline` 路径。
 - 不迁移 DOCX/PPTX/图片语义对象（030e–030g）。
+- 不统一 GUI（BabelDOC 原位）与 API（mineru/docling → Markdown）两条 PDF 入口；030d 只保证 GUI 主链闭环，API 旁路维持现状并在 manifest 标注 `processing_mode`。
+- 不接管 BabelDOC 的正文**翻译引擎**；030d 把正文建模为语义对象并消费/审计 BabelDOC 的版面结果，不重写译文生成。
+- 不做跨页续表合并（父纲领列为后续）。
+- 不重写 HPD OCR 引擎；扫描件路径只做语义对象与审计口径对齐。
+- 不改动 `letter_pipeline` 的书信重绘算法本身。
 
-## 五、与父纲领的有意偏离
+## 五、执行顺序与风险分层
 
-父纲领把 030d 定义为「PDF 纵向闭环：原生/扫描/混合 PDF 的正文、Figure、Table、单/双/多栏检测—翻译—回写—审计」。本子计划**只取其中的 SSOT 与 Figure 执行对账部分**，理由：
+全量范围按风险从低到高分三组，前一组的阶段门通过后才进入下一组：
 
-| 父纲领要求 | 030d 处理 | 理由 |
-| --- | --- | --- |
-| 正文检测—翻译—回写 | 推迟 | 正文完全由 BabelDOC 承担，本仓只有 site-packages 补丁；接管前需先有 SSOT 记录执行状态，否则改动无法对账 |
-| 单/双/多栏保真 | 推迟 | 需要 DocLayout 或自研列检测 + 金样标定 + 跨栏回归，工作量本身即一个完整子计划 |
-| PDF 表格原位重建 | 推迟 | 需要单元格级重建器与数字保护验收，与 SSOT 正交 |
-| 扫描件路径统一 | 推迟 | 涉及 HPD 与 `letter_pipeline` 两套实现的行为对齐 |
+| 组 | 任务 | 风险 | 说明 |
+| --- | --- | --- | --- |
+| A：SSOT 地基 | Tasks 1–5 | 低 | 纯新增 + 可选参数，`manifest=None` 保留旧路径 |
+| B：版面语义 | Tasks 6–7 | 中 | 依赖 DocLayout 可离线使用；不可用时回退自研列检测 |
+| C：表格原位 | Tasks 8–9 | 高 | 触碰临床数据渲染，fail-closed 优先 |
 
-**拆分建议**：把推迟部分作为 `PLAN-030d2`（正文与多栏保真）与 `PLAN-030d3`（PDF 表格原位重建）后续审批，或并入 030h 跨格式版式保真。请在批准时确认取舍。
+**为什么先做 A**：正文、多栏、表格的执行状态都需要 manifest 记录，否则 `FAILED_SOFT` 与 `EXPLICITLY_SKIPPED` 无法区分，回归时定位不了是检测问题还是执行问题。030c 已用「先统一口径再改执行」验证过这个节奏。
 
-不先做 SSOT 就做正文/多栏的风险：执行状态无处记录，`FAILED_SOFT` 与 `EXPLICITLY_SKIPPED` 无法区分，一旦回归无法定位是检测问题还是执行问题。030c 已经用「先统一口径再改执行」的顺序验证过这个节奏。
+**组 B 的技术路线分支**：Task 6 启动时先判定 BabelDOC DocLayout 能否离线调用。
+
+- 可用：消费其 `figure/table/text/title` 标签与坐标，作为栏位与阅读顺序的主证据。
+- 不可用（缺权重、需联网、性能不可接受）：回退自研列检测——按文本块 x 中心聚类判定栏边界，用 PyMuPDF `get_text("blocks")` 的几何做阅读顺序。回退方案精度较低，须在 manifest 记 `detector="column_clustering"` 与较低 `confidence`。
+
+两条路线的**验收标准相同**，实现择优。选定后在 WT-030d 记录判定依据。
 
 ## 六、关键设计
 
@@ -287,26 +293,105 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验证：** `pytest -q tests/structure/test_prescan_error_surface.py --no-cov`
 
-### Checkpoint：030d 阶段门
+### Checkpoint A：SSOT 地基阶段门
 
 - [ ] Tasks 1–5 聚焦测试全绿。
 - [ ] 三方对账：幻灯 12/12/12，Nature 7/7/7，ljae439 5/5/5。
-- [ ] `bash scripts/verify-plan-030d.sh` PASS。
-- [ ] 030c 的三个门（028/029/030c）仍 PASS。
-- [ ] `pytest -q tests/structure --no-cov -rxX`：只剩 `QY030-PPT-001` 一个 xfail。
+- [ ] 028/029/030c 三个门仍 PASS。
 - [ ] archive 3 个既有失败精确不变。
 
-### Task 6：验收脚本与文档
+未通过不得进入组 B。
 
-**依赖：** Checkpoint
+### Task 6：正文 BODY 对象与版面证据
 
-**文件：** `scripts/verify-plan-030d.sh`、`docs/walkthroughs/WT-030d-manifest-ssot-execution-parity.md`、父纲领阶段门
+**依赖：** Checkpoint A
+
+**文件：** `qyunslation/structure/layout.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_body_objects.py`
+
+先判定 DocLayout 可用性（§五），再择路实现。
+
+**验收：**
+
+- [ ] 三个样本每页产出 `BODY` 对象，`bbox` 不与 Figure/Table 区域重叠超过 20%。
+- [ ] `BODY.reading_order` 在页内连续且从 0 开始。
+- [ ] `detector_evidence` 标明用的是 `doclayout` 还是 `column_clustering`，并带 `confidence`。
+- [ ] 纯表页（Nature p4/p5/p9）不产出跨越表格区域的 `BODY` 对象。
+- [ ] 正文对象 `planned_action="babeldoc_text_layer"`、`execution_status=EXPLICITLY_SKIPPED`、`reason_code="delegated_to_babeldoc"`——030d 审计正文但不接管译文生成。
+
+**验证：** `pytest -q tests/structure/test_body_objects.py --no-cov`
+
+### Task 7：单/双/多栏检测与阅读顺序
+
+**依赖：** Task 6
+
+**文件：** `qyunslation/structure/layout.py`、`qyunslation/structure/canvases.py`、`tests/structure/test_column_layout.py`
+
+**验收：**
+
+- [ ] `Canvas.layout_mode` 按实际填充，不再硬编码 `MIXED`（现状 [`canvases.py:88`](../../../qyunslation/structure/canvases.py)）。
+- [ ] ljae439 判定为双栏为主（十页中七页 DOUBLE），Nature 十九页中十三页 DOUBLE。
+- [ ] 合成夹具 `single-column.pdf` 判 SINGLE、`double-column.pdf` 判 DOUBLE。
+- [ ] 幻灯页判 FREEFORM。
+- [ ] `Canvas.reading_order` 填充 `BODY` 对象 ID，双栏页顺序为「左栏自上而下 → 右栏自上而下」。
+- [ ] 跨栏串接检测：任一 `BODY` 对象横跨栏边界且宽度超过页宽 60% 时记 `ManifestIssue(code="LAYOUT_COLUMN_SPAN")`；双栏金样该 issue 为 0。
+
+**验证：** `pytest -q tests/structure/test_column_layout.py --no-cov`
+
+### Task 8：PDF 表格原位重建
+
+**依赖：** Checkpoint A、Task 7
+
+**文件：** `scripts/pdf_table_rebuild.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_table_rebuild.py`
+
+`TableObject` 从 `planned_action="text_layer"` 升级为可执行对象，填充 `row_count` / `column_count` 与单元格 `translatable_blocks`。
+
+**验收：**
+
+- [ ] 三个金样的 Table 1–3 均产出结构化单元格，行列数与人工真值一致。
+- [ ] **数字保护**：重建后表格内数字、百分比、区间、统计符号集合与原文完全一致（逐 token 比对）。
+- [ ] 表头与文本单元格译文回写原位，列宽与线框不变。
+- [ ] 结构置信度不足时 `FAILED_SOFT` + `reason_code="table_structure_low_confidence"`，保留原表不改动。
+- [ ] 纯表页仍禁止 OCR 嵌字（030c 规则 A 不回归）。
+- [ ] 表格不被误判为 Figure（Figure 计数不变）。
+
+**验证：** `pytest -q tests/structure/test_table_rebuild.py --no-cov`
+
+### Task 9：原生/扫描/混合 PDF 路径对齐
+
+**依赖：** Tasks 6–8
+
+**文件：** `qyunslation/structure/scan_pdf.py`、`scripts/doc_image_prescan.py`、`tests/structure/test_scanned_pdf_parity.py`
+
+**验收：**
+
+- [ ] scanner 判定并记录 `Representation.SCANNED` / `NATIVE_TEXT` / `HYBRID`。
+- [ ] 扫描件（`pdf_needs_hpd` 为真）产出的 manifest 标 `processing_mode=HYBRID` 并记录 HPD 血缘。
+- [ ] 混合 PDF（部分页扫描）逐页判定，不整档一刀切。
+- [ ] 扫描件路径的对象也有终态，不出现 `PENDING` 残留。
+- [ ] FDA PIND 样本（20 页扫描件）扫描不超时，`truncated` 语义正确。
+
+**验证：** `pytest -q tests/structure/test_scanned_pdf_parity.py --no-cov`
+
+### Checkpoint B：全量阶段门
+
+- [ ] Tasks 1–9 聚焦测试全绿。
+- [ ] `bash scripts/verify-plan-030d.sh` PASS。
+- [ ] 028/029/030c 三个门仍 PASS。
+- [ ] `pytest -q tests/structure --no-cov -rxX`：只剩 `QY030-PPT-001` 一个 xfail。
+- [ ] archive 3 个既有失败精确不变。
+- [ ] 父纲领 Checkpoint B 四条全部达成（跨格式对账除外，仍按 030c §五 推迟至 030g 后）。
+
+### Task 10：验收脚本与文档
+
+**依赖：** Checkpoint B
+
+**文件：** `scripts/verify-plan-030d.sh`、`docs/walkthroughs/WT-030d-pdf-vertical-closure.md`、父纲领阶段门
 
 **验收：**
 
 - [ ] 单命令门区分 PASS / EXPECTED_RED / FAIL。
-- [ ] WT 记录三方对账实测、缓存命中率与部署步骤。
-- [ ] 父纲领 Checkpoint B 标为达成，下一批准门更新。
+- [ ] WT 记录三方对账实测、DocLayout 路线判定依据、表格数字保护实测、部署步骤。
+- [ ] 父纲领 Checkpoint B 标为达成，下一批准门更新为 PLAN-030e。
 
 ## 九、阶段验收命令
 
@@ -316,6 +401,10 @@ SHA-256 与 030c 一致，不重新物化。
 .venv/bin/python -m pytest -q tests/structure/test_prescan_manifest.py --no-cov
 .venv/bin/python -m pytest -q tests/structure/test_execution_parity.py --no-cov
 .venv/bin/python -m pytest -q tests/structure/test_prescan_error_surface.py --no-cov
+.venv/bin/python -m pytest -q tests/structure/test_body_objects.py --no-cov
+.venv/bin/python -m pytest -q tests/structure/test_column_layout.py --no-cov
+.venv/bin/python -m pytest -q tests/structure/test_table_rebuild.py --no-cov
+.venv/bin/python -m pytest -q tests/structure/test_scanned_pdf_parity.py --no-cov
 .venv/bin/python -m pytest -q tests/structure --no-cov -rxX
 bash scripts/verify-plan-030d.sh
 bash scripts/verify-plan-030c.sh
@@ -329,21 +418,25 @@ git diff --check
 - 缓存只是加速，不是真值：任何读取失败都回落重新扫描，绝不因缓存问题阻断翻译。
 - `manifest=None` 路径必须保留，作为执行侧一键回滚。
 - 无编号对象不得伪造 `figure:N` 编号，也不得计入 `figure_count`。
-- 纯表页 fail-closed（030c 规则 A）不得因 manifest 接入而失效。
+- 纯表页 fail-closed（030c 规则 A）不得因 manifest 接入或表格重建而失效。
 - 幻灯 PLAN-029b profile 区域数维持 12。
 - 错误不得伪装成零结果。
-- 执行终态不得为 `PENDING`；失败一律 `FAILED_SOFT` 并保留原图。
+- 执行终态不得为 `PENDING`；失败一律 `FAILED_SOFT` 并保留原对象。
+- **表格数字保护**：重建后数字、单位、百分比、区间、统计符号集合必须与原文完全一致；不一致即 fail-closed 保留原表。
+- 正文可搜索性：不得为了版面保真把正文页整页栅格化。
+- 栏边界硬约束：译文膨胀不得跨栏；宁可记 overflow issue 也不静默越界。
 
 ## 十一、回滚
 
-- Task 4（执行侧）独立回滚：GUI 补丁改回不传 manifest，其余改进保留。
-- Task 3（预扫描）回滚需同时恢复 030c 的直接检测逻辑。
+- 组 C（Tasks 8–9）独立回滚：`TableObject` 恢复 `planned_action="text_layer"`，其余保留。
+- 组 B（Tasks 6–7）独立回滚：停止产出 `BODY` 对象与 `layout_mode`，manifest 退回 030c 的题注级语义。
+- Task 4（执行侧）独立回滚：GUI 补丁改回不传 manifest。
 - 缓存目录可整体删除，系统自动退化为每次重新扫描。
-- 不得恢复「Tier-3 错误显示为零插图」的旧行为。
+- 不得恢复「Tier-3 错误显示为零插图」与「位图+矢量相加」两个旧行为。
 
 ## 十二、完成条件
 
-- 用户批准本子计划（含 §五 拆分取舍）后才开始编码。
-- Checkpoint B 全部条款达成并在父纲领标注。
-- 三个样本三方对账一致。
+- Checkpoint A 与 Checkpoint B 全部条款达成并在父纲领标注。
+- 三个样本三方对账一致；双栏阅读顺序与表格数字保护均有自动断言。
 - WT-030d 与 `verify-plan-030d.sh` 入库。
+- 部署后用生产解释器实测三类样本（期刊、幻灯、扫描件），文案与执行一致。

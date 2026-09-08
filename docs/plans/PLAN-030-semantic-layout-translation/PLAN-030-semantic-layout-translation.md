@@ -4,7 +4,7 @@
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
-> 阶段门：030a、030b、030c 已完成并通过验收（030c 已部署生产）。[PLAN-030d](./PLAN-030d-manifest-ssot-execution-parity.md) 已编写，**待批准**。批准前不实现 manifest 接入、不部署。
+> 阶段门：030a、030b、030c 已完成并通过验收（030c 已部署生产）。[PLAN-030d](./PLAN-030d-manifest-ssot-execution-parity.md) 已批准全量范围，**实施中**。
 
 ## 一、执行基线提示词
 
@@ -139,7 +139,7 @@ DocumentStructureManifest
 | 030a | 跨格式契约与红色基线（已完成） | 固定 manifest schema、格式能力表、内容画像、Figure/Table 口径和格式×题材金样；记录格式/画像解耦及原生/图片化双模式 ADR；先让现状测试失败 | 无 |
 | 030b | 输入适配与归一化画布 | 统一 MIME/扩展名探测、PDF/DOCX/图片/PPT(X) 接入、Office 转换、图片解码、产物血缘和能力探针 | 030a |
 | 030c | [统一语义扫描与题注驱动归并](./PLAN-030c-unified-semantic-scan.md)（已完成） | 题注锚点 + 物理对象关联 → manifest；预扫描/UI 语义计数；纯表页 fail-closed 执行防护 | 030a–030b |
-| 030d | [manifest SSOT 贯通与 PDF 执行对账](./PLAN-030d-manifest-ssot-execution-parity.md)（待批准） | manifest 持久化、预扫描与执行共用同一份结构结果、无编号对象建模、执行状态回写；正文/多栏/表格原位重建按 §五 拆分推迟 | 030c |
+| 030d | [PDF 纵向闭环](./PLAN-030d-manifest-ssot-execution-parity.md)（已批准，实施中） | manifest SSOT 贯通、无编号对象、执行状态回写、正文 BODY 与 DocLayout、单/双/多栏与阅读顺序、表格原位重建、原生/扫描/混合路径对齐 | 030c |
 | 030e | DOCX 纵向闭环 | 节/栏、正文、表格、文本框、页眉页脚、DrawingML occurrence 的可编辑原位翻译与视觉校验 | 030c |
 | 030f | 图片与 Poster 纵向闭环 | 常见图片格式、超大画布分区、方向/透明度/色彩保护、无接缝回填与 Poster 画像 | 030c |
 | 030g | PPT/PPTX 双模式闭环 | 原生可编辑模式、嵌图翻译、PPT 转换、逐页图片化翻译及图片化 PPTX/PDF/图片集打包 | 030b–030f |
@@ -257,4 +257,4 @@ DocumentStructureManifest
 030b 完成记录：[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md) / [WT-030b](../../walkthroughs/WT-030b-input-adapters-normalized-canvases.md)。
 030c 完成记录：[PLAN-030c](./PLAN-030c-unified-semantic-scan.md) / [WT-030c](../../walkthroughs/WT-030c-unified-semantic-scan.md)。
 
-030d 子计划：[PLAN-030d manifest SSOT 贯通与 PDF 执行对账](./PLAN-030d-manifest-ssot-execution-parity.md)（**待批准**）。该子计划对父纲领 030d 范围做了拆分：只做 SSOT 贯通与 Figure 执行对账，正文/多栏/表格原位重建建议另立 030d2/030d3 或并入 030h，取舍见其 §五。请回复 **批准 PLAN-030d** 后开始实现。
+030d 子计划：[PLAN-030d PDF 纵向闭环](./PLAN-030d-manifest-ssot-execution-parity.md)（**已批准全量范围，实施中**）。用户于 2026-09-08 选择全量执行，含正文 DocLayout、多栏保真与 PDF 表格原位重建；实现按 §五 的 A/B/C 三组风险分层顺序推进。
