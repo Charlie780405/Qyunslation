@@ -154,8 +154,12 @@ def test_every_catalog_entry_has_truth_or_deterministic_generation_evidence():
         if item["origin"] == "GENERATED":
             assert SHA256_RE.fullmatch(item["sha256"])
             assert item["relative_path"]
-        elif item["origin"] == "KNOWLEDGE_BASE":
-            assert item["truth_file"] == TRUTH_PATH.relative_to(ROOT).as_posix()
+        elif item["origin"] in {"KNOWLEDGE_BASE", "OPEN_ACCESS"}:
+            if item["origin"] == "KNOWLEDGE_BASE":
+                assert item["truth_file"] == TRUTH_PATH.relative_to(ROOT).as_posix()
+            else:
+                assert item["truth_file"]
+                assert (ROOT / item["truth_file"]).is_file()
             assert item["fixture_state"] == "MATERIALIZED"
             fixture_path = FIXTURE_ROOT / item["relative_path"]
             assert fixture_path.is_file()

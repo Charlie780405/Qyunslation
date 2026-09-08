@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "document_id": "doi:10.1038/s41467-024-53384-1",
+  "title": "41467_2024_Article_53384",
+  "scope": "MAIN_ARTICLE",
+  "usage_scope": "TEST_FIXTURE_ONLY",
+  "source": {
+    "kind": "OPEN_ACCESS",
+    "runtime_dependency": false,
+    "locator": "file://tests/fixtures/structure/reference/nature_comm_53384.pdf",
+    "materialized_path": "tests/fixtures/structure/reference/nature_comm_53384.pdf",
+    "publisher_url": "https://www.nature.com/articles/s41467-024-53384-1",
+    "license": "CC BY 4.0",
+    "import_state": "IMPORTED",
+    "sha256": "566f97dd5c43e3a8c5729c25ad5004fe9e6995a6be4ad95fe64c9f18b5e37723",
+    "integrity_policy": "The committed TEST_FIXTURE_ONLY copy must match this full lowercase SHA-256."
+  },
+  "semantic_ids": {
+    "figures": ["figure:1", "figure:2", "figure:3", "figure:4", "figure:5", "figure:6", "figure:7"],
+    "tables": ["table:1", "table:2", "table:3"]
+  },
+  "counting_rules": [
+    "Count semantic Figure identifiers, not bitmap/vector regions.",
+    "Count semantic Table identifiers independently from figures.",
+    "Exclude supplementary-material identifiers from MAIN_ARTICLE counts.",
+    "Multiple physical resources or occurrences may belong to one semantic identifier."
+  ]
+}
