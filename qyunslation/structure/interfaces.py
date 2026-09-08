@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .models import ContentProfile, DocumentStructureManifest, ProcessingMode
 
 
+@runtime_checkable
 class StructureScanner(Protocol):
     """Produce a validated structure manifest without translating the document."""
 
@@ -20,6 +21,7 @@ class StructureScanner(Protocol):
     ) -> DocumentStructureManifest: ...
 
 
+@runtime_checkable
 class ManifestConsumer(Protocol):
     """Consume a validated manifest without depending on detector internals."""
 

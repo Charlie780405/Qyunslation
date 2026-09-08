@@ -79,6 +79,7 @@ from .runtime import (
     probe_runtime_capabilities,
 )
 from .canvases import CanvasLimits, extract_canvases
+from .manifest_store import ManifestStore, default_cache_root
 from .scan_pdf import PdfStructureScanner
 from .captions import (
     CAPTION_LINE,
@@ -162,7 +163,9 @@ __all__ = [
     "decide_runtime_capability",
     "probe_runtime_capabilities",
     "CanvasLimits",
+    "ManifestStore",
     "PdfStructureScanner",
+    "default_cache_root",
     "extract_canvases",
     "CAPTION_LINE",
     "FIGURE_LINE",
