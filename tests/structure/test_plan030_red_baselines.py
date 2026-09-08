@@ -44,19 +44,17 @@ def current_workflow_route(filename: str) -> str:
     return result.stdout.strip()
 
 
-@expected_gap(
-    "QY030-SEM-001",
-    "PLAN-030c",
-    "physical bitmap/vector regions are still summed as user-facing figures",
-)
 def test_user_summary_reports_ljae439_semantic_figures_not_physical_regions():
     summary = format_tier3_summary(
         {"candidate_count": 5, "translatable_count": 5},
         vector_count=2,
         table_count=3,
+        figure_caption_count=5,
+        table_caption_count=3,
+        translatable_count=5,
     )
 
-    assert "检测到 5 处插图" in summary
+    assert "5 张插图" in summary
     assert "3 处表格" in summary
     assert "7 处插图" not in summary
 

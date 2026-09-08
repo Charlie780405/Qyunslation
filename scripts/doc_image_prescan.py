@@ -52,6 +52,9 @@ class Tier1Result:
 class Tier3Result:
     vector_count: int = 0
     table_count: int = 0
+    figure_caption_count: int = 0
+    table_caption_count: int = 0
+    translatable_count: int = 0
     pages_scanned: int = 0
     truncated: bool = False
     error: str | None = None
@@ -391,7 +394,7 @@ def scan_pdf_tier3(
     deadline_s: float | None = None,
     should_abort: Callable[[], bool] | None = None,
 ) -> Tier3Result:
-    """PLAN-028a：PDF 矢量插图 + 表格结构扫描（共享 find_tables 结果）。"""
+    """PLAN-030c：按题注去重统计 Figure/Table，可译区走 find_figure_regions。"""
     path = Path(path)
     if path.suffix.lower() != ".pdf":
         return Tier3Result()
@@ -409,7 +412,8 @@ def scan_pdf_tier3(
         return Tier3Result(error="pymupdf_missing")
 
     try:
-        from pdf_figure_crop import find_safe_vector_figures, table_rects
+        from pdf_figure_crop import labeled_figure_regions
+        from qyunslation.structure.captions import caption_anchors
     except ImportError:
         return Tier3Result(error="pdf_figure_crop_missing")
 
@@ -423,8 +427,9 @@ def scan_pdf_tier3(
         return Tier3Result(error="encrypted")
 
     started = time.monotonic()
-    vector_count = 0
-    table_count = 0
+    figure_ids: set[int] = set()
+    table_ids: set[int] = set()
+    translatable_ids: set[int] = set()
     pages_scanned = 0
     truncated = False
 
@@ -439,18 +444,27 @@ def scan_pdf_tier3(
                 truncated = True
                 break
             page = doc[pno]
-            tables = table_rects(page)
-            table_count += len(tables)
-            vector_count += len(find_safe_vector_figures(page, tables=tables))
+            for kind, num, _y, _bb in caption_anchors(page):
+                if kind == "figure":
+                    figure_ids.add(num)
+                else:
+                    table_ids.add(num)
+            translatable_ids.update(labeled_figure_regions(page))
             pages_scanned += 1
         if limit < total and pages_scanned >= limit:
             truncated = truncated or limit < total
     finally:
         doc.close()
 
+    fig_n = len(figure_ids)
+    tab_n = len(table_ids)
+    trans_n = len(translatable_ids)
     return Tier3Result(
-        vector_count=vector_count,
-        table_count=table_count,
+        vector_count=trans_n,
+        table_count=tab_n,
+        figure_caption_count=fig_n,
+        table_caption_count=tab_n,
+        translatable_count=trans_n,
         pages_scanned=pages_scanned,
         truncated=truncated,
     )
@@ -463,42 +477,39 @@ def format_tier3_summary(
     table_count: int,
     truncated: bool = False,
     pages_scanned: int = 0,
+    figure_caption_count: int | None = None,
+    table_caption_count: int | None = None,
+    translatable_count: int | None = None,
 ) -> str:
-    """PLAN-028a：合并 Tier-2 位图结论与 Tier-3 矢量/表格计数。"""
-    bitmap_n = int(entry.get("candidate_count") or 0)
-    translatable = int(entry.get("translatable_count") or 0)
-    vector_n = int(vector_count or 0)
-    table_n = int(table_count or 0)
-    total_illust = bitmap_n + vector_n
+    """PLAN-030c：按语义题注计数，不再把位图+矢量相加。"""
+    fig_n = int(
+        figure_caption_count
+        if figure_caption_count is not None
+        else entry.get("figure_caption_count")
+        or vector_count
+        or 0
+    )
+    table_n = int(
+        table_caption_count
+        if table_caption_count is not None
+        else entry.get("table_caption_count")
+        or table_count
+        or 0
+    )
+    trans_n = int(
+        translatable_count
+        if translatable_count is not None
+        else entry.get("translatable_count")
+        or vector_count
+        or 0
+    )
 
-    if total_illust == 0 and table_n == 0:
+    if fig_n == 0 and table_n == 0:
         text = "未检测到需要嵌字的插图。"
-    elif total_illust == 0:
+    elif fig_n == 0:
         text = f"未检测到需要嵌字的插图；另有 {table_n} 处表格，按文字层翻译。"
-    elif bitmap_n and vector_n:
-        text = (
-            f"检测到 {total_illust} 处插图（{bitmap_n} 处位图、{vector_n} 处矢量图），"
-            f"将随文档一并翻译"
-        )
-        if translatable and translatable < bitmap_n:
-            text = (
-                f"检测到 {total_illust} 处插图（{bitmap_n} 处位图、{vector_n} 处矢量图），"
-                f"其中 {translatable} 处位图含待译文字，将随文档一并翻译"
-            )
-        if table_n:
-            text += f"；另有 {table_n} 处表格，按文字层翻译"
-        text += "。"
-    elif vector_n:
-        text = f"检测到 {vector_n} 处矢量插图，将随文档一并翻译"
-        if table_n:
-            text += f"；另有 {table_n} 处表格，按文字层翻译"
-        text += "。"
     else:
-        text = f"检测到 {bitmap_n} 处插图"
-        if translatable:
-            text += f"，其中 {translatable} 处含待译文字，将随文档一并翻译"
-        elif bitmap_n:
-            text += "，将随文档一并翻译"
+        text = f"共 {fig_n} 张插图，其中 {trans_n} 张将 OCR 嵌字翻译"
         if table_n:
             text += f"；另有 {table_n} 处表格，按文字层翻译"
         text += "。"

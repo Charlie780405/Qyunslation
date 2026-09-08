@@ -265,10 +265,16 @@ HELPER = r'''
                 table_count=t3.table_count,
                 truncated=t3.truncated,
                 pages_scanned=t3.pages_scanned,
+                figure_caption_count=getattr(t3, "figure_caption_count", None),
+                table_caption_count=getattr(t3, "table_caption_count", None),
+                translatable_count=getattr(t3, "translatable_count", None),
             )
             entry["tier3_done"] = True
             entry["vector_count"] = t3.vector_count
             entry["table_count"] = t3.table_count
+            entry["figure_caption_count"] = getattr(t3, "figure_caption_count", 0)
+            entry["table_caption_count"] = getattr(t3, "table_caption_count", 0)
+            entry["translatable_count"] = getattr(t3, "translatable_count", 0)
             entry["tier3_truncated"] = t3.truncated
             entry["summary_text"] = text
             meta.setdefault("files", {})[fh] = entry
