@@ -416,6 +416,10 @@ def scan_pdf_tier3(
     try:
         from qyunslation.structure import ManifestStore, PdfStructureScanner
         from qyunslation.structure.models import ExecutionStatus, ObjectType
+        from qyunslation.structure.scan_pdf import (
+            PDF_STRUCTURE_SCANNER_NAME,
+            PDF_STRUCTURE_SCANNER_VERSION,
+        )
     except ImportError:
         return Tier3Result(error="pdf_figure_crop_missing")
 
@@ -435,6 +439,12 @@ def scan_pdf_tier3(
         manifest = store.get(digest)
     except Exception:
         digest = None
+
+    if manifest is not None and (
+        manifest.producer.name != PDF_STRUCTURE_SCANNER_NAME
+        or manifest.producer.version != PDF_STRUCTURE_SCANNER_VERSION
+    ):
+        manifest = None
 
     if manifest is None:
         try:

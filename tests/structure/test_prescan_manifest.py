@@ -75,6 +75,26 @@ def test_second_scan_reuses_the_cache_without_rescanning(monkeypatch):
     assert scan_pdf_tier3(NATURE).translatable_count == 7
 
 
+def test_stale_scanner_cache_is_rebuilt(monkeypatch):
+    stale = PdfStructureScanner().scan(NATURE)
+    stale.producer.version = "0.0.0"
+    ManifestStore().put(stale)
+    original_scan = PdfStructureScanner.scan
+    calls = 0
+
+    def counted_scan(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_scan(self, *args, **kwargs)
+
+    monkeypatch.setattr(PdfStructureScanner, "scan", counted_scan)
+
+    result = scan_pdf_tier3(NATURE)
+
+    assert calls == 1
+    assert result.translatable_count == 7
+
+
 def test_cache_entry_is_written_for_complete_scans():
     scan_pdf_tier3(NATURE)
     import hashlib

@@ -56,6 +56,10 @@ from .models import (
 from .profiles import resolve_profile
 
 
+PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
+PDF_STRUCTURE_SCANNER_VERSION = "1.1.0"
+
+
 @dataclass(frozen=True, slots=True)
 class _PageAnalysis:
     anchors: list
@@ -578,7 +582,10 @@ class PdfStructureScanner:
             schema_version="1.0.0",
             manifest_id=build_manifest_id(prepared.source_sha256),
             created_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
-            producer=ProducerInfo(name="qyunslation-plan-030c", version="1.0.0"),
+            producer=ProducerInfo(
+                name=PDF_STRUCTURE_SCANNER_NAME,
+                version=PDF_STRUCTURE_SCANNER_VERSION,
+            ),
             document=document,
             canvases=list(prepared.canvases),
             objects=objects,
