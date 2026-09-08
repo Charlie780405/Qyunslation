@@ -10,8 +10,16 @@ from pathlib import Path
 
 from .captions import caption_anchors
 from .ingest import prepare_document
+from .layout import (
+    body_blocks,
+    column_of,
+    figure_table_rects,
+    overflows_column,
+    reading_order,
+)
 from .models import (
     AssetRole,
+    BodyObject,
     BoundingBox,
     CaptionObject,
     ContentProfile,
@@ -107,6 +115,74 @@ class PdfStructureScanner:
             )
         return out
 
+    def _body_objects(self, page, canvas, prepared, page_no: int) -> tuple[list, list]:
+        """正文块建模为 BODY 对象，带页内阅读顺序。
+
+        030d 只审计正文、不接管译文生成：正文仍由 BabelDOC 文字层翻译，因此对象
+        终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。
+        """
+        blocks = body_blocks(page, exclude_rects=figure_table_rects(page))
+        if not blocks:
+            return [], []
+        mode = canvas.layout_mode
+        ordered = reading_order(page, mode, blocks)
+        objects: list = []
+        issues: list[ManifestIssue] = []
+        for order, block in enumerate(ordered):
+            key = f"body:page:{page_no}:{order}"
+            object_id = build_object_id(
+                prepared.source_sha256,
+                canvas.canvas_id,
+                ObjectType.BODY,
+                key,
+                [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": key}],
+            )
+            rect = _rect_from_bbox((block.x0, block.y0, block.x1, block.y1))
+            objects.append(
+                BodyObject(
+                    type=ObjectType.BODY,
+                    object_id=object_id,
+                    canvas_id=canvas.canvas_id,
+                    bbox=_clip_bbox(rect, canvas),
+                    representation=Representation.NATIVE_TEXT,
+                    source_refs=[SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=key)],
+                    detector_evidence=[
+                        DetectorEvidence(
+                            detector="pymupdf_text_blocks",
+                            label="body",
+                            confidence=0.7,
+                            bbox=_clip_bbox(rect, canvas),
+                            details={
+                                "page": page_no,
+                                "layout_mode": mode.value,
+                                "column": column_of(block, page, mode),
+                            },
+                        )
+                    ],
+                    execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                    reason_code="delegated_to_babeldoc",
+                    planned_action="babeldoc_text_layer",
+                    semantic_id=key,
+                    semantic_scope="body",
+                    reading_order=order,
+                )
+            )
+            if overflows_column(block, page, mode):
+                issues.append(
+                    ManifestIssue(
+                        code="LAYOUT_COLUMN_OVERFLOW",
+                        severity=IssueSeverity.WARNING,
+                        stage=PipelineStage.SCAN,
+                        object_id=object_id,
+                        retryable=False,
+                        message=(
+                            f"page {page_no} narrow body block crosses the column midline"
+                        ),
+                        details={"page": page_no},
+                    )
+                )
+        return objects, issues
+
     def scan(
         self,
         source: Path,
@@ -137,7 +213,7 @@ class PdfStructureScanner:
         scripts = Path(__file__).resolve().parents[2] / "scripts"
         if str(scripts) not in sys.path:
             sys.path.insert(0, str(scripts))
-        from pdf_figure_crop import labeled_figure_regions
+        from pdf_figure_crop import labeled_figure_regions, table_rects
 
         import pymupdf
 
@@ -188,6 +264,25 @@ class PdfStructureScanner:
                     continue
                 if not labeled:
                     objects.extend(self._unnumbered_images(page, canvas, prepared, i))
+                body, body_issues = self._body_objects(page, canvas, prepared, i)
+                objects.extend(body)
+                issues.extend(body_issues)
+                canvas.reading_order = [b.object_id for b in body]
+                if any(kind == "table" for kind, *_ in anchors) and not table_rects(page):
+                    # 有表题注却测不到表格几何：表内文字会漏进正文，必须留痕
+                    issues.append(
+                        ManifestIssue(
+                            code="TABLE_GEOMETRY_MISSING",
+                            severity=IssueSeverity.WARNING,
+                            stage=PipelineStage.SCAN,
+                            retryable=False,
+                            message=(
+                                f"page {i} has a table caption but find_tables() "
+                                "returned no geometry"
+                            ),
+                            details={"page": i},
+                        )
+                    )
                 for kind, num, y0, bb in anchors:
                     cap_bbox = _clip_bbox(_rect_from_bbox(bb), canvas)
                     cap_key = f"{kind}:{num}:caption:{i}"

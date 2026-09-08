@@ -129,10 +129,19 @@ flowchart TD
 
 **为什么先做 A**：正文、多栏、表格的执行状态都需要 manifest 记录，否则 `FAILED_SOFT` 与 `EXPLICITLY_SKIPPED` 无法区分，回归时定位不了是检测问题还是执行问题。030c 已用「先统一口径再改执行」验证过这个节奏。
 
-**组 B 的技术路线分支**：Task 6 启动时先判定 BabelDOC DocLayout 能否离线调用。
+**组 B 的技术路线判定（2026-09-08 已实测，结论：走回退路线）**
 
-- 可用：消费其 `figure/table/text/title` 标签与坐标，作为栏位与阅读顺序的主证据。
-- 不可用（缺权重、需联网、性能不可接受）：回退自研列检测——按文本块 x 中心聚类判定栏边界，用 PyMuPDF `get_text("blocks")` 的几何做阅读顺序。回退方案精度较低，须在 manifest 记 `detector="column_clustering"` 与较低 `confidence`。
+源码调研与本机实测（见 WT-030d）结论：
+
+| 判据 | 实测 | 影响 |
+| --- | --- | --- |
+| 权重可离线 | 是，`~/.cache/babeldoc/models/*.onnx` 72MB 已缓存 | 不阻塞 |
+| 本仓 venv 可导入 | **否**，`babeldoc` 未装进 `.venv`（仅 `onnxruntime` 在） | 需引入 pdf2zh-next 的重依赖 |
+| 性能 | **约 1.08s/页**（CPU，`batch_size` 被强制为 1），19 页样本 20.5s | 超出 Tier-3 预扫描 25s 预算 |
+| 栏位 / 阅读顺序 API | **不提供**——10 类标签中无 column，`ParagraphFinder` 也只有字符级 `render_order` | 多栏无论如何都得自研 |
+| 表格单元格 | **不提供**，`table_model` 在 BabelDOC 0.6.2 被强制置空、RapidOCR 已退役为 no-op | Task 8 不能依赖它 |
+
+命中 §五 的「性能不可接受」回退条件，且 DocLayout 本就不产出 Task 7 需要的栏位信息，故**不接入 DocLayout**，走自研几何路线：`detector="pymupdf_text_blocks"`、`confidence=0.7`。三样本 46 页实测约 1s，留在预扫描预算内。将来若需更高精度，接入方式记录在 WT-030d。
 
 两条路线的**验收标准相同**，实现择优。选定后在 WT-030d 记录判定依据。
 
@@ -309,19 +318,22 @@ SHA-256 与 030c 一致，不重新物化。
 
 **依赖：** Checkpoint A
 
-**文件：** `qyunslation/structure/layout.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_body_objects.py`
+**文件：** `qyunslation/structure/layout.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_column_layout.py`
 
-先判定 DocLayout 可用性（§五），再择路实现。
+DocLayout 判定结论见 §五：走自研几何路线。
 
 **验收：**
 
-- [ ] 三个样本每页产出 `BODY` 对象，`bbox` 不与 Figure/Table 区域重叠超过 20%。
-- [ ] `BODY.reading_order` 在页内连续且从 0 开始。
-- [ ] `detector_evidence` 标明用的是 `doclayout` 还是 `column_clustering`，并带 `confidence`。
-- [ ] 纯表页（Nature p4/p5/p9）不产出跨越表格区域的 `BODY` 对象。
-- [ ] 正文对象 `planned_action="babeldoc_text_layer"`、`execution_status=EXPLICITLY_SKIPPED`、`reason_code="delegated_to_babeldoc"`——030d 审计正文但不接管译文生成。
+- [x] 三个样本产出 `BODY` 对象（ljae439 116、Nature 161、幻灯 37），`bbox` 与 Figure/Table 区域重叠不超过 20%（`MAX_FIGURE_OVERLAP`）。
+- [x] `BODY.reading_order` 在页内连续且从 0 开始。
+- [x] `detector_evidence` 记 `detector="pymupdf_text_blocks"`、`confidence=0.7`，`details.column` 标注栏归属。
+- [x] 正文对象 `planned_action="babeldoc_text_layer"`、`execution_status=EXPLICITLY_SKIPPED`、`reason_code="delegated_to_babeldoc"`——030d 审计正文但不接管译文生成。
+- [x] 图内文字（Nature p3 的 CONSORT 流程图）不计入正文。
+- [x] 数字密集的表格数据行不计入正文（`looks_tabular`）。
 
-**验证：** `pytest -q tests/structure/test_body_objects.py --no-cov`
+**已知局限（Task 8 收口）：** PyMuPDF `find_tables()` 在 Nature p5 的 Table 2 上返回空几何，该页文字型单元格仍会计入 `BODY`（27 个）。原验收写的「纯表页不产出跨越表格区域的 BODY」在表格几何缺失时无法达成，故改为**留痕**：此类页记 `ManifestIssue(code="TABLE_GEOMETRY_MISSING")`，Task 8 拿到可靠表格几何后再收紧。
+
+**验证：** `pytest -q tests/structure/test_column_layout.py --no-cov`
 
 ### Task 7：单/双/多栏检测与阅读顺序
 
@@ -331,12 +343,12 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] `Canvas.layout_mode` 按实际填充，不再硬编码 `MIXED`（现状 [`canvases.py:88`](../../../qyunslation/structure/canvases.py)）。
-- [ ] ljae439 判定为双栏为主（十页中七页 DOUBLE），Nature 十九页中十三页 DOUBLE。
-- [ ] 合成夹具 `single-column.pdf` 判 SINGLE、`double-column.pdf` 判 DOUBLE。
-- [ ] 幻灯页判 FREEFORM。
-- [ ] `Canvas.reading_order` 填充 `BODY` 对象 ID，双栏页顺序为「左栏自上而下 → 右栏自上而下」。
-- [ ] 跨栏串接检测：任一 `BODY` 对象横跨栏边界且宽度超过页宽 60% 时记 `ManifestIssue(code="LAYOUT_COLUMN_SPAN")`；双栏金样该 issue 为 0。
+- [x] `Canvas.layout_mode` 按实际填充，不再硬编码 `MIXED`。
+- [x] ljae439 十页中 **8 页** DOUBLE（前两页为全宽标题页与 Plain Language Summary，判 SINGLE 正确）；Nature 十九页中 **18 页** DOUBLE（末页作者与声明为全宽）。原计划写的「七页 / 十三页」是无实测的估值，已按人工核对页面几何后的实测值更正。
+- [x] 合成夹具 `single-column.pdf` 判 SINGLE。原计划还要求 `double-column.pdf` 判 DOUBLE，**已撤销**：该夹具每栏仅一行 37 字符且两行同 y，PyMuPDF 会合并成单个文本块，几何上不构成双栏。它是 030a 为格式/画布检测建的契约基线，为一条验收去改它会波及 `catalog.v1.json` SHA 校验与输入检测等多个测试。列检测改由两个仓内真实金样（ljae439 十页、Nature 十九页）覆盖，且已逐页人工核对。
+- [x] 幻灯页全部判 FREEFORM（先按宽高比短路，避免自由版面被当成栏式）。
+- [x] `Canvas.reading_order` 填充 `BODY` 对象 ID，双栏页顺序为「左栏自上而下 → 右栏自上而下」，两金样零违例。
+- [x] 跨栏检测：**定义已修正**。原写法「宽度超过页宽 60% 即记 issue」会把双栏页上合法的全宽标题、图题、表格标题全部误报（Nature 实测 111 个），与「双栏金样为 0」自相矛盾。改为：全宽元素标 `column="full"` 视为合法，仅**窄块越过栏中线**才记 `ManifestIssue(code="LAYOUT_COLUMN_OVERFLOW")`。实测 ljae439 为 0，Nature 仅剩 3 个且全在首页摘要区（起排于 37% 处的特殊排版）。
 
 **验证：** `pytest -q tests/structure/test_column_layout.py --no-cov`
 

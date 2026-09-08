@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 
 from .capabilities import capability_for
 from .ingest import InputPreparationError, detect_input
+from .layout import detect_layout_mode
 from .models import (
     Canvas,
     CanvasKind,
@@ -87,7 +88,7 @@ def _pdf_canvases(content: bytes, limits: CanvasLimits) -> list[Canvas]:
                     height=float(rect.height),
                     unit=CoordinateUnit.PT,
                     rotation=int(page.rotation),
-                    layout_mode=LayoutMode.MIXED,
+                    layout_mode=detect_layout_mode(page),
                     source_geometry=SourceGeometry(
                         unit=CoordinateUnit.PT,
                         bbox=(

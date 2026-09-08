@@ -26,7 +26,7 @@ def test_extracts_pdf_page_canvas(generated_structure_fixtures: Path):
     assert canvas.unit is CoordinateUnit.PT
     assert canvas.width == pytest.approx(612)
     assert canvas.height == pytest.approx(792)
-    assert canvas.layout_mode is LayoutMode.MIXED
+    assert canvas.layout_mode is LayoutMode.SINGLE
 
 
 def test_extracts_docx_section_and_column_count(generated_structure_fixtures: Path):
