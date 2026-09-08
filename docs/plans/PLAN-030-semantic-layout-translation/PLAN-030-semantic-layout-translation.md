@@ -4,7 +4,7 @@
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
-> 阶段门：030a、030b 已完成并通过验收；下一步为编写、单独审批 PLAN-030c。批准前不实现语义扫描、不部署。
+> 阶段门：030a、030b 已完成并通过验收；[PLAN-030c](./PLAN-030c-unified-semantic-scan.md) 已编写，**待批准**。批准前不实现语义扫描、不部署。
 
 ## 一、执行基线提示词
 
@@ -138,7 +138,7 @@ DocumentStructureManifest
 | --- | --- | --- | --- |
 | 030a | 跨格式契约与红色基线（已完成） | 固定 manifest schema、格式能力表、内容画像、Figure/Table 口径和格式×题材金样；记录格式/画像解耦及原生/图片化双模式 ADR；先让现状测试失败 | 无 |
 | 030b | 输入适配与归一化画布 | 统一 MIME/扩展名探测、PDF/DOCX/图片/PPT(X) 接入、Office 转换、图片解码、产物血缘和能力探针 | 030a |
-| 030c | 统一语义扫描与画像路由 | 融合题注、DocLayout、OOXML、物理对象与 OCR，生成可缓存 manifest；替换不一致计数入口 | 030a–030b |
+| 030c | [统一语义扫描与题注驱动归并](./PLAN-030c-unified-semantic-scan.md)（待批准） | 题注锚点 + 物理对象关联 → manifest；预扫描/UI 语义计数；纯表页 fail-closed 执行防护 | 030a–030b |
 | 030d | PDF 纵向闭环 | 原生/扫描/混合 PDF 的正文、Figure、Table、单/双/多栏检测—翻译—回写—审计 | 030c |
 | 030e | DOCX 纵向闭环 | 节/栏、正文、表格、文本框、页眉页脚、DrawingML occurrence 的可编辑原位翻译与视觉校验 | 030c |
 | 030f | 图片与 Poster 纵向闭环 | 常见图片格式、超大画布分区、方向/透明度/色彩保护、无接缝回填与 Poster 画像 | 030c |
@@ -159,7 +159,7 @@ DocumentStructureManifest
 - 同一输入重复扫描得到稳定 manifest。
 - UI 预扫与执行读取同一 `schema_version + document_hash`。
 - `ljae439` 达到 5 Figure / 3 Table，且每个对象有题注与 bbox 证据。
-- 同内容经 PDF、DOCX、图片和 PPTX 承载时，语义对象可对账；转换产物具有 hash、转换器版本和可编辑性标记。
+- 同内容经 PDF、DOCX、图片和 PPTX 承载时，语义对象可对账；转换产物具有 hash、转换器版本和可编辑性标记。（030c 仅交付 PDF；跨格式对账推迟至 030g 之后，见 PLAN-030c §五。）
 
 ### Checkpoint C：030d–030g 后
 
@@ -255,4 +255,4 @@ DocumentStructureManifest
 
 030a 完成记录：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md) / [WT-030a](../../walkthroughs/WT-030a-contract-baselines.md)。
 030b 完成记录：[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md) / [WT-030b](../../walkthroughs/WT-030b-input-adapters-normalized-canvases.md)。
-下一批准门为编写并审批 **PLAN-030c 统一语义扫描与画像路由详细子计划**；当前尚未创建该子计划。
+030c 子计划：[PLAN-030c 统一语义扫描与题注驱动 Figure/Table 归并](./PLAN-030c-unified-semantic-scan.md)（**待批准**）。请回复 **批准 PLAN-030c** 后开始实现。
