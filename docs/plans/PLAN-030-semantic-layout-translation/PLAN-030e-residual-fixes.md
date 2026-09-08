@@ -1,10 +1,17 @@
 # PLAN-030e-residual 子计划：030e 已知局限收口
 
-**状态**：待批准  
+**状态**：**已完成**（2026-09-08）  
 **类型**：030e 遗留修复（非新格式闭环）  
 **依赖**：PLAN-030e 已完成  
-**建议顺序**：**先于 PLAN-030f 批准门执行**（体量小、解除 030f/030g 环境阻塞）  
-**验收门**：`bash scripts/verify-plan-030e-residual.sh`（待建）
+**验收门**：三项分别由下游计划的门覆盖，未单独建 `verify-plan-030e-residual.sh`
+
+三项关闭去向：
+
+| 项 | 关闭方式 | 验证 |
+| --- | --- | --- |
+| R1 LibreOffice 生产就绪 | 已安装 `/usr/bin/soffice`，`OFFICE_CONVERTER` / `SLIDE_RENDERER` 探针转绿 | `verify-plan-030e.sh` |
+| R2 多节 DOCX 正文全挂 `section:1` | 随 PLAN-030e-fix 关闭 | `test_scan_docx.py::test_second_section_bodies_use_their_own_canvas` |
+| R3 verify 门对仓外样本仅 BLOCKED | 并入 [PLAN-030h](./PLAN-030h-cross-format-fidelity.md) H1 交付 | `verify-plan-030h.sh` 的「无运行时样本目录时结构套件仍全绿」一项 |
 
 ## 一、背景
 

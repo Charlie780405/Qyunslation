@@ -108,15 +108,13 @@ xfails = {
     if (node := case.find("skipped")) is not None
     and node.attrib.get("type") == "pytest.xfail"
 }
-assert xfails == {
-    "test_user_summary_reports_ljae439_semantic_figures_not_physical_regions",
-    "test_pptx_picture_shape_is_emitted_as_a_translatable_object",
-}, xfails
+# 立项时这里还剩两条红：030c 的语义计数与 030g 的 PPT 嵌图执行。两者都已修绿。
+assert xfails == set(), xfails
 assert not root.findall(".//failure")
 assert not root.findall(".//error")
 PY
   then
-    expected_red "only PLAN-030c semantic count and PLAN-030g PPT image execution remain XFAIL"
+    pass "PLAN-030c semantic count and PLAN-030g PPT image execution are both closed"
   else
     fail "structure XFAIL inventory changed"
     show_failure_log "$STRUCTURE_LOG"
@@ -131,9 +129,6 @@ RUNXFAIL_LOG="$STAGE_DIR/runxfail.log"
 if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q tests/structure/test_plan030_red_baselines.py \
     --runxfail --no-cov --junitxml="$RUNXFAIL_XML" >"$RUNXFAIL_LOG" 2>&1; then
-  fail "--runxfail unexpectedly passed; the two downstream gaps are stale"
-  show_failure_log "$RUNXFAIL_LOG"
-else
   if "$PY" - "$RUNXFAIL_XML" <<'PY'
 from pathlib import Path
 import sys
@@ -141,21 +136,20 @@ import xml.etree.ElementTree as ET
 
 root = ET.parse(Path(sys.argv[1])).getroot()
 cases = root.findall(".//testcase")
-failed = {case.attrib["name"] for case in cases if case.find("failure") is not None}
 assert len(cases) == 6, len(cases)
-assert failed == {
-    "test_user_summary_reports_ljae439_semantic_figures_not_physical_regions",
-    "test_pptx_picture_shape_is_emitted_as_a_translatable_object",
-}, failed
+assert not root.findall(".//failure")
 assert not root.findall(".//error")
 assert not root.findall(".//skipped")
 PY
   then
-    expected_red "--runxfail proves the exact two downstream gaps still fail"
+    pass "--runxfail confirms the downstream gaps pass for real"
   else
-    fail "--runxfail differs from the exact two-failure baseline"
+    fail "--runxfail differs from the all-pass baseline"
     show_failure_log "$RUNXFAIL_LOG"
   fi
+else
+  fail "--runxfail regressed; a documented gap reopened"
+  show_failure_log "$RUNXFAIL_LOG"
 fi
 
 run_pass \
@@ -170,41 +164,18 @@ run_pass \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
     "$PY" -m pytest -q --ignore=tests/test_pdf2zh_archive.py --no-cov
 
-ARCHIVE_XML="$STAGE_DIR/archive.xml"
+# PLAN-032 已修好这三条历史红（原文件名清洗 + 归档 ID 前缀），不再是预期红
 ARCHIVE_LOG="$STAGE_DIR/archive.log"
 if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
-  "$PY" -m pytest -q tests/test_pdf2zh_archive.py --no-cov \
-    --junitxml="$ARCHIVE_XML" >"$ARCHIVE_LOG" 2>&1; then
-  fail "archive baseline changed unexpectedly; review it before updating the gate"
-  show_failure_log "$ARCHIVE_LOG"
+  "$PY" -m pytest -q tests/test_pdf2zh_archive.py --no-cov >"$ARCHIVE_LOG" 2>&1; then
+  pass "archive naming suite is green since PLAN-032"
 else
-  if "$PY" - "$ARCHIVE_XML" <<'PY'
-from pathlib import Path
-import sys
-import xml.etree.ElementTree as ET
-
-expected = {
-    "test_output_group_key",
-    "test_infer_original_filename",
-    "test_ingest_pdf2zh_group_local",
-}
-root = ET.parse(Path(sys.argv[1])).getroot()
-cases = root.findall(".//testcase")
-failed = {case.attrib["name"] for case in cases if case.find("failure") is not None}
-assert len(cases) == 3, len(cases)
-assert failed == expected, (failed, expected)
-assert not root.findall(".//error")
-assert not root.findall(".//skipped")
-PY
-  then
-    expected_red "three unchanged pre-PLAN-030 archive naming failures"
-  else
-    fail "archive regression differs from the recorded pre-PLAN-030 baseline"
-    show_failure_log "$ARCHIVE_LOG"
-  fi
+  fail "archive naming suite regressed"
+  show_failure_log "$ARCHIVE_LOG"
 fi
 
-if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 && "$EXPECTED_REDS" -eq 3 ]]; then
+# 030c 与 030g 交付后本门不再登记任何预期红
+if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 && "$EXPECTED_REDS" -eq 0 ]]; then
   printf 'SUMMARY: PASS expected_red=%d blocked=0 fail=0\n' "$EXPECTED_REDS"
   exit 0
 fi

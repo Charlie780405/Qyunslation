@@ -21,15 +21,10 @@ from qyunslation.structure.layout import (
 from qyunslation.structure.models import ExecutionStatus, LayoutMode, ObjectType
 
 ROOT = Path(__file__).resolve().parents[2]
-from tests.structure.sample_paths import slide_sample
+from tests.structure.sample_paths import both_slides
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = slide_sample()
-
-requires_slide = pytest.mark.skipif(
-    not SLIDE.is_file(), reason="slide sample lives outside the repo"
-)
 
 
 @pytest.fixture(scope="module")
@@ -74,9 +69,9 @@ def test_full_width_front_matter_is_single_column():
     assert Counter(modes)[LayoutMode.DOUBLE] == 8
 
 
-@requires_slide
-def test_slides_are_freeform_not_columnar():
-    modes = _modes(SLIDE)
+@both_slides
+def test_slides_are_freeform_not_columnar(slide_pdf):
+    modes = _modes(slide_pdf)
 
     assert set(modes) == {LayoutMode.FREEFORM}
 

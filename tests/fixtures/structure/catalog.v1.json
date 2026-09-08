@@ -9,7 +9,12 @@
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "single-column.pdf",
       "sha256": "215d93d086a7c406df93996df9e93f1ecfa5da64fbc793731c508a0680618394",
-      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE"],
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
       "future_owner": "PLAN-030d"
     },
     {
@@ -19,7 +24,12 @@
       "content_profile": "REVIEW_ARTICLE",
       "relative_path": "double-column.pdf",
       "sha256": "f22ac26e148d41ee3ea2971f6c6a49836693d36b0a7d2f43e7107ce4d6cb7777",
-      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE"],
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
       "future_owner": "PLAN-030d"
     },
     {
@@ -29,7 +39,14 @@
       "content_profile": "REVIEW_ARTICLE",
       "relative_path": "review.docx",
       "sha256": "1124a6bd6ed816f76736d4749a25a0ad794c7662e8d4b188e44305d327bc5d81",
-      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE", "IMAGE", "TEXT_BOX"],
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE",
+        "IMAGE",
+        "TEXT_BOX"
+      ],
       "future_owner": "PLAN-030e"
     },
     {
@@ -39,7 +56,11 @@
       "content_profile": "POSTER",
       "relative_path": "poster.png",
       "sha256": "0be4affaa9a930101bcf16efc5b7443778f7133e4f00e9daae499aa0af3a3b07",
-      "expected_objects": ["POSTER_SECTION", "FIGURE", "TABLE"],
+      "expected_objects": [
+        "POSTER_SECTION",
+        "FIGURE",
+        "TABLE"
+      ],
       "future_owner": "PLAN-030f"
     },
     {
@@ -49,7 +70,10 @@
       "content_profile": "GENERIC",
       "relative_path": "photo.jpg",
       "sha256": "783b993e64972d033dc3c27b87685a0d6d55968c667c04339bff532af07555b9",
-      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "expected_objects": [
+        "IMAGE",
+        "TEXT_BOX"
+      ],
       "future_owner": "PLAN-030f"
     },
     {
@@ -59,7 +83,10 @@
       "content_profile": "GENERIC",
       "relative_path": "diagram.webp",
       "sha256": "9e6fcba25d14b248be799d9b55be6563a338d82ddfeaf2c1c0bd9b3cb9c245e8",
-      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "expected_objects": [
+        "IMAGE",
+        "TEXT_BOX"
+      ],
       "future_owner": "PLAN-030f"
     },
     {
@@ -69,7 +96,10 @@
       "content_profile": "POSTER",
       "relative_path": "scan.bmp",
       "sha256": "31beaaa9f7d6ea06ec8728bbee9bed1d0c6dcc87b4a75792c1830a6e6c25fa7c",
-      "expected_objects": ["IMAGE", "TEXT_BOX"],
+      "expected_objects": [
+        "IMAGE",
+        "TEXT_BOX"
+      ],
       "future_owner": "PLAN-030f"
     },
     {
@@ -79,7 +109,11 @@
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "multipage.tiff",
       "sha256": "828e1e8f7f35d6e2504f42f30d428ad5b07c4fedba20cbf001019e26357e3ffa",
-      "expected_objects": ["IMAGE", "FIGURE", "TABLE"],
+      "expected_objects": [
+        "IMAGE",
+        "FIGURE",
+        "TABLE"
+      ],
       "future_owner": "PLAN-030f"
     },
     {
@@ -89,8 +123,47 @@
       "content_profile": "PRESENTATION",
       "relative_path": "presentation.pptx",
       "sha256": "67846cffae7d565c42da6e7b294177b4b648ced5a620fd8ef8a4831c52b2ea4d",
-      "expected_objects": ["TEXT_BOX", "TABLE", "IMAGE"],
+      "expected_objects": [
+        "TEXT_BOX",
+        "TABLE",
+        "IMAGE"
+      ],
       "future_owner": "PLAN-030g"
+    },
+    {
+      "id": "synthetic-pdf-scanned-equivalent",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "REGULATORY",
+      "relative_path": "scanned-equivalent.pdf",
+      "sha256": "5cbe1cc8fad09bad553b8cac6907933d6b4e2dfa39f5b7ea2800ea9fc48f3d5f",
+      "expected_objects": [],
+      "future_owner": "PLAN-030h",
+      "note": "20 页全扫描态，替代仓外 FDA PIND 金样作为主门断言来源"
+    },
+    {
+      "id": "synthetic-pdf-scanned-equivalent-ocr",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "REGULATORY",
+      "relative_path": "scanned-equivalent.hpd-ocr.pdf",
+      "sha256": "b6517b9ae6bd9ca08e1a472596c60398ab41e587588ea99197d019768fdeb206",
+      "expected_objects": [],
+      "future_owner": "PLAN-030h",
+      "note": "OCR 后仍压整页图的 HYBRID 形态"
+    },
+    {
+      "id": "synthetic-pdf-slide-equivalent",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "PRESENTATION",
+      "relative_path": "slide-equivalent.pdf",
+      "sha256": "bce1daab53a0634cfc03ee5bd9173e9c86ba684b5513965ad879a889c1f57376",
+      "expected_objects": [
+        "IMAGE"
+      ],
+      "future_owner": "PLAN-030h",
+      "note": "16:9 无题注幻灯，12 个可译区，替代仓外 QX027N 金样"
     },
     {
       "id": "ljae439-knowledge-base",
@@ -113,6 +186,110 @@
       "truth_file": "tests/fixtures/structure/nature_comm_53384.truth.json",
       "fixture_state": "MATERIALIZED",
       "future_owner": "PLAN-030c"
+    },
+    {
+      "id": "synthetic-parity-pdf",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "parity.pdf",
+      "sha256": "5bde49623f31aa5734c756f1859756ca1a57e9439387dbf00d42f54a95f7e2c8",
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-docx",
+      "origin": "GENERATED",
+      "source_format": "DOCX",
+      "content_profile": "REVIEW_ARTICLE",
+      "relative_path": "parity.docx",
+      "sha256": "9ef01531318946bbb09b43d85f68ff8e2d0fbcdc0645fc1bdacce5c0d655e4bb",
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-pptx",
+      "origin": "GENERATED",
+      "source_format": "PPTX",
+      "content_profile": "PRESENTATION",
+      "relative_path": "parity.pptx",
+      "sha256": "6a608ef72f5a1631aeba628d9bde45e998ac029b76f38938a9cda5b32d2e4c02",
+      "expected_objects": [
+        "TEXT_BOX",
+        "IMAGE",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-png",
+      "origin": "GENERATED",
+      "source_format": "PNG",
+      "content_profile": "GENERIC",
+      "relative_path": "parity.png",
+      "sha256": "d4014969e20705d9a8f7e1804188a52ca9117ccc179813e575bb676123421d83",
+      "expected_objects": [
+        "IMAGE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-layout-three-column",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "three-column.pdf",
+      "sha256": "9077182935ff2a360e87914fc7c38715af66ddbbf33b4c4ce8de990125b4097f",
+      "expected_objects": [
+        "BODY"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-layout-four-column",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "four-column.pdf",
+      "sha256": "f8c4d9008cae8b3c00f401475bda29d025d0fa0de9801ab3a33f538c20101746",
+      "expected_objects": [
+        "BODY"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-layout-mixed-columns",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "mixed-columns.pdf",
+      "sha256": "418a3a3f89b156979c3743d7771508e865a9efd46a3c92b0c8599067ff742df2",
+      "expected_objects": [
+        "BODY"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-layout-poster-sections",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "poster-sections.pdf",
+      "sha256": "1a93ed3bcdf323fe112f44522015d198876c97d2a79cf54bf85b0ef4ee7b15f0",
+      "expected_objects": [
+        "BODY"
+      ],
+      "future_owner": "PLAN-030h"
     }
   ]
 }

@@ -7,6 +7,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gui_extensions import list_literal, set_literal  # noqa: E402
+
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/"
     "site-packages/pdf2zh_next/gui.py"
@@ -18,7 +21,8 @@ HELPER_HEAD = "# --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---"
 OFFICE_HELPER = '''
 # --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---
 # _qy_office_sidecar
-_QY_OFFICE_SIDECAR_EXT = {".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".webp"}
+# PLAN-030h H2：集合由 capabilities.gui_extension_manifest() 渲染，勿手改
+_QY_OFFICE_SIDECAR_EXT = __QY_SIDECAR_EXT__
 _QY_OFFICE_SIDECAR_URL = "http://127.0.0.1:8010"
 _QY_LANG_TO_SIDECAR = {
     "Simplified Chinese": "简体中文",
@@ -51,7 +55,7 @@ async def _qy_run_office_sidecar_task(
     import json
 
     suffix = file_path.suffix.lower()
-    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+    if suffix in __QY_IMAGE_EXT__:
         workflow_type = "image_overlay"
     elif suffix in {".ppt", ".pptx"}:
         workflow_type = "pptx"
@@ -147,15 +151,19 @@ async def _qy_run_office_sidecar_task(
             raise gr.Error(status.get("status_message", "文档/图片翻译异常结束"))
 
 
-'''
+'''.replace("__QY_SIDECAR_EXT__", set_literal("sidecar")).replace(
+    "__QY_IMAGE_EXT__", set_literal("image")
+)
 
 FILE_TYPES_OLD = 'file_types=[".pdf", ".PDF"],'
+# 历史补丁遗留的中间形态，仍需被识别为可升级锚点
 FILE_TYPES_DOCIMG = (
     'file_types=[".pdf", ".PDF", ".doc", ".docx", ".png", ".jpg", ".jpeg"],'
 )
-FILE_TYPES_NEW = (
+FILE_TYPES_LEGACY = (
     'file_types=[".pdf", ".PDF", ".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"],'
 )
+FILE_TYPES_NEW = f'file_types={list_literal("upload_file_types")},'
 
 LOOP_ANCHOR = '''            # Build translation settings
             translate_settings = _build_translate_settings(
@@ -257,6 +265,9 @@ def apply(text: str) -> tuple[str, bool]:
         or "_QY_LANG_TO_SIDECAR" not in text
         or 'payload = {"workflow_type": workflow_type, "to_lang": mapped}' not in text
         or '".ppt", ".pptx"' not in text
+        # 清单变更后已注入的旧集合必须被重写，否则新格式永远进不了 sidecar
+        or set_literal("sidecar") not in text
+        or set_literal("image") not in text
     )
     if needs_refresh:
         text2, n_removed = _strip_all_helpers(text)
@@ -270,13 +281,12 @@ def apply(text: str) -> tuple[str, bool]:
         text = text.replace(anchor, OFFICE_HELPER + anchor, 1)
         changed = True
 
-    if FILE_TYPES_OLD in text:
-        text = text.replace(FILE_TYPES_OLD, FILE_TYPES_NEW, 1)
-        changed = True
-    elif FILE_TYPES_DOCIMG in text:
-        text = text.replace(FILE_TYPES_DOCIMG, FILE_TYPES_NEW, 1)
-        changed = True
-    elif FILE_TYPES_NEW not in text:
+    # 任何历史形态都升级到清单渲染的当前形态，保证补丁幂等且可自愈
+    for stale in (FILE_TYPES_OLD, FILE_TYPES_DOCIMG, FILE_TYPES_LEGACY):
+        if stale in text and stale != FILE_TYPES_NEW:
+            text = text.replace(stale, FILE_TYPES_NEW)
+            changed = True
+    if FILE_TYPES_NEW not in text:
         print("WARN: file_types anchor not found", file=sys.stderr)
 
     if LOOP_ANCHOR in text:

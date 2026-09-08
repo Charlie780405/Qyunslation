@@ -20,18 +20,13 @@ from qyunslation.structure.representation import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-from tests.structure.sample_paths import pind_ocr_sample, pind_sample
+from tests.structure.sample_paths import (
+    SCANNED_PAGE_COUNT,
+    both_ocr,
+    both_scanned,
+)
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
-PIND = pind_sample()
-PIND_OCR = pind_ocr_sample()
-
-requires_pind = pytest.mark.skipif(
-    not PIND.is_file(), reason="FDA PIND sample lives outside the repo"
-)
-requires_pind_ocr = pytest.mark.skipif(
-    not PIND_OCR.is_file(), reason="OCR-derived PIND sample lives outside the repo"
-)
 
 
 def _scanned_page(doc):
@@ -68,19 +63,19 @@ def test_native_document_is_native_on_every_page():
     assert needs_ocr(modes) is False
 
 
-@requires_pind
-def test_scanned_document_is_scanned_on_every_page():
-    modes = _modes(PIND)
+@both_scanned
+def test_scanned_document_is_scanned_on_every_page(scanned_pdf):
+    modes = _modes(scanned_pdf)
 
     assert set(modes) == {Representation.SCANNED}
     assert document_representation(modes) is Representation.SCANNED
     assert needs_ocr(modes) is True
 
 
-@requires_pind_ocr
-def test_ocr_output_is_hybrid_not_native():
+@both_ocr
+def test_ocr_output_is_hybrid_not_native(ocr_pdf):
     """OCR 后仍压着整页扫描图，不能当作原生文字件。"""
-    modes = _modes(PIND_OCR)
+    modes = _modes(ocr_pdf)
 
     assert set(modes) == {Representation.HYBRID}
     assert document_representation(modes) is Representation.HYBRID
@@ -139,22 +134,22 @@ def test_manifest_records_representation_for_native():
     assert manifest.document.selected_mode is ProcessingMode.NATIVE
 
 
-@requires_pind
-def test_manifest_marks_scanned_document_hybrid():
-    manifest = PdfStructureScanner().scan(PIND)
+@both_scanned
+def test_manifest_marks_scanned_document_hybrid(scanned_pdf):
+    manifest = PdfStructureScanner().scan(scanned_pdf)
 
     assert manifest.extensions["document_representation"] == "SCANNED"
     assert manifest.extensions["needs_ocr"] is True
     assert manifest.document.selected_mode is ProcessingMode.HYBRID
 
 
-@requires_pind
-def test_pages_requiring_ocr_are_listed():
-    manifest = PdfStructureScanner().scan(PIND)
+@both_scanned
+def test_pages_requiring_ocr_are_listed(scanned_pdf):
+    manifest = PdfStructureScanner().scan(scanned_pdf)
 
     issues = [i for i in manifest.issues if i.code == "PAGES_REQUIRE_OCR"]
     assert len(issues) == 1
-    assert issues[0].details["pages"] == list(range(1, 21))
+    assert issues[0].details["pages"] == list(range(1, SCANNED_PAGE_COUNT + 1))
 
 
 def test_page_representations_are_recorded_per_page():
@@ -165,9 +160,9 @@ def test_page_representations_are_recorded_per_page():
     assert set(per_page.values()) == {"NATIVE_TEXT"}
 
 
-@requires_pind
-def test_scanned_path_leaves_no_pending_objects():
-    manifest = PdfStructureScanner().scan(PIND)
+@both_scanned
+def test_scanned_path_leaves_no_pending_objects(scanned_pdf):
+    manifest = PdfStructureScanner().scan(scanned_pdf)
 
     pending = [
         o for o in manifest.objects if o.execution_status is ExecutionStatus.PENDING
@@ -175,15 +170,15 @@ def test_scanned_path_leaves_no_pending_objects():
     assert pending == []
 
 
-@requires_pind
-def test_scanning_pind_stays_well_inside_the_prescan_budget():
+@both_scanned
+def test_scanning_stays_well_inside_the_prescan_budget(scanned_pdf):
     """20 页扫描件必须远低于 Tier-3 的 25s 预算。
 
     早期实现用 get_image_rects() 量图片覆盖，这一份要 17s；改走 get_text("dict")
     的图像块后降到亚秒级。
     """
     started = time.monotonic()
-    PdfStructureScanner().scan(PIND)
+    PdfStructureScanner().scan(scanned_pdf)
     elapsed = time.monotonic() - started
 
     assert elapsed < 10.0
