@@ -117,3 +117,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://translate.qyunsgen.com/
 - **首页摘要跨栏** 3 例（Nature p1）保留为 `LAYOUT_COLUMN_OVERFLOW` 警告，反映首页起排于 37% 的特殊排版，非缺陷。
 - **合成夹具 `double-column.pdf`** 每栏仅一行 37 字符且两行同 y，PyMuPDF 会合并成单块，几何上不构成双栏，因此未用于栏检测验收；该夹具是 030a 的格式检测契约基线，改动会波及 `catalog.v1.json` SHA 校验。
 - `QY030-PPT-001`（PPTX 图片对象）仍为唯一 XFAIL，留待 030g。
+
+## 八、契约字段空置登记（PLAN-030e 收拢）
+
+详见 [`WT-030e-docx-vertical-closure.md`](./WT-030e-docx-vertical-closure.md) §四。030e 已贯通 `translatable_blocks`（部分）、`output_evidence`（执行 checks）与 DOCX 表格行列数；PDF 表格行列、fast_fingerprint 等仍预留。

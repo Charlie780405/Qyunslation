@@ -84,7 +84,7 @@ def test_prepares_core_pdf_without_fake_conversion_lineage(
     [
         ("multipage.tiff", SourceFormat.TIFF, "image_overlay", 2),
         ("presentation.pptx", SourceFormat.PPTX, "pptx", 1),
-        ("review.docx", SourceFormat.DOCX, "docx", 1),
+        ("review.docx", SourceFormat.DOCX, "docx", 2),
     ],
 )
 def test_prepares_other_core_formats(

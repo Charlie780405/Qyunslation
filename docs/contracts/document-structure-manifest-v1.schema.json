@@ -8,9 +8,11 @@
           "title": "Asset Id",
           "type": "string"
         },
-        "locator": {
-          "minLength": 1,
-          "title": "Locator",
+        "role": {
+          "$ref": "#/$defs/AssetRole"
+        },
+        "sha256": {
+          "title": "Sha256",
           "type": "string"
         },
         "media_type": {
@@ -18,11 +20,9 @@
           "title": "Media Type",
           "type": "string"
         },
-        "role": {
-          "$ref": "#/$defs/AssetRole"
-        },
-        "sha256": {
-          "title": "Sha256",
+        "locator": {
+          "minLength": 1,
+          "title": "Locator",
           "type": "string"
         }
       },
@@ -50,13 +50,123 @@
     "BodyObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "BODY",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -72,43 +182,16 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
+        "source_geometry": {
           "anyOf": [
             {
-              "$ref": "#/$defs/OutputEvidence"
+              "$ref": "#/$defs/SourceGeometry"
             },
             {
               "type": "null"
             }
           ],
           "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
         },
         "reading_order": {
           "anyOf": [
@@ -122,88 +205,12 @@
           ],
           "default": null,
           "title": "Reading Order"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
-        "source_geometry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SourceGeometry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "BODY",
-          "title": "Type",
-          "type": "string"
         }
       },
       "required": [
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "BodyObject",
@@ -216,12 +223,12 @@
           "title": "X0",
           "type": "number"
         },
-        "x1": {
-          "title": "X1",
-          "type": "number"
-        },
         "y0": {
           "title": "Y0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
           "type": "number"
         },
         "y1": {
@@ -246,23 +253,26 @@
           "title": "Canvas Id",
           "type": "string"
         },
+        "kind": {
+          "$ref": "#/$defs/CanvasKind"
+        },
+        "source_index": {
+          "minimum": 1,
+          "title": "Source Index",
+          "type": "integer"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "number"
+        },
         "height": {
           "exclusiveMinimum": 0,
           "title": "Height",
           "type": "number"
         },
-        "kind": {
-          "$ref": "#/$defs/CanvasKind"
-        },
-        "layout_mode": {
-          "$ref": "#/$defs/LayoutMode"
-        },
-        "reading_order": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Reading Order",
-          "type": "array"
+        "unit": {
+          "$ref": "#/$defs/CoordinateUnit"
         },
         "rotation": {
           "default": 0,
@@ -275,6 +285,16 @@
           "title": "Rotation",
           "type": "integer"
         },
+        "layout_mode": {
+          "$ref": "#/$defs/LayoutMode"
+        },
+        "reading_order": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reading Order",
+          "type": "array"
+        },
         "source_geometry": {
           "anyOf": [
             {
@@ -285,19 +305,6 @@
             }
           ],
           "default": null
-        },
-        "source_index": {
-          "minimum": 1,
-          "title": "Source Index",
-          "type": "integer"
-        },
-        "unit": {
-          "$ref": "#/$defs/CoordinateUnit"
-        },
-        "width": {
-          "exclusiveMinimum": 0,
-          "title": "Width",
-          "type": "number"
         }
       },
       "required": [
@@ -325,20 +332,123 @@
     "CaptionObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "CAPTION",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
         },
-        "caption_for": {
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SourceRef"
           },
-          "title": "Caption For",
+          "title": "Source Refs",
           "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -354,89 +464,6 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/OutputEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
         "source_geometry": {
           "anyOf": [
             {
@@ -448,31 +475,18 @@
           ],
           "default": null
         },
-        "source_refs": {
+        "caption_for": {
           "items": {
-            "$ref": "#/$defs/SourceRef"
+            "type": "string"
           },
-          "title": "Source Refs",
+          "title": "Caption For",
           "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "CAPTION",
-          "title": "Type",
-          "type": "string"
         }
       },
       "required": [
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "CaptionObject",
@@ -494,6 +508,21 @@
     "ConversionStep": {
       "additionalProperties": true,
       "properties": {
+        "step_id": {
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "source_asset_id": {
+          "minLength": 1,
+          "title": "Source Asset Id",
+          "type": "string"
+        },
+        "output_asset_id": {
+          "minLength": 1,
+          "title": "Output Asset Id",
+          "type": "string"
+        },
         "converter": {
           "minLength": 1,
           "title": "Converter",
@@ -504,25 +533,10 @@
           "title": "Converter Version",
           "type": "string"
         },
-        "output_asset_id": {
-          "minLength": 1,
-          "title": "Output Asset Id",
-          "type": "string"
-        },
         "parameters": {
           "additionalProperties": true,
           "title": "Parameters",
           "type": "object"
-        },
-        "source_asset_id": {
-          "minLength": 1,
-          "title": "Source Asset Id",
-          "type": "string"
-        },
-        "step_id": {
-          "minLength": 1,
-          "title": "Step Id",
-          "type": "string"
         }
       },
       "required": [
@@ -547,16 +561,15 @@
     "DetectorEvidence": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/BoundingBox"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+        "detector": {
+          "minLength": 1,
+          "title": "Detector",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
         },
         "confidence": {
           "anyOf": [
@@ -572,20 +585,21 @@
           "default": null,
           "title": "Confidence"
         },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "details": {
           "additionalProperties": true,
           "title": "Details",
           "type": "object"
-        },
-        "detector": {
-          "minLength": 1,
-          "title": "Detector",
-          "type": "string"
-        },
-        "label": {
-          "minLength": 1,
-          "title": "Label",
-          "type": "string"
         }
       },
       "required": [
@@ -598,37 +612,8 @@
     "DocumentInfo": {
       "additionalProperties": true,
       "properties": {
-        "auto_profile_suggestion": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ContentProfile"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "content_profile": {
-          "$ref": "#/$defs/ContentProfile"
-        },
-        "conversion_lineage": {
-          "items": {
-            "$ref": "#/$defs/ConversionStep"
-          },
-          "title": "Conversion Lineage",
-          "type": "array"
-        },
-        "derived_assets": {
-          "items": {
-            "$ref": "#/$defs/AssetRef"
-          },
-          "title": "Derived Assets",
-          "type": "array"
-        },
-        "detected_mime": {
-          "minLength": 1,
-          "title": "Detected Mime",
+        "source_sha256": {
+          "title": "Source Sha256",
           "type": "string"
         },
         "fast_fingerprint": {
@@ -643,11 +628,24 @@
           "default": null,
           "title": "Fast Fingerprint"
         },
-        "input_asset": {
-          "$ref": "#/$defs/AssetRef"
+        "source_name": {
+          "minLength": 1,
+          "title": "Source Name",
+          "type": "string"
         },
-        "output_editability": {
-          "$ref": "#/$defs/OutputEditability"
+        "source_format": {
+          "$ref": "#/$defs/SourceFormat"
+        },
+        "detected_mime": {
+          "minLength": 1,
+          "title": "Detected Mime",
+          "type": "string"
+        },
+        "content_profile": {
+          "$ref": "#/$defs/ContentProfile"
+        },
+        "profile_source": {
+          "$ref": "#/$defs/ProfileSource"
         },
         "profile_confidence": {
           "anyOf": [
@@ -670,8 +668,16 @@
           "title": "Profile Evidence",
           "type": "array"
         },
-        "profile_source": {
-          "$ref": "#/$defs/ProfileSource"
+        "auto_profile_suggestion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "requested_mode": {
           "$ref": "#/$defs/ProcessingMode"
@@ -679,17 +685,25 @@
         "selected_mode": {
           "$ref": "#/$defs/ProcessingMode"
         },
-        "source_format": {
-          "$ref": "#/$defs/SourceFormat"
+        "output_editability": {
+          "$ref": "#/$defs/OutputEditability"
         },
-        "source_name": {
-          "minLength": 1,
-          "title": "Source Name",
-          "type": "string"
+        "input_asset": {
+          "$ref": "#/$defs/AssetRef"
         },
-        "source_sha256": {
-          "title": "Source Sha256",
-          "type": "string"
+        "derived_assets": {
+          "items": {
+            "$ref": "#/$defs/AssetRef"
+          },
+          "title": "Derived Assets",
+          "type": "array"
+        },
+        "conversion_lineage": {
+          "items": {
+            "$ref": "#/$defs/ConversionStep"
+          },
+          "title": "Conversion Lineage",
+          "type": "array"
         }
       },
       "required": [
@@ -722,13 +736,148 @@
     "FigureObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "FIGURE",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "source_geometry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "caption_ids": {
           "items": {
@@ -743,20 +892,54 @@
           },
           "title": "Child Object Ids",
           "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "object_id",
+        "canvas_id",
+        "representation"
+      ],
+      "title": "FigureObject",
+      "type": "object"
+    },
+    "ImageObject": {
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "const": "IMAGE",
+          "title": "Type",
+          "type": "string"
         },
-        "confidence": {
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "canvas_id": {
+          "minLength": 1,
+          "title": "Canvas Id",
+          "type": "string"
+        },
+        "bbox": {
           "anyOf": [
             {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
+              "$ref": "#/$defs/BoundingBox"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Confidence"
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
         },
         "detector_evidence": {
           "items": {
@@ -765,36 +948,16 @@
           "title": "Detector Evidence",
           "type": "array"
         },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
         "execution_status": {
           "$ref": "#/$defs/ExecutionStatus",
           "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/OutputEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
         },
         "reason_code": {
           "anyOf": [
@@ -808,8 +971,28 @@
           "default": null,
           "title": "Reason Code"
         },
-        "representation": {
-          "$ref": "#/$defs/Representation"
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "semantic_id": {
           "anyOf": [
@@ -823,12 +1006,6 @@
           "default": null,
           "title": "Semantic Id"
         },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
         "semantic_scope": {
           "anyOf": [
             {
@@ -841,57 +1018,11 @@
           "default": null,
           "title": "Semantic Scope"
         },
-        "source_geometry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SourceGeometry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "FIGURE",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "object_id",
-        "canvas_id",
-        "bbox",
-        "representation"
-      ],
-      "title": "FigureObject",
-      "type": "object"
-    },
-    "ImageObject": {
-      "additionalProperties": true,
-      "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
-        },
-        "canvas_id": {
-          "minLength": 1,
-          "title": "Canvas Id",
-          "type": "string"
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -907,20 +1038,16 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
+        "source_geometry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "occurrence_key": {
           "anyOf": [
@@ -933,111 +1060,12 @@
           ],
           "default": null,
           "title": "Occurrence Key"
-        },
-        "output_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/OutputEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
-        "source_geometry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SourceGeometry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "IMAGE",
-          "title": "Type",
-          "type": "string"
         }
       },
       "required": [
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "ImageObject",
@@ -1071,15 +1099,11 @@
           "title": "Code",
           "type": "string"
         },
-        "details": {
-          "additionalProperties": true,
-          "title": "Details",
-          "type": "object"
+        "severity": {
+          "$ref": "#/$defs/IssueSeverity"
         },
-        "message": {
-          "minLength": 1,
-          "title": "Message",
-          "type": "string"
+        "stage": {
+          "$ref": "#/$defs/PipelineStage"
         },
         "object_id": {
           "anyOf": [
@@ -1098,11 +1122,15 @@
           "title": "Retryable",
           "type": "boolean"
         },
-        "severity": {
-          "$ref": "#/$defs/IssueSeverity"
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
         },
-        "stage": {
-          "$ref": "#/$defs/PipelineStage"
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
         }
       },
       "required": [
@@ -1123,12 +1151,11 @@
           "title": "Figure Count",
           "type": "integer"
         },
-        "issue_counts": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Issue Counts",
-          "type": "object"
+        "table_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Table Count",
+          "type": "integer"
         },
         "object_counts": {
           "additionalProperties": {
@@ -1144,11 +1171,12 @@
           "title": "Status Counts",
           "type": "object"
         },
-        "table_count": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Table Count",
-          "type": "integer"
+        "issue_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Issue Counts",
+          "type": "object"
         }
       },
       "title": "ManifestSummary",
@@ -1198,13 +1226,123 @@
     "PosterSectionObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "POSTER_SECTION",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -1220,58 +1358,16 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
+        "source_geometry": {
           "anyOf": [
             {
-              "$ref": "#/$defs/OutputEvidence"
+              "$ref": "#/$defs/SourceGeometry"
             },
             {
               "type": "null"
             }
           ],
           "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
         },
         "section_role": {
           "anyOf": [
@@ -1284,73 +1380,12 @@
           ],
           "default": null,
           "title": "Section Role"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
-        "source_geometry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SourceGeometry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "POSTER_SECTION",
-          "title": "Type",
-          "type": "string"
         }
       },
       "required": [
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "PosterSectionObject",
@@ -1409,13 +1444,123 @@
     "ShapeObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "SHAPE",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -1431,89 +1576,6 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/OutputEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
         "source_geometry": {
           "anyOf": [
             {
@@ -1524,25 +1586,6 @@
             }
           ],
           "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "SHAPE",
-          "title": "Type",
-          "type": "string"
         },
         "z_order": {
           "anyOf": [
@@ -1561,7 +1604,6 @@
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "ShapeObject",
@@ -1592,6 +1634,17 @@
     "SourceGeometry": {
       "additionalProperties": true,
       "properties": {
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoordinateUnit"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Unit"
+        },
         "bbox": {
           "anyOf": [
             {
@@ -1620,11 +1673,6 @@
           "default": null,
           "title": "Bbox"
         },
-        "details": {
-          "additionalProperties": true,
-          "title": "Details",
-          "type": "object"
-        },
         "transform": {
           "anyOf": [
             {
@@ -1640,16 +1688,10 @@
           "default": null,
           "title": "Transform"
         },
-        "unit": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CoordinateUnit"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "title": "Unit"
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
         }
       },
       "required": [
@@ -1664,6 +1706,11 @@
         "kind": {
           "$ref": "#/$defs/SourceRefKind"
         },
+        "ref": {
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
         "occurrence_index": {
           "anyOf": [
             {
@@ -1676,11 +1723,6 @@
           ],
           "default": null,
           "title": "Occurrence Index"
-        },
-        "ref": {
-          "minLength": 1,
-          "title": "Ref",
-          "type": "string"
         },
         "source_geometry": {
           "anyOf": [
@@ -1719,33 +1761,123 @@
     "TableObject": {
       "additionalProperties": true,
       "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
+        "type": {
+          "const": "TABLE",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
         },
         "canvas_id": {
           "minLength": 1,
           "title": "Canvas Id",
           "type": "string"
         },
-        "caption_ids": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Caption Ids",
-          "type": "array"
-        },
-        "column_count": {
+        "bbox": {
           "anyOf": [
             {
-              "minimum": 0,
-              "type": "integer"
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Column Count"
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Id"
+        },
+        "semantic_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Scope"
+        },
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -1761,25 +1893,10 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
+        "source_geometry": {
           "anyOf": [
             {
-              "$ref": "#/$defs/OutputEvidence"
+              "$ref": "#/$defs/SourceGeometry"
             },
             {
               "type": "null"
@@ -1787,32 +1904,12 @@
           ],
           "default": null
         },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
+        "caption_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Caption Ids",
+          "type": "array"
         },
         "row_count": {
           "anyOf": [
@@ -1827,6 +1924,120 @@
           "default": null,
           "title": "Row Count"
         },
+        "column_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Count"
+        }
+      },
+      "required": [
+        "type",
+        "object_id",
+        "canvas_id",
+        "representation"
+      ],
+      "title": "TableObject",
+      "type": "object"
+    },
+    "TextBoxObject": {
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "const": "TEXT_BOX",
+          "title": "Type",
+          "type": "string"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "canvas_id": {
+          "minLength": 1,
+          "title": "Canvas Id",
+          "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representation": {
+          "$ref": "#/$defs/Representation"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "detector_evidence": {
+          "items": {
+            "$ref": "#/$defs/DetectorEvidence"
+          },
+          "title": "Detector Evidence",
+          "type": "array"
+        },
+        "translatable_blocks": {
+          "items": {
+            "$ref": "#/$defs/TranslatableBlock"
+          },
+          "title": "Translatable Blocks",
+          "type": "array"
+        },
+        "execution_status": {
+          "$ref": "#/$defs/ExecutionStatus",
+          "default": "PENDING"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "planned_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Action"
+        },
+        "output_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "semantic_id": {
           "anyOf": [
             {
@@ -1838,12 +2049,6 @@
           ],
           "default": null,
           "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
         },
         "semantic_scope": {
           "anyOf": [
@@ -1857,57 +2062,11 @@
           "default": null,
           "title": "Semantic Scope"
         },
-        "source_geometry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SourceGeometry"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "TABLE",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "object_id",
-        "canvas_id",
-        "bbox",
-        "representation"
-      ],
-      "title": "TableObject",
-      "type": "object"
-    },
-    "TextBoxObject": {
-      "additionalProperties": true,
-      "properties": {
-        "bbox": {
-          "$ref": "#/$defs/BoundingBox"
-        },
-        "canvas_id": {
-          "minLength": 1,
-          "title": "Canvas Id",
-          "type": "string"
+        "semantic_occurrence_index": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Semantic Occurrence Index",
+          "type": "integer"
         },
         "confidence": {
           "anyOf": [
@@ -1923,89 +2082,6 @@
           "default": null,
           "title": "Confidence"
         },
-        "detector_evidence": {
-          "items": {
-            "$ref": "#/$defs/DetectorEvidence"
-          },
-          "title": "Detector Evidence",
-          "type": "array"
-        },
-        "execution_status": {
-          "$ref": "#/$defs/ExecutionStatus",
-          "default": "PENDING"
-        },
-        "object_id": {
-          "title": "Object Id",
-          "type": "string"
-        },
-        "output_evidence": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/OutputEvidence"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "planned_action": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Planned Action"
-        },
-        "reason_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason Code"
-        },
-        "representation": {
-          "$ref": "#/$defs/Representation"
-        },
-        "semantic_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Id"
-        },
-        "semantic_occurrence_index": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Semantic Occurrence Index",
-          "type": "integer"
-        },
-        "semantic_scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Semantic Scope"
-        },
         "source_geometry": {
           "anyOf": [
             {
@@ -2016,25 +2092,6 @@
             }
           ],
           "default": null
-        },
-        "source_refs": {
-          "items": {
-            "$ref": "#/$defs/SourceRef"
-          },
-          "title": "Source Refs",
-          "type": "array"
-        },
-        "translatable_blocks": {
-          "items": {
-            "$ref": "#/$defs/TranslatableBlock"
-          },
-          "title": "Translatable Blocks",
-          "type": "array"
-        },
-        "type": {
-          "const": "TEXT_BOX",
-          "title": "Type",
-          "type": "string"
         },
         "z_order": {
           "anyOf": [
@@ -2053,7 +2110,6 @@
         "type",
         "object_id",
         "canvas_id",
-        "bbox",
         "representation"
       ],
       "title": "TextBoxObject",
@@ -2062,6 +2118,15 @@
     "TranslatableBlock": {
       "additionalProperties": true,
       "properties": {
+        "block_id": {
+          "minLength": 1,
+          "title": "Block Id",
+          "type": "string"
+        },
+        "source_text": {
+          "title": "Source Text",
+          "type": "string"
+        },
         "bbox": {
           "anyOf": [
             {
@@ -2072,11 +2137,6 @@
             }
           ],
           "default": null
-        },
-        "block_id": {
-          "minLength": 1,
-          "title": "Block Id",
-          "type": "string"
         },
         "source_language": {
           "anyOf": [
@@ -2089,10 +2149,6 @@
           ],
           "default": null,
           "title": "Source Language"
-        },
-        "source_text": {
-          "title": "Source Text",
-          "type": "string"
         }
       },
       "required": [
@@ -2105,36 +2161,32 @@
   },
   "additionalProperties": true,
   "properties": {
-    "canvases": {
-      "items": {
-        "$ref": "#/$defs/Canvas"
-      },
-      "title": "Canvases",
-      "type": "array"
+    "schema_version": {
+      "default": "1.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "manifest_id": {
+      "title": "Manifest Id",
+      "type": "string"
     },
     "created_at": {
       "format": "date-time",
       "title": "Created At",
       "type": "string"
     },
+    "producer": {
+      "$ref": "#/$defs/ProducerInfo"
+    },
     "document": {
       "$ref": "#/$defs/DocumentInfo"
     },
-    "extensions": {
-      "additionalProperties": true,
-      "title": "Extensions",
-      "type": "object"
-    },
-    "issues": {
+    "canvases": {
       "items": {
-        "$ref": "#/$defs/ManifestIssue"
+        "$ref": "#/$defs/Canvas"
       },
-      "title": "Issues",
+      "title": "Canvases",
       "type": "array"
-    },
-    "manifest_id": {
-      "title": "Manifest Id",
-      "type": "string"
     },
     "objects": {
       "items": {
@@ -2181,13 +2233,12 @@
       "title": "Objects",
       "type": "array"
     },
-    "producer": {
-      "$ref": "#/$defs/ProducerInfo"
-    },
-    "schema_version": {
-      "default": "1.0.0",
-      "title": "Schema Version",
-      "type": "string"
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ManifestIssue"
+      },
+      "title": "Issues",
+      "type": "array"
     },
     "summary": {
       "anyOf": [
@@ -2199,6 +2250,11 @@
         }
       ],
       "default": null
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
     }
   },
   "required": [

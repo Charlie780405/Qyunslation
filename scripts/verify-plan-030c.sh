@@ -155,14 +155,12 @@ xfails = {
     if (node := case.find("skipped")) is not None
     and node.attrib.get("type") == "pytest.xfail"
 }
-assert xfails == {
-    "test_pptx_picture_shape_is_emitted_as_a_translatable_object",
-}, xfails
+assert xfails == set(), xfails
 assert not root.findall(".//failure")
 assert not root.findall(".//error")
 PY
   then
-    expected_red "only PLAN-030g PPT image execution remains XFAIL"
+    pass "structure suite has no XFAIL"
   else
     fail "structure XFAIL inventory changed"
     show_failure_log "$STRUCTURE_LOG"
@@ -177,30 +175,10 @@ RUNXFAIL_LOG="$STAGE_DIR/runxfail.log"
 if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q tests/structure/test_plan030_red_baselines.py \
     --runxfail --no-cov --junitxml="$RUNXFAIL_XML" >"$RUNXFAIL_LOG" 2>&1; then
-  fail "--runxfail unexpectedly passed; the PLAN-030g PPT gap is stale"
-  show_failure_log "$RUNXFAIL_LOG"
+  pass "red baselines have no remaining XFAIL"
 else
-  if "$PY" - "$RUNXFAIL_XML" <<'PY'
-from pathlib import Path
-import sys
-import xml.etree.ElementTree as ET
-
-root = ET.parse(Path(sys.argv[1])).getroot()
-cases = root.findall(".//testcase")
-failed = {case.attrib["name"] for case in cases if case.find("failure") is not None}
-assert len(cases) == 6, len(cases)
-assert failed == {
-    "test_pptx_picture_shape_is_emitted_as_a_translatable_object",
-}, failed
-assert not root.findall(".//error")
-assert not root.findall(".//skipped")
-PY
-  then
-    expected_red "--runxfail proves the exact PLAN-030g PPT gap still fails"
-  else
-    fail "--runxfail differs from the exact one-failure baseline"
-    show_failure_log "$RUNXFAIL_LOG"
-  fi
+  fail "red baselines failed under --runxfail"
+  show_failure_log "$RUNXFAIL_LOG"
 fi
 
 run_pass \

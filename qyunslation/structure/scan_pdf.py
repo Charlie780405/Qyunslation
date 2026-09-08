@@ -52,6 +52,8 @@ from .models import (
     TableObject,
     build_manifest_id,
     build_object_id,
+    CURRENT_SCHEMA_VERSION,
+    TranslatableBlock,
 )
 from .profiles import resolve_profile
 
@@ -87,6 +89,15 @@ def _rect_from_bbox(bb) -> object:
             self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
 
     return _R(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
+
+
+def _clip_text(page, bb) -> str:
+    import pymupdf
+
+    try:
+        return (page.get_text("text", clip=pymupdf.Rect(bb)) or "").strip()
+    except Exception:
+        return ""
 
 
 class PdfStructureScanner:
@@ -185,12 +196,13 @@ class PdfStructureScanner:
                 [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": key}],
             )
             rect = _rect_from_bbox((block.x0, block.y0, block.x1, block.y1))
+            body_bbox = _clip_bbox(rect, canvas)
             objects.append(
                 BodyObject(
                     type=ObjectType.BODY,
                     object_id=object_id,
                     canvas_id=canvas.canvas_id,
-                    bbox=_clip_bbox(rect, canvas),
+                    bbox=body_bbox,
                     representation=Representation.NATIVE_TEXT,
                     source_refs=[SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=key)],
                     detector_evidence=[
@@ -198,12 +210,19 @@ class PdfStructureScanner:
                             detector="pymupdf_text_blocks",
                             label="body",
                             confidence=0.7,
-                            bbox=_clip_bbox(rect, canvas),
+                            bbox=body_bbox,
                             details={
                                 "page": page_no,
                                 "layout_mode": mode.value,
                                 "column": column_of(block, page, mode),
                             },
+                        )
+                    ],
+                    translatable_blocks=[
+                        TranslatableBlock(
+                            block_id=f"block:{order}",
+                            source_text=block.text,
+                            bbox=body_bbox,
                         )
                     ],
                     execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,
@@ -416,6 +435,7 @@ class PdfStructureScanner:
                             [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": fig_key}],
                         )
                         skipped = region is None
+                        cap_text = _clip_text(page, bb)
                         objects.append(
                             CaptionObject(
                                 type=ObjectType.CAPTION,
@@ -425,6 +445,13 @@ class PdfStructureScanner:
                                 representation=Representation.NATIVE_TEXT,
                                 source_refs=[
                                     SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=cap_key)
+                                ],
+                                translatable_blocks=[
+                                    TranslatableBlock(
+                                        block_id=f"block:caption:{num}",
+                                        source_text=cap_text,
+                                        bbox=cap_bbox,
+                                    )
                                 ],
                                 caption_for=[fig_id],
                                 semantic_id=f"caption:figure:{num}",
@@ -461,6 +488,15 @@ class PdfStructureScanner:
                                 semantic_id=f"figure:{num}",
                                 semantic_scope="main",
                                 caption_ids=[cap_id],
+                                translatable_blocks=[
+                                    TranslatableBlock(
+                                        block_id=f"block:figure:{num}",
+                                        source_text=cap_text,
+                                        bbox=body_bbox,
+                                    )
+                                ]
+                                if region is not None
+                                else [],
                             )
                         )
                     else:
@@ -468,6 +504,7 @@ class PdfStructureScanner:
                             continue
                         table_seen.add(num)
                         tab_key = f"table:{num}"
+                        tab_cap_text = _clip_text(page, bb)
                         tab_id = build_object_id(
                             prepared.source_sha256,
                             canvas.canvas_id,
@@ -484,6 +521,13 @@ class PdfStructureScanner:
                                 representation=Representation.NATIVE_TEXT,
                                 source_refs=[
                                     SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=cap_key)
+                                ],
+                                translatable_blocks=[
+                                    TranslatableBlock(
+                                        block_id=f"block:caption:table:{num}",
+                                        source_text=tab_cap_text,
+                                        bbox=cap_bbox,
+                                    )
                                 ],
                                 caption_for=[tab_id],
                                 semantic_id=f"caption:table:{num}",
@@ -579,7 +623,7 @@ class PdfStructureScanner:
             conversion_lineage=list(prepared.conversion_lineage),
         )
         return DocumentStructureManifest(
-            schema_version="1.0.0",
+            schema_version=CURRENT_SCHEMA_VERSION,
             manifest_id=build_manifest_id(prepared.source_sha256),
             created_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
             producer=ProducerInfo(

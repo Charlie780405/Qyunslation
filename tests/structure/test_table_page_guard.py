@@ -21,11 +21,10 @@ from pdf_figure_crop import (  # noqa: E402
     translatable_regions,
 )
 
+from tests.structure.sample_paths import slide_sample
+
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = Path(
-    "/home/dev/pdf2zh/pdf2zh_files/57114032-8727-41f9-b826-b5ff40fcf733/"
-    "QX027N QnA-2026.08.19-临床.pdf"
-)
+SLIDE = slide_sample()
 
 
 def test_nature_table2_page_has_no_ocr_regions():

@@ -34,7 +34,7 @@ def test_extracts_docx_section_and_column_count(generated_structure_fixtures: Pa
 
     canvases = extract_canvases(SourceFormat.DOCX, content)
 
-    assert len(canvases) == 1
+    assert len(canvases) == 2
     canvas = canvases[0]
     assert canvas.canvas_id == "section:1"
     assert canvas.kind is CanvasKind.SECTION

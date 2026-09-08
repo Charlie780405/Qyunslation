@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-CURRENT_SCHEMA_VERSION = "1.0.0"
+CURRENT_SCHEMA_VERSION = "1.1.0"
 SUPPORTED_SCHEMA_MAJOR = 1
 _SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -310,7 +310,7 @@ class SemanticObjectBase(ContractModel):
     type: ObjectType
     object_id: str
     canvas_id: str = Field(min_length=1)
-    bbox: BoundingBox
+    bbox: BoundingBox | None = None
     representation: Representation
     source_refs: list[SourceRef] = Field(default_factory=list)
     detector_evidence: list[DetectorEvidence] = Field(default_factory=list)
@@ -613,9 +613,18 @@ class DocumentStructureManifest(ContractModel):
                 raise ValueError(
                     f"MANIFEST_CANVAS_UNKNOWN: object references {item.canvas_id!r}"
                 )
-            if item.bbox.x1 > canvas.width or item.bbox.y1 > canvas.height:
+            if item.bbox is not None:
+                if canvas.kind is CanvasKind.SECTION:
+                    raise ValueError(
+                        "MANIFEST_BBOX_INVALID: flow-layout SECTION objects must not carry bbox"
+                    )
+                if item.bbox.x1 > canvas.width or item.bbox.y1 > canvas.height:
+                    raise ValueError(
+                        "MANIFEST_BBOX_INVALID: object bbox exceeds its canvas"
+                    )
+            elif canvas.kind is not CanvasKind.SECTION:
                 raise ValueError(
-                    "MANIFEST_BBOX_INVALID: object bbox exceeds its canvas"
+                    "MANIFEST_BBOX_REQUIRED: page/slide/poster objects must carry bbox"
                 )
             if item.type in {ObjectType.FIGURE, ObjectType.TABLE} and item.semantic_id:
                 occurrence = (

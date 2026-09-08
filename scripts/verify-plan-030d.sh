@@ -70,6 +70,22 @@ if [[ ! "$TEST_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
+SAMPLE_ROOT="${QYUNSLATION_SAMPLE_ROOT:-/home/dev/pdf2zh/pdf2zh_files}"
+MISSING_SAMPLES=0
+for rel in \
+  "57114032-8727-41f9-b826-b5ff40fcf733/QX027N QnA-2026.08.19-临床.pdf" \
+  "5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.pdf" \
+  "5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.hpd-ocr.pdf"
+do
+  if [[ ! -f "$SAMPLE_ROOT/$rel" ]]; then
+    blocked "missing external sample: $SAMPLE_ROOT/$rel"
+    MISSING_SAMPLES=$((MISSING_SAMPLES + 1))
+  fi
+done
+if [[ "$MISSING_SAMPLES" -eq 0 ]]; then
+  pass "external gold samples present under QYUNSLATION_SAMPLE_ROOT"
+fi
+
 run_pass \
   "PLAN-030d modules compile" \
   "$STAGE_DIR/compile.log" \
@@ -227,14 +243,12 @@ xfails = {
     if (node := case.find("skipped")) is not None
     and node.attrib.get("type") == "pytest.xfail"
 }
-assert xfails == {
-    "test_pptx_picture_shape_is_emitted_as_a_translatable_object",
-}, xfails
+assert xfails == set(), xfails
 assert not root.findall(".//failure")
 assert not root.findall(".//error")
 PY
   then
-    expected_red "only PLAN-030g PPT image execution remains XFAIL"
+    pass "structure suite has no XFAIL"
   else
     fail "structure XFAIL inventory changed"
     show_failure_log "$STRUCTURE_LOG"

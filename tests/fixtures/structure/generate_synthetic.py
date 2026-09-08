@@ -18,6 +18,7 @@ from typing import Callable
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.enum.section import WD_SECTION
 from docx.shared import Inches
 from PIL import Image, ImageDraw
 from pptx import Presentation
@@ -178,6 +179,11 @@ def _docx_bytes() -> bytes:
     document.core_properties.created = FIXED_TIME
     document.core_properties.modified = FIXED_TIME
 
+    header = document.sections[0].header
+    header.paragraphs[0].text = "Deterministic header for review"
+    footer = document.sections[0].footer
+    footer.paragraphs[0].text = "Deterministic footer for review"
+
     section_properties = document.sections[0]._sectPr
     columns = section_properties.find(qn("w:cols"))
     if columns is None:
@@ -199,6 +205,22 @@ def _docx_bytes() -> bytes:
     document.add_paragraph("Figure 1. First occurrence.")
     document.add_picture(BytesIO(image), width=Inches(1.6))
     document.add_paragraph("Figure 1. Reused occurrence.")
+
+    textbox_para = document.add_paragraph()
+    run = textbox_para.add_run()
+    txbx = OxmlElement("w:txbxContent")
+    inner_p = OxmlElement("w:p")
+    inner_r = OxmlElement("w:r")
+    inner_t = OxmlElement("w:t")
+    inner_t.text = "Standalone text box content."
+    inner_r.append(inner_t)
+    inner_p.append(inner_r)
+    txbx.append(inner_p)
+    run._r.append(txbx)
+
+    document.add_page_break()
+    document.add_section(WD_SECTION.NEW_PAGE)
+    document.add_paragraph("Second section body in single flow.")
 
     stream = BytesIO()
     document.save(stream)

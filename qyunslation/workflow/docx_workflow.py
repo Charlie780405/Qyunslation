@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Self
 
 from qyunslation.exporter.base import ExporterConfig
+from qyunslation.structure import DocxStructureScanner, ManifestStore
 from qyunslation.exporter.docx.docx2docx_exporter import Docx2DocxExporter
 from qyunslation.exporter.docx.docx2html_exporter import Docx2HTMLExporterConfig, Docx2HTMLExporter
 from qyunslation.glossary.glossary import Glossary
@@ -39,12 +40,30 @@ class DocxWorkflow(Workflow[DocxWorkflowConfig, Document, Document], HTMLExporta
         translator = DocxTranslator(translate_config)
         return document, translator
 
+    def _structure_manifest(self, document: Document):
+        store = ManifestStore()
+        import hashlib
+
+        digest = hashlib.sha256(document.content).hexdigest()
+        cached = store.get(digest)
+        if cached is not None:
+            return cached
+        try:
+            manifest = DocxStructureScanner().scan(document.content, source_name=document.stem + ".docx")
+        except Exception as exc:
+            if self.config.logger:
+                self.config.logger.warning("DOCX structure scan failed, legacy path: %s", exc)
+            return None
+        store.put(manifest)
+        return manifest
+
     def translate(self) -> Self:
         # 同步版本
         self.progress_tracker.update(percent=10, message="正在准备翻译...")
         document, translator = self._pre_translate(self.document_original)
         self._translator = translator  # 保存translator引用
-        translator.translate(document)
+        structure_manifest = self._structure_manifest(document)
+        translator.translate(document, structure_manifest=structure_manifest)
         if translator.glossary.glossary_dict:
             self.progress_tracker.update(percent=95, message="正在保存术语表...")
             self.attachment.add_document("glossary", Glossary.glossary_dict2csv(translator.glossary.glossary_dict))
@@ -57,9 +76,10 @@ class DocxWorkflow(Workflow[DocxWorkflowConfig, Document, Document], HTMLExporta
         self.progress_tracker.update(percent=10, message="正在准备翻译...")
         document, translator = self._pre_translate(self.document_original)
         self._translator = translator  # 保存translator引用
+        structure_manifest = self._structure_manifest(document)
 
         # 翻译阶段 - 由 agent 更新细粒度进度
-        await translator.translate_async(document)
+        await translator.translate_async(document, structure_manifest=structure_manifest)
 
         # 保存术语表阶段
         if translator.glossary.glossary_dict:

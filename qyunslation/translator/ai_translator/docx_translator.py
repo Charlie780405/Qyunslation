@@ -19,6 +19,10 @@ from docx.text.run import Run
 from docx.table import _Cell, Table
 
 from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.structure.docx_walk import walk_docx
+from qyunslation.structure.execution_evidence import write_output_evidence
+from qyunslation.structure.manifest_store import ManifestStore
+from qyunslation.structure.models import ExecutionStatus, ObjectType
 from qyunslation.ir.document import Document
 from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
@@ -307,25 +311,74 @@ class DocxTranslator(AiTranslator):
 
     def _pre_translate(self, document: Document) -> Tuple[DocumentObject, List[Dict[str, Any]], List[str]]:
         content = self._decrypt_if_needed(document.content)
-        doc = docx.Document(BytesIO(content))
-        elements, texts = [], []
-
-        self._traverse_container(doc, elements, texts)
-
-        for section in doc.sections:
-            self._traverse_container(section.header, elements, texts)
-            self._traverse_container(section.first_page_header, elements, texts)
-            self._traverse_container(section.even_page_header, elements, texts)
-            self._traverse_container(section.footer, elements, texts)
-            self._traverse_container(section.first_page_footer, elements, texts)
-            self._traverse_container(section.even_page_footer, elements, texts)
-
-        if hasattr(doc.part, 'footnotes_part') and doc.part.footnotes_part is not None:
-            self._traverse_container(doc.part.footnotes_part, elements, texts)
-        if hasattr(doc.part, 'endnotes_part') and doc.part.endnotes_part is not None:
-            self._traverse_container(doc.part.endnotes_part, elements, texts)
-
+        doc, _segments, elements, texts = walk_docx(content)
         return doc, elements, texts
+
+    def _writeback_manifest(
+        self,
+        structure_manifest,
+        elements: List[Dict[str, Any]],
+        translated: List[str],
+        originals: List[str],
+    ) -> None:
+        if structure_manifest is None:
+            return
+        translated_by_index = {
+            info.get("segment_index"): (orig, trans)
+            for info, orig, trans in zip(elements, originals, translated)
+        }
+        for obj in structure_manifest.objects:
+            if obj.type not in {
+                ObjectType.BODY,
+                ObjectType.CAPTION,
+                ObjectType.TABLE,
+                ObjectType.TEXT_BOX,
+            }:
+                continue
+            if not obj.translatable_blocks:
+                continue
+            block = obj.translatable_blocks[0]
+            seg_idx = None
+            if block.block_id.startswith("block:"):
+                try:
+                    seg_idx = int(block.block_id.split(":", 1)[1])
+                except ValueError:
+                    seg_idx = None
+            if seg_idx is None:
+                for info in elements:
+                    if info.get("container_ref") == obj.source_refs[0].ref if obj.source_refs else False:
+                        seg_idx = info.get("segment_index")
+                        break
+            pair = translated_by_index.get(seg_idx)
+            if pair is None:
+                write_output_evidence(
+                    obj,
+                    status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                    reason_code="not_reached",
+                    checks={"translated": False},
+                )
+                continue
+            orig, trans = pair
+            write_output_evidence(
+                obj,
+                status=ExecutionStatus.TRANSLATED,
+                checks={
+                    "translated": True,
+                    "source_len": len(orig),
+                    "target_len": len(trans),
+                    "unchanged": orig == trans,
+                },
+            )
+        for obj in structure_manifest.objects:
+            if obj.execution_status is ExecutionStatus.PENDING:
+                write_output_evidence(
+                    obj,
+                    status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                    reason_code="not_reached",
+                    checks={"translated": False},
+                )
+        structure_manifest.refresh_summary()
+        ManifestStore().put_execution(structure_manifest)
 
     def _apply_translation(self, element_info: Dict[str, Any], final_text: str):
         if element_info["type"] == "text_runs":
@@ -695,11 +748,12 @@ class DocxTranslator(AiTranslator):
             self.logger.warning("embedded image overlay failed, keep originals: %s", exc)
 
 
-    def translate(self, document: Document) -> Self:
+    def translate(self, document: Document, *, structure_manifest=None) -> Self:
         doc, elements, originals = self._pre_translate(document)
         if not originals:
             self.logger.info("\n文档中未找到可翻译的文本内容。")
             document.content = self._after_translate(doc, elements, [], [])
+            self._writeback_manifest(structure_manifest, elements, [], [])
             return self
 
         if self.glossary_agent:
@@ -712,13 +766,15 @@ class DocxTranslator(AiTranslator):
         translated = self.translate_agent.send_segments(originals,
                                                         self.chunk_size) if self.translate_agent else originals
         document.content = self._after_translate(doc, elements, translated, originals)
+        self._writeback_manifest(structure_manifest, elements, translated, originals)
         return self
 
-    async def translate_async(self, document: Document) -> Self:
+    async def translate_async(self, document: Document, *, structure_manifest=None) -> Self:
         doc, elements, originals = await asyncio.to_thread(self._pre_translate, document)
         if not originals:
             self.logger.info("\n文档中未找到可翻译的文本内容。")
             document.content = await asyncio.to_thread(self._after_translate, doc, elements, [], [])
+            self._writeback_manifest(structure_manifest, elements, [], [])
             return self
 
         if self.glossary_agent:
@@ -731,4 +787,5 @@ class DocxTranslator(AiTranslator):
         translated = await self.translate_agent.send_segments_async(originals,
                                                                     self.chunk_size) if self.translate_agent else originals
         document.content = await asyncio.to_thread(self._after_translate, doc, elements, translated, originals)
+        self._writeback_manifest(structure_manifest, elements, translated, originals)
         return self

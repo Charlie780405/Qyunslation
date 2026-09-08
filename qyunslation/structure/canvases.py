@@ -212,6 +212,21 @@ def _pptx_canvases(content: bytes, limits: CanvasLimits) -> list[Canvas]:
     ]
 
 
+def _poster_dimensions(width: float, height: float) -> bool:
+    if width <= 0 or height <= 0:
+        return False
+    return height / width > 1.8 or min(width, height) > 4096
+
+
+def _image_canvas_kind(width: float, height: float) -> CanvasKind:
+    return CanvasKind.POSTER if _poster_dimensions(width, height) else CanvasKind.PAGE
+
+
+def _image_canvas_id(kind: CanvasKind, index: int) -> str:
+    prefix = "poster" if kind is CanvasKind.POSTER else "page"
+    return f"{prefix}:{index}"
+
+
 def _orientation_rotation(orientation: int) -> int:
     return {3: 180, 5: 90, 6: 90, 7: 270, 8: 270}.get(orientation, 0)
 
@@ -248,10 +263,11 @@ def _image_canvases(content: bytes, limits: CanvasLimits) -> list[Canvas]:
                     (height, width) if orientation in {5, 6, 7, 8} else (width, height)
                 )
                 image.load()
+                kind = _image_canvas_kind(float(canonical_width), float(canonical_height))
                 canvases.append(
                     Canvas(
-                        canvas_id=f"page:{index + 1}",
-                        kind=CanvasKind.PAGE,
+                        canvas_id=_image_canvas_id(kind, index + 1),
+                        kind=kind,
                         source_index=index + 1,
                         width=float(canonical_width),
                         height=float(canonical_height),

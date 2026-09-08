@@ -238,10 +238,10 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] `put` / `get` 往返后 manifest 逐字段相等。
-- [ ] `schema_version` major 不匹配时视为未命中并覆盖。
-- [ ] JSON 损坏、目录不可写、并发写入均降级为未命中，不抛错。
-- [ ] 原子落盘：写入过程中读取不会得到半截 JSON。
+- [x] `put` / `get` 往返后 manifest 逐字段相等。
+- [x] `schema_version` major 不匹配时视为未命中并覆盖。
+- [x] JSON 损坏、目录不可写、并发写入均降级为未命中，不抛错。
+- [x] 原子落盘：写入过程中读取不会得到半截 JSON。
 
 **验证：** `pytest -q tests/structure/test_manifest_store.py --no-cov`
 
@@ -253,12 +253,12 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] scanner 改用 `translatable_regions`，幻灯样本产出 12 个 `IMAGE` 对象。
-- [ ] `semantic_id` 为 `image:page:{page}:{index}`，不占用 `figure:N`。
-- [ ] 幻灯 `summary.figure_count == 0`，`object_counts["IMAGE"] == 12`。
-- [ ] ljae439 与 Nature 的 Figure/Table 计数不变；ljae439 `IMAGE` 为 1，Nature 为 0。
-- [ ] `translatable_regions` 嵌套去重后幻灯仍 12、Nature 仍 7。
-- [ ] manifest 两次扫描的 `object_id` 稳定。
+- [x] scanner 改用 `translatable_regions`，幻灯样本产出 12 个 `IMAGE` 对象。
+- [x] `semantic_id` 为 `image:page:{page}:{index}`，不占用 `figure:N`。
+- [x] 幻灯 `summary.figure_count == 0`，`object_counts["IMAGE"] == 12`。
+- [x] ljae439 与 Nature 的 Figure/Table 计数不变；ljae439 `IMAGE` 为 1，Nature 为 0。
+- [x] `translatable_regions` 嵌套去重后幻灯仍 12、Nature 仍 7。
+- [x] manifest 两次扫描的 `object_id` 稳定。
 
 **验证：** `pytest -q tests/structure/test_scan_pdf.py --no-cov`
 
@@ -270,10 +270,10 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] `scan_pdf_tier3` 命中缓存时不重新打开 PDF（用调用计数断言）。
-- [ ] 三个样本的 Tier-3 计数与 manifest 完全一致。
-- [ ] 超时/中止时标 `truncated` 且不写缓存。
-- [ ] 030c 的 UI 文案维持不变（期刊 7/3、ljae439 5/3、幻灯 12）。
+- [x] `scan_pdf_tier3` 命中缓存时不重新打开 PDF（用调用计数断言）。
+- [x] 三个样本的 Tier-3 计数与 manifest 完全一致。
+- [x] 超时/中止时标 `truncated` 且不写缓存。
+- [x] 030c 的 UI 文案维持不变（期刊 7/3、ljae439 5/3、幻灯 12）。
 
 **验证：** `pytest -q tests/structure/test_prescan_manifest.py --no-cov`
 
@@ -285,11 +285,11 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] `manifest=None` 时行为与 030c 完全一致（回归测试）。
-- [ ] 传入 manifest 时按对象 bbox 执行，不再逐页检测。
-- [ ] 执行后无 `PENDING` 残留；每个对象为 `TRANSLATED` / `EXPLICITLY_SKIPPED` / `FAILED_SOFT`。
-- [ ] `FAILED_SOFT` 保留原图，不产生空白或半截覆盖。
-- [ ] GUI 补丁取不到 manifest 时回落旧路径且幂等。
+- [x] `manifest=None` 时行为与 030c 完全一致（回归测试）。
+- [x] 传入 manifest 时按对象 bbox 执行，不再逐页检测。
+- [x] 执行后无 `PENDING` 残留；每个对象为 `TRANSLATED` / `EXPLICITLY_SKIPPED` / `FAILED_SOFT`。
+- [x] `FAILED_SOFT` 保留原图，不产生空白或半截覆盖。
+- [x] GUI 补丁取不到 manifest 时回落旧路径且幂等。
 
 **验证：** `pytest -q tests/structure/test_execution_parity.py --no-cov`
 
@@ -301,18 +301,18 @@ SHA-256 与 030c 一致，不重新物化。
 
 **验收：**
 
-- [ ] `encrypted` / `pymupdf_missing` / 未知异常各有明确文案。
-- [ ] 任何 error 都不再产生「未检测到需要嵌字的插图。」。
-- [ ] 对应 `ManifestIssue` 进入 manifest 且 `retryable` 正确。
+- [x] `encrypted` / `pymupdf_missing` / 未知异常各有明确文案。
+- [x] 任何 error 都不再产生「未检测到需要嵌字的插图。」。
+- [x] 对应 `ManifestIssue` 进入 manifest 且 `retryable` 正确。
 
 **验证：** `pytest -q tests/structure/test_prescan_error_surface.py --no-cov`
 
 ### Checkpoint A：SSOT 地基阶段门
 
-- [ ] Tasks 1–5 聚焦测试全绿。
-- [ ] 三方对账：幻灯 12/12/12，Nature 7/7/7，ljae439 5/5/5。
-- [ ] 028/029/030c 三个门仍 PASS。
-- [ ] archive 3 个既有失败精确不变。
+- [x] Tasks 1–5 聚焦测试全绿。
+- [x] 三方对账：幻灯 12/12/12，Nature 7/7/7，ljae439 5/5/5。
+- [x] 028/029/030c 三个门仍 PASS。
+- [x] archive 3 个既有失败精确不变。
 
 未通过不得进入组 B。
 
@@ -416,12 +416,12 @@ DocLayout 判定结论见 §五：走自研几何路线。
 
 ### Checkpoint B：全量阶段门
 
-- [ ] Tasks 1–9 聚焦测试全绿。
-- [ ] `bash scripts/verify-plan-030d.sh` PASS。
-- [ ] 028/029/030c 三个门仍 PASS。
-- [ ] `pytest -q tests/structure --no-cov -rxX`：只剩 `QY030-PPT-001` 一个 xfail。
-- [ ] archive 3 个既有失败精确不变。
-- [ ] 父纲领 Checkpoint B 四条全部达成（跨格式对账除外，仍按 030c §五 推迟至 030g 后）。
+- [x] Tasks 1–9 聚焦测试全绿。
+- [x] `bash scripts/verify-plan-030d.sh` PASS。
+- [x] 028/029/030c 三个门仍 PASS。
+- [x] `pytest -q tests/structure --no-cov -rxX`：只剩 `QY030-PPT-001` 一个 xfail。
+- [x] archive 3 个既有失败精确不变。
+- [x] 父纲领 Checkpoint B 四条全部达成（跨格式对账除外，仍按 030c §五 推迟至 030g 后）。
 
 ### Task 10：验收脚本与文档
 

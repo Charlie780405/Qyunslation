@@ -80,11 +80,6 @@ def test_legacy_ppt_routes_through_explicit_normalization():
     assert route != "pptx"
 
 
-@expected_gap(
-    "QY030-PPT-001",
-    "PLAN-030g",
-    "PPTX picture shapes have no translatable image object or execution state",
-)
 def test_pptx_picture_shape_is_emitted_as_a_translatable_object(
     generated_structure_fixtures: Path,
 ):

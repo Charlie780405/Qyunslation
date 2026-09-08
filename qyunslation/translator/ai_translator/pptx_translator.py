@@ -224,10 +224,21 @@ class PPTXTranslator(AiTranslator):
 
         flush_segment()
 
-    def _process_shape(self, shape, elements: List[Dict[str, Any]], texts: List[str]):
+    def _process_shape(self, shape, elements: List[Dict[str, Any]], texts: List[str],
+                       *, slide_index: int | None = None):
         if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
             for child_shape in shape.shapes:
-                self._process_shape(child_shape, elements, texts)
+                self._process_shape(child_shape, elements, texts, slide_index=slide_index)
+            return
+
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            elements.append({
+                "type": "image",
+                "shape": shape,
+                "slide_index": slide_index,
+                "shape_id": shape.shape_id,
+                "execution_status": "PENDING",
+            })
             return
 
         if shape.has_table:
@@ -263,13 +274,13 @@ class PPTXTranslator(AiTranslator):
                         self.logger.warning(f"Deep XML Scan Error: {e}")
 
     def _scan_presentation_content(self, prs: Presentation, elements: List[Dict[str, Any]], texts: List[str]):
-        def scan_slide_object(slide_obj):
+        def scan_slide_object(slide_obj, slide_index: int | None = None):
             for shape in slide_obj.shapes:
-                self._process_shape(shape, elements, texts)
+                self._process_shape(shape, elements, texts, slide_index=slide_index)
             self._scan_deep_xml_for_text(slide_obj.element, elements, texts)
 
-        for slide in prs.slides:
-            scan_slide_object(slide)
+        for index, slide in enumerate(prs.slides, start=1):
+            scan_slide_object(slide, slide_index=index)
             if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
                 self._process_text_frame(slide.notes_slide.notes_text_frame, elements, texts)
 
@@ -287,7 +298,100 @@ class PPTXTranslator(AiTranslator):
         self.logger.info(f"Extracted {len(texts)} text segments.")
         return prs, elements, texts
 
+    def _replace_picture_blob(self, shape, new_bytes: bytes) -> None:
+        blip = shape._element.blipFill.blip
+        embed = blip.get(qn("r:embed"))
+        if not embed:
+            raise ValueError("picture has no embedded blip")
+        shape.part.related_part(embed)._blob = new_bytes
+
+    def _overlay_images(self, elements: List[Dict[str, Any]]) -> None:
+        from qyunslation.extensions.image_translate import translate_image_bytes
+
+        suffix_by_type = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/webp": ".webp",
+            "image/bmp": ".bmp",
+            "image/tiff": ".tiff",
+        }
+        to_lang = getattr(self.config, "to_lang", None) or "简体中文"
+        for info in elements:
+            if info.get("type") != "image":
+                continue
+            if self.skip_translate:
+                info["execution_status"] = "EXPLICITLY_SKIPPED"
+                info["reason_code"] = "SKIP_TRANSLATE"
+                continue
+            shape = info.get("shape")
+            try:
+                blob = shape.image.blob
+                content_type = (shape.image.content_type or "image/png").lower()
+                new_blob, block_count, _qc = translate_image_bytes(
+                    blob,
+                    suffix=suffix_by_type.get(content_type, ".png"),
+                    to_lang=to_lang,
+                )
+                if new_blob:
+                    self._replace_picture_blob(shape, new_blob)
+                info["execution_status"] = (
+                    "TRANSLATED" if block_count > 0 else "EXPLICITLY_SKIPPED"
+                )
+                info["reason_code"] = None if block_count > 0 else "NO_TRANSLATABLE_BLOCKS"
+            except Exception as exc:
+                self.logger.warning(f"PPTX picture overlay failed: {exc}")
+                info["execution_status"] = "FAILED_SOFT"
+                info["reason_code"] = "IMAGE_OVERLAY_FAILED"
+
+    def _writeback_manifest(self, structure_manifest, elements: List[Dict[str, Any]]) -> None:
+        if structure_manifest is None:
+            return
+        from qyunslation.structure.execution_evidence import write_output_evidence
+        from qyunslation.structure.manifest_store import ManifestStore
+        from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+        status_by_key = {}
+        for info in elements:
+            if info.get("type") != "image":
+                continue
+            slide_index = info.get("slide_index")
+            shape_id = info.get("shape_id")
+            if slide_index and shape_id is not None:
+                status_by_key[f"image:slide:{slide_index}:{shape_id}"] = info
+        for obj in structure_manifest.objects:
+            if obj.type is not ObjectType.IMAGE:
+                if obj.execution_status is ExecutionStatus.PENDING and obj.translatable_blocks:
+                    write_output_evidence(
+                        obj,
+                        status=ExecutionStatus.TRANSLATED,
+                        checks={"translated": True},
+                    )
+                elif obj.execution_status is ExecutionStatus.PENDING:
+                    write_output_evidence(
+                        obj,
+                        status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                        reason_code="not_reached",
+                        checks={"translated": False},
+                    )
+                continue
+            info = status_by_key.get(obj.semantic_id or "")
+            raw_status = (info or {}).get("execution_status", "EXPLICITLY_SKIPPED")
+            reason = (info or {}).get("reason_code") or (
+                None if raw_status == "TRANSLATED" else "not_reached"
+            )
+            write_output_evidence(
+                obj,
+                status=ExecutionStatus(raw_status),
+                reason_code=reason,
+                checks={"translated": raw_status == "TRANSLATED"},
+            )
+        structure_manifest.refresh_summary()
+        ManifestStore().put_execution(structure_manifest)
+
     def _apply_translation(self, element_info: Dict[str, Any], final_text: str):
+        if element_info.get("type") == "image":
+            return
         runs = element_info["runs"]
         if not runs: return
 
@@ -317,13 +421,15 @@ class PPTXTranslator(AiTranslator):
 
     def _after_translate(self, prs: Presentation, elements: List[Dict[str, Any]], translated: List[str],
                          originals: List[str]) -> bytes:
-        if len(elements) != len(translated):
-            min_len = min(len(elements), len(translated))
-            elements = elements[:min_len]
+        text_elements = [info for info in elements if info.get("type") != "image"]
+        if len(text_elements) != len(translated):
+            min_len = min(len(text_elements), len(translated))
+            text_elements = text_elements[:min_len]
             translated = translated[:min_len]
 
-        for info, trans in zip(elements, translated):
+        for info, trans in zip(text_elements, translated):
             self._apply_translation(info, trans)
+        self._overlay_images(elements)
 
         output_stream = BytesIO()
         prs.save(output_stream)
@@ -331,11 +437,12 @@ class PPTXTranslator(AiTranslator):
 
     # ---------------- 接口 ----------------
 
-    def translate(self, document: Document) -> Self:
+    def translate(self, document: Document, *, structure_manifest=None) -> Self:
         prs, elements, originals = self._pre_translate(document)
         if not originals:
             self.logger.info("No text found.")
             document.content = self._after_translate(prs, elements, [], [])
+            self._writeback_manifest(structure_manifest, elements)
             return self
 
         if self.glossary_agent:
@@ -347,13 +454,15 @@ class PPTXTranslator(AiTranslator):
         translated = self.translate_agent.send_segments(originals,
                                                         self.chunk_size) if self.translate_agent else originals
         document.content = self._after_translate(prs, elements, translated, originals)
+        self._writeback_manifest(structure_manifest, elements)
         return self
 
-    async def translate_async(self, document: Document) -> Self:
+    async def translate_async(self, document: Document, *, structure_manifest=None) -> Self:
         prs, elements, originals = await asyncio.to_thread(self._pre_translate, document)
         if not originals:
             self.logger.info("No text found.")
             document.content = await asyncio.to_thread(self._after_translate, prs, elements, [], [])
+            self._writeback_manifest(structure_manifest, elements)
             return self
 
         if self.glossary_agent:
@@ -365,4 +474,5 @@ class PPTXTranslator(AiTranslator):
         translated = await self.translate_agent.send_segments_async(originals,
                                                                     self.chunk_size) if self.translate_agent else originals
         document.content = await asyncio.to_thread(self._after_translate, prs, elements, translated, originals)
+        self._writeback_manifest(structure_manifest, elements)
         return self

@@ -20,12 +20,11 @@ from qyunslation.structure.representation import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+from tests.structure.sample_paths import pind_ocr_sample, pind_sample
+
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
-PIND = Path(
-    "/home/dev/pdf2zh/pdf2zh_files/5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/"
-    "FDA responses on PIND.pdf"
-)
-PIND_OCR = PIND.with_name("FDA responses on PIND.hpd-ocr.pdf")
+PIND = pind_sample()
+PIND_OCR = pind_ocr_sample()
 
 requires_pind = pytest.mark.skipif(
     not PIND.is_file(), reason="FDA PIND sample lives outside the repo"
