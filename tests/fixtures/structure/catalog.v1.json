@@ -186,6 +186,62 @@
       "truth_file": "tests/fixtures/structure/nature_comm_53384.truth.json",
       "fixture_state": "MATERIALIZED",
       "future_owner": "PLAN-030c"
+    },
+    {
+      "id": "synthetic-parity-pdf",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "parity.pdf",
+      "sha256": "5bde49623f31aa5734c756f1859756ca1a57e9439387dbf00d42f54a95f7e2c8",
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-docx",
+      "origin": "GENERATED",
+      "source_format": "DOCX",
+      "content_profile": "REVIEW_ARTICLE",
+      "relative_path": "parity.docx",
+      "sha256": "9ef01531318946bbb09b43d85f68ff8e2d0fbcdc0645fc1bdacce5c0d655e4bb",
+      "expected_objects": [
+        "BODY",
+        "FIGURE",
+        "CAPTION",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-pptx",
+      "origin": "GENERATED",
+      "source_format": "PPTX",
+      "content_profile": "PRESENTATION",
+      "relative_path": "parity.pptx",
+      "sha256": "6a608ef72f5a1631aeba628d9bde45e998ac029b76f38938a9cda5b32d2e4c02",
+      "expected_objects": [
+        "TEXT_BOX",
+        "IMAGE",
+        "TABLE"
+      ],
+      "future_owner": "PLAN-030h"
+    },
+    {
+      "id": "synthetic-parity-png",
+      "origin": "GENERATED",
+      "source_format": "PNG",
+      "content_profile": "GENERIC",
+      "relative_path": "parity.png",
+      "sha256": "d4014969e20705d9a8f7e1804188a52ca9117ccc179813e575bb676123421d83",
+      "expected_objects": [
+        "IMAGE"
+      ],
+      "future_owner": "PLAN-030h"
     }
   ]
 }

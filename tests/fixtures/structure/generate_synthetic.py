@@ -241,6 +241,121 @@ def _slide_pdf_bytes(*, pages: int) -> bytes:
     return _assemble_pdf(objects)
 
 
+# --- PLAN-030h H3：同一逻辑内容的四种承载物 ----------------------------------
+#
+# 四份夹具承载**同一份内容**：一段正文、一张带 Figure 1 题注的图、一张带
+# Table 1 题注的表。跨格式对账断言据此比对语义对象集合，差异必须由
+# content_profile / container_mode / output_editability 解释。
+
+PARITY_BODY = "Body text follows reading order across one column."
+PARITY_FIGURE_CAPTION = "Figure 1. Cross-format parity figure."
+PARITY_TABLE_CAPTION = "Table 1. Cross-format parity table."
+PARITY_TITLE = "Cross-format parity fixture"
+
+
+def _parity_pdf_bytes() -> bytes:
+    commands = [
+        f"BT /F1 18 Tf 72 752 Td ({PARITY_TITLE}) Tj ET",
+        f"BT /F1 10 Tf 72 700 Td ({PARITY_BODY}) Tj ET",
+        "0.7 w 72 420 468 190 re S",
+        f"BT /F1 10 Tf 72 404 Td ({PARITY_FIGURE_CAPTION}) Tj ET",
+        "72 250 468 120 re S",
+        "72 290 m 540 290 l S",
+        "306 250 m 306 370 l S",
+        f"BT /F1 10 Tf 72 234 Td ({PARITY_TABLE_CAPTION}) Tj ET",
+    ]
+    stream = "\n".join(commands).encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+        _stream_object(stream),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    return _assemble_pdf(objects)
+
+
+def _parity_docx_bytes() -> bytes:
+    document = Document()
+    document.core_properties.title = PARITY_TITLE
+    document.core_properties.created = FIXED_TIME
+    document.core_properties.modified = FIXED_TIME
+
+    document.add_heading(PARITY_TITLE, 0)
+    document.add_paragraph(PARITY_BODY)
+    document.add_picture(BytesIO(_png_bytes()), width=Inches(2.2))
+    document.add_paragraph(PARITY_FIGURE_CAPTION)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Outcome"
+    table.cell(0, 1).text = "Value"
+    table.cell(1, 0).text = "Stable"
+    table.cell(1, 1).text = "Yes"
+    document.add_paragraph(PARITY_TABLE_CAPTION)
+
+    stream = BytesIO()
+    document.save(stream)
+    return _canonicalize_ooxml(stream.getvalue())
+
+
+def _parity_pptx_bytes() -> bytes:
+    presentation = Presentation()
+    presentation.core_properties.title = PARITY_TITLE
+    presentation.core_properties.created = FIXED_TIME
+    presentation.core_properties.modified = FIXED_TIME
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+
+    title = slide.shapes.add_textbox(
+        PptxInches(0.5), PptxInches(0.3), PptxInches(9), PptxInches(0.6)
+    )
+    title.text_frame.text = PARITY_TITLE
+    body = slide.shapes.add_textbox(
+        PptxInches(0.5), PptxInches(1.0), PptxInches(9), PptxInches(0.5)
+    )
+    body.text_frame.text = PARITY_BODY
+
+    slide.shapes.add_picture(
+        BytesIO(_png_bytes()), PptxInches(0.5), PptxInches(1.7), width=PptxInches(4)
+    )
+    figure_caption = slide.shapes.add_textbox(
+        PptxInches(0.5), PptxInches(4.2), PptxInches(4), PptxInches(0.4)
+    )
+    figure_caption.text_frame.text = PARITY_FIGURE_CAPTION
+
+    table = slide.shapes.add_table(
+        2, 2, PptxInches(5.0), PptxInches(1.7), PptxInches(4), PptxInches(1.6)
+    ).table
+    table.cell(0, 0).text = "Outcome"
+    table.cell(0, 1).text = "Value"
+    table.cell(1, 0).text = "Stable"
+    table.cell(1, 1).text = "Yes"
+    table_caption = slide.shapes.add_textbox(
+        PptxInches(5.0), PptxInches(4.2), PptxInches(4), PptxInches(0.4)
+    )
+    table_caption.text_frame.text = PARITY_TABLE_CAPTION
+
+    stream = BytesIO()
+    presentation.save(stream)
+    return _canonicalize_ooxml(stream.getvalue())
+
+
+def _parity_png_bytes() -> bytes:
+    """同一内容的整页栅格承载：结构在这里被压平，只剩像素。"""
+    image = Image.new("RGB", (612, 792), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.text((72, 40), PARITY_TITLE, fill=(0, 0, 0))
+    draw.text((72, 92), PARITY_BODY, fill=(0, 0, 0))
+    draw.rectangle((72, 182, 540, 372), outline=(0, 0, 0), width=1)
+    draw.text((72, 388), PARITY_FIGURE_CAPTION, fill=(0, 0, 0))
+    draw.rectangle((72, 422, 540, 542), outline=(0, 0, 0), width=1)
+    draw.line((72, 482, 540, 482), fill=(0, 0, 0), width=1)
+    draw.line((306, 422, 306, 542), fill=(0, 0, 0), width=1)
+    draw.text((72, 558), PARITY_TABLE_CAPTION, fill=(0, 0, 0))
+    return _save_image(image, "PNG", optimize=False)
+
+
 def _base_image(*, poster: bool = False, alpha: bool = False) -> Image.Image:
     size = (900, 1200) if poster else (320, 180)
     mode = "RGBA" if alpha else "RGB"
@@ -423,6 +538,10 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "scan.bmp": _bmp_bytes,
     "multipage.tiff": _tiff_bytes,
     "presentation.pptx": _pptx_bytes,
+    "parity.pdf": _parity_pdf_bytes,
+    "parity.docx": _parity_docx_bytes,
+    "parity.pptx": _parity_pptx_bytes,
+    "parity.png": _parity_png_bytes,
 }
 
 
