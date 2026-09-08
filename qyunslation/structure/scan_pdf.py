@@ -17,6 +17,7 @@ from .layout import (
     overflows_column,
     reading_order,
 )
+from .tables import table_regions
 from .models import (
     AssetRole,
     BodyObject,
@@ -114,6 +115,27 @@ class PdfStructureScanner:
                 )
             )
         return out
+
+    @staticmethod
+    def _table_region_evidence(regions_by_number, number, canvas, page_no):
+        """表格区域几何。仅供保护与审计——030d 不做单元格重建。"""
+        region = regions_by_number.get(number)
+        if region is None:
+            return []
+        bbox = _clip_bbox(_rect_from_bbox(region.as_tuple()), canvas)
+        return [
+            DetectorEvidence(
+                detector="table_rule_lines",
+                label=f"table:{number}",
+                confidence=0.8,
+                bbox=bbox,
+                details={
+                    "page": page_no,
+                    "rule_lines": region.line_count,
+                    "reconstructed": False,
+                },
+            )
+        ]
 
     def _body_objects(self, page, canvas, prepared, page_no: int) -> tuple[list, list]:
         """正文块建模为 BODY 对象，带页内阅读顺序。
@@ -262,13 +284,16 @@ class PdfStructureScanner:
                         )
                     )
                     continue
+                regions_by_number = {
+                    r.number: r for r in table_regions(page, anchors=anchors)
+                }
                 if not labeled:
                     objects.extend(self._unnumbered_images(page, canvas, prepared, i))
                 body, body_issues = self._body_objects(page, canvas, prepared, i)
                 objects.extend(body)
                 issues.extend(body_issues)
                 canvas.reading_order = [b.object_id for b in body]
-                if any(kind == "table" for kind, *_ in anchors) and not table_rects(page):
+                if any(kind == "table" for kind, *_ in anchors) and not regions_by_number:
                     # 有表题注却测不到表格几何：表内文字会漏进正文，必须留痕
                     issues.append(
                         ManifestIssue(
@@ -277,8 +302,8 @@ class PdfStructureScanner:
                             stage=PipelineStage.SCAN,
                             retryable=False,
                             message=(
-                                f"page {i} has a table caption but find_tables() "
-                                "returned no geometry"
+                                f"page {i} has a table caption but no table region "
+                                "could be delimited"
                             ),
                             details={"page": i},
                         )
@@ -398,7 +423,10 @@ class PdfStructureScanner:
                                         label=f"table:{num}",
                                         bbox=cap_bbox,
                                         details={"page": i},
-                                    )
+                                    ),
+                                    *self._table_region_evidence(
+                                        regions_by_number, num, canvas, i
+                                    ),
                                 ],
                                 execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,
                                 reason_code="text_layer_table",

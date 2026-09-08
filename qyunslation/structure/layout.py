@@ -104,11 +104,14 @@ def figure_table_rects(page) -> list:
     scripts = Path(__file__).resolve().parents[2] / "scripts"
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
+    from .tables import table_exclusion_rects
+
     try:
         from pdf_figure_crop import labeled_figure_regions, table_rects, translatable_regions
     except ImportError:
-        return []
+        return list(table_exclusion_rects(page))
     rects = list(table_rects(page))
+    rects.extend(table_exclusion_rects(page))
     rects.extend(labeled_figure_regions(page).values())
     rects.extend(translatable_regions(page))
     return rects

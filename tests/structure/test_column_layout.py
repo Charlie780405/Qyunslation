@@ -151,13 +151,6 @@ def test_ljae_has_no_column_overflow(ljae):
     assert [i for i in ljae.issues if i.code == "LAYOUT_COLUMN_OVERFLOW"] == []
 
 
-def test_missing_table_geometry_is_recorded(nature):
-    """Nature p5 的 Table 2 检测不到几何，表内文字会漏进正文，必须留痕。"""
-    codes = [i.code for i in nature.issues]
-
-    assert "TABLE_GEOMETRY_MISSING" in codes
-
-
 def test_tabular_rows_are_not_treated_as_body():
     assert looks_tabular("0\n0\n1 (6.3)\n1 (5.9)\n2 (5.9)\n0\n2 (9.5)")
     assert not looks_tabular(

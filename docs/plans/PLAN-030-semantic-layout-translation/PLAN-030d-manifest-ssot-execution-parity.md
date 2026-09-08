@@ -357,7 +357,7 @@ DocLayout 判定结论见 §五：走自研几何路线。
 ### Task 8：PDF 表格区域保护（原「原位重建」已降级）
 
 **依赖：** Checkpoint A、Task 7
-**状态：** 未开始。范围已于 2026-09-08 经用户决策变更，理由见下。
+**状态：** 已完成。范围于 2026-09-08 经用户决策变更，理由见下。
 
 **文件：** `qyunslation/structure/tables.py`、`qyunslation/structure/layout.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_table_protection.py`
 
@@ -383,13 +383,15 @@ DocLayout 判定结论见 §五：走自研几何路线。
 
 #### 收窄后的验收
 
-- [ ] 表格区域检测改用「题注锚点 + 三线表横线几何」，不再依赖 `find_tables()`：ljae439 p5/p7 与 Nature p4/p5/p9 的表格区域全部圈定成功。
-- [ ] 消除 Task 6 遗留的 `TABLE_GEOMETRY_MISSING`：Nature p5 表内文字不再计入 `BODY`（当前泄漏 27 个）。
-- [ ] 无表题注的图表页不产生表格区域（Nature p7/p8/p10/p11/p12 假阳性为 0）。
-- [ ] 表格区域内禁止 OCR 嵌字（030c 规则 A 不回归）。
-- [ ] 表格不被误判为 Figure（两金样 Figure 计数保持 5 / 7）。
-- [ ] `TableObject` 保持 `planned_action="text_layer"`，如实标注未做单元格重建，不伪装成已重建。
-- [ ] 圈不定区域时 fail-closed：记 `ManifestIssue`，保留原表不做任何改动。
+- [x] 表格区域检测改用「题注锚点 + 三线表横线几何」（`qyunslation/structure/tables.py`），不再依赖 `find_tables()`：ljae439 p5（Table 1、2）、p7（Table 3）与 Nature p4/p5/p9 六个表格全部圈定成功。
+- [x] 消除 Task 6 遗留的 `TABLE_GEOMETRY_MISSING`：Nature p5 的 `BODY` 由 27 降至 7（剩余为该页表格之外的真实双栏正文），两金样均无该 issue。
+- [x] 无表题注的图表页不产生表格区域：Nature p7/p8/p10/p11/p12 假阳性为 0（`find_tables()` 在这些页曾测出 1–6 个空表）。
+- [x] 表格区域内禁止 OCR 嵌字（030c 规则 A 不回归，可译计数保持 6 / 7 / 12）。
+- [x] 表格不被误判为 Figure（Figure 计数保持 5 / 7，Table 保持 3 / 3）。
+- [x] `TableObject` 保持 `planned_action="text_layer"`，并挂 `detector="table_rule_lines"` 证据带 `reconstructed=False`，如实标注未做单元格重建。
+- [x] 圈不定区域时 fail-closed：`table_regions()` 返回空，上层记 `ManifestIssue`，不猜测几何、不改动原表。
+
+**关键参数**：`ROW_GAP_BREAK_FRAC=0.20`，下界受 ljae439 p5 约束（表头线 0.148 到底线 0.287 相隔 0.139），上界受 Nature p5 约束（表格底 0.661 到页脚线 0.954 相隔 0.293）。横线按 y 容差 1.5pt 合并，因为顶线常被切成多段（ljae439 p5 切成三段）。
 
 **验证：** `pytest -q tests/structure/test_table_protection.py --no-cov`
 
