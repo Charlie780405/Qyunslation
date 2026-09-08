@@ -1247,7 +1247,7 @@ def run_app(host=None, port: int | None = None, enable_CORS=False,
         port_to_use = find_free_port(initial_port)
         if port_to_use != initial_port:
             print(f"端口 {initial_port} 被占用，将使用端口 {port_to_use} 代替")
-        print(f"正在启动 DocuTranslate WebUI 版本号：{__version__}")
+        print(f"正在启动 Qyunslation WebUI 版本号：{__version__}")
         app.state.port_to_use = port_to_use
         app.state.with_mcp = with_mcp
         if enable_CORS:

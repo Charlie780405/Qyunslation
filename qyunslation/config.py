@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
-"""DocuTranslate 配置模块 - 从环境变量读取默认值"""
+"""Qyunslation 配置模块 - 从环境变量读取默认值"""
 import os
 from typing import Optional
 from pathlib import Path

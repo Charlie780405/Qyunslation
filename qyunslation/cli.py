@@ -6,7 +6,7 @@ import sys # 用于检查命令行参数数量
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DocuTranslate: 一个文档翻译工具。",
+        description="Qyunslation: 荃信内部文档翻译工具。",
         # 更新示例，展示如何使用 host 参数
         epilog="示例:\n"
                "  qyunslation -i                           (启动图形界面，默认本地访问)\n"
@@ -97,7 +97,7 @@ def main():
 
     # 检查是否没有提供任何参数
     if len(sys.argv) == 1:
-        print("欢迎使用 DocuTranslate！")
+        print("欢迎使用 Qyunslation！")
         print("请使用 '-i' 或 '--interactive' 选项来启动图形化界面。")
         print("\n示例:")
         print("  qyunslation -i")

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 """
-DocuTranslate Shared Server Layer
+Qyunslation Shared Server Layer
 
 This module provides a shared TranslationService that is used by both
 the Web backend (app.py) and MCP server to ensure consistent task management.

@@ -41,7 +41,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=f'DocuTranslate-{qyunslation.__version__}-mac',
+    name=f'Qyunslation-{qyunslation.__version__}-mac',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -52,5 +52,5 @@ exe = EXE(
     argv_emulation=False,
     codesign_identity=None,
     entitlements_file=None,
-    icon='DocuTranslate.icns', # 保留 Mac 图标
+    icon='archive/legacy/DocuTranslate.icns',
 )
