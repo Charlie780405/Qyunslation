@@ -36,23 +36,25 @@ class ManifestStore:
     def __init__(self, root: Path | str | None = None) -> None:
         self.root = Path(root) if root is not None else default_cache_root()
 
-    def path_for(self, source_sha256: str) -> Path:
+    def path_for(self, source_sha256: str, *, kind: str = "manifest") -> Path:
         digest = str(source_sha256).strip().lower()
         if len(digest) != _SHA256_LEN or not all(
             c in "0123456789abcdef" for c in digest
         ):
             raise ValueError("MANIFEST_STORE_KEY_INVALID: expected full lowercase SHA-256")
         major = _schema_major(CURRENT_SCHEMA_VERSION)
-        return self.root / f"v{major}" / f"{digest}.manifest.json"
+        return self.root / f"v{major}" / f"{digest}.{kind}.json"
 
-    def put(self, manifest: DocumentStructureManifest) -> Path | None:
+    def put(
+        self, manifest: DocumentStructureManifest, *, kind: str = "manifest"
+    ) -> Path | None:
         """原子落盘。失败返回 None，不抛错。
 
         写入前回读校验一次：summary 与对象不一致等问题若被写进缓存，会退化成永久
         未命中且不留痕迹，宁可此处拒绝写入。
         """
         try:
-            target = self.path_for(manifest.document.source_sha256)
+            target = self.path_for(manifest.document.source_sha256, kind=kind)
             target.parent.mkdir(parents=True, exist_ok=True)
             payload = manifest.model_dump_json()
             DocumentStructureManifest.model_validate_json(payload)
@@ -70,10 +72,12 @@ class ManifestStore:
         except Exception:
             return None
 
-    def get(self, source_sha256: str) -> DocumentStructureManifest | None:
+    def get(
+        self, source_sha256: str, *, kind: str = "manifest"
+    ) -> DocumentStructureManifest | None:
         """命中返回 manifest；未命中、损坏或 schema major 不符一律返回 None。"""
         try:
-            target = self.path_for(source_sha256)
+            target = self.path_for(source_sha256, kind=kind)
         except ValueError:
             return None
         try:
@@ -90,17 +94,27 @@ class ManifestStore:
             return None
         return manifest
 
+    def put_execution(self, manifest: DocumentStructureManifest) -> Path | None:
+        """写执行审计快照。
+
+        必须与结构缓存分开：执行后对象都是终态，若覆盖结构缓存，同一文档再次翻译
+        时预扫描会算出 0 个可译对象，执行侧也会全部跳过。
+        """
+        return self.put(manifest, kind="execution")
+
+    def get_execution(self, source_sha256: str) -> DocumentStructureManifest | None:
+        return self.get(source_sha256, kind="execution")
+
     def consume(self, manifest: DocumentStructureManifest) -> None:
         """ManifestConsumer 协议：持久化后供下游阶段复用。"""
         self.put(manifest)
 
     def invalidate(self, source_sha256: str) -> bool:
-        try:
-            target = self.path_for(source_sha256)
-        except ValueError:
-            return False
-        try:
-            target.unlink()
-            return True
-        except OSError:
-            return False
+        removed = False
+        for kind in ("manifest", "execution"):
+            try:
+                self.path_for(source_sha256, kind=kind).unlink()
+                removed = True
+            except (OSError, ValueError):
+                continue
+        return removed

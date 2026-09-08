@@ -502,7 +502,8 @@ def _persist_structure_manifest(structure_manifest, *, reason: str = "not_reache
                 _mark(obj, "EXPLICITLY_SKIPPED", reason)
         # 状态变更后 summary 必须重算，否则回读时 MANIFEST_SUMMARY_MISMATCH
         structure_manifest.refresh_summary()
-        ManifestStore().put(structure_manifest)
+        # 写审计快照而非结构缓存：后者要保持可重复翻译
+        ManifestStore().put_execution(structure_manifest)
     except Exception as exc:
         logger.warning("persist structure manifest failed: %s", exc)
 

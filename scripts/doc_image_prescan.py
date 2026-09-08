@@ -471,6 +471,15 @@ def scan_pdf_tier3(
     )
 
 
+def _format_tier3_error(error: str) -> str:
+    """扫描失败的 UI 文案。零结果与扫描失败是两回事，必须区分。"""
+    if error == "encrypted":
+        return "文档已加密，无法扫描插图；翻译仍会尝试文字层。"
+    if error in ("pymupdf_missing", "pdf_figure_crop_missing"):
+        return "插图扫描组件不可用，本次不做插图嵌字。"
+    return f"插图扫描失败（{error}），本次不做插图嵌字。"
+
+
 def format_tier3_summary(
     entry: dict,
     *,
@@ -482,12 +491,16 @@ def format_tier3_summary(
     table_caption_count: int | None = None,
     translatable_count: int | None = None,
     unnumbered_count: int | None = None,
+    error: str | None = None,
 ) -> str:
     """PLAN-030c：按语义题注计数，不再把位图+矢量相加。
 
     PLAN-030d：插图总数 = 有编号 Figure + 无编号可译区域，保证不小于将要 OCR
-    嵌字的区域数。
+    嵌字的区域数；扫描失败如实上报，不得伪装成「未检测到」。
     """
+    err = error if error is not None else entry.get("tier3_error")
+    if err:
+        return _format_tier3_error(str(err))
     numbered_n = int(
         figure_caption_count
         if figure_caption_count is not None

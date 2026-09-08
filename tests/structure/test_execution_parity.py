@@ -154,20 +154,56 @@ def test_no_pending_objects_remain_after_execution(tmp_path, stub_translation):
     assert pending == []
 
 
-def test_execution_persists_the_updated_manifest(tmp_path, stub_translation):
+def test_execution_persists_an_audit_snapshot(tmp_path, stub_translation):
     src = tmp_path / "ljae439.pdf"
     shutil.copy(LJAE, src)
     manifest = PdfStructureScanner().scan(src)
 
     translate_pdf_images(src, to_lang="简体中文", structure_manifest=manifest)
-    stored = ManifestStore().get(manifest.document.source_sha256)
+    audit = ManifestStore().get_execution(manifest.document.source_sha256)
 
-    assert stored is not None
+    assert audit is not None
     assert all(
         o.execution_status is not ExecutionStatus.PENDING
-        for o in stored.objects
+        for o in audit.objects
         if o.type in TRANSLATABLE
     )
+
+
+def test_execution_does_not_poison_the_structure_cache(tmp_path, stub_translation):
+    """回写终态若覆盖结构缓存，同一文档再译会被判定为零可译对象。"""
+    import hashlib
+    import sys as _sys
+
+    src = tmp_path / "nature.pdf"
+    shutil.copy(NATURE, src)
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()
+
+    _sys.path.insert(0, str(ROOT / "scripts"))
+    from doc_image_prescan import scan_pdf_tier3
+
+    first = scan_pdf_tier3(src).translatable_count
+    manifest = ManifestStore().get(digest)
+    translate_pdf_images(src, to_lang="简体中文", structure_manifest=manifest)
+    second = scan_pdf_tier3(src).translatable_count
+
+    assert first == second == 7
+
+
+def test_repeat_translation_still_reaches_every_object(tmp_path, stub_translation):
+    import hashlib
+
+    src = tmp_path / "nature.pdf"
+    shutil.copy(NATURE, src)
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()
+    store = ManifestStore()
+
+    for _ in range(2):
+        store.put(PdfStructureScanner().scan(src))
+        manifest = store.get(digest)
+        translate_pdf_images(src, to_lang="简体中文", structure_manifest=manifest)
+        audit = store.get_execution(digest)
+        assert audit.summary.status_counts.get("TRANSLATED", 0) == 7
 
 
 def test_overlay_failure_is_recorded_as_failed_soft(tmp_path, stub_translation, monkeypatch):

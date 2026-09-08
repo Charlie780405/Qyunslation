@@ -21,8 +21,11 @@ from .models import (
     ExecutionStatus,
     FigureObject,
     ImageObject,
+    IssueSeverity,
+    ManifestIssue,
     ObjectType,
     OutputEditability,
+    PipelineStage,
     ProcessingMode,
     ProducerInfo,
     ProfileSource,
@@ -140,6 +143,7 @@ class PdfStructureScanner:
 
         canvases = {c.source_index: c for c in prepared.canvases}
         objects: list = []
+        issues: list[ManifestIssue] = []
         figure_seen: set[int] = set()
         table_seen: set[int] = set()
 
@@ -166,8 +170,22 @@ class PdfStructureScanner:
                 if canvas is None:
                     continue
                 pages_scanned += 1
-                anchors = caption_anchors(page)
-                labeled = labeled_figure_regions(page)
+                try:
+                    anchors = caption_anchors(page)
+                    labeled = labeled_figure_regions(page)
+                except Exception as exc:
+                    # 单页失败不得丢掉整份结构，但必须留痕而非静默
+                    issues.append(
+                        ManifestIssue(
+                            code="SCAN_PAGE_FAILED",
+                            severity=IssueSeverity.WARNING,
+                            stage=PipelineStage.SCAN,
+                            retryable=True,
+                            message=f"page {i} scan failed: {exc}",
+                            details={"page": i},
+                        )
+                    )
+                    continue
                 if not labeled:
                     objects.extend(self._unnumbered_images(page, canvas, prepared, i))
                 for kind, num, y0, bb in anchors:
@@ -334,7 +352,7 @@ class PdfStructureScanner:
             document=document,
             canvases=list(prepared.canvases),
             objects=objects,
-            issues=[],
+            issues=issues,
             extensions={
                 "translatable_figure_count": sum(
                     1
