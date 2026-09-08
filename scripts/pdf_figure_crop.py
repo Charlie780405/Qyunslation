@@ -77,6 +77,126 @@ def _overlap_ratio(a, b) -> float:
     return abs(inter.width * inter.height) / area_a
 
 
+def page_caption_profile(page) -> dict:
+    """PLAN-030c：页型 = pure_table | figure_only | mixed | none。"""
+    try:
+        from qyunslation.structure.captions import caption_anchors
+
+        anchors = caption_anchors(page)
+    except Exception:
+        anchors = []
+    figs = [a for a in anchors if a[0] == "figure"]
+    tabs = [a for a in anchors if a[0] == "table"]
+    if tabs and not figs:
+        kind = "pure_table"
+    elif figs and not tabs:
+        kind = "figure_only"
+    elif figs and tabs:
+        kind = "mixed"
+    else:
+        kind = "none"
+    return {"figure_caps": figs, "table_caps": tabs, "page_kind": kind}
+
+
+def _merge_by_figure_captions(page, candidates: list, caps: list) -> list:
+    if not candidates:
+        return []
+    if not caps:
+        return list(candidates)
+    page_area = abs(page.rect.width * page.rect.height) or 1.0
+    caps_sorted = sorted(caps, key=lambda x: x[2])
+    groups: dict[int, list] = {}
+    for u in candidates:
+        owner = None
+        for _kind, num, y0, _bb in caps_sorted:
+            if u.y1 <= y0 + 12:
+                owner = num
+                break
+        if owner is None:
+            owner = caps_sorted[-1][1]
+        groups.setdefault(owner, []).append(u)
+    out = []
+    for _num, us in sorted(groups.items()):
+        merged = _union_rects(us)
+        if merged is None or merged.is_empty:
+            continue
+        merged = pymupdf.Rect(merged) & page.rect
+        area_frac = abs(merged.width * merged.height) / page_area
+        if area_frac > MAX_AREA_FRAC:
+            out.extend(us)
+            continue
+        if merged.width >= 80 and merged.height >= 60:
+            out.append(merged)
+    return out
+
+
+def _page_bitmap_rects(page, exclude_rects: Iterable | None = None) -> list:
+    exclude = [pymupdf.Rect(r) for r in (exclude_rects or [])]
+    out = []
+    try:
+        infos = page.get_image_info(xrefs=True) or []
+    except Exception:
+        return out
+    for info in infos:
+        bbox = info.get("bbox")
+        if not bbox:
+            continue
+        rr = pymupdf.Rect(bbox) & page.rect
+        if rr.is_empty or rr.width < 40 or rr.height < 40:
+            continue
+        if any(_overlap_ratio(rr, ex) > 0.45 for ex in exclude):
+            continue
+        out.append(rr)
+    return out
+
+
+def labeled_figure_regions(page, exclude_rects: Iterable | None = None) -> dict[int, object]:
+    """按 Figure 编号归组后的区域。无题注页返回空（不把匿名矢量当语义图）。"""
+    profile = page_caption_profile(page)
+    if not profile["figure_caps"]:
+        return {}
+    regions = find_figure_regions(page, exclude_rects)
+    caps_sorted = sorted(profile["figure_caps"], key=lambda x: x[2])
+    out: dict[int, object] = {}
+    for u in regions:
+        owner = None
+        for _kind, num, y0, _bb in caps_sorted:
+            if u.y1 <= y0 + 12:
+                owner = num
+                break
+        if owner is None:
+            owner = caps_sorted[-1][1]
+        if owner in out:
+            merged = _union_rects([out[owner], u])
+            if merged is not None:
+                out[owner] = pymupdf.Rect(merged) & page.rect
+        else:
+            out[owner] = u
+    return out
+
+
+def find_figure_regions(page, exclude_rects: Iterable | None = None) -> list:
+    """PLAN-030c 规则 A–D：题注驱动的可译区域（矢量 + 位图归组）。"""
+    if pymupdf is None:
+        return []
+    profile = page_caption_profile(page)
+    if profile["page_kind"] == "pure_table":
+        return []
+    if profile["page_kind"] == "none":
+        return find_safe_vector_figures(page, exclude_rects=exclude_rects)
+    tables = [] if profile["page_kind"] == "figure_only" else None
+    candidates = list(
+        find_safe_vector_figures(
+            page,
+            exclude_rects=exclude_rects,
+            tables=tables,
+            min_drawings=2,
+        )
+    )
+    candidates.extend(_page_bitmap_rects(page, exclude_rects))
+    return _merge_by_figure_captions(page, candidates, profile["figure_caps"])
+
+
 def find_safe_vector_figures(
     page,
     exclude_rects: Iterable | None = None,
