@@ -78,6 +78,8 @@ run_pass \
     "$PY" -m pytest -q tests/structure \
     --ignore=tests/structure/test_plan030_red_baselines.py --no-cov
 
+# 030a 立项时这 6 条是 XFAIL 红灯基线；030c-030g 已逐条修绿，本门改为守住
+# 「不许倒退回 XFAIL」。红灯清零本身由 --runxfail 全绿证明。
 RED_XML="$STAGE_DIR/red.xml"
 RED_LOG="$STAGE_DIR/red.log"
 if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
@@ -97,12 +99,12 @@ xfails = [
     and node.attrib.get("type") == "pytest.xfail"
 ]
 assert len(cases) == 6, len(cases)
-assert len(xfails) == 6, len(xfails)
+assert xfails == [], [case.attrib["name"] for case in xfails]
 assert not root.findall(".//failure")
 assert not root.findall(".//error")
 PY
   then
-    expected_red "6 strict PLAN-030 gaps are XFAIL with no SKIP or XPASS"
+    pass "all 6 PLAN-030 gaps are closed with no remaining XFAIL"
   else
     fail "strict XFAIL inventory changed"
     show_failure_log "$RED_LOG"
@@ -117,9 +119,6 @@ RUNXFAIL_LOG="$STAGE_DIR/runxfail.log"
 if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q tests/structure/test_plan030_red_baselines.py \
   --runxfail --no-cov --junitxml="$RUNXFAIL_XML" >"$RUNXFAIL_LOG" 2>&1; then
-  fail "--runxfail unexpectedly passed; at least one red baseline is stale"
-  show_failure_log "$RUNXFAIL_LOG"
-else
   if "$PY" - "$RUNXFAIL_XML" <<'PY'
 from pathlib import Path
 import sys
@@ -127,16 +126,15 @@ import xml.etree.ElementTree as ET
 
 root = ET.parse(Path(sys.argv[1])).getroot()
 cases = root.findall(".//testcase")
-failures = root.findall(".//failure")
 assert len(cases) == 6, len(cases)
-assert len(failures) == 6, len(failures)
+assert not root.findall(".//failure")
 assert not root.findall(".//error")
 assert not root.findall(".//skipped")
 PY
   then
-    expected_red "--runxfail proves all 6 documented gaps still fail"
+    pass "--runxfail confirms all 6 documented gaps now pass for real"
   else
-    fail "--runxfail result is not the exact 6-failure baseline"
+    fail "--runxfail result is not the exact 6-pass baseline"
     show_failure_log "$RUNXFAIL_LOG"
   fi
 fi
@@ -165,9 +163,15 @@ if source["import_state"] == "PENDING":
 elif source["import_state"] == "IMPORTED":
     expected = source["sha256"]
     assert isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{64}", expected)
+    # PLAN-030h：优先用元数据里的 materialized_path，这份夹具本来就在仓内。
+    # 只认环境变量会让本仓单命令验证在没人手工导出变量时凭空 BLOCKED。
     candidate = os.environ.get("QYUNSLATION_LJAE439_FIXTURE")
     if not candidate:
-        print("IMPORTED metadata requires QYUNSLATION_LJAE439_FIXTURE for byte verification")
+        materialized = source.get("materialized_path")
+        if materialized and (root / materialized).is_file():
+            candidate = str(root / materialized)
+    if not candidate:
+        print("IMPORTED metadata requires materialized_path or QYUNSLATION_LJAE439_FIXTURE")
         raise SystemExit(3)
     path = Path(candidate)
     assert path.is_file(), path
@@ -190,7 +194,7 @@ else
 fi
 
 run_pass \
-  "full pytest regression excluding three pre-existing archive failures" \
+  "full pytest regression excluding the separately gated archive suite" \
   "$STAGE_DIR/full.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
     "$PY" -m pytest -q --ignore=tests/test_pdf2zh_archive.py --no-cov
@@ -206,9 +210,9 @@ else
 fi
 
 if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 ]]; then
-  printf 'SUMMARY: PASS expected_red=6 blocked=0 fail=0\n'
+  printf 'SUMMARY: PASS expected_red=0 blocked=0 fail=0\n'
   exit 0
 fi
 
-printf 'SUMMARY: FAIL expected_red<=6 blocked=%d fail=%d\n' "$BLOCKERS" "$FAILURES"
+printf 'SUMMARY: FAIL expected_red=0 blocked=%d fail=%d\n' "$BLOCKERS" "$FAILURES"
 exit 1
