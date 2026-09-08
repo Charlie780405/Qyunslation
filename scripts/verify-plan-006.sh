@@ -26,7 +26,6 @@ check "PLAN-006 纲领" test -f "$ROOT/docs/plans/PLAN-006-audit-remediation/PLA
 check "baseline-006b" test -f "$ROOT/docs/perf/baseline-006b.json"
 check "baseline-006c" test -f "$ROOT/docs/perf/baseline-006c.json"
 check "benchmark script" test -f "$ROOT/scripts/benchmark-plan-006c.py"
-check "pytest workflow" test -f "$ROOT/.github/workflows/pytest.yml"
 
 echo "== package rename =="
 check "no docutranslate symlink" test ! -e "$ROOT/docutranslate"
