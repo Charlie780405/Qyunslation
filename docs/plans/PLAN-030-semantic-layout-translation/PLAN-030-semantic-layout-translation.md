@@ -4,7 +4,7 @@
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
-> 阶段门：030a 已完成并通过验收；下一步为编写、单独审批 PLAN-030b。批准前不接入生产入口、不部署。
+> 阶段门：030a、030b 已完成并通过验收；下一步为编写、单独审批 PLAN-030c。批准前不实现语义扫描、不部署。
 
 ## 一、执行基线提示词
 
@@ -253,4 +253,6 @@ DocumentStructureManifest
 7. 将单栏、双栏、多栏、自由布局和 Poster 分区作为独立质量门，而不是依赖底层库“应当支持”。
 8. 依次编写 030a–030i 详细子计划；每份子计划再次单独审批后实施。
 
-030a 完成记录：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md) / [WT-030a](../../walkthroughs/WT-030a-contract-baselines.md)。下一批准门为编写并审批 **PLAN-030b 输入适配与归一化画布详细子计划**；当前尚未创建该子计划。
+030a 完成记录：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md) / [WT-030a](../../walkthroughs/WT-030a-contract-baselines.md)。
+030b 完成记录：[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md) / [WT-030b](../../walkthroughs/WT-030b-input-adapters-normalized-canvases.md)。
+下一批准门为编写并审批 **PLAN-030c 统一语义扫描与画像路由详细子计划**；当前尚未创建该子计划。

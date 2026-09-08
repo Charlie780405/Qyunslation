@@ -1,6 +1,6 @@
 # PLAN-030b 子计划：输入适配与归一化画布
 
-> 状态：**已批准，实施中**
+> 状态：**已完成**
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确要求“执行 PLAN-030b”
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)
@@ -92,9 +92,9 @@
 
 **验收：**
 
-- [ ] CORE/NORMALIZE/CONDITIONAL 格式可由真实魔数或 OOXML part 识别。
-- [ ] 扩展名/MIME 冲突、空文件、未知二进制和容器炸弹返回稳定错误码。
-- [ ] 文件名清洗、完整 SHA-256 和大小边界有测试。
+- [x] CORE/NORMALIZE/CONDITIONAL 格式可由真实魔数或 OOXML part 识别。
+- [x] 扩展名/MIME 冲突、空文件、未知二进制和容器炸弹返回稳定错误码。
+- [x] 文件名清洗、完整 SHA-256 和大小边界有测试。
 
 **验证：** 先运行测试证明 RED，再实现并运行 `pytest -q tests/structure/test_input_detection.py --no-cov`。
 
@@ -106,9 +106,9 @@
 
 **验收：**
 
-- [ ] 每项 RuntimeFeature 有 AVAILABLE/UNAVAILABLE 证据与版本/路径摘要。
-- [ ] 自动模式只选择当前可满足的模式；请求模式缺能力时显式 UNAVAILABLE。
-- [ ] DOC/PPT 在无 Office converter 时上传前失败，不静默路由到 OOXML 工作流。
+- [x] 每项 RuntimeFeature 有 AVAILABLE/UNAVAILABLE 证据与版本/路径摘要。
+- [x] 自动模式只选择当前可满足的模式；请求模式缺能力时显式 UNAVAILABLE。
+- [x] DOC/PPT 在无 Office converter 时上传前失败，不静默路由到 OOXML 工作流。
 
 ### Task 3：四类 canonical canvas adapter
 
@@ -118,15 +118,15 @@
 
 **验收：**
 
-- [ ] 合成 PDF、DOCX、核心图片、PPTX 均生成稳定画布。
-- [ ] 双栏 DOCX、EXIF 旋转 JPEG、双页 TIFF、PPTX slide 数量与尺寸正确。
-- [ ] 损坏、加密、超像素/超帧输入 fail-closed。
+- [x] 合成 PDF、DOCX、核心图片、PPTX 均生成稳定画布。
+- [x] 双栏 DOCX、EXIF 旋转 JPEG、双页 TIFF、PPTX slide 数量与尺寸正确。
+- [x] 损坏、加密、超像素/超帧输入 fail-closed。
 
 ### Checkpoint 1：输入内核
 
-- [ ] Tasks 1–3 聚焦测试通过。
-- [ ] 030a schema/fixture/profile 测试无回归。
-- [ ] 不依赖网络或知识库运行时路径。
+- [x] Tasks 1–3 聚焦测试通过。
+- [x] 030a schema/fixture/profile 测试无回归。
+- [x] 不依赖网络或知识库运行时路径。
 
 ### Task 4：Office DOC/PPT 规范化与资产血缘
 
@@ -136,9 +136,9 @@
 
 **验收：**
 
-- [ ] DOC→DOCX、PPT→PPTX 使用同一转换器接口且可注入 fake 测试。
-- [ ] 命令无 shell、临时路径固定、超时、退出码、缺输出、错误输出和错误格式均被拒绝。
-- [ ] 转换结果创建 NORMALIZED asset 和无环 lineage，记录转换器版本及参数。
+- [x] DOC→DOCX、PPT→PPTX 使用同一转换器接口且可注入 fake 测试。
+- [x] 命令无 shell、临时路径固定、超时、退出码、缺输出、错误输出和错误格式均被拒绝。
+- [x] 转换结果创建 NORMALIZED asset 和无环 lineage，记录转换器版本及参数。
 
 ### Task 5：PreparedDocument 纵向准备器
 
@@ -148,9 +148,9 @@
 
 **验收：**
 
-- [ ] CORE 格式返回原字节 + capability + canvases；NORMALIZE 格式返回转换字节 + lineage。
-- [ ] 无转换时 hash 不变且无伪血缘；转换后输入/输出 hash 可对账。
-- [ ] 生成可安全记录的审计摘要，正文和原始字节不进入 repr/日志。
+- [x] CORE 格式返回原字节 + capability + canvases；NORMALIZE 格式返回转换字节 + lineage。
+- [x] 无转换时 hash 不变且无伪血缘；转换后输入/输出 hash 可对账。
+- [x] 生成可安全记录的审计摘要，正文和原始字节不进入 repr/日志。
 
 ### Task 6：共享预扫描接入
 
@@ -160,9 +160,9 @@
 
 **验收：**
 
-- [ ] TIFF 返回 `file_type=image` 并识别多帧；PPTX 返回 `file_type=pptx`。
-- [ ] DOCX/PPTX 嵌图候选使用 occurrence/part 信息，不把文件级拒绝伪装成零候选。
-- [ ] `file_sha256` 覆盖完整文件，不再只取前 32 MiB。
+- [x] TIFF 返回 `file_type=image` 并识别多帧；PPTX 返回 `file_type=pptx`。
+- [x] DOCX/PPTX 嵌图候选使用 occurrence/part 信息，不把文件级拒绝伪装成零候选。
+- [x] `file_sha256` 覆盖完整文件，不再只取前 32 MiB。
 
 ### Task 7：生产路由、MIME 与上传上限接线
 
@@ -172,16 +172,16 @@
 
 **验收：**
 
-- [ ] 两个主上传端点传入声明 MIME，并在超限时返回 413。
-- [ ] 未知输入不再回退 TXT；`.ppt` 不再直接进入 PPTX workflow。
-- [ ] 自动路由使用规范化格式；任务状态保存不含正文的 ingest 审计摘要。
-- [ ] 既有明确文本格式和前端字符串错误展示保持兼容；日志不再输出 token 前缀。
+- [x] 两个主上传端点传入声明 MIME，并在超限时返回 413。
+- [x] 未知输入不再回退 TXT；`.ppt` 不再直接进入 PPTX workflow。
+- [x] 自动路由使用规范化格式；任务状态保存不含正文的 ingest 审计摘要。
+- [x] 既有明确文本格式和前端字符串错误展示保持兼容；日志不再输出 token 前缀。
 
 ### Checkpoint 2：生产入口
 
-- [ ] 四个 PLAN-030b 严格 XFAIL 转为普通绿色测试。
-- [ ] 030c/030g 两个 XFAIL 仍为严格红灯且 `--runxfail` 可证明。
-- [ ] FastAPI 测试覆盖 413、415/422、伪后缀和合法上传。
+- [x] 四个 PLAN-030b 严格 XFAIL 转为普通绿色测试。
+- [x] 030c/030g 两个 XFAIL 仍为严格红灯且 `--runxfail` 可证明。
+- [x] FastAPI 测试覆盖 413、415/422、伪后缀和合法上传。
 
 ### Task 8：真实样本、阶段门和交接文档
 
@@ -191,10 +191,10 @@
 
 **验收：**
 
-- [ ] 知识库 ljae439 物化为 TEST_FIXTURE_ONLY，记录完整 SHA-256；生产代码无该路径引用。
-- [ ] 真实 PDF 得到 10 个稳定 PAGE canvas；语义 5 Figure / 3 Table 仍留给 030c。
-- [ ] 单命令门区分 PASS、EXPECTED_RED、BLOCKED、FAIL，并精确锁定既有 3 个 archive 失败。
-- [ ] 全仓无新增失败、工作区干净、walkthrough 记录真实输出。
+- [x] 知识库 ljae439 物化为 TEST_FIXTURE_ONLY，记录完整 SHA-256；生产代码无该路径引用。
+- [x] 真实 PDF 得到 10 个稳定 PAGE canvas；语义 5 Figure / 3 Table 仍留给 030c。
+- [x] 单命令门区分 PASS、EXPECTED_RED、BLOCKED、FAIL，并精确锁定既有 3 个 archive 失败。
+- [x] 全仓无新增失败、工作区干净、walkthrough 记录真实输出。
 
 ## 六、阶段验收命令
 
@@ -240,3 +240,7 @@ git diff --check
 - 真实 ljae439 与合成格式矩阵通过字节级探测和画布提取。
 - 既有 3 个 archive 失败精确不变，除此之外全仓无新增失败。
 - 代码审查覆盖正确性、安全、兼容性、性能、可观察性和回滚；无高优先级发现。
+
+实施于 2026-09-07 完成；验收证据见
+[WT-030b](../../walkthroughs/WT-030b-input-adapters-normalized-canvases.md)。
+下一阶段为单独编写并审批 PLAN-030c，不在本子计划中实现语义 Figure/Table 归并。
