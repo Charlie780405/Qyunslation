@@ -27,6 +27,7 @@ grep -q 'def scan_pdf_tier3' "$SCRIPTS/doc_image_prescan.py" && check "scan_pdf_
 grep -q 'def format_tier3_summary' "$SCRIPTS/doc_image_prescan.py" && check "format_tier3_summary" true || check "format_tier3_summary" false
 
 echo "== 2. 论文 PDF 结构扫描 =="
+# PLAN-030c 口径变更：用户主计数改题注去重，不再用几何矢量/find_tables 数。
 if [[ -f "$SAMPLE" ]]; then
   PYTHONPATH="$SCRIPTS:$ROOT" "$PY" - <<PY
 import sys, time
@@ -40,8 +41,9 @@ p = Path("$SAMPLE")
 t0 = time.time()
 r = scan_pdf_tier3(p)
 dt = time.time() - t0
-assert r.vector_count == 12, f"vector_count={r.vector_count}"
-assert r.table_count >= 19, f"table_count={r.table_count}"
+assert r.figure_caption_count == 7, f"figure_caption_count={r.figure_caption_count}"
+assert r.table_caption_count == 3, f"table_caption_count={r.table_caption_count}"
+assert r.translatable_count == 7, f"translatable_count={r.translatable_count}"
 assert dt < 15.0, f"tier3 slow {dt:.2f}s"
 assert not r.error, r.error
 
@@ -52,7 +54,7 @@ a = find_safe_vector_figures(page, tables=tb)
 b = find_safe_vector_figures(page)
 assert len(a) == len(b), f"tables= mismatch {len(a)} vs {len(b)}"
 doc.close()
-print("tier3_ok", r.vector_count, r.table_count, f"{dt:.2f}s")
+print("tier3_ok", r.figure_caption_count, r.table_caption_count, f"{dt:.2f}s")
 PY
   check "tier3 sample pdf" test $? -eq 0
 else

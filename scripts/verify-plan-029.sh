@@ -117,20 +117,24 @@ else
 fi
 
 echo "== 5. PLAN-028 回归 =="
+# PLAN-030c 口径变更：期刊用户口径改为题注可译区，不再断言几何矢量合计 12。
 if [[ -f "$JOURNAL" ]]; then
   PYTHONPATH="$SCRIPTS:$ROOT" "$PY" - <<PY
 import sys
 sys.path.insert(0, "$SCRIPTS")
 import pymupdf
+from doc_image_prescan import scan_pdf_tier3
 from pdf_figure_crop import find_safe_vector_figures
 
+r = scan_pdf_tier3("$JOURNAL")
+assert r.translatable_count == 7, f"journal translatable {r.translatable_count}"
 d = pymupdf.open("$JOURNAL")
-n = sum(len(find_safe_vector_figures(p)) for p in d)
+legacy = sum(len(find_safe_vector_figures(p)) for p in d)
 d.close()
-assert n == 12, f"vector regression {n}"
-print("vector_ok", n)
+assert legacy == 12, f"legacy geometric regression {legacy}"
+print("journal_ok", r.translatable_count, legacy)
 PY
-  check "journal vector still 12" test $? -eq 0
+  check "journal translatable == 7" test $? -eq 0
 fi
 
 echo "== 6. export 挂载 =="

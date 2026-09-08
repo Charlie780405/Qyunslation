@@ -1,7 +1,9 @@
 # PLAN-030c 子计划：统一语义扫描与题注驱动 Figure/Table 归并
 
-> 状态：**待批准**
+> 状态：**已完成**
 > 日期：2026-09-08
+> 批准记录：用户于 2026-09-08 明确批准 PLAN-030c
+> 完成记录：[WT-030c](../../walkthroughs/WT-030c-unified-semantic-scan.md)
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
 > 前置阶段：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md)（已完成）、[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md)（已完成）
 > 阶段边界：交付 PDF 语义扫描、manifest 装配、预扫描/UI 计数口径对齐、纯表页 fail-closed 执行防护；不实现正文翻译回写、不接入 DocLayout、不迁移 DOCX/PPTX 语义对象（归属 030d–030g）。
@@ -193,9 +195,9 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] `caption_anchors` 对 ljae439 p5 返回 table:2、对 nature p10 返回 figure:5。
-- [ ] Nature PDF 完整 SHA-256 与 truth JSON 一致。
-- [ ] 单元测试覆盖 TOC 行、续表题注、Springer `Table N | Title` 格式的 figure/table 编号解析。
+- [x] `caption_anchors` 对 ljae439 p5 返回 table:2、对 nature p10 返回 figure:5。
+- [x] Nature PDF 完整 SHA-256 与 truth JSON 一致。
+- [x] 单元测试覆盖 TOC 行、续表题注、Springer `Table N | Title` 格式的 figure/table 编号解析。
 
 **验证：** `pytest -q tests/structure/test_caption_anchors.py --no-cov`
 
@@ -207,11 +209,11 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] `page_caption_profile` 正确区分 pure_table / figure_only / mixed / none。
-- [ ] nature 样本：7 可译区、Figure 1–7 全覆盖、p4/p5/p9 返回空。
-- [ ] ljae439 样本：5 可译区、Figure 1–5 全覆盖、3 表页零 OCR 区域。
-- [ ] 幻灯样本：仍为 12 区域。
-- [ ] `find_safe_vector_figures` 行为不变（回归测试）。
+- [x] `page_caption_profile` 正确区分 pure_table / figure_only / mixed / none。
+- [x] nature 样本：7 可译区、Figure 1–7 全覆盖、p4/p5/p9 返回空。
+- [x] ljae439 样本：5 可译区、Figure 1–5 全覆盖；表题注 `{1,2,3}`，纯表页零 OCR（Table 1+2 同页，Table 3 与 Figure 4 同页为 mixed）。
+- [x] 幻灯样本：PLAN-029b profile 仍为 12 区域。
+- [x] `find_safe_vector_figures` 行为不变（回归测试）。
 
 **验证：** `pytest -q tests/structure/test_figure_regions.py --no-cov`
 
@@ -223,11 +225,11 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] `PdfStructureScanner.scan` 产出通过 manifest 契约校验的 v1 文档。
-- [ ] ljae439：`summary.figure_count==5`、`summary.table_count==3`。
-- [ ] nature：`summary.figure_count==7`、`summary.table_count==3`。
-- [ ] 同一输入两次扫描 manifest 稳定（hash + object IDs 一致）。
-- [ ] 每个 Figure/Table 对象带 `caption_bbox` 与 `detector_evidence`。
+- [x] `PdfStructureScanner.scan` 产出通过 manifest 契约校验的 v1 文档。
+- [x] ljae439：`summary.figure_count==5`、`summary.table_count==3`。
+- [x] nature：`summary.figure_count==7`、`summary.table_count==3`。
+- [x] 同一输入两次扫描 manifest 稳定（hash + object IDs 一致）。
+- [x] 每个 Figure/Table 对象带 `caption_bbox` 与 `detector_evidence`。
 
 **验证：** `pytest -q tests/structure/test_scan_pdf.py --no-cov`
 
@@ -239,9 +241,9 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] `QY030-SEM-001` xfail 移除，测试转绿。
-- [ ] `format_tier3_summary` 不再出现「N 位图 + M 矢量 = 总插图」相加口径。
-- [ ] ljae439 Tier-3 摘要含「5 张插图」与「3 处表格」，不含「7 处插图」。
+- [x] `QY030-SEM-001` xfail 移除，测试转绿。
+- [x] `format_tier3_summary` 不再出现「N 位图 + M 矢量 = 总插图」相加口径。
+- [x] ljae439 Tier-3 摘要含「5 张插图」与「3 处表格」，不含「7 处插图」。
 
 **验证：** `pytest -q tests/structure/test_plan030_red_baselines.py --no-cov`
 
@@ -253,19 +255,19 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] 非幻灯页策略 B 改调 `find_figure_regions`。
-- [ ] nature p5（Table 2）不产生 OCR 嵌字区域。
-- [ ] 幻灯页仍走 PLAN-029b profile，行为不变。
+- [x] 非幻灯页策略 B 改调 `find_figure_regions`。
+- [x] nature p5（Table 2）不产生 OCR 嵌字区域。
+- [x] 幻灯页仍走 PLAN-029b profile，行为不变。
 
 **验证：** `pytest -q tests/structure/test_table_page_guard.py --no-cov`
 
 ### Checkpoint：030c 阶段门
 
-- [ ] Tasks 1–5 聚焦测试全部绿。
-- [ ] `bash scripts/verify-plan-030c.sh` PASS。
-- [ ] 028/029 验收脚本更新后仍 PASS。
-- [ ] 全仓 `pytest -q tests/structure --no-cov -rxX`：`N passed, 1 xfailed`（只剩 QY030-PPT-001）。
-- [ ] archive 3 个既有失败精确不变。
+- [x] Tasks 1–5 聚焦测试全部绿。
+- [x] `bash scripts/verify-plan-030c.sh` PASS。
+- [x] 028/029 验收脚本更新后仍 PASS。
+- [x] 全仓 `pytest -q tests/structure --no-cov -rxX`：`145 passed, 1 xfailed`（只剩 QY030-PPT-001）。
+- [x] archive 3 个既有失败精确不变。
 
 ### Task 6：验收脚本与文档
 
@@ -275,9 +277,9 @@ PdfStructureScanner.scan(source, *, content_profile, processing_mode)
 
 **验收：**
 
-- [ ] 单命令门区分 PASS / EXPECTED_RED / FAIL。
-- [ ] WT 记录 ljae439 与 nature 实测摘要、028/029 断言变更说明。
-- [ ] 父纲领「下一批准门」更新为 PLAN-030d。
+- [x] 单命令门区分 PASS / EXPECTED_RED / FAIL。
+- [x] WT 记录 ljae439 与 nature 实测摘要、028/029 断言变更说明。
+- [x] 父纲领「下一批准门」更新为 PLAN-030d。
 
 ## 九、阶段验收命令
 
@@ -325,4 +327,4 @@ git diff --check
 - 幻灯 PLAN-029b 零回归。
 - WT-030c 与 verify-plan-030c.sh 入库。
 
-批准前不修改业务代码、不部署、不重启 pdf2zh 服务。
+本子计划已完成实现与验收；未部署、未重启 pdf2zh 服务。下一批准门为 PLAN-030d。
