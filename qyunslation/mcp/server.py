@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 """
-DocuTranslate MCP Server
+Qyunslation MCP Server
 
-Model Context Protocol server for DocuTranslate, providing document translation
+Model Context Protocol server for Qyunslation, providing document translation
 capabilities to AI assistants.
 
 This implementation uses the shared TranslationService from the server layer
@@ -185,13 +185,13 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
         # Create FastMCP instance
         mcp = FastMCP(
             name=SERVER_NAME,
-            instructions="DocuTranslate MCP server for document translation. "
+            instructions="Qyunslation MCP server for document translation. "
                          "Step 1: Use submit_task to start a translation task, "
                          "Step 2: Use get_task_status to check progress - when completed, "
                          "it will show all available formats and attachments, "
                          "Step 3: Use download_file to save translations or attachments (set auto_release=True to automatically clean up resources after download), "
                          "Step 4 (optional): Use release_task to manually clean up resources when done. "
-                         "The translation uses the full workflow engine from DocuTranslate.",
+                         "The translation uses the full Qyunslation workflow engine.",
             host=host,
             port=port,
         )
@@ -253,7 +253,7 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
                 mineru_deploy_lang_list: Optional[List[str]] = None,
                 mineru_deploy_server_url: Optional[str] = None,
         ) -> str:
-            """Configure the DocuTranslate client LLM settings.
+            """Configure the Qyunslation client LLM settings.
             If already configured via environment variables, this tool can override them.
 
             Args:
@@ -1054,9 +1054,9 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
             except Exception as e:
                 return f"Error loading glossary file: {e}"
 
-        @mcp.resource("qyunslation://info", name="DocuTranslate Server Information")
+        @mcp.resource("qyunslation://info", name="Qyunslation Server Information")
         async def get_info_resource() -> str:
-            """Information about the DocuTranslate MCP server"""
+            """Information about the Qyunslation MCP server"""
             status_info = {
                 "server": "qyunslation",
                 "version": __version__,
@@ -1159,7 +1159,7 @@ if MCP_AVAILABLE and FastMCP is not None and Context is not None:
         import argparse
 
         parser = argparse.ArgumentParser(
-            description="DocuTranslate MCP Server"
+            description="Qyunslation MCP Server"
         )
         parser.add_argument(
             "--transport",

@@ -78,7 +78,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=f'DocuTranslate_full-{qyunslation.__version__}-win',
+    name=f'Qyunslation_full-{qyunslation.__version__}-win',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -91,5 +91,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='DocuTranslate.ico',
+    icon='archive/legacy/DocuTranslate.ico',
 )

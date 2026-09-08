@@ -1,5 +1,5 @@
 """
-Global pytest fixtures for DocuTranslate tests
+Global pytest fixtures for Qyunslation tests
 """
 import os
 import sys
