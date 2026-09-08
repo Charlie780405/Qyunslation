@@ -59,3 +59,12 @@ PLAN-028d 将 19 页 Nature 金标 PDF 的冷扫描从 28.81 秒、12/19 页截�
 - `QYUNSLATION_VERIFY_PY` 可覆盖默认的仓库 `.venv/bin/python`。
 - `QYUNSLATION_PLAN028_SAMPLE` 可指定金标文件；`QYUNSLATION_SAMPLE_ROOT` 可指定样本根目录。
 - 缺少运行时或金标样本时门禁返回非零 `BLOCKED`，不得以 skip 伪装通过。
+
+## 部署
+
+- main `4cdcc9a`（merge PLAN-028d，含 4 个原子提交）
+- 已推送 `qyunslation/main`
+- `apply-pdf2zh-docimg.py` 已升级 gui 为 `get_current()` 消费结构缓存
+- `systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service pdf2zh.service`
+- 部署后 `verify-plan-028.sh`：PASS（冷扫描中位 1.361s，19/19 页，7/3/7）
+- `http://127.0.0.1:7860/`、`http://127.0.0.1:8010/` 均 200

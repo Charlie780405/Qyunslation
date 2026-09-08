@@ -1,6 +1,6 @@
 # PLAN-028d：Tier-3 预扫描性能恢复与阻塞解除
 
-> 状态：**代码与门禁已通过，待提交**
+> 状态：**已合并 main 并部署**
 > 日期：2026-09-08
 > 父计划：[PLAN-028](./PLAN-028-prescan-parity.md)
 > 前置：[PLAN-028c](./PLAN-028c-verify-delivery.md)、[PLAN-030d](../PLAN-030-semantic-layout-translation/PLAN-030d-manifest-ssot-execution-parity.md)
