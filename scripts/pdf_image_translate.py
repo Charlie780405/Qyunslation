@@ -190,12 +190,16 @@ def _structure_regions(
     return out
 
 
-def _mark(obj, status: str, reason: str | None = None) -> None:
+def _mark(obj, status: str, reason: str | None = None, *, checks: dict | None = None) -> None:
+    from qyunslation.structure.execution_evidence import write_output_evidence
     from qyunslation.structure.models import ExecutionStatus
 
-    obj.execution_status = ExecutionStatus(status)
-    if reason:
-        obj.reason_code = reason
+    write_output_evidence(
+        obj,
+        status=ExecutionStatus(status),
+        reason_code=reason,
+        checks=checks or {},
+    )
 
 
 def translate_pdf_images(

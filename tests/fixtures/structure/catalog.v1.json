@@ -28,8 +28,8 @@
       "source_format": "DOCX",
       "content_profile": "REVIEW_ARTICLE",
       "relative_path": "review.docx",
-      "sha256": "4626d65a392a277f0a2ec4de86a74df7ac5e52afa755e4225c2e1f315ec6d7b3",
-      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE", "IMAGE"],
+      "sha256": "1124a6bd6ed816f76736d4749a25a0ad794c7662e8d4b188e44305d327bc5d81",
+      "expected_objects": ["BODY", "FIGURE", "CAPTION", "TABLE", "IMAGE", "TEXT_BOX"],
       "future_owner": "PLAN-030e"
     },
     {

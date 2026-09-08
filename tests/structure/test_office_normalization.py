@@ -146,3 +146,26 @@ def test_non_legacy_format_is_rejected():
         converter.convert("paper.pdf", b"%PDF", SourceFormat.PDF)
 
     assert exc_info.value.code == "OFFICE_SOURCE_FORMAT_UNSUPPORTED"
+
+
+@pytest.mark.skipif(
+    __import__("shutil").which("soffice") is None
+    and __import__("shutil").which("libreoffice") is None,
+    reason="LibreOffice not installed; run scripts/install-libreoffice.sh",
+)
+def test_real_libreoffice_converts_doc_fixture_to_docx(generated_structure_fixtures: Path):
+    """End-to-end conversion without FakeRunner (PLAN-030e Task 1)."""
+    expected = (generated_structure_fixtures / "review.docx").read_bytes()
+    ole_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    converter = LibreOfficeConverter()
+
+    result = converter.convert("legacy.doc", ole_header + b"legacy", SourceFormat.DOC)
+
+    assert result.output_format is SourceFormat.DOCX
+    assert result.content.startswith(b"PK")
+    assert len(result.content) > 100
+    import io
+    import zipfile
+
+    names = zipfile.ZipFile(io.BytesIO(result.content)).namelist()
+    assert "word/document.xml" in names

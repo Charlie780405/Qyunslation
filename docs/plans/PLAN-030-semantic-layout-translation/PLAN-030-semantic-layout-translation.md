@@ -4,7 +4,7 @@
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
-> 阶段门：030a、030b、030c、030d 已完成并通过验收。下一批准门为 **PLAN-030e**（DOCX 纵向闭环）。
+> 阶段门：030a–030e、030e-fix、**030f** 已完成。下一批准门为 **PLAN-030g**（PPT/PPTX 纵向闭环）。
 
 ## 一、执行基线提示词
 
@@ -140,7 +140,7 @@ DocumentStructureManifest
 | 030b | 输入适配与归一化画布 | 统一 MIME/扩展名探测、PDF/DOCX/图片/PPT(X) 接入、Office 转换、图片解码、产物血缘和能力探针 | 030a |
 | 030c | [统一语义扫描与题注驱动归并](./PLAN-030c-unified-semantic-scan.md)（已完成） | 题注锚点 + 物理对象关联 → manifest；预扫描/UI 语义计数；纯表页 fail-closed 执行防护 | 030a–030b |
 | 030d | [PDF 纵向闭环](./PLAN-030d-manifest-ssot-execution-parity.md)（已完成） | manifest SSOT 贯通、无编号对象、执行状态回写、正文 BODY 与阅读顺序、单/双/多栏检测、表格区域保护、原生/扫描/混合逐页对齐 | 030c |
-| 030e | DOCX 纵向闭环 | 节/栏、正文、表格、文本框、页眉页脚、DrawingML occurrence 的可编辑原位翻译与视觉校验 | 030c |
+| 030e | [DOCX 纵向闭环与前序缺口收拢](./PLAN-030e-docx-vertical-closure.md)（已完成） | DOCX 结构扫描、manifest 对账、单元格级表格、结构校验门；收拢 LibreOffice/样本/契约债 | 030c–030d |
 | 030f | 图片与 Poster 纵向闭环 | 常见图片格式、超大画布分区、方向/透明度/色彩保护、无接缝回填与 Poster 画像 | 030c |
 | 030g | PPT/PPTX 双模式闭环 | 原生可编辑模式、嵌图翻译、PPT 转换、逐页图片化翻译及图片化 PPTX/PDF/图片集打包 | 030b–030f |
 | 030h | 跨格式版式保真 | 单/双/多/混合栏、幻灯片自由布局、Poster 分区的阅读顺序、几何、文本和视觉回归 | 030d–030g |

@@ -80,7 +80,6 @@ from .runtime import (
 )
 from .canvases import CanvasLimits, extract_canvases
 from .manifest_store import ManifestStore, default_cache_root
-from .scan_pdf import PdfStructureScanner
 from .captions import (
     CAPTION_LINE,
     FIGURE_LINE,
@@ -165,6 +164,8 @@ __all__ = [
     "CanvasLimits",
     "ManifestStore",
     "PdfStructureScanner",
+    "DocxStructureScanner",
+    "ImageStructureScanner",
     "default_cache_root",
     "extract_canvases",
     "CAPTION_LINE",
@@ -176,3 +177,19 @@ __all__ = [
     "squeeze_caps",
     "table_caption_num",
 ]
+
+_LAZY_EXPORTS = {
+    "PdfStructureScanner": ("scan_pdf", "PdfStructureScanner"),
+    "DocxStructureScanner": ("scan_docx", "DocxStructureScanner"),
+    "ImageStructureScanner": ("scan_image", "ImageStructureScanner"),
+}
+
+
+def __getattr__(name: str):
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr = _LAZY_EXPORTS[name]
+    from importlib import import_module
+
+    module = import_module(f".{module_name}", __name__)
+    return getattr(module, attr)

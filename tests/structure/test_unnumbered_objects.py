@@ -14,13 +14,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from pdf_figure_crop import _drop_nested, translatable_regions  # noqa: E402
+from tests.structure.sample_paths import slide_sample
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = Path(
-    "/home/dev/pdf2zh/pdf2zh_files/57114032-8727-41f9-b826-b5ff40fcf733/"
-    "QX027N QnA-2026.08.19-临床.pdf"
-)
+SLIDE = slide_sample()
 
 requires_slide = pytest.mark.skipif(
     not SLIDE.is_file(), reason="slide sample lives outside the repo"
