@@ -48,11 +48,35 @@
 - 已安装 GUI 的 `_QY_OFFICE_SIDECAR_EXT` 与清单逐字节一致（契约测试断言）。
 - 五种 CORE 图片格式过 sidecar `image-probe` 全部受理，TIFF 此前返回 `unsupported_format:.tiff`。返回的 `skip/too_small` 是尺寸策略，不是格式拒绝。
 
+## 回归门暴露的既存问题
+
+跑相邻门做回归时，发现四个门本身早已失效，都与本次改动无关，一并修掉。
+
+**归档预期红过期。** PLAN-032 修好了三条归档命名红（原文件名清洗 + 归档 ID 前缀），但 030a/030b/030c 仍把它们登记为「预期红」并断言必须失败，于是这三个门在 PLAN-032 之后一律 FAIL。改为要求归档套件全绿。
+
+**预期红计数从一开始就判不了 PASS。** `expected_red` 是脚本内的局部计数，嵌套子门的预期红不会计进来，030c 与 030d 却分别要求它等于 3 和 1。030d 上一轮九项全 PASS 却输出 `SUMMARY: FAIL fail=0`，就是这个原因。
+
+**XFAIL 基线随子计划交付而过期。** 030a 要求 6 条红灯全红、030b 要求只剩两条，而 030c–030g 已逐条修绿。改为守住「不许倒退回 XFAIL」，并由 `--runxfail` 全绿证明缺口真的关上了。
+
+**ljae439 凭空 BLOCKED。** 030a 在夹具标为 IMPORTED 后只认 `QYUNSLATION_LJAE439_FIXTURE` 环境变量做字节校验，而 truth 元数据里本就写着 `materialized_path`、文件也在仓内。改为优先读 `materialized_path`——这与 H1 是同一类问题：本仓单命令验证不该因为没人手工导出变量就阻塞。
+
+## 夹具确定性：pymupdf 的 garbage=4
+
+`poster-sections.pdf` 在全仓并发跑门时出现过两次生成 hash 不同，catalog 的复现断言转红。单独跑、加状态扰动跑、全仓串行跑都复现不出来，只在多个嵌套门并发时出现。
+
+根因在 `tobytes(garbage=4)`：它重排 xref，产物字节受进程内累积状态影响。最初只规范化了 trailer 的 `/ID`，不够。四份版式金样改为裸内容流手写，彻底不经 pymupdf 生成，`_canonicalize_pdf` 一并移除。
+
+裸流排版有两处约束，写进了生成器注释：同一基线 y 上的多列文字会被 PyMuPDF 并成一个横跨整页的块（各列整体错开 3pt 解决）；行距超过约 34pt 时列内各行不再聚成一块，会碎成一行一块。
+
+改写后三栏的中列中心落在 0.501 而非 0.499，归属从左串翻到右串。断言相应放宽为「三栏被压成两串」——这个千分之二就能翻转阅读顺序的现象，比原来的固定断言更能说明按中线机械二分的问题。
+
 ## 验收记录
 
 `bash scripts/verify-plan-030h.sh` 九项全 PASS：模块编译、清单在补丁运行时可载入、GUI 清单契约、跨格式对账、版式金样、夹具可复现且与 catalog 一致、**无运行时样本目录时结构套件仍全绿**、sidecar 受理全部 CORE 图片格式、已安装 GUI 与清单一致。
 
-结构套件 344 passed。`verify-plan-028.sh` 在 `SAMPLE_ROOT` 指向空目录时 PASS（blocked=0）。
+结构套件 344 passed，全仓 440 passed。
+
+整条门链全绿：028、029、030a、030b、030c、030d、030e、030f、030g、030h 均 `SUMMARY: PASS`，其中 030f 内部嵌套跑通了 028/029/030c/030d/030e。`verify-plan-028.sh` 在 `SAMPLE_ROOT` 指向空目录时也 PASS（blocked=0）。
 
 ## 留下的债
 
