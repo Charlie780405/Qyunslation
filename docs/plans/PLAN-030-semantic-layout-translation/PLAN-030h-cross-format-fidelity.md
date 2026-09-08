@@ -5,6 +5,7 @@
 > 批准记录：用户于 2026-09-08 批准「按最佳建议推进」
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
 > 前置：[PLAN-030d](./PLAN-030d-manifest-ssot-execution-parity.md)、[PLAN-030e](./PLAN-030e-docx-vertical-closure.md)、[PLAN-030f](./PLAN-030f-image-poster-closure.md)、[PLAN-030g](./PLAN-030g-pptx-dual-mode-closure.md)
+> 吸收：[PLAN-030e-residual](./PLAN-030e-residual-fixes.md) R3（R1/R2 已随 030e / 030e-fix 关闭）
 > 验收门：`bash scripts/verify-plan-030h.sh`（**禁止**嵌套 028/029/030c–030g 全门）
 
 ## 目标
@@ -25,9 +26,9 @@
 
 ## 交付
 
-### H1 验收基线脱离运行时样本目录
+### H1 验收基线脱离运行时样本目录（吸收 030e-residual R3）
 
-新增三份合成等价夹具，主门断言改走仓内合成件；仓外真实金样降级为「加强回归」，缺失只报 INFO 不再 BLOCKED。
+新增三份合成等价夹具，主门断言改走仓内合成件；仓外真实金样降级为「加强回归」，缺失只报 INFO 不再 BLOCKED。用户已明确不入库真实临床/监管 PDF，合成件是唯一可行路径。
 
 | 夹具 | 等价于 | 关键性质 |
 | --- | --- | --- |
