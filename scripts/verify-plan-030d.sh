@@ -301,7 +301,9 @@ for gate in 028 029 030c; do
   fi
 done
 
-if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 && "$EXPECTED_REDS" -eq 1 ]]; then
+# 本门不登记任何预期红：expected_red 是脚本局部计数，嵌套子门的预期红不会计到这里，
+# 原先要求 -eq 1 使这个门永远无法 PASS。
+if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 && "$EXPECTED_REDS" -eq 0 ]]; then
   printf 'SUMMARY: PASS expected_red=%d blocked=0 fail=0\n' "$EXPECTED_REDS"
   exit 0
 fi
