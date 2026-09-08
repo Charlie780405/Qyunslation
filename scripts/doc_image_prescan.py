@@ -412,7 +412,11 @@ def scan_pdf_tier3(
         return Tier3Result(error="pymupdf_missing")
 
     try:
-        from pdf_figure_crop import labeled_figure_regions
+        from pdf_figure_crop import (
+            is_slide_page,
+            labeled_figure_regions,
+            translatable_regions,
+        )
         from qyunslation.structure.captions import caption_anchors
     except ImportError:
         return Tier3Result(error="pdf_figure_crop_missing")
@@ -430,6 +434,7 @@ def scan_pdf_tier3(
     figure_ids: set[int] = set()
     table_ids: set[int] = set()
     translatable_ids: set[int] = set()
+    unlabeled_regions = 0
     pages_scanned = 0
     truncated = False
 
@@ -449,16 +454,19 @@ def scan_pdf_tier3(
                     figure_ids.add(num)
                 else:
                     table_ids.add(num)
-            translatable_ids.update(labeled_figure_regions(page))
+            if is_slide_page(page):
+                unlabeled_regions += len(translatable_regions(page))
+            else:
+                translatable_ids.update(labeled_figure_regions(page))
             pages_scanned += 1
         if limit < total and pages_scanned >= limit:
             truncated = truncated or limit < total
     finally:
         doc.close()
 
-    fig_n = len(figure_ids)
+    fig_n = len(figure_ids) + unlabeled_regions
     tab_n = len(table_ids)
-    trans_n = len(translatable_ids)
+    trans_n = len(translatable_ids) + unlabeled_regions
     return Tier3Result(
         vector_count=trans_n,
         table_count=tab_n,

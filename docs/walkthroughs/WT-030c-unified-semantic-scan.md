@@ -53,10 +53,29 @@ SUMMARY: PASS expected_red=3 blocked=0 fail=0
 | `verify-plan-028.sh` | `vector_count == 12`、`table_count >= 19` | `figure_caption_count == 7`、`table_caption_count == 3` |
 | `verify-plan-029.sh` | `journal vector still 12` | `journal translatable == 7`；legacy `find_safe_vector_figures` 几何合计仍回归为 12 |
 
-## 四、部署边界
+## 四、部署后发现并修复的回归
+
+首次部署后用生产 venv 实测六个真实样本，发现幻灯样本预扫描报「未检测到需要嵌字的插图」，执行侧却仍按 PLAN-029b profile 嵌 12 张图，违反 PLAN-027 不变量 4。原因是幻灯页没有题注，`labeled_figure_regions` 返回空，而预扫描没有走幻灯分支。
+
+| 样本 | 页数 | 幻灯页 | 修复前预扫描 | 执行 |
+| --- | --- | --- | --- | --- |
+| QX027N QnA | 17 | 17 | 0 | 12 |
+| FDA responses on PIND | 20 | 0 | 0 | 0 |
+| CBP-201 Ph 3 | 4 | 0 | 0 | 0 |
+| CM310 Ph 3 | 3 | 0 | 0 | 0 |
+| Abstract | 24 | 0 | 0 | 0 |
+| Nature 53384 | 19 | 0 | 7 | 7 |
+
+只有幻灯偏离；其他无题注 PDF 两侧同为 0，无回归。
+
+修复把分派收敛为 `pdf_figure_crop.translatable_regions(page, exclude_rects=None)`：幻灯页走 PLAN-029b profile，其余走 `find_figure_regions`。预扫描与 `pdf_image_translate` 策略 B 都调用它，幻灯页按区域数计入，非幻灯页仍按题注编号去重。修复后幻灯预扫描与执行同为 12。
+
+`verify-plan-029.sh` 增加 `slide prescan == execution` 断言；幻灯接线断言改为检查分派函数。
+
+## 五、部署边界
 
 本阶段不重启 pdf2zh。`verify-plan-028.sh` 的幂等检查会调用 `apply-pdf2zh-prescan.py`：首次因 HELPER 文案更新写入了 site-packages `gui.py`，第二次已报 `already patched`。进程内仍是旧 helper，用户可见文案要等单独 WT 重启后才会变成语义计数。
 
-## 五、下一阶段边界
+## 六、下一阶段边界
 
 PLAN-030d 消费本阶段 manifest，做 PDF 正文/Figure/Table 检测—翻译—回写闭环。不在 030c 范围：DocLayout、DOCX/PPTX 语义对象、跨格式对账、pdf2zh 服务重启。

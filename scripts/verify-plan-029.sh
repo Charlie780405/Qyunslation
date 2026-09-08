@@ -78,7 +78,9 @@ echo "== 4. 幻灯 profile =="
 check "slide constants" grep -q 'SLIDE_TEXT_OVERLAP' "$SCRIPTS/pdf_figure_crop.py"
 check "is_slide_page" grep -q 'def is_slide_page' "$SCRIPTS/pdf_figure_crop.py"
 check "profile params" grep -q 'text_overlap_max' "$SCRIPTS/pdf_figure_crop.py"
-check "imgtr slide wiring" grep -q 'is_slide_page(page)' "$SCRIPTS/pdf_image_translate.py"
+# PLAN-030c 补丁：幻灯分支收敛进 pdf_figure_crop.translatable_regions。
+check "slide dispatch in figure_crop" grep -q 'def translatable_regions' "$SCRIPTS/pdf_figure_crop.py"
+check "imgtr slide wiring" grep -q 'translatable_regions(page, exclude_rects=exclude)' "$SCRIPTS/pdf_image_translate.py"
 
 if [[ -f "$SLIDE" ]]; then
   PYTHONPATH="$SCRIPTS:$ROOT" "$PY" - <<PY
@@ -112,6 +114,24 @@ assert profile >= 12, f"profile {profile}"
 print("slide_profile_ok", baseline, profile)
 PY
   check "slide profile 8->12" test $? -eq 0
+
+  # PLAN-030c 补丁：幻灯无题注，预扫描必须与执行同口径（PLAN-027 不变量 4）。
+  PYTHONPATH="$SCRIPTS:$ROOT" "$PY" - <<PY
+import sys
+sys.path.insert(0, "$SCRIPTS")
+import pymupdf
+from doc_image_prescan import scan_pdf_tier3
+from pdf_figure_crop import translatable_regions
+
+d = pymupdf.open("$SLIDE")
+execution = sum(len(translatable_regions(p)) for p in d)
+d.close()
+r = scan_pdf_tier3("$SLIDE")
+assert execution == 12, f"slide execution {execution}"
+assert r.translatable_count == execution, f"prescan {r.translatable_count} vs exec {execution}"
+print("slide_parity_ok", r.translatable_count, execution)
+PY
+  check "slide prescan == execution" test $? -eq 0
 else
   printf '  skip  slide sample missing\n'
 fi

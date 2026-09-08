@@ -197,6 +197,23 @@ def find_figure_regions(page, exclude_rects: Iterable | None = None) -> list:
     return _merge_by_figure_captions(page, candidates, profile["figure_caps"])
 
 
+def translatable_regions(page, exclude_rects: Iterable | None = None) -> list:
+    """预扫描与执行共用的可译区域口径（PLAN-027 不变量 4）。
+
+    幻灯页无题注，必须走 PLAN-029b profile；否则预扫描报 0 而执行仍会嵌字。
+    """
+    if is_slide_page(page):
+        return find_safe_vector_figures(
+            page,
+            exclude_rects=exclude_rects,
+            tables=[],
+            text_overlap_max=SLIDE_TEXT_OVERLAP,
+            max_area_frac=SLIDE_MAX_AREA_FRAC,
+            min_drawings=SLIDE_MIN_DRAWINGS,
+        )
+    return find_figure_regions(page, exclude_rects=exclude_rects)
+
+
 def find_safe_vector_figures(
     page,
     exclude_rects: Iterable | None = None,
