@@ -142,6 +142,24 @@ def test_refresh_summary_tracks_execution_states(tmp_path, manifest):
     assert manifest.summary.status_counts.get("TRANSLATED", 0) >= 1
 
 
+def test_get_current_drops_stale_producer_versions(tmp_path, manifest):
+    store = ManifestStore(tmp_path)
+    name = manifest.producer.name
+    version = manifest.producer.version
+    stale = manifest.model_copy(deep=True)
+    stale.producer.version = "0.0.0"
+    store.put(stale)
+
+    loaded = store.get_current(
+        manifest.document.source_sha256,
+        producer_name=name,
+        producer_version=version,
+    )
+
+    assert loaded is None
+    assert store.get(manifest.document.source_sha256) is None
+
+
 def test_invalidate_removes_the_entry(tmp_path, manifest):
     store = ManifestStore(tmp_path)
     store.put(manifest)

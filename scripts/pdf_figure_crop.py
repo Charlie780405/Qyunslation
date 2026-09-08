@@ -36,13 +36,14 @@ def _union_rects(rects: list) -> object | None:
     return u
 
 
-def _long_text_rects(page) -> list:
+def _long_text_rects(page, *, blocks: list | None = None) -> list:
     """长段落文字块（>60 字符）用于防触碰。"""
     out = []
-    try:
-        blocks = page.get_text("blocks") or []
-    except Exception:
-        return out
+    if blocks is None:
+        try:
+            blocks = page.get_text("blocks") or []
+        except Exception:
+            return out
     for b in blocks:
         if len(b) < 5:
             continue
@@ -77,14 +78,15 @@ def _overlap_ratio(a, b) -> float:
     return abs(inter.width * inter.height) / area_a
 
 
-def page_caption_profile(page) -> dict:
+def page_caption_profile(page, *, anchors: list | None = None) -> dict:
     """PLAN-030c：页型 = pure_table | figure_only | mixed | none。"""
-    try:
-        from qyunslation.structure.captions import caption_anchors
+    if anchors is None:
+        try:
+            from qyunslation.structure.captions import caption_anchors
 
-        anchors = caption_anchors(page)
-    except Exception:
-        anchors = []
+            anchors = caption_anchors(page)
+        except Exception:
+            anchors = []
     figs = [a for a in anchors if a[0] == "figure"]
     tabs = [a for a in anchors if a[0] == "table"]
     if tabs and not figs:
@@ -150,12 +152,27 @@ def _page_bitmap_rects(page, exclude_rects: Iterable | None = None) -> list:
     return out
 
 
-def labeled_figure_regions(page, exclude_rects: Iterable | None = None) -> dict[int, object]:
+def labeled_figure_regions(
+    page,
+    exclude_rects: Iterable | None = None,
+    *,
+    profile: dict | None = None,
+    tables: list | None = None,
+    drawings: list | None = None,
+    text_blocks: list | None = None,
+) -> dict[int, object]:
     """按 Figure 编号归组后的区域。无题注页返回空（不把匿名矢量当语义图）。"""
-    profile = page_caption_profile(page)
+    profile = page_caption_profile(page) if profile is None else profile
     if not profile["figure_caps"]:
         return {}
-    regions = find_figure_regions(page, exclude_rects)
+    regions = find_figure_regions(
+        page,
+        exclude_rects,
+        profile=profile,
+        tables=tables,
+        drawings=drawings,
+        text_blocks=text_blocks,
+    )
     caps_sorted = sorted(profile["figure_caps"], key=lambda x: x[2])
     out: dict[int, object] = {}
     for u in regions:
@@ -175,21 +192,38 @@ def labeled_figure_regions(page, exclude_rects: Iterable | None = None) -> dict[
     return out
 
 
-def find_figure_regions(page, exclude_rects: Iterable | None = None) -> list:
+def find_figure_regions(
+    page,
+    exclude_rects: Iterable | None = None,
+    *,
+    profile: dict | None = None,
+    tables: list | None = None,
+    drawings: list | None = None,
+    text_blocks: list | None = None,
+) -> list:
     """PLAN-030c 规则 A–D：题注驱动的可译区域（矢量 + 位图归组）。"""
     if pymupdf is None:
         return []
-    profile = page_caption_profile(page)
+    profile = page_caption_profile(page) if profile is None else profile
     if profile["page_kind"] == "pure_table":
         return []
     if profile["page_kind"] == "none":
-        return find_safe_vector_figures(page, exclude_rects=exclude_rects)
-    tables = [] if profile["page_kind"] == "figure_only" else None
+        return find_safe_vector_figures(
+            page,
+            exclude_rects=exclude_rects,
+            tables=tables,
+            drawings=drawings,
+            text_blocks=text_blocks,
+        )
+    if profile["page_kind"] == "figure_only" and tables is None:
+        tables = []
     candidates = list(
         find_safe_vector_figures(
             page,
             exclude_rects=exclude_rects,
             tables=tables,
+            drawings=drawings,
+            text_blocks=text_blocks,
             min_drawings=2,
         )
     )
@@ -217,7 +251,15 @@ def _drop_nested(rects: list) -> list:
     return out
 
 
-def translatable_regions(page, exclude_rects: Iterable | None = None) -> list:
+def translatable_regions(
+    page,
+    exclude_rects: Iterable | None = None,
+    *,
+    profile: dict | None = None,
+    tables: list | None = None,
+    drawings: list | None = None,
+    text_blocks: list | None = None,
+) -> list:
     """预扫描与执行共用的可译区域口径（PLAN-027 不变量 4）。
 
     幻灯页无题注，必须走 PLAN-029b profile；否则预扫描报 0 而执行仍会嵌字。
@@ -227,12 +269,21 @@ def translatable_regions(page, exclude_rects: Iterable | None = None) -> list:
             page,
             exclude_rects=exclude_rects,
             tables=[],
+            drawings=drawings,
+            text_blocks=text_blocks,
             text_overlap_max=SLIDE_TEXT_OVERLAP,
             max_area_frac=SLIDE_MAX_AREA_FRAC,
             min_drawings=SLIDE_MIN_DRAWINGS,
         )
     else:
-        regions = find_figure_regions(page, exclude_rects=exclude_rects)
+        regions = find_figure_regions(
+            page,
+            exclude_rects=exclude_rects,
+            profile=profile,
+            tables=tables,
+            drawings=drawings,
+            text_blocks=text_blocks,
+        )
     return _drop_nested(regions)
 
 
@@ -241,6 +292,8 @@ def find_safe_vector_figures(
     exclude_rects: Iterable | None = None,
     *,
     tables: list | None = None,
+    drawings: list | None = None,
+    text_blocks: list | None = None,
     text_overlap_max: float | None = None,
     max_area_frac: float | None = None,
     min_drawings: int | None = None,
@@ -252,10 +305,11 @@ def find_safe_vector_figures(
     area_max = MAX_AREA_FRAC if max_area_frac is None else max_area_frac
     min_dr = MIN_DRAWINGS if min_drawings is None else min_drawings
     exclude = [pymupdf.Rect(r) for r in (exclude_rects or [])]
-    try:
-        drawings = page.get_drawings() or []
-    except Exception:
-        return []
+    if drawings is None:
+        try:
+            drawings = page.get_drawings() or []
+        except Exception:
+            return []
     if len(drawings) < min_dr:
         return []
 
@@ -294,7 +348,7 @@ def find_safe_vector_figures(
             clusters.append([r])
 
     page_area = abs(page.rect.width * page.rect.height) or 1.0
-    long_texts = _long_text_rects(page)
+    long_texts = _long_text_rects(page, blocks=text_blocks)
     if tables is None:
         tables = table_rects(page)
     safe: list = []

@@ -59,7 +59,15 @@ SNIPPET = r'''
                         _qy_full = _qy_hashlib.sha256(
                             _qy_Pimg(str(file_path)).read_bytes()
                         ).hexdigest()
-                        _qy_manifest = _QyStore().get(_qy_full)
+                        from qyunslation.structure.scan_pdf import (
+                            PDF_STRUCTURE_SCANNER_NAME as _QyScanName,
+                            PDF_STRUCTURE_SCANNER_VERSION as _QyScanVer,
+                        )
+                        _qy_manifest = _QyStore().get_current(
+                            _qy_full,
+                            producer_name=_QyScanName,
+                            producer_version=_QyScanVer,
+                        )
                     except Exception:
                         _qy_manifest = None
                     _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(
@@ -127,7 +135,15 @@ MANIFEST_NEW = (
     "                        _qy_full = _qy_hashlib.sha256(\n"
     "                            _qy_Pimg(str(file_path)).read_bytes()\n"
     "                        ).hexdigest()\n"
-    "                        _qy_manifest = _QyStore().get(_qy_full)\n"
+    "                        from qyunslation.structure.scan_pdf import (\n"
+    "                            PDF_STRUCTURE_SCANNER_NAME as _QyScanName,\n"
+    "                            PDF_STRUCTURE_SCANNER_VERSION as _QyScanVer,\n"
+    "                        )\n"
+    "                        _qy_manifest = _QyStore().get_current(\n"
+    "                            _qy_full,\n"
+    "                            producer_name=_QyScanName,\n"
+    "                            producer_version=_QyScanVer,\n"
+    "                        )\n"
     "                    except Exception:\n"
     "                        _qy_manifest = None\n"
     "                    _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(\n"
@@ -145,13 +161,30 @@ MANIFEST_NEW = (
 def apply(text: str) -> tuple[str, bool]:
     changed = False
 
+    GET_OLD = "                        _qy_manifest = _QyStore().get(_qy_full)\n"
+    GET_NEW = (
+        "                        from qyunslation.structure.scan_pdf import (\n"
+        "                            PDF_STRUCTURE_SCANNER_NAME as _QyScanName,\n"
+        "                            PDF_STRUCTURE_SCANNER_VERSION as _QyScanVer,\n"
+        "                        )\n"
+        "                        _qy_manifest = _QyStore().get_current(\n"
+        "                            _qy_full,\n"
+        "                            producer_name=_QyScanName,\n"
+        "                            producer_version=_QyScanVer,\n"
+        "                        )\n"
+    )
+    if MANIFEST_MARKER in text and "get_current(" not in text and GET_OLD in text:
+        text = text.replace(GET_OLD, GET_NEW, 1)
+        changed = True
+
     if (
         MARKER in text
         and EXEC_MARKER in text
         and CANCEL_MARKER in text
         and MANIFEST_MARKER in text
+        and "get_current(" in text
     ):
-        return text, False
+        return text, changed
 
     # 已有 027d/SSE 补丁但缺 030d manifest 消费：就地升级该块
     if MARKER in text and EXEC_MARKER in text and MANIFEST_MARKER not in text:

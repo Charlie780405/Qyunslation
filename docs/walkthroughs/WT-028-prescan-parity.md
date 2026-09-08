@@ -1,31 +1,70 @@
-# WT-028 预扫描口径对齐交付记录
+# WT-028 预扫描口径与 Tier-3 性能恢复记录
 
-## 问题
+## 交付结果
 
-`41467_2024_Article_53384.pdf` 预扫描报「检测到 0 处候选插图」，但翻译执行会 OCR 嵌字 12 处矢量多面板图；表格 19+ 处从未在 UI 提及。
+PLAN-028d 将 19 页 Nature 金标 PDF 的冷扫描从 28.81 秒、12/19 页截断，恢复为全 19 页完成。Figure/Table/可译图片计数保持 7/3/7，表格继续按文字层处理，不纳入图片 OCR。
 
-## 根因
+## 根因证据
 
-Tier-1 只扫 `get_image_info` 嵌入位图；该文仅 2 张首页 logo，几何门槛刷掉后为 0。矢量图与表格检测在 `pdf_figure_crop` / `find_tables`，未接入预扫描。
+修复前 cProfile 共 20,888,335 次调用：
+
+| 热点 | 调用 | 累计耗时 |
+|---|---:|---:|
+| `PdfStructureScanner._body_objects` | 12 | 23.30s |
+| `layout.figure_table_rects` | 12 | 22.82s |
+| `pdf_figure_crop.table_rects` | 14 | 20.05s |
+| `page.find_tables` | 14 | 20.05s |
+| `caption_anchors` | 79 | 3.15s |
+
+正文排除区重新调用表格和图片检测，而图片检测在混排页再次调用 `find_tables()`，形成页内 N+1 式重复分析。
 
 ## 实现
 
 | 组件 | 变更 |
 |---|---|
-| `pdf_figure_crop.py` | `table_rects` 公开；`find_safe_vector_figures(tables=)` |
-| `doc_image_prescan.py` | `scan_pdf_tier3`、`format_tier3_summary` |
-| `apply-pdf2zh-prescan.py` | Tier-3 挂链 + 代际守卫 |
+| `scan_pdf.py` | 私有 `_PageAnalysis` 汇总题注、表格、图片和正文证据；`_body_objects` 与 `_unnumbered_images` 只消费预计算结果 |
+| `pdf_figure_crop.py` | Figure/IMAGE 检测接口接受预计算 profile、table、drawing、text blocks |
+| `tables.py` / `layout.py` | 表格横线和正文块复用页面原始证据；现代路径不调用 `find_tables()` |
+| `manifest_store.py` | 新增 `get_current()`：生产者名/版本不符则删除结构缓存后当未命中 |
+| `doc_image_prescan.py` / `apply-pdf2zh-docimg.py` | 预扫描与执行都走 `get_current()`，避免截断重扫后仍消费 1.0.0 结果 |
+| `verify-plan-028.sh` | 使用仓库 Python/可配置样本，缺失依赖明确 BLOCKED，并执行三冷一热性能门禁 |
 
-## 验证
+## 性能结果
 
-```bash
-bash scripts/verify-plan-028.sh
-```
+`bash scripts/verify-plan-028.sh` 在 `/home/dev/qyunslation/.venv/bin/python` 下得到：
 
-预期：矢量 12、表格 ≥ 19、Tier-3 < 15s、gui 语法 OK。
+| 场景 | 结果 |
+|---|---:|
+| 冷缓存 1 | 1.687s |
+| 冷缓存 2 | 1.409s |
+| 冷缓存 3 | 1.428s |
+| 冷缓存中位数 / 最大值 | 1.428s / 1.687s |
+| 热缓存 | 0.012s |
 
-## UI 预期文案
+优化后 cProfile 为 1,340,442 次调用、2.313 秒；`_analyze_page` 对 19 页累计 1.249 秒，旧 `table_rects/page.find_tables` 不再出现在现代扫描热路径。
 
-> 检测到 12 处矢量插图，将随文档一并翻译；另有 19 处表格，按文字层翻译。
+## 验证清单
 
-表格不参与插图 OCR，正文与表内文字仍走 pdf2zh 文字层。
+- PLAN-028：PASS，19/19 页、`truncated=false`、7/3/7。
+- PLAN-030c：PASS，`expected_red=3`；结构套件仅保留 PLAN-030g PPT 图片执行 XFAIL。
+- PLAN-029：PASS，期刊表格注入、幻灯 12 区域和执行一致性均通过。
+- PLAN-030e：待恢复分支 `codex/recovery-030e-030f-20260908`，不在本性能分支验收。
+
+## 审查结论
+
+五轴审查后唯一阻断项：版本不匹配时旧结构缓存未删除，截断重扫会把 1.0.0 完整结果留给执行侧。已用失败用例钉死并改为 `get_current()`。其余项（兼容旧 helper、门禁 `mktemp`、`QYUNSLATION_VERIFY_PY` 覆盖）不阻断合并。
+
+## 操作约束
+
+- `QYUNSLATION_VERIFY_PY` 可覆盖默认的仓库 `.venv/bin/python`。
+- `QYUNSLATION_PLAN028_SAMPLE` 可指定金标文件；`QYUNSLATION_SAMPLE_ROOT` 可指定样本根目录。
+- 缺少运行时或金标样本时门禁返回非零 `BLOCKED`，不得以 skip 伪装通过。
+
+## 部署
+
+- main `4cdcc9a`（merge PLAN-028d，含 4 个原子提交）
+- 已推送 `qyunslation/main`
+- `apply-pdf2zh-docimg.py` 已升级 gui 为 `get_current()` 消费结构缓存
+- `systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service pdf2zh.service`
+- 部署后 `verify-plan-028.sh`：PASS（冷扫描中位 1.361s，19/19 页，7/3/7）
+- `http://127.0.0.1:7860/`、`http://127.0.0.1:8010/` 均 200

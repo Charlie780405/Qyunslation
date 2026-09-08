@@ -1,78 +1,194 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-028 预扫描口径对齐验收
+# PLAN-028d: portable Tier-3 correctness and performance gate.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPTS="$ROOT/scripts"
-GUI="/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/pdf2zh_next/gui.py"
-SAMPLE="/home/dev/pdf2zh/pdf2zh_files/ef8f3e1f-fc80-4c84-bfca-bc2e9ac8d302/41467_2024_Article_53384.pdf"
-PY="${PY:-/home/dev/.local/share/uv/tools/pdf2zh-next/bin/python}"
-FAIL=0
+PY="${QYUNSLATION_VERIFY_PY:-$ROOT/.venv/bin/python}"
+TEST_TIMEOUT_SECONDS="${QYUNSLATION_VERIFY_TIMEOUT_SECONDS:-300}"
+STAGE_DIR="$(mktemp -d)"
+FAILURES=0
+BLOCKERS=0
 
-check() {
-  local desc="$1"; shift
-  if "$@" >/dev/null 2>&1; then
-    printf '  ok    %s\n' "$desc"
-  else
-    printf '  FAIL  %s\n' "$desc"
-    FAIL=$((FAIL + 1))
+cleanup() {
+  rm -rf -- "$STAGE_DIR"
+}
+trap cleanup EXIT
+
+cd "$ROOT" || exit 1
+
+pass() {
+  printf 'PASS: %s\n' "$1"
+}
+
+fail() {
+  printf 'FAIL: %s\n' "$1"
+  FAILURES=$((FAILURES + 1))
+}
+
+blocked() {
+  printf 'BLOCKED: %s\n' "$1"
+  BLOCKERS=$((BLOCKERS + 1))
+}
+
+show_failure_log() {
+  local log_path="$1"
+  if [[ -f "$log_path" ]]; then
+    tail -n 80 "$log_path"
   fi
 }
 
-echo "== 1. 内核 API =="
-grep -q 'def table_rects' "$SCRIPTS/pdf_figure_crop.py" && check "table_rects public" true || check "table_rects public" false
-grep -q 'tables: list | None = None' "$SCRIPTS/pdf_figure_crop.py" && check "tables= param" true || check "tables= param" false
-grep -q 'def scan_pdf_tier3' "$SCRIPTS/doc_image_prescan.py" && check "scan_pdf_tier3" true || check "scan_pdf_tier3" false
-grep -q 'def format_tier3_summary' "$SCRIPTS/doc_image_prescan.py" && check "format_tier3_summary" true || check "format_tier3_summary" false
+run_pass() {
+  local label="$1"
+  local log_path="$2"
+  shift 2
+  if "$@" >"$log_path" 2>&1; then
+    pass "$label"
+  else
+    fail "$label"
+    show_failure_log "$log_path"
+  fi
+}
 
-echo "== 2. 论文 PDF 结构扫描 =="
-# PLAN-030c 口径变更：用户主计数改题注去重，不再用几何矢量/find_tables 数。
-if [[ -f "$SAMPLE" ]]; then
-  PYTHONPATH="$SCRIPTS:$ROOT" "$PY" - <<PY
-import sys, time
+resolve_sample() {
+  local explicit="${QYUNSLATION_PLAN028_SAMPLE:-}"
+  local sample_root="${QYUNSLATION_SAMPLE_ROOT:-}"
+  local candidate
+
+  if [[ -n "$explicit" ]]; then
+    printf '%s\n' "$explicit"
+    return
+  fi
+  if [[ -n "$sample_root" ]]; then
+    for candidate in \
+      "$sample_root/nature_comm_53384.pdf" \
+      "$sample_root/reference/nature_comm_53384.pdf" \
+      "$sample_root/tests/fixtures/structure/reference/nature_comm_53384.pdf"; do
+      if [[ -f "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return
+      fi
+    done
+    printf '%s\n' "$sample_root/nature_comm_53384.pdf"
+    return
+  fi
+  printf '%s\n' \
+    "$ROOT/tests/fixtures/structure/reference/nature_comm_53384.pdf"
+}
+
+if [[ ! -x "$PY" ]]; then
+  blocked "Python runtime is unavailable at $PY"
+fi
+if [[ ! "$TEST_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  blocked "QYUNSLATION_VERIFY_TIMEOUT_SECONDS must be a positive integer"
+fi
+
+SAMPLE="$(resolve_sample)"
+if [[ ! -f "$SAMPLE" ]]; then
+  blocked "PLAN-028 gold sample is unavailable at $SAMPLE"
+fi
+
+if [[ "$BLOCKERS" -ne 0 ]]; then
+  printf 'SUMMARY: FAIL blocked=%d fail=%d\n' "$BLOCKERS" "$FAILURES"
+  exit 1
+fi
+
+run_pass \
+  "PLAN-028d modules compile" \
+  "$STAGE_DIR/compile.log" \
+  "$PY" -m compileall -q \
+    qyunslation/structure \
+    scripts/doc_image_prescan.py \
+    scripts/pdf_figure_crop.py
+
+run_pass \
+  "Tier-3 page reuse, cache, figure, table, and layout tests" \
+  "$STAGE_DIR/focused.log" \
+  timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
+    "$PY" -m pytest -q --no-cov \
+      tests/structure/test_tier3_page_analysis.py \
+      tests/structure/test_prescan_manifest.py \
+      tests/structure/test_figure_regions.py \
+      tests/structure/test_table_protection.py \
+      tests/structure/test_column_layout.py
+
+BENCHMARK_LOG="$STAGE_DIR/benchmark.log"
+if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
+  env PYTHONPATH="$SCRIPTS:$ROOT" QYUNSLATION_PLAN028_SAMPLE="$SAMPLE" \
+  "$PY" - >"$BENCHMARK_LOG" 2>&1 <<'PY'
+import os
+import statistics
+import tempfile
+import time
 from pathlib import Path
-sys.path.insert(0, "$SCRIPTS")
-from doc_image_prescan import scan_pdf_tier3
-from pdf_figure_crop import find_safe_vector_figures, table_rects
+
 import pymupdf
 
-p = Path("$SAMPLE")
-t0 = time.time()
-r = scan_pdf_tier3(p)
-dt = time.time() - t0
-assert r.figure_caption_count == 7, f"figure_caption_count={r.figure_caption_count}"
-assert r.table_caption_count == 3, f"table_caption_count={r.table_caption_count}"
-assert r.translatable_count == 7, f"translatable_count={r.translatable_count}"
-assert dt < 15.0, f"tier3 slow {dt:.2f}s"
-assert not r.error, r.error
+from doc_image_prescan import scan_pdf_tier3
 
-doc = pymupdf.open(p)
-page = doc[2]
-tb = table_rects(page)
-a = find_safe_vector_figures(page, tables=tb)
-b = find_safe_vector_figures(page)
-assert len(a) == len(b), f"tables= mismatch {len(a)} vs {len(b)}"
-doc.close()
-print("tier3_ok", r.figure_caption_count, r.table_caption_count, f"{dt:.2f}s")
+sample = Path(os.environ["QYUNSLATION_PLAN028_SAMPLE"])
+with pymupdf.open(sample) as document:
+    total_pages = len(document)
+assert total_pages == 19, f"gold sample page count changed: {total_pages}"
+
+
+def assert_complete(result) -> None:
+    assert result.error is None, result.error
+    assert result.pages_scanned == total_pages, (
+        result.pages_scanned,
+        total_pages,
+    )
+    assert result.truncated is False, result
+    assert result.figure_caption_count == 7, result.figure_caption_count
+    assert result.table_caption_count == 3, result.table_caption_count
+    assert result.translatable_count == 7, result.translatable_count
+
+
+cold_seconds = []
+warm_seconds = None
+with tempfile.TemporaryDirectory(prefix="plan028d-") as parent:
+    for run in range(3):
+        cache = Path(parent) / f"cold-{run}"
+        os.environ["QYUNSLATION_MANIFEST_CACHE"] = str(cache)
+        started = time.perf_counter()
+        result = scan_pdf_tier3(sample)
+        elapsed = time.perf_counter() - started
+        assert_complete(result)
+        assert elapsed < 15.0, f"cold run {run + 1} took {elapsed:.3f}s"
+        cold_seconds.append(elapsed)
+
+    started = time.perf_counter()
+    warm_result = scan_pdf_tier3(sample)
+    warm_seconds = time.perf_counter() - started
+    assert_complete(warm_result)
+
+median_seconds = statistics.median(cold_seconds)
+assert median_seconds < 12.0, f"cold median took {median_seconds:.3f}s"
+assert max(cold_seconds) < 15.0, f"cold max took {max(cold_seconds):.3f}s"
+assert warm_seconds < 1.0, f"warm cache took {warm_seconds:.3f}s"
+print(
+    "tier3_benchmark",
+    "cold=" + ",".join(f"{value:.3f}" for value in cold_seconds),
+    f"median={median_seconds:.3f}",
+    f"max={max(cold_seconds):.3f}",
+    f"warm={warm_seconds:.3f}",
+    f"pages={total_pages}",
+    "counts=7/3/7",
+)
 PY
-  check "tier3 sample pdf" test $? -eq 0
+then
+  pass "19-page Tier-3 cold and warm performance budgets"
+  tail -n 1 "$BENCHMARK_LOG"
 else
-  printf '  skip  sample pdf missing\n'
+  fail "19-page Tier-3 cold and warm performance budgets"
+  show_failure_log "$BENCHMARK_LOG"
 fi
 
-echo "== 3. GUI 补丁 =="
-check "tier3 helper" grep -q 'def _qy_prescan_tier3(' "$GUI"
-check "tier3 wired" grep -q '_qy_prescan_tier3,' "$GUI"
-check "vector_count in gui" grep -q 'vector_count' "$GUI"
-check "gui syntax" "$PY" -m py_compile "$GUI"
-
-echo "== 4. 幂等 =="
-check "prescan idempotent" sh -c "python3 '$SCRIPTS/apply-pdf2zh-prescan.py' 2>&1 | grep -q 'already patched'"
-
-if [[ "$FAIL" -eq 0 ]]; then
-  echo "PASS ($FAIL failures)"
-else
-  echo "FAIL ($FAIL failures)"
+if [[ "$FAILURES" -eq 0 && "$BLOCKERS" -eq 0 ]]; then
+  printf 'SUMMARY: PASS blocked=0 fail=0\n'
+  exit 0
 fi
-exit "$FAIL"
+
+printf 'SUMMARY: FAIL blocked=%d fail=%d\n' "$BLOCKERS" "$FAILURES"
+exit 1

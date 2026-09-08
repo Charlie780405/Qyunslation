@@ -15,11 +15,12 @@ PLAN-027b 预扫描 Tier-1 仅统计 PDF 嵌入位图（`page.get_image_info`）
 | **028a** | 结构扫描内核与表格共享 | `table_rects` 公开、`find_safe_vector_figures(tables=)`、`scan_pdf_tier3` | `pdf_figure_crop.py`<br>`doc_image_prescan.py` | PLAN-027d |
 | **028b** | UI 三段渐进与代际守卫 | `_qy_prescan_tier3` 挂链、逐页 `should_abort` | `apply-pdf2zh-prescan.py` | 028a |
 | **028c** | 验证与交付 | `verify-plan-028.sh`、WT-028 | 脚本 + 文档 | 028a, 028b |
+| **028d** | Tier-3 性能恢复 | 单页证据复用、扫描算法缓存版本、可移植性能门禁 | 扫描器 + 门禁 + WT-028 | 028c, PLAN-030d |
 
 ```mermaid
 flowchart LR
     T1[Tier-1 位图 0.2s] --> T2[Tier-2 OCR 探针 1-3s]
-    T2 --> T3[Tier-3 矢量+表格 约9s]
+    T2 --> T3[Tier-3 矢量+表格 约1.5s]
     T3 --> UI[最终 summary_text]
 ```
 
@@ -30,8 +31,9 @@ flowchart LR
 | 步骤 | 耗时 | 层级 |
 |---|---|---|
 | `get_image_info` | 0.21s | Tier-1 |
-| `find_tables` + `find_safe_vector_figures`（共享 tables） | 7.9s | Tier-3 |
-| 朴素串行（不共享） | 21s | 禁止 |
+| 028a `find_tables` + `find_safe_vector_figures`（共享 tables） | 7.9s | 历史基线 |
+| PLAN-030d 集成后的重复分析 | 28.81s，12/19 页后截断 | 禁止 |
+| 028d 单页证据复用 | 冷扫描中位数 1.428s，19/19 页 | 当前 Tier-3 |
 
 ---
 
@@ -41,11 +43,12 @@ flowchart LR
 2. **表格仅上报**：文案固定「按文字层翻译」，不纳入插图 OCR。
 3. **代际守卫**：Tier-3 入口与逐页 `should_abort` 比对 `_prescan_generation`。
 4. **Fail-Soft**：Tier-3 异常保留 Tier-2 文案，不阻断翻译。
+5. **完整性先于耗时**：金标样本必须完成 19/19 页且 `truncated=false`；不得靠减少扫描工作满足性能门槛。
 
 ---
 
 ## 五、明确不做
 
 - 表格 OCR 嵌字（与文字层重复）
-- Tier-3 结果缓存到翻译阶段
+- 在全局 `site-packages` 或旧 GUI 补丁中保存 Tier-3 状态；结构缓存统一由仓库内 `ManifestStore` 管理
 - 修改位图几何门槛（小 logo 仍过滤）

@@ -69,7 +69,9 @@ def _overlap_frac(block: TextBlock, rect) -> float:
     return ((ix1 - ix0) * (iy1 - iy0)) / area
 
 
-def body_blocks(page, exclude_rects=None) -> list[TextBlock]:
+def body_blocks(
+    page, exclude_rects=None, *, raw_blocks: list | None = None
+) -> list[TextBlock]:
     """页面上可作为正文候选的文本块。
 
     落在 Figure/Table 区域内的文字（如流程图节点、表格单元格）不是正文，必须排除，
@@ -80,7 +82,8 @@ def body_blocks(page, exclude_rects=None) -> list[TextBlock]:
         return []
     excluded = list(exclude_rects or [])
     out: list[TextBlock] = []
-    for raw in page.get_text("blocks"):
+    source_blocks = page.get_text("blocks") if raw_blocks is None else raw_blocks
+    for raw in source_blocks:
         x0, y0, x1, y1, text = raw[0], raw[1], raw[2], raw[3], raw[4]
         if len(str(text).strip()) < MIN_BODY_CHARS:
             continue
@@ -104,16 +107,48 @@ def figure_table_rects(page) -> list:
     scripts = Path(__file__).resolve().parents[2] / "scripts"
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
+    from .captions import caption_anchors
     from .tables import table_exclusion_rects
 
     try:
-        from pdf_figure_crop import labeled_figure_regions, table_rects, translatable_regions
+        from pdf_figure_crop import (
+            labeled_figure_regions,
+            page_caption_profile,
+            translatable_regions,
+        )
     except ImportError:
         return list(table_exclusion_rects(page))
-    rects = list(table_rects(page))
-    rects.extend(table_exclusion_rects(page))
-    rects.extend(labeled_figure_regions(page).values())
-    rects.extend(translatable_regions(page))
+    anchors = caption_anchors(page)
+    profile = page_caption_profile(page, anchors=anchors)
+    try:
+        drawings = page.get_drawings() or []
+    except Exception:
+        drawings = []
+    try:
+        raw_blocks = page.get_text("blocks") or []
+    except Exception:
+        raw_blocks = []
+    rects = list(
+        table_exclusion_rects(page, anchors=anchors, drawings=drawings)
+    )
+    labeled = labeled_figure_regions(
+        page,
+        profile=profile,
+        tables=rects,
+        drawings=drawings,
+        text_blocks=raw_blocks,
+    )
+    rects.extend(labeled.values())
+    if not labeled:
+        rects.extend(
+            translatable_regions(
+                page,
+                profile=profile,
+                tables=rects,
+                drawings=drawings,
+                text_blocks=raw_blocks,
+            )
+        )
     return rects
 
 

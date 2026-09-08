@@ -1,6 +1,7 @@
 """PLAN-030d Task 3：预扫描从 manifest 派生计数，不再独立检测。"""
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -74,9 +75,41 @@ def test_second_scan_reuses_the_cache_without_rescanning(monkeypatch):
     assert scan_pdf_tier3(NATURE).translatable_count == 7
 
 
+def test_stale_scanner_cache_is_rebuilt(monkeypatch):
+    stale = PdfStructureScanner().scan(NATURE)
+    stale.producer.version = "0.0.0"
+    ManifestStore().put(stale)
+    original_scan = PdfStructureScanner.scan
+    calls = 0
+
+    def counted_scan(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_scan(self, *args, **kwargs)
+
+    monkeypatch.setattr(PdfStructureScanner, "scan", counted_scan)
+
+    result = scan_pdf_tier3(NATURE)
+
+    assert calls == 1
+    assert result.translatable_count == 7
+
+
+def test_stale_cache_is_dropped_when_rebuild_is_truncated():
+    stale = PdfStructureScanner().scan(NATURE)
+    stale.producer.version = "0.0.0"
+    ManifestStore().put(stale)
+    digest = hashlib.sha256(NATURE.read_bytes()).hexdigest()
+
+    result = scan_pdf_tier3(NATURE, max_pages=2)
+
+    assert result.truncated is True
+    cached = ManifestStore().get(digest)
+    assert cached is None
+
+
 def test_cache_entry_is_written_for_complete_scans():
     scan_pdf_tier3(NATURE)
-    import hashlib
 
     digest = hashlib.sha256(NATURE.read_bytes()).hexdigest()
 
@@ -85,7 +118,6 @@ def test_cache_entry_is_written_for_complete_scans():
 
 def test_truncated_scan_is_not_cached():
     result = scan_pdf_tier3(NATURE, max_pages=2)
-    import hashlib
 
     digest = hashlib.sha256(NATURE.read_bytes()).hexdigest()
 
@@ -125,7 +157,6 @@ def test_unreadable_pdf_reports_an_error(tmp_path):
 
 def test_corrupt_cache_entry_falls_back_to_a_fresh_scan():
     scan_pdf_tier3(NATURE)
-    import hashlib
 
     digest = hashlib.sha256(NATURE.read_bytes()).hexdigest()
     ManifestStore().path_for(digest).write_text("{ broken", encoding="utf-8")

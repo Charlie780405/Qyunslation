@@ -5,15 +5,16 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .captions import caption_anchors
 from .ingest import prepare_document
 from .layout import (
+    TextBlock,
     body_blocks,
     column_of,
-    figure_table_rects,
     overflows_column,
     reading_order,
 )
@@ -57,6 +58,19 @@ from .models import (
 from .profiles import resolve_profile
 
 
+PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
+PDF_STRUCTURE_SCANNER_VERSION = "1.1.0"
+
+
+@dataclass(frozen=True, slots=True)
+class _PageAnalysis:
+    anchors: list
+    table_regions_by_number: dict
+    labeled_figures: dict[int, object]
+    unnumbered_regions: list
+    body_blocks: list[TextBlock]
+
+
 def _clip_bbox(rect, canvas) -> BoundingBox:
     x0 = max(0.0, float(rect.x0))
     y0 = max(0.0, float(rect.y0))
@@ -89,16 +103,16 @@ def _clip_text(page, bb) -> str:
 class PdfStructureScanner:
     """Produce a validated Manifest v1 from a PDF path."""
 
-    def _unnumbered_images(self, page, canvas, prepared, page_no: int) -> list:
+    def _unnumbered_images(
+        self, regions: list, canvas, prepared, page_no: int
+    ) -> list:
         """无题注页的可译区域：不伪造 Figure 编号，产出 IMAGE 对象。
 
         口径与 scan_pdf_tier3、pdf_image_translate 共用 translatable_regions
         （PLAN-027 不变量 4）；幻灯页由该函数走 PLAN-029b profile。
         """
-        from pdf_figure_crop import translatable_regions
-
         out: list = []
-        for index, rect in enumerate(translatable_regions(page), start=1):
+        for index, rect in enumerate(regions, start=1):
             key = f"image:page:{page_no}:{index}"
             object_id = build_object_id(
                 prepared.source_sha256,
@@ -153,13 +167,19 @@ class PdfStructureScanner:
             )
         ]
 
-    def _body_objects(self, page, canvas, prepared, page_no: int) -> tuple[list, list]:
+    def _body_objects(
+        self,
+        page,
+        canvas,
+        prepared,
+        page_no: int,
+        blocks: list[TextBlock],
+    ) -> tuple[list, list]:
         """正文块建模为 BODY 对象，带页内阅读顺序。
 
         030d 只审计正文、不接管译文生成：正文仍由 BabelDOC 文字层翻译，因此对象
         终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。
         """
-        blocks = body_blocks(page, exclude_rects=figure_table_rects(page))
         if not blocks:
             return [], []
         mode = canvas.layout_mode
@@ -229,6 +249,59 @@ class PdfStructureScanner:
                 )
         return objects, issues
 
+    @staticmethod
+    def _analyze_page(page) -> _PageAnalysis:
+        from pdf_figure_crop import (
+            labeled_figure_regions,
+            page_caption_profile,
+            translatable_regions,
+        )
+
+        import pymupdf
+
+        anchors = caption_anchors(page)
+        profile = page_caption_profile(page, anchors=anchors)
+        try:
+            drawings = page.get_drawings() or []
+        except Exception:
+            drawings = []
+        try:
+            raw_blocks = page.get_text("blocks") or []
+        except Exception:
+            raw_blocks = []
+        detected_tables = table_regions(
+            page, anchors=anchors, drawings=drawings
+        )
+        regions_by_number = {region.number: region for region in detected_tables}
+        table_rectangles = [
+            pymupdf.Rect(region.as_tuple()) for region in detected_tables
+        ]
+        labeled = labeled_figure_regions(
+            page,
+            profile=profile,
+            tables=table_rectangles,
+            drawings=drawings,
+            text_blocks=raw_blocks,
+        )
+        unnumbered = []
+        if not labeled:
+            unnumbered = translatable_regions(
+                page,
+                profile=profile,
+                tables=table_rectangles,
+                drawings=drawings,
+                text_blocks=raw_blocks,
+            )
+        exclusions = [*table_rectangles, *labeled.values(), *unnumbered]
+        blocks = body_blocks(page, exclude_rects=exclusions, raw_blocks=raw_blocks)
+        return _PageAnalysis(
+            anchors=anchors,
+            table_regions_by_number=regions_by_number,
+            labeled_figures=labeled,
+            unnumbered_regions=unnumbered,
+            body_blocks=blocks,
+        )
+
     def scan(
         self,
         source: Path,
@@ -259,8 +332,6 @@ class PdfStructureScanner:
         scripts = Path(__file__).resolve().parents[2] / "scripts"
         if str(scripts) not in sys.path:
             sys.path.insert(0, str(scripts))
-        from pdf_figure_crop import labeled_figure_regions, table_rects
-
         import pymupdf
 
         canvases = {c.source_index: c for c in prepared.canvases}
@@ -295,8 +366,7 @@ class PdfStructureScanner:
                 pages_scanned += 1
                 page_modes[i] = page_representation(page)
                 try:
-                    anchors = caption_anchors(page)
-                    labeled = labeled_figure_regions(page)
+                    analysis = self._analyze_page(page)
                 except Exception as exc:
                     # 单页失败不得丢掉整份结构，但必须留痕而非静默
                     issues.append(
@@ -310,12 +380,18 @@ class PdfStructureScanner:
                         )
                     )
                     continue
-                regions_by_number = {
-                    r.number: r for r in table_regions(page, anchors=anchors)
-                }
-                if not labeled:
-                    objects.extend(self._unnumbered_images(page, canvas, prepared, i))
-                body, body_issues = self._body_objects(page, canvas, prepared, i)
+                anchors = analysis.anchors
+                labeled = analysis.labeled_figures
+                regions_by_number = analysis.table_regions_by_number
+                if analysis.unnumbered_regions:
+                    objects.extend(
+                        self._unnumbered_images(
+                            analysis.unnumbered_regions, canvas, prepared, i
+                        )
+                    )
+                body, body_issues = self._body_objects(
+                    page, canvas, prepared, i, analysis.body_blocks
+                )
                 objects.extend(body)
                 issues.extend(body_issues)
                 canvas.reading_order = [b.object_id for b in body]
@@ -550,7 +626,10 @@ class PdfStructureScanner:
             schema_version=CURRENT_SCHEMA_VERSION,
             manifest_id=build_manifest_id(prepared.source_sha256),
             created_at=datetime(2026, 9, 8, tzinfo=timezone.utc),
-            producer=ProducerInfo(name="qyunslation-plan-030c", version="1.0.0"),
+            producer=ProducerInfo(
+                name=PDF_STRUCTURE_SCANNER_NAME,
+                version=PDF_STRUCTURE_SCANNER_VERSION,
+            ),
             document=document,
             canvases=list(prepared.canvases),
             objects=objects,
