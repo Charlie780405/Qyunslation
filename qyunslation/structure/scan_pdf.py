@@ -18,6 +18,7 @@ from .models import (
     DocumentStructureManifest,
     ExecutionStatus,
     FigureObject,
+    ImageObject,
     ObjectType,
     OutputEditability,
     ProcessingMode,
@@ -58,6 +59,49 @@ def _rect_from_bbox(bb) -> object:
 class PdfStructureScanner:
     """Produce a validated Manifest v1 from a PDF path."""
 
+    def _unnumbered_images(self, page, canvas, prepared, page_no: int) -> list:
+        """无题注页的可译区域：不伪造 Figure 编号，产出 IMAGE 对象。
+
+        口径与 scan_pdf_tier3、pdf_image_translate 共用 translatable_regions
+        （PLAN-027 不变量 4）；幻灯页由该函数走 PLAN-029b profile。
+        """
+        from pdf_figure_crop import translatable_regions
+
+        out: list = []
+        for index, rect in enumerate(translatable_regions(page), start=1):
+            key = f"image:page:{page_no}:{index}"
+            object_id = build_object_id(
+                prepared.source_sha256,
+                canvas.canvas_id,
+                ObjectType.IMAGE,
+                key,
+                [{"kind": SourceRefKind.PDF_DRAWING.value, "ref": key}],
+            )
+            out.append(
+                ImageObject(
+                    type=ObjectType.IMAGE,
+                    object_id=object_id,
+                    canvas_id=canvas.canvas_id,
+                    bbox=_clip_bbox(rect, canvas),
+                    representation=Representation.HYBRID,
+                    source_refs=[SourceRef(kind=SourceRefKind.PDF_DRAWING, ref=key)],
+                    detector_evidence=[
+                        DetectorEvidence(
+                            detector="translatable_regions",
+                            label="unnumbered_region",
+                            bbox=_clip_bbox(rect, canvas),
+                            details={"page": page_no, "index": index},
+                        )
+                    ],
+                    execution_status=ExecutionStatus.PENDING,
+                    planned_action="ocr_overlay",
+                    semantic_id=key,
+                    semantic_scope="unnumbered",
+                    occurrence_key=key,
+                )
+            )
+        return out
+
     def scan(
         self,
         source: Path,
@@ -97,6 +141,8 @@ class PdfStructureScanner:
                     continue
                 anchors = caption_anchors(page)
                 labeled = labeled_figure_regions(page)
+                if not labeled:
+                    objects.extend(self._unnumbered_images(page, canvas, prepared, i))
                 for kind, num, y0, bb in anchors:
                     cap_bbox = _clip_bbox(_rect_from_bbox(bb), canvas)
                     cap_key = f"{kind}:{num}:caption:{i}"
@@ -266,7 +312,7 @@ class PdfStructureScanner:
                 "translatable_figure_count": sum(
                     1
                     for item in objects
-                    if isinstance(item, FigureObject)
+                    if isinstance(item, (FigureObject, ImageObject))
                     and item.execution_status is ExecutionStatus.PENDING
                 )
             },

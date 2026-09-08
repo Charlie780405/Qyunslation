@@ -197,13 +197,33 @@ def find_figure_regions(page, exclude_rects: Iterable | None = None) -> list:
     return _merge_by_figure_captions(page, candidates, profile["figure_caps"])
 
 
+NESTED_COVER_FRAC = float(os.environ.get("QYUNSLATION_NESTED_COVER_FRAC", "0.90"))
+
+
+def _drop_nested(rects: list) -> list:
+    """丢弃被更大区域覆盖 ≥90% 的嵌套框。
+
+    PLAN-030d：legacy 聚类在同一处会同时给出父框与子框（如 ljae439 p2），
+    导致预扫描与执行重复计数同一张图。按面积降序保留最大者。
+    """
+    out: list = []
+    for r in sorted(rects, key=lambda x: abs(x), reverse=True):
+        area = abs(r)
+        if area <= 0:
+            continue
+        if any(abs(r & bigger) / area >= NESTED_COVER_FRAC for bigger in out):
+            continue
+        out.append(r)
+    return out
+
+
 def translatable_regions(page, exclude_rects: Iterable | None = None) -> list:
     """预扫描与执行共用的可译区域口径（PLAN-027 不变量 4）。
 
     幻灯页无题注，必须走 PLAN-029b profile；否则预扫描报 0 而执行仍会嵌字。
     """
     if is_slide_page(page):
-        return find_safe_vector_figures(
+        regions = find_safe_vector_figures(
             page,
             exclude_rects=exclude_rects,
             tables=[],
@@ -211,7 +231,9 @@ def translatable_regions(page, exclude_rects: Iterable | None = None) -> list:
             max_area_frac=SLIDE_MAX_AREA_FRAC,
             min_drawings=SLIDE_MIN_DRAWINGS,
         )
-    return find_figure_regions(page, exclude_rects=exclude_rects)
+    else:
+        regions = find_figure_regions(page, exclude_rects=exclude_rects)
+    return _drop_nested(regions)
 
 
 def find_safe_vector_figures(

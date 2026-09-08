@@ -211,9 +211,11 @@ GUI 补丁 [`scripts/apply-pdf2zh-docimg.py`](../../../scripts/apply-pdf2zh-doci
 
 | 样本 | 路径 | 030d 硬验收 |
 | --- | --- | --- |
-| ljae439 | `tests/fixtures/structure/reference/ljae439.pdf` | Figure 1–5 / Table 1–3；`IMAGE` 对象 0 |
-| Nature | `tests/fixtures/structure/reference/nature_comm_53384.pdf` | Figure 1–7 / Table 1–3；`IMAGE` 对象 0；p4/p5/p9 零可译区 |
+| ljae439 | `tests/fixtures/structure/reference/ljae439.pdf` | Figure 1–5 / Table 1–3；p2 一个无编号 `IMAGE`；三方一致为 6 |
+| Nature | `tests/fixtures/structure/reference/nature_comm_53384.pdf` | Figure 1–7 / Table 1–3；`IMAGE` 0；p4/p5/p9 零可译区；三方一致为 7 |
 | 幻灯（不入仓） | `/home/dev/pdf2zh/pdf2zh_files/57114032-8727-41f9-b826-b5ff40fcf733/QX027N QnA-2026.08.19-临床.pdf` | `figure_count` 0、`IMAGE` 12；三方一致为 12 |
+
+ljae439 的第六个可译对象是 p2 一处无题注矢量区。030c 的预扫描只数有编号 Figure（报 5），执行侧走 legacy 却处理 6 处，属于与幻灯同源的口径分叉，030d 一并收敛。legacy 聚类在该页同时给出父框与嵌套子框，`translatable_regions` 增加嵌套去重后由 7 收敛为 6；幻灯 12 与 Nature 7 不受影响。
 
 SHA-256 与 030c 一致，不重新物化。
 
@@ -243,8 +245,9 @@ SHA-256 与 030c 一致，不重新物化。
 - [ ] scanner 改用 `translatable_regions`，幻灯样本产出 12 个 `IMAGE` 对象。
 - [ ] `semantic_id` 为 `image:page:{page}:{index}`，不占用 `figure:N`。
 - [ ] 幻灯 `summary.figure_count == 0`，`object_counts["IMAGE"] == 12`。
-- [ ] ljae439 与 Nature 的 Figure/Table 计数不变，`IMAGE` 为 0。
-- [ ] manifest 两次扫描仍稳定。
+- [ ] ljae439 与 Nature 的 Figure/Table 计数不变；ljae439 `IMAGE` 为 1，Nature 为 0。
+- [ ] `translatable_regions` 嵌套去重后幻灯仍 12、Nature 仍 7。
+- [ ] manifest 两次扫描的 `object_id` 稳定。
 
 **验证：** `pytest -q tests/structure/test_scan_pdf.py --no-cov`
 
