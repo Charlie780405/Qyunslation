@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from qyunslation.archive.filenames import strip_pipeline_markers
 from qyunslation.archive.index_db import ArchiveIndex
 from qyunslation.archive.models import ArchiveFileRef, ArchiveRecord
 from qyunslation.archive.storage import StorageBackend, build_storage_backend
@@ -20,18 +21,9 @@ _OUTPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^(.+)\.zh\.docx$", re.I), "translated_docx"),
 ]
 
-_NO_WATERMARK_RE = re.compile(r"\.no_watermark(?:\.[^.]+)?", re.I)
-_HPD_OCR_RE = re.compile(r"\.hpd-ocr", re.I)
-_TRAIL_LANG_RE = re.compile(r"\.(zh-CN|zh|en)$", re.I)
-
-
 def normalize_group_stem(stem: str) -> str:
-    """剥掉 .hpd-ocr / .no_watermark.<lang> / 尾部语言码，使原文与各格式产物同组。"""
-    s = stem
-    s = _NO_WATERMARK_RE.sub("", s)
-    s = _HPD_OCR_RE.sub("", s)
-    s = _TRAIL_LANG_RE.sub("", s)
-    return s
+    """剥掉流水线标记，使原文与各格式产物同组。"""
+    return strip_pipeline_markers(stem)
 
 
 def output_group_key(filename: str) -> str | None:
@@ -44,7 +36,8 @@ def output_group_key(filename: str) -> str | None:
 
 
 def infer_original_filename(group_key: str) -> str:
-    return f"{group_key}.pdf"
+    # 调用方可能传入未规范化的分组键，这里再剥一次（幂等）
+    return f"{normalize_group_stem(group_key)}.pdf"
 
 
 def infer_to_lang(group_key: str) -> str:

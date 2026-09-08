@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from qyunslation.archive.filenames import original_filename_from_product  # noqa: E402
 from qyunslation.archive.index_db import ArchiveIndex  # noqa: E402
 from qyunslation.archive.models import ArchiveFileRef, ArchiveRecord  # noqa: E402
 from qyunslation.archive.pdf2zh_ingest import build_pdf2zh_archive_backend  # noqa: E402
@@ -95,7 +96,7 @@ def ingest_one(path: Path, storage, index: ArchiveIndex, cfg: dict) -> str:
     record = ArchiveRecord(
         archive_id=archive_id,
         task_id=f"office-{path.stem}",
-        original_filename=path.name,
+        original_filename=original_filename_from_product(path.name),
         to_lang="zh",
         workflow_type="office",
         created_at=created_at,

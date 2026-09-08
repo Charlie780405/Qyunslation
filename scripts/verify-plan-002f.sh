@@ -23,7 +23,7 @@ check() {
 }
 
 check "Vault 翻译目录存在" test -d "$VAULT/$TRANS_DIR"
-check "至少一条 DT- 翻译笔记" bash -c "ls '$VAULT/$TRANS_DIR'/DT-*.md 2>/dev/null | head -1 | grep -q ."
+check "至少一条归档翻译笔记（QY-/DT- 均可）" bash -c "ls '$VAULT/$TRANS_DIR'/QY-*.md '$VAULT/$TRANS_DIR'/DT-*.md 2>/dev/null | head -1 | grep -q ."
 check "qyunsvault-api health" curl -fsS -o /dev/null --max-time 8 "$API/api/health"
 check "向量检索可命中翻译笔记" python3 -c "
 import json, urllib.parse, urllib.request
