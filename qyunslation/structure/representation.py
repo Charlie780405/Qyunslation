@@ -11,7 +11,7 @@ from .models import Representation
 # 页面文字少于此字符数即认为没有可用文字层
 MIN_PAGE_CHARS = 20
 # 单张图覆盖页面达到此比例即认为是整页扫描图。
-# 实测：FDA PIND 0.75、Abstract 1.00；原生件 ljae439 最大 0.22、Nature 0。
+# 阈值两侧有明确间隔：扫描件金样实测 0.75 与 1.00，原生件最大 0.22。见 WT-030d。
 SCAN_IMAGE_COVER = 0.60
 
 
@@ -19,7 +19,7 @@ def _max_image_cover(page) -> float:
     """最大图片的页面覆盖比。
 
     走 `get_text("dict")` 的图像块 bbox 而非 `get_image_rects()`——后者要按
-    xref 反查内容流，在 FDA PIND 这类每页两张大图的扫描件上实测 20 页要 17s，
+    xref 反查内容流，在每页两张大图的扫描件金样上实测 20 页要 17.5s，
     会吃掉 Tier-3 的整个预算。
     """
     area = page.rect.get_area()

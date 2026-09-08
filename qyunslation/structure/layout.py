@@ -43,7 +43,7 @@ class TextBlock:
 def looks_tabular(text: str) -> bool:
     """数字密集的多行短文本：表格数据行。
 
-    PyMuPDF find_tables() 并非总能框住表格（Nature 的 Table 2 就检测不到），
+    PyMuPDF find_tables() 并非总能框住表格（无竖线的三线表常整个测不到），
     此时表格行会被当成正文块。按内容形态兜底识别。
     """
     lines = [line.strip() for line in text.splitlines() if line.strip()]

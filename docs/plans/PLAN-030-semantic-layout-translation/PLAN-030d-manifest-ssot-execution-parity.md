@@ -4,7 +4,7 @@
 > 日期：2026-09-08
 > 批准记录：用户于 2026-09-08 批准全量范围（含正文 DocLayout、多栏保真、PDF 表格原位重建）
 > 范围修订：2026-09-08 用户决策——正文不接 DocLayout 改自研几何（§五）、表格由「原位重建」降级为「区域保护」（Task 8）。两处均基于实测证据，非实现让步。
-> 进度：Tasks 1–7 已完成并推送（`54d8909`）；Tasks 8–10 未开始。
+> 进度：Tasks 1–10 已完成。
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
 > 前置阶段：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md)、[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md)、[PLAN-030c](./PLAN-030c-unified-semantic-scan.md)（均已完成）
 > 阶段边界：交付父纲领定义的 PDF 纵向闭环——原生/扫描/混合 PDF 的正文、Figure、Table、单/双/多栏的检测—翻译—回写—审计；不迁移 DOCX/PPTX/图片语义对象（030e–030g）。
@@ -431,9 +431,11 @@ DocLayout 判定结论见 §五：走自研几何路线。
 
 **验收：**
 
-- [ ] 单命令门区分 PASS / EXPECTED_RED / FAIL。
-- [ ] WT 记录三方对账实测、DocLayout 路线判定依据、表格检测探底与降级依据、部署步骤。
-- [ ] 父纲领 Checkpoint B 标为达成，下一批准门更新为 PLAN-030e。
+- [x] 单命令门 `scripts/verify-plan-030d.sh` 区分 PASS / EXPECTED_RED / FAIL / BLOCKED，覆盖模块编译、八个聚焦测试文件、金样断言、FDA PIND 预算断言、结构套件 XFAIL 清单，并串跑 028 / 029 / 030c 三个既有门。
+- [x] [WT-030d](../../walkthroughs/WT-030d-pdf-vertical-closure.md) 记录 DocLayout 判定依据、表格探底与降级依据、逐页形态判定与性能坑、部署步骤、遗留项。
+- [x] 父纲领阶段门更新：030d 标为已完成，下一批准门为 PLAN-030e。父纲领的 Checkpoint C 要求 030d–030g 四条纵向闭环齐备，030d 只交付 PDF 一条，**不标达成**。
+
+**顺带修复**：030c 门默认超时 300s 已不足以跑完增长后的结构套件（500s 量级），`timeout --signal=INT` 发出的 SIGINT 会表现为 `KeyboardInterrupt` 并被误记为「structure suite failed」。两门默认超时统一提到 900s。
 
 ## 九、阶段验收命令
 

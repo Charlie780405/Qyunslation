@@ -5,7 +5,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${QYUNSLATION_VERIFY_PY:-$ROOT/.venv/bin/python}"
-TEST_TIMEOUT_SECONDS="${QYUNSLATION_VERIFY_TIMEOUT_SECONDS:-300}"
+# 结构套件随 030d 增长到 500s 量级；300s 会让 timeout 发出的 SIGINT
+# 被当成测试失败上报（表现为 KeyboardInterrupt + "structure suite failed"）
+TEST_TIMEOUT_SECONDS="${QYUNSLATION_VERIFY_TIMEOUT_SECONDS:-900}"
 STAGE_DIR="$(mktemp -d)"
 FAILURES=0
 BLOCKERS=0
