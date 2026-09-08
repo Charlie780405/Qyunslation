@@ -31,4 +31,4 @@
 
 ## 未做
 
-033b（表格几何）、033d（参考文献）、033e（300 DPI）、033f 总门。未把 Elsevier PDF 入库。代码仍在 `codex/plan-033-pdf-fidelity`，未合 main。
+033d（参考文献）、033e（300 DPI）见已立子计划。033b / 033f 已接着做完。未把 Elsevier PDF 入库。代码仍在 `codex/plan-033-pdf-fidelity`，未合 main。
