@@ -15,8 +15,19 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+# PLAN-032：编号前缀收口为内部品牌。历史记录与 Vault 笔记仍是 DT-，不迁移，
+# 检索与展示两种前缀都要认。
+ARCHIVE_ID_PREFIX = "QY"
+LEGACY_ARCHIVE_ID_PREFIXES = ("DT",)
+ARCHIVE_ID_PREFIXES = (ARCHIVE_ID_PREFIX, *LEGACY_ARCHIVE_ID_PREFIXES)
+
+
+def is_archive_id(value: str) -> bool:
+    return any(value.startswith(f"{p}-") for p in ARCHIVE_ID_PREFIXES)
+
+
 class ArchiveIndex:
-    """SQLite 元数据索引与 DT-YYYY-NNNN 编号生成。"""
+    """SQLite 元数据索引与 <前缀>-YYYY-NNNN 编号生成。"""
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -88,7 +99,7 @@ class ArchiveIndex:
                     (seq + 1, year),
                 )
             conn.commit()
-        return f"DT-{year}-{seq:04d}"
+        return f"{ARCHIVE_ID_PREFIX}-{year}-{seq:04d}"
 
     def insert(self, record: ArchiveRecord) -> None:
         with self._db() as conn:
