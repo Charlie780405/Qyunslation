@@ -15,6 +15,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gui_extensions import set_literal  # noqa: E402
+
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/"
     "site-packages/pdf2zh_next/gui.py"
@@ -60,26 +63,23 @@ def _qy_externalize_data_uris(html: str, out_dir: Path) -> str:
 
 ANCHOR = "def _qy_wrap_preview_html(body: str, title: str = \"\") -> str:"
 
-IMG_OLD = '''        elif suf in {".png", ".jpg", ".jpeg", ".webp"}:
+IMG_OLD = '''        elif suf in __QY_IMAGE_EXT__:
             # Gradio 文件路径对浏览器不一定可访问；用 data URL
             import base64
 
-            mime = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".webp": "image/webp",
-            }.get(suf, "application/octet-stream")
+            mime = _QY_IMAGE_MIME.get(suf, "application/octet-stream")
             b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-            body = f'<img src="data:{mime};base64,{b64}" alt="{path.name}" style="max-width:100%;height:auto;"/>\''''
+            body = f'<img src="data:{mime};base64,{b64}" alt="{path.name}" style="max-width:100%;height:auto;"/>\''''.replace(
+    "__QY_IMAGE_EXT__", set_literal("image")
+)
 
-IMG_NEW = '''        elif suf in {".png", ".jpg", ".jpeg", ".webp"}:
+IMG_NEW = '''        elif suf in __QY_IMAGE_EXT__:
             # 走静态路由而非 data URL：内联 base64 会让事件载荷膨胀约 1.34 倍，
             # 慢链路上单张图就要几十秒才推得完，表现为预览长时间转圈。
             body = (
                 f'<img src="{_qy_file_url(path)}" alt="{_html_escape(path.name)}"'
                 ' loading="lazy" style="max-width:100%;height:auto;"/>'
-            )'''
+            )'''.replace("__QY_IMAGE_EXT__", set_literal("image"))
 
 DOCX_OLD = """        elif suf in {".docx", ".doc"}:
             body = _qy_docx_to_html(path)

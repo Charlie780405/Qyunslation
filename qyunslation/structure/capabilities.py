@@ -423,3 +423,92 @@ def source_formats_for_mime(mime_type: str) -> tuple[SourceFormat, ...]:
     """Return all declared formats for a MIME type without guessing."""
 
     return _BY_MIME.get(mime_type.strip().lower(), (SourceFormat.UNKNOWN,))
+
+
+# --- PLAN-030h H2：GUI 入口扩展名的单一事实源 ---------------------------------
+#
+# 生产 GUI 由 scripts/apply-pdf2zh-*.py 补丁注入，补丁里曾有六处互不相同的手写
+# 扩展名集合，导致 capabilities 已登记 CORE 的格式（WebP/BMP/TIFF）在文件选择器
+# 里选不了。补丁改为在打补丁时从这里渲染字面量，新增格式只需改 _CAPABILITIES。
+#
+# CONDITIONAL 级（SVG/GIF/HEIF/HEIC/AVIF）依赖运行时探针，不放进 GUI 入口。
+
+_GUI_LEVELS = (RequirementLevel.CORE, RequirementLevel.NORMALIZE)
+_IMAGE_FORMATS = frozenset(
+    {
+        SourceFormat.PNG,
+        SourceFormat.JPEG,
+        SourceFormat.WEBP,
+        SourceFormat.BMP,
+        SourceFormat.TIFF,
+    }
+)
+
+
+def _gui_capabilities() -> tuple[FormatCapability, ...]:
+    return tuple(c for c in _CAPABILITIES if c.requirement_level in _GUI_LEVELS)
+
+
+def gui_image_extensions() -> tuple[str, ...]:
+    """图片类扩展名，用于预览判定与图片翻译分流。"""
+
+    return tuple(
+        sorted(
+            ext
+            for c in _gui_capabilities()
+            if c.source_format in _IMAGE_FORMATS
+            for ext in c.extensions
+        )
+    )
+
+
+def gui_image_mime_types() -> dict[str, str]:
+    """图片扩展名到 MIME 的映射，供预览分支设置 data URL 与响应头。"""
+
+    return {
+        ext: c.mime_types[0]
+        for c in _gui_capabilities()
+        if c.source_format in _IMAGE_FORMATS
+        for ext in c.extensions
+    }
+
+
+def gui_sidecar_extensions() -> tuple[str, ...]:
+    """交给 office sidecar 处理的扩展名（PDF 走 pdf2zh 自身链路）。"""
+
+    return tuple(
+        sorted(
+            ext
+            for c in _gui_capabilities()
+            if c.source_format is not SourceFormat.PDF
+            for ext in c.extensions
+        )
+    )
+
+
+def gui_upload_extensions() -> tuple[str, ...]:
+    """文件选择器可受理的全部扩展名（小写规范形）。"""
+
+    return tuple(sorted(ext for c in _gui_capabilities() for ext in c.extensions))
+
+
+def gui_upload_file_types() -> tuple[str, ...]:
+    """gradio ``file_types`` 实参：小写规范形加大写变体。
+
+    gradio 按字面量匹配后缀，历史补丁只手工加了 ``.PDF``，大写的 ``.DOCX`` 等
+    一律选不中。这里对全部扩展名统一补大写变体。
+    """
+
+    lower = gui_upload_extensions()
+    return (*lower, *(ext.upper() for ext in lower))
+
+
+def gui_extension_manifest() -> dict[str, tuple[str, ...]]:
+    """补丁脚本与契约测试共用的清单。"""
+
+    return {
+        "upload": gui_upload_extensions(),
+        "upload_file_types": gui_upload_file_types(),
+        "sidecar": gui_sidecar_extensions(),
+        "image": gui_image_extensions(),
+    }

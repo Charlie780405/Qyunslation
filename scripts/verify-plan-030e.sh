@@ -45,6 +45,7 @@ else
   pass "LibreOffice available"
 fi
 
+# PLAN-030h H1：仓外样本只作加强回归，缺失不阻断主门（主门走仓内合成等价夹具）
 MISSING_SAMPLES=0
 for rel in \
   "57114032-8727-41f9-b826-b5ff40fcf733/QX027N QnA-2026.08.19-临床.pdf" \
@@ -52,11 +53,15 @@ for rel in \
   "5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.hpd-ocr.pdf"
 do
   if [[ ! -f "$SAMPLE_ROOT/$rel" ]]; then
-    blocked "missing external sample: $SAMPLE_ROOT/$rel"
+    printf 'INFO: strengthened regression skipped, sample absent: %s/%s\n' "$SAMPLE_ROOT" "$rel"
     MISSING_SAMPLES=$((MISSING_SAMPLES + 1))
   fi
 done
-[[ "$MISSING_SAMPLES" -eq 0 ]] && pass "external gold samples present"
+if [[ "$MISSING_SAMPLES" -eq 0 ]]; then
+  pass "external gold samples present"
+else
+  pass "main gate runs on in-repo synthetic equivalents ($MISSING_SAMPLES strengthened skipped)"
+fi
 
 run_pass "PLAN-030e modules compile" "$STAGE_DIR/compile.log" \
   "$PY" -m compileall -q qyunslation/structure qyunslation/workflow/docx_workflow.py

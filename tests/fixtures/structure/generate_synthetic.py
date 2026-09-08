@@ -92,6 +92,155 @@ def _pdf_bytes(*, columns: int) -> bytes:
     return bytes(output)
 
 
+def _assemble_pdf(objects: list[bytes]) -> bytes:
+    """把已编号的对象体拼成最小 PDF。对象 1 必须是 Catalog。"""
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{number} 0 obj\n".encode("ascii"))
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(output)
+
+
+def _stream_object(payload: bytes) -> bytes:
+    return (
+        b"<< /Length "
+        + str(len(payload)).encode("ascii")
+        + b" >>\nstream\n"
+        + payload
+        + b"\nendstream"
+    )
+
+
+# 与仓外扫描件金样等价的合成件：整页图 + 可选 OCR 文字层。
+# 真实件是 20 页 FDA PIND，不入库；这里复现的是形态与页数，不是内容。
+SCANNED_EQUIVALENT_PAGES = 20
+# 与仓外幻灯金样等价：16:9、无题注、每页一个矢量区域。
+SLIDE_EQUIVALENT_PAGES = 12
+_SLIDE_DRAWINGS_PER_PAGE = 8
+
+
+def _scanned_pdf_bytes(*, pages: int, text_layer: bool) -> bytes:
+    """扫描态 PDF：每页一张整页灰度图。
+
+    `text_layer=False` 让 `page_representation()` 判 SCANNED（文字 < 20 字符）；
+    `True` 追加足够长的文字层，判 HYBRID（有文字又压着整页图），复现 hpd-ocr 产物形态。
+    """
+    width, height = 612, 792
+    # 8x8 DeviceGray 原始位图，够小且完全确定
+    pixels = bytes(range(0, 256, 4))[:64]
+    image_object = (
+        b"<< /Type /XObject /Subtype /Image /Width 8 /Height 8 "
+        b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Length "
+        + str(len(pixels)).encode("ascii")
+        + b" >>\nstream\n"
+        + pixels
+        + b"\nendstream"
+    )
+
+    first_page_number = 5
+    page_refs = " ".join(
+        f"{first_page_number + i} 0 R" for i in range(pages)
+    )
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        (
+            b"<< /Type /Pages /Kids ["
+            + page_refs.encode("ascii")
+            + b"] /Count "
+            + str(pages).encode("ascii")
+            + b" >>"
+        ),
+        image_object,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    contents_start = first_page_number + pages
+    for index in range(pages):
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
+                f"/Resources << /XObject << /Im0 3 0 R >> /Font << /F1 4 0 R >> >> "
+                f"/Contents {contents_start + index} 0 R >>"
+            ).encode("ascii")
+        )
+
+    for index in range(pages):
+        commands = [f"q {width} 0 0 {height} 0 0 cm /Im0 Do Q"]
+        if text_layer:
+            commands.append(
+                "BT /F1 10 Tf 72 700 Td "
+                f"(Recovered text layer for scanned page {index + 1} of {pages}.) Tj ET"
+            )
+        objects.append(_stream_object("\n".join(commands).encode("ascii")))
+
+    return _assemble_pdf(objects)
+
+
+def _slide_pdf_bytes(*, pages: int) -> bytes:
+    """幻灯导出态 PDF：16:9 画布、无 Figure/Table 题注、每页一个矢量区域。
+
+    区域由纵向邻近的矩形聚类而成，因此每页画 `_SLIDE_DRAWINGS_PER_PAGE` 个
+    彼此靠近的小矩形，超过 `SLIDE_MIN_DRAWINGS` 门槛且聚成一簇。
+    文字保持短句，避免形成 `_long_text_rects` 的防触碰块。
+    """
+    width, height = 720, 405  # 16:9，宽高比 1.78 ≥ 1.55
+
+    first_page_number = 4
+    page_refs = " ".join(f"{first_page_number + i} 0 R" for i in range(pages))
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        (
+            b"<< /Type /Pages /Kids ["
+            + page_refs.encode("ascii")
+            + b"] /Count "
+            + str(pages).encode("ascii")
+            + b" >>"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    contents_start = first_page_number + pages
+    for index in range(pages):
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
+                f"/Resources << /Font << /F1 3 0 R >> >> "
+                f"/Contents {contents_start + index} 0 R >>"
+            ).encode("ascii")
+        )
+
+    for index in range(pages):
+        # 标题与副标题都放在顶部，与下方矢量区域不重叠；每块都短于
+        # `_long_text_rects` 的 60 字符门槛，不会形成防触碰块
+        commands = [
+            f"BT /F1 16 Tf 48 {height - 48} Td (Slide {index + 1} overview) Tj ET",
+            f"BT /F1 11 Tf 48 {height - 72} Td (Study design and endpoints) Tj ET",
+            "0.8 w",
+        ]
+        # 一簇纵向相邻的矩形：聚类后成为单个可译区。行距必须让
+        # `find_safe_vector_figures` 的纵向邻近判据成立（并簇后 y 跨度 < 40）
+        for row in range(_SLIDE_DRAWINGS_PER_PAGE):
+            y = 90 + row * 20
+            commands.append(f"120 {y} 200 18 re S")
+        objects.append(_stream_object("\n".join(commands).encode("ascii")))
+
+    return _assemble_pdf(objects)
+
+
 def _base_image(*, poster: bool = False, alpha: bool = False) -> Image.Image:
     size = (900, 1200) if poster else (320, 180)
     mode = "RGBA" if alpha else "RGB"
@@ -260,6 +409,13 @@ def _pptx_bytes() -> bytes:
 GENERATORS: dict[str, Callable[[], bytes]] = {
     "single-column.pdf": lambda: _pdf_bytes(columns=1),
     "double-column.pdf": lambda: _pdf_bytes(columns=2),
+    "scanned-equivalent.pdf": lambda: _scanned_pdf_bytes(
+        pages=SCANNED_EQUIVALENT_PAGES, text_layer=False
+    ),
+    "scanned-equivalent.hpd-ocr.pdf": lambda: _scanned_pdf_bytes(
+        pages=SCANNED_EQUIVALENT_PAGES, text_layer=True
+    ),
+    "slide-equivalent.pdf": lambda: _slide_pdf_bytes(pages=SLIDE_EQUIVALENT_PAGES),
     "review.docx": _docx_bytes,
     "poster.png": _png_bytes,
     "photo.jpg": _jpeg_bytes,

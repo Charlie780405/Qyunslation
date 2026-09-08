@@ -21,10 +21,9 @@ from pdf_figure_crop import (  # noqa: E402
     translatable_regions,
 )
 
-from tests.structure.sample_paths import slide_sample
+from tests.structure.sample_paths import SLIDE_TRANSLATABLE_REGIONS, both_slides
 
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = slide_sample()
 
 
 def test_nature_table2_page_has_no_ocr_regions():
@@ -43,9 +42,9 @@ def test_imgtr_strategy_b_uses_the_shared_region_dispatcher():
     assert "SLIDE_MIN_DRAWINGS" not in src
 
 
-@pytest.mark.skipif(not SLIDE.is_file(), reason="slide sample missing")
-def test_slide_pages_keep_plan029b_profile_count():
-    doc = pymupdf.open(SLIDE)
+@both_slides
+def test_slide_pages_keep_plan029b_profile_count(slide_pdf):
+    doc = pymupdf.open(slide_pdf)
     try:
         profile_n = sum(
             len(
@@ -63,21 +62,21 @@ def test_slide_pages_keep_plan029b_profile_count():
         dispatched_n = sum(len(translatable_regions(p)) for p in doc)
     finally:
         doc.close()
-    assert profile_n == 12
-    assert dispatched_n == 12
+    assert profile_n == SLIDE_TRANSLATABLE_REGIONS
+    assert dispatched_n == SLIDE_TRANSLATABLE_REGIONS
 
 
-@pytest.mark.skipif(not SLIDE.is_file(), reason="slide sample missing")
-def test_slide_prescan_matches_execution_regions():
+@both_slides
+def test_slide_prescan_matches_execution_regions(slide_pdf):
     """PLAN-027 不变量 4：幻灯无题注，预扫描不得报 0 而执行嵌 12 张。"""
 
-    doc = pymupdf.open(SLIDE)
+    doc = pymupdf.open(slide_pdf)
     try:
         execution_n = sum(len(translatable_regions(p)) for p in doc)
     finally:
         doc.close()
 
-    result = scan_pdf_tier3(SLIDE)
+    result = scan_pdf_tier3(slide_pdf)
 
     assert result.translatable_count == execution_n
     # PLAN-030d：幻灯确实没有题注，12 处区域记在无编号计数下，不伪造 Figure 编号

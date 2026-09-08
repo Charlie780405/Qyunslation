@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from qyunslation.extensions.glossary_db import load_glossary, merge_glossary, save_glossary
 from qyunslation.extensions.image_translate import probe_image, translate_image
 from qyunslation.server.uploads import read_upload_limited
+from qyunslation.structure.capabilities import gui_image_extensions
 from qyunslation.structure.ingest import InputPreparationError
 
 router = APIRouter(tags=["Custom Extensions"])
@@ -22,7 +23,7 @@ async def image_translate_endpoint(
 ):
     """上传设计图，返回图内文字已翻译为目标语言的图片（版式不变）。"""
     suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
-    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+    if suffix not in gui_image_extensions():
         raise HTTPException(400, f"不支持的图片格式: {suffix}")
     tmp_in = None
     tmp_out = None
@@ -58,7 +59,7 @@ async def image_probe_endpoint(
 ):
     """PLAN-027a：仅 OCR + 策略判定，供预扫描 Tier-2 使用。失败返回 status=error，不抛 500。"""
     suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
-    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+    if suffix not in gui_image_extensions():
         return JSONResponse(
             {
                 "status": "error",

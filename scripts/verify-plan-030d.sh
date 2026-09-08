@@ -39,6 +39,11 @@ blocked() {
   BLOCKERS=$((BLOCKERS + 1))
 }
 
+# 不影响判定，只交代加强回归为何没跑
+info() {
+  printf 'INFO: %s\n' "$1"
+}
+
 show_failure_log() {
   local log_path="$1"
   if [[ -f "$log_path" ]]; then
@@ -70,6 +75,8 @@ if [[ ! "$TEST_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
+# PLAN-030h H1：仓外样本只作加强回归。默认根是 pdf2zh 的运行时会话目录，
+# 会被回收，缺失不得阻断主门——主门断言走仓内合成等价夹具。
 SAMPLE_ROOT="${QYUNSLATION_SAMPLE_ROOT:-/home/dev/pdf2zh/pdf2zh_files}"
 MISSING_SAMPLES=0
 for rel in \
@@ -78,12 +85,14 @@ for rel in \
   "5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.hpd-ocr.pdf"
 do
   if [[ ! -f "$SAMPLE_ROOT/$rel" ]]; then
-    blocked "missing external sample: $SAMPLE_ROOT/$rel"
+    info "strengthened regression skipped, sample absent: $SAMPLE_ROOT/$rel"
     MISSING_SAMPLES=$((MISSING_SAMPLES + 1))
   fi
 done
 if [[ "$MISSING_SAMPLES" -eq 0 ]]; then
   pass "external gold samples present under QYUNSLATION_SAMPLE_ROOT"
+else
+  pass "main gate runs on in-repo synthetic equivalents ($MISSING_SAMPLES strengthened skipped)"
 fi
 
 run_pass \
@@ -189,11 +198,13 @@ else
 fi
 
 SCANNED_LOG="$STAGE_DIR/scanned.log"
-PIND="/home/dev/pdf2zh/pdf2zh_files/5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.pdf"
-if [[ -f "$PIND" ]]; then
-  if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
-    env PYTHONPATH="$ROOT/scripts:$ROOT" QYUNSLATION_PIND="$PIND" \
-    "$PY" - >"$SCANNED_LOG" 2>&1 <<'PY'
+# 主门跑仓内合成等价件；仓外真实件（PIND）存在时同一组断言再跑一遍作加强。
+PIND="$SAMPLE_ROOT/5fa54bcf-4843-4e97-8cd0-85c797fa9b5d/FDA responses on PIND.pdf"
+if timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
+  env PYTHONPATH="$ROOT/scripts:$ROOT" QYUNSLATION_PIND="$PIND" \
+  QYUNSLATION_FIXTURE_OUT="$STAGE_DIR/fixtures" \
+  "$PY" - >"$SCANNED_LOG" 2>&1 <<'PY'
+import importlib.util
 import os
 import time
 from pathlib import Path
@@ -201,29 +212,50 @@ from pathlib import Path
 from qyunslation.structure.models import ExecutionStatus, ProcessingMode
 from qyunslation.structure.scan_pdf import PdfStructureScanner
 
-started = time.monotonic()
-manifest = PdfStructureScanner().scan(Path(os.environ["QYUNSLATION_PIND"]))
-elapsed = time.monotonic() - started
+spec = importlib.util.spec_from_file_location(
+    "plan030_fixtures", "tests/fixtures/structure/generate_synthetic.py"
+)
+assert spec and spec.loader
+generator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(generator)
 
-assert manifest.extensions["document_representation"] == "SCANNED"
-assert manifest.extensions["needs_ocr"] is True
-assert manifest.document.selected_mode is ProcessingMode.HYBRID
-assert [i for i in manifest.issues if i.code == "PAGES_REQUIRE_OCR"]
-assert not [
-    o for o in manifest.objects if o.execution_status is ExecutionStatus.PENDING
-]
-# Tier-3 预算 25s；首版量图片覆盖的写法在这份样本上要 17.5s
-assert elapsed < 10.0, elapsed
-print("scanned_ok", round(elapsed, 2))
+out = Path(os.environ["QYUNSLATION_FIXTURE_OUT"])
+generator.generate_all(out)
+expected_pages = generator.SCANNED_EQUIVALENT_PAGES
+
+
+def assert_scanned(path: Path, label: str) -> None:
+    started = time.monotonic()
+    manifest = PdfStructureScanner().scan(path)
+    elapsed = time.monotonic() - started
+
+    assert manifest.extensions["document_representation"] == "SCANNED", label
+    assert manifest.extensions["needs_ocr"] is True, label
+    assert manifest.document.selected_mode is ProcessingMode.HYBRID, label
+    ocr_issues = [i for i in manifest.issues if i.code == "PAGES_REQUIRE_OCR"]
+    assert ocr_issues, label
+    assert ocr_issues[0].details["pages"] == list(range(1, expected_pages + 1)), label
+    assert not [
+        o for o in manifest.objects if o.execution_status is ExecutionStatus.PENDING
+    ], label
+    # Tier-3 预算 25s；首版量图片覆盖的写法在真实 20 页扫描件上要 17.5s
+    assert elapsed < 10.0, (label, elapsed)
+    print(f"scanned_ok {label} {elapsed:.2f}")
+
+
+assert_scanned(out / "scanned-equivalent.pdf", "synthetic")
+
+pind = Path(os.environ["QYUNSLATION_PIND"])
+if pind.is_file():
+    assert_scanned(pind, "external-pind")
+else:
+    print(f"strengthened skipped, sample absent: {pind}")
 PY
-  then
-    pass "FDA PIND scanned sample stays inside the prescan budget"
-  else
-    fail "FDA PIND scanned sample stays inside the prescan budget"
-    show_failure_log "$SCANNED_LOG"
-  fi
+then
+  pass "scanned-document prescan budget and OCR inventory"
 else
-  blocked "FDA PIND sample is unavailable at $PIND"
+  fail "scanned-document prescan budget and OCR inventory"
+  show_failure_log "$SCANNED_LOG"
 fi
 
 STRUCTURE_XML="$STAGE_DIR/structure.xml"

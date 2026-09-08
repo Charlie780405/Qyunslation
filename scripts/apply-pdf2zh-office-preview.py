@@ -3,8 +3,12 @@
 """PLAN-014/015：Office HTML 预览 + 翻译进度绑定双预览 + 一屏布局。uv 升级后重跑。"""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gui_extensions import image_mime_literal, set_literal  # noqa: E402
 
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/"
@@ -15,7 +19,9 @@ MARKER = "_qy_office_preview"
 
 HELPER = r'''
 # --- PLAN-014: non-PDF preview via HTML ---
-_QY_PREVIEW_HTML_EXT = {".docx", ".doc", ".md", ".markdown", ".png", ".jpg", ".jpeg", ".webp", ".html", ".htm"}
+# PLAN-030h H2：图片扩展名与 MIME 由 capabilities 清单渲染，勿手改
+_QY_PREVIEW_HTML_EXT = __QY_PREVIEW_EXT__
+_QY_IMAGE_MIME = __QY_IMAGE_MIME__
 _QY_MAMMOTH_PY = Path("/home/dev/qyunslation/.venv/bin/python")
 
 
@@ -123,16 +129,11 @@ def _qy_preview_payload(path_str: str | None) -> tuple:
                 body = "<p>（未能从 Word 提取预览内容，请直接下载）</p>"
         elif suf in {".md", ".markdown"}:
             body = _qy_md_to_html(path)
-        elif suf in {".png", ".jpg", ".jpeg", ".webp"}:
+        elif suf in __QY_IMAGE_EXT__:
             # Gradio 文件路径对浏览器不一定可访问；用 data URL
             import base64
 
-            mime = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".webp": "image/webp",
-            }.get(suf, "application/octet-stream")
+            mime = _QY_IMAGE_MIME.get(suf, "application/octet-stream")
             b64 = base64.b64encode(path.read_bytes()).decode("ascii")
             body = f'<img src="data:{mime};base64,{b64}" alt="{path.name}" style="max-width:100%;height:auto;"/>'
         else:
@@ -150,10 +151,51 @@ def _html_escape(s: str) -> str:
         .replace('"', "&quot;")
     )
 
-'''
+'''.replace(
+    "__QY_PREVIEW_EXT__",
+    set_literal("image", extra=(".docx", ".doc", ".md", ".markdown", ".html", ".htm")),
+).replace("__QY_IMAGE_EXT__", set_literal("image")).replace(
+    "__QY_IMAGE_MIME__", image_mime_literal()
+)
+
+
+_PREVIEW_EXT_LITERAL = set_literal(
+    "image", extra=(".docx", ".doc", ".md", ".markdown", ".html", ".htm")
+)
+_IMAGE_EXT_LITERAL = set_literal("image")
+
+
+def refresh_extension_sets(text: str) -> str:
+    """PLAN-030h H2：把已注入的旧扩展名集合就地升级到当前清单。
+
+    HELPER 只在 marker 缺失时整体注入，集合漂移时不会被重写，新增格式因此
+    永远进不了预览分支。这里做精确的局部替换，不动周围代码。
+    """
+    text = re.sub(
+        r"_QY_PREVIEW_HTML_EXT = \{[^}]*\}",
+        "_QY_PREVIEW_HTML_EXT = " + _PREVIEW_EXT_LITERAL,
+        text,
+    )
+    # 预览分派里的图片分支：形态可能是 base64 版，也可能已被 preview-url 换成静态路由版
+    text = re.sub(
+        r'elif suf in \{[^}]*"\.webp"[^}]*\}:',
+        "elif suf in " + _IMAGE_EXT_LITERAL + ":",
+        text,
+    )
+    if "_QY_IMAGE_MIME = " not in text and "_QY_PREVIEW_HTML_EXT = " in text:
+        text = text.replace(
+            "_QY_PREVIEW_HTML_EXT = " + _PREVIEW_EXT_LITERAL,
+            "_QY_PREVIEW_HTML_EXT = "
+            + _PREVIEW_EXT_LITERAL
+            + "\n_QY_IMAGE_MIME = "
+            + image_mime_literal(),
+            1,
+        )
+    return text
 
 
 def apply(text: str) -> str:
+    text = refresh_extension_sets(text)
     if MARKER in text and "preview_html = gr.HTML" in text:
         # still allow partial upgrades below
         pass

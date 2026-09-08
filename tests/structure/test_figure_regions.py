@@ -20,7 +20,11 @@ from pdf_figure_crop import (  # noqa: E402
     page_caption_profile,
 )
 
-from tests.structure.sample_paths import slide_sample
+from tests.structure.sample_paths import (
+    SLIDE_TRANSLATABLE_REGIONS,
+    both_slides,
+    slide_sample,
+)
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
@@ -95,9 +99,9 @@ def test_legacy_find_safe_vector_figures_unchanged_on_nature():
     assert n == 12
 
 
-@pytest.mark.skipif(not SLIDE.is_file(), reason="slide sample missing")
-def test_slide_profile_still_twelve_regions():
-    doc = pymupdf.open(SLIDE)
+@both_slides
+def test_slide_profile_still_twelve_regions(slide_pdf):
+    doc = pymupdf.open(slide_pdf)
     try:
         assert all(is_slide_page(p) for p in doc)
         profile_n = sum(
@@ -112,8 +116,17 @@ def test_slide_profile_still_twelve_regions():
             )
             for p in doc
         )
+    finally:
+        doc.close()
+    assert profile_n == SLIDE_TRANSLATABLE_REGIONS
+
+
+@pytest.mark.skipif(not SLIDE.is_file(), reason="slide sample missing")
+def test_external_slide_caption_region_count():
+    """题注区域数是真实幻灯的排版特性，合成等价件不复刻，留作加强回归。"""
+    doc = pymupdf.open(SLIDE)
+    try:
         caption_n = sum(len(find_figure_regions(p)) for p in doc)
     finally:
         doc.close()
-        assert profile_n == 12
-        assert caption_n == 8
+    assert caption_n == 8

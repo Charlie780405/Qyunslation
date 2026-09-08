@@ -16,15 +16,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from doc_image_prescan import scan_pdf_tier3  # noqa: E402
 from pdf_figure_crop import translatable_regions  # noqa: E402
 
-from tests.structure.sample_paths import pind_ocr_sample, pind_sample, slide_sample
+from tests.structure.sample_paths import (
+    SLIDE_TRANSLATABLE_REGIONS,
+    both_slides,
+    pind_ocr_sample,
+    pind_sample,
+)
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = slide_sample()
-
-requires_slide = pytest.mark.skipif(
-    not SLIDE.is_file(), reason="slide sample lives outside the repo"
-)
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +45,6 @@ def _execution_regions(path: Path) -> int:
     [
         pytest.param(LJAE, 6, id="ljae439"),
         pytest.param(NATURE, 7, id="nature"),
-        pytest.param(SLIDE, 12, id="slide", marks=requires_slide),
     ],
 )
 def test_prescan_matches_manifest_and_execution(path, expected):
@@ -55,6 +54,17 @@ def test_prescan_matches_manifest_and_execution(path, expected):
     assert manifest.extensions["translatable_figure_count"] == expected
     assert result.translatable_count == expected
     assert _execution_regions(path) == expected
+
+
+@both_slides
+def test_slide_prescan_matches_manifest_and_execution(slide_pdf):
+    manifest = PdfStructureScanner().scan(slide_pdf)
+    result = scan_pdf_tier3(slide_pdf)
+
+    expected = SLIDE_TRANSLATABLE_REGIONS
+    assert manifest.extensions["translatable_figure_count"] == expected
+    assert result.translatable_count == expected
+    assert _execution_regions(slide_pdf) == expected
 
 
 def test_caption_counts_are_unchanged_for_journals():

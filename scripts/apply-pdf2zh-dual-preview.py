@@ -295,26 +295,17 @@ def apply_skeleton(text: str) -> tuple[str, bool]:
         changed = True
 
     # file_input show_label=False
-    old_fi = '''                            file_input = gr.File(
-                                label=_("File(s)"),
-                                file_count="multiple",
-                                file_types=[".pdf", ".PDF", ".doc", ".docx", ".png", ".jpg", ".jpeg"],
-                                type="filepath",
-                                elem_classes=["input-file"],
-                            )
-'''
-    new_fi = '''                            file_input = gr.File(
-                                label=_("File(s)"),
-                                show_label=False,
-                                file_count="multiple",
-                                file_types=[".pdf", ".PDF", ".doc", ".docx", ".png", ".jpg", ".jpeg"],
-                                type="filepath",
-                                elem_classes=["input-file"],
-                            )
-'''
+    #
+    # PLAN-030h H2：不再硬编码 file_types 锚点。链上游的 office-route 会把它
+    # 改写成 capabilities 清单渲染的形态，写死锚点会在清单变更时静默失配。
     if "show_label=False" not in text[text.find("file_input = gr.File") : text.find("file_input = gr.File") + 350]:
-        if old_fi in text:
-            text = text.replace(old_fi, new_fi, 1)
+        text, n = re.subn(
+            r'(file_input = gr\.File\(\n\s+label=_\("File\(s\)"\),\n)',
+            r"\1                                show_label=False,\n",
+            text,
+            count=1,
+        )
+        if n:
             changed = True
 
     return text, changed

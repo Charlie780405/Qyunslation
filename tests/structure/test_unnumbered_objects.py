@@ -14,15 +14,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from pdf_figure_crop import _drop_nested, translatable_regions  # noqa: E402
-from tests.structure.sample_paths import slide_sample
+from tests.structure.sample_paths import SLIDE_TRANSLATABLE_REGIONS, both_slides
 
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
 NATURE = ROOT / "tests/fixtures/structure/reference/nature_comm_53384.pdf"
-SLIDE = slide_sample()
-
-requires_slide = pytest.mark.skipif(
-    not SLIDE.is_file(), reason="slide sample lives outside the repo"
-)
 
 
 def _images(manifest):
@@ -111,13 +106,13 @@ def test_captioned_document_produces_no_spurious_image_objects(nature_manifest):
     assert nature_manifest.summary.table_count == 3
 
 
-@requires_slide
-def test_slide_regions_enter_the_manifest_without_fake_numbers():
-    manifest = PdfStructureScanner().scan(SLIDE)
+@both_slides
+def test_slide_regions_enter_the_manifest_without_fake_numbers(slide_pdf):
+    manifest = PdfStructureScanner().scan(slide_pdf)
 
     assert manifest.summary.figure_count == 0
-    assert len(_images(manifest)) == 12
-    assert manifest.summary.object_counts.get("IMAGE") == 12
+    assert len(_images(manifest)) == SLIDE_TRANSLATABLE_REGIONS
+    assert manifest.summary.object_counts.get("IMAGE") == SLIDE_TRANSLATABLE_REGIONS
 
 
 @pytest.mark.parametrize(
@@ -125,13 +120,21 @@ def test_slide_regions_enter_the_manifest_without_fake_numbers():
     [
         pytest.param(LJAE, id="ljae439"),
         pytest.param(NATURE, id="nature"),
-        pytest.param(SLIDE, id="slide", marks=requires_slide),
     ],
 )
 def test_manifest_translatable_count_matches_execution(path):
     manifest = PdfStructureScanner().scan(path)
 
     assert manifest.extensions["translatable_figure_count"] == _execution_region_count(path)
+
+
+@both_slides
+def test_slide_translatable_count_matches_execution(slide_pdf):
+    manifest = PdfStructureScanner().scan(slide_pdf)
+
+    assert manifest.extensions["translatable_figure_count"] == _execution_region_count(
+        slide_pdf
+    )
 
 
 def test_image_object_ids_are_stable_across_scans():

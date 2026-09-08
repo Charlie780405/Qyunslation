@@ -9,6 +9,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gui_extensions import set_literal  # noqa: E402
+
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/"
     "site-packages/pdf2zh_next/gui.py"
@@ -195,7 +198,7 @@ HELPER = r'''
                                 errors += 1
                     finally:
                         doc.close()
-                elif path and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+                elif path and path.suffix.lower() in __QY_IMAGE_EXT__:
                     pr = probe_image(path, to_lang=str(lang_to or "简体中文"))
                     if pr.get("status") == "error":
                         errors += 1
@@ -292,7 +295,7 @@ HELPER = r'''
             st["_prescan_meta"] = {"files": {}}
             st.pop("_prescan_active_hash", None)
             return gr.update(value="", visible=False), st
-'''
+'''.replace("__QY_IMAGE_EXT__", set_literal("image"))
 
 CSS = """
 /* _qy_prescan_css */

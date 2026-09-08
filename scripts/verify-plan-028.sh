@@ -70,9 +70,8 @@ resolve_sample() {
         return
       fi
     done
-    printf '%s\n' "$sample_root/nature_comm_53384.pdf"
-    return
   fi
+  # PLAN-030h H1：这份样本本来就在仓内，外部根里找不到时不得返回不存在的路径
   printf '%s\n' \
     "$ROOT/tests/fixtures/structure/reference/nature_comm_53384.pdf"
 }
