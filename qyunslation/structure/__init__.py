@@ -79,6 +79,17 @@ from .runtime import (
     probe_runtime_capabilities,
 )
 from .canvases import CanvasLimits, extract_canvases
+from .scan_pdf import PdfStructureScanner
+from .captions import (
+    CAPTION_LINE,
+    FIGURE_LINE,
+    caption_anchors,
+    figure_caption_num,
+    is_continued_caption,
+    is_toc_line,
+    squeeze_caps,
+    table_caption_num,
+)
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -151,5 +162,14 @@ __all__ = [
     "decide_runtime_capability",
     "probe_runtime_capabilities",
     "CanvasLimits",
+    "PdfStructureScanner",
     "extract_canvases",
+    "CAPTION_LINE",
+    "FIGURE_LINE",
+    "caption_anchors",
+    "figure_caption_num",
+    "is_continued_caption",
+    "is_toc_line",
+    "squeeze_caps",
+    "table_caption_num",
 ]
