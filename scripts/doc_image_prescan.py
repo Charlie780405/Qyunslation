@@ -436,15 +436,13 @@ def scan_pdf_tier3(
     manifest = None
     try:
         digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        manifest = store.get(digest)
+        manifest = store.get_current(
+            digest,
+            producer_name=PDF_STRUCTURE_SCANNER_NAME,
+            producer_version=PDF_STRUCTURE_SCANNER_VERSION,
+        )
     except Exception:
         digest = None
-
-    if manifest is not None and (
-        manifest.producer.name != PDF_STRUCTURE_SCANNER_NAME
-        or manifest.producer.version != PDF_STRUCTURE_SCANNER_VERSION
-    ):
-        manifest = None
 
     if manifest is None:
         try:
