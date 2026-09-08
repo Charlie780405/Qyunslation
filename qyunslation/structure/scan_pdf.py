@@ -17,6 +17,11 @@ from .layout import (
     overflows_column,
     reading_order,
 )
+from .representation import (
+    document_representation,
+    needs_ocr,
+    page_representation,
+)
 from .tables import table_regions
 from .models import (
     AssetRole,
@@ -240,6 +245,7 @@ class PdfStructureScanner:
         import pymupdf
 
         canvases = {c.source_index: c for c in prepared.canvases}
+        page_modes: dict[int, Representation] = {}
         objects: list = []
         issues: list[ManifestIssue] = []
         figure_seen: set[int] = set()
@@ -268,6 +274,7 @@ class PdfStructureScanner:
                 if canvas is None:
                     continue
                 pages_scanned += 1
+                page_modes[i] = page_representation(page)
                 try:
                     anchors = caption_anchors(page)
                     labeled = labeled_figure_regions(page)
@@ -450,6 +457,34 @@ class PdfStructureScanner:
             ],
             user_override=content_profile,
         )
+        ordered_modes = [page_modes[k] for k in sorted(page_modes)]
+        doc_representation = document_representation(ordered_modes)
+        # 扫描页要经 HPD OCR 才能拿到文字层，落到 manifest 上就是 HYBRID
+        selected_mode = (
+            ProcessingMode.HYBRID
+            if doc_representation is not Representation.NATIVE_TEXT
+            else mode
+        )
+        if needs_ocr(ordered_modes):
+            issues.append(
+                ManifestIssue(
+                    code="PAGES_REQUIRE_OCR",
+                    severity=IssueSeverity.INFO,
+                    stage=PipelineStage.SCAN,
+                    retryable=False,
+                    message=(
+                        f"{sum(1 for m in ordered_modes if m is Representation.SCANNED)}"
+                        " page(s) have no text layer and need HPD OCR"
+                    ),
+                    details={
+                        "pages": [
+                            k
+                            for k in sorted(page_modes)
+                            if page_modes[k] is Representation.SCANNED
+                        ]
+                    },
+                )
+            )
         document = DocumentInfo(
             source_sha256=prepared.source_sha256,
             source_name=prepared.source_name,
@@ -461,7 +496,7 @@ class PdfStructureScanner:
             profile_evidence=decision.evidence,
             auto_profile_suggestion=decision.auto_suggestion,
             requested_mode=mode,
-            selected_mode=mode,
+            selected_mode=selected_mode,
             output_editability=OutputEditability.EDITABLE,
             input_asset=prepared.input_asset,
             derived_assets=list(prepared.derived_assets),
@@ -485,5 +520,10 @@ class PdfStructureScanner:
                 ),
                 "truncated": truncated,
                 "pages_scanned": pages_scanned,
+                "document_representation": doc_representation.value,
+                "page_representations": {
+                    str(k): page_modes[k].value for k in sorted(page_modes)
+                },
+                "needs_ocr": needs_ocr(ordered_modes),
             },
         )

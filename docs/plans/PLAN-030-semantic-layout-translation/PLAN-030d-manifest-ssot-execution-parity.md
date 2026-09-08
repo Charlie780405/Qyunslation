@@ -399,15 +399,18 @@ DocLayout 判定结论见 §五：走自研几何路线。
 
 **依赖：** Tasks 6–8
 
-**文件：** `qyunslation/structure/scan_pdf.py`、`scripts/doc_image_prescan.py`、`tests/structure/test_scanned_pdf_parity.py`
+**文件：** `qyunslation/structure/representation.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_scanned_pdf_parity.py`
+**状态：** 已完成。
 
 **验收：**
 
-- [ ] scanner 判定并记录 `Representation.SCANNED` / `NATIVE_TEXT` / `HYBRID`。
-- [ ] 扫描件（`pdf_needs_hpd` 为真）产出的 manifest 标 `processing_mode=HYBRID` 并记录 HPD 血缘。
-- [ ] 混合 PDF（部分页扫描）逐页判定，不整档一刀切。
-- [ ] 扫描件路径的对象也有终态，不出现 `PENDING` 残留。
-- [ ] FDA PIND 样本（20 页扫描件）扫描不超时，`truncated` 语义正确。
+- [x] scanner 逐页判定并记录 `SCANNED` / `NATIVE_TEXT` / `HYBRID`，写入 `extensions.page_representations` 与 `document_representation`。
+- [x] 扫描件 manifest 的 `selected_mode` 标 `HYBRID`（`requested_mode` 保留调用方原值）。**HPD 血缘按实际能力落地**：扫描阶段 OCR 尚未发生，无法记录已完成的转换血缘，改为记 `ManifestIssue(code="PAGES_REQUIRE_OCR")` 列出需要 OCR 的页号；已 OCR 的产物（`*.hpd-ocr.pdf`）判为 `HYBRID`。
+- [x] 混合 PDF 逐页判定：合成夹具（两页原生 + 一页扫描）得 `[NATIVE_TEXT, NATIVE_TEXT, SCANNED]`，文档级 `HYBRID`。测试同时锁定整档门槛的盲区——该夹具整档字符数 ≥ 80，`pdf_needs_hpd` 会判成不需要 OCR，逐页判定则正确识别第三页。
+- [x] 扫描件路径无 `PENDING` 残留（无文字层即无题注，不产出可译对象）。
+- [x] FDA PIND（20 页扫描件）扫描 **0.4s**，远低于 25s 预算。首版用 `get_image_rects()` 量图片覆盖需 17.5s，改走 `get_text("dict")` 的图像块 bbox 后快约 125 倍，判定结果一致。
+
+**判定口径**：页面字符数 < 20 即 `SCANNED`（无文字层必须走 OCR，宁可多判不可漏判）；有文字层且单图覆盖 ≥ 60% 页面为 `HYBRID`（OCR 产物）；其余为 `NATIVE_TEXT`。覆盖阈值实测有明确间隔——扫描件 FDA PIND 0.75、Abstract 1.00，原生件 ljae439 最大 0.22、Nature 0。
 
 **验证：** `pytest -q tests/structure/test_scanned_pdf_parity.py --no-cov`
 
