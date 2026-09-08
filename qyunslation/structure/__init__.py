@@ -166,6 +166,7 @@ __all__ = [
     "PdfStructureScanner",
     "DocxStructureScanner",
     "ImageStructureScanner",
+    "PptxStructureScanner",
     "default_cache_root",
     "extract_canvases",
     "CAPTION_LINE",
@@ -182,6 +183,7 @@ _LAZY_EXPORTS = {
     "PdfStructureScanner": ("scan_pdf", "PdfStructureScanner"),
     "DocxStructureScanner": ("scan_docx", "DocxStructureScanner"),
     "ImageStructureScanner": ("scan_image", "ImageStructureScanner"),
+    "PptxStructureScanner": ("scan_pptx", "PptxStructureScanner"),
 }
 
 

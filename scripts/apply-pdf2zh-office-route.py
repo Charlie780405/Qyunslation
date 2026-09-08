@@ -18,7 +18,7 @@ HELPER_HEAD = "# --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---"
 OFFICE_HELPER = '''
 # --- PLAN-005e: Word/图片 → Qyunslation sidecar (:8010) ---
 # _qy_office_sidecar
-_QY_OFFICE_SIDECAR_EXT = {".doc", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
+_QY_OFFICE_SIDECAR_EXT = {".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".webp"}
 _QY_OFFICE_SIDECAR_URL = "http://127.0.0.1:8010"
 _QY_LANG_TO_SIDECAR = {
     "Simplified Chinese": "简体中文",
@@ -51,7 +51,12 @@ async def _qy_run_office_sidecar_task(
     import json
 
     suffix = file_path.suffix.lower()
-    workflow_type = "image_overlay" if suffix in {".png", ".jpg", ".jpeg", ".webp"} else "docx"
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        workflow_type = "image_overlay"
+    elif suffix in {".ppt", ".pptx"}:
+        workflow_type = "pptx"
+    else:
+        workflow_type = "docx"
     mapped = _qy_map_lang_to_sidecar(to_lang)
     payload = {"workflow_type": workflow_type, "to_lang": mapped}
 
@@ -146,7 +151,7 @@ async def _qy_run_office_sidecar_task(
 
 FILE_TYPES_OLD = 'file_types=[".pdf", ".PDF"],'
 FILE_TYPES_NEW = (
-    'file_types=[".pdf", ".PDF", ".doc", ".docx", ".png", ".jpg", ".jpeg"],'
+    'file_types=[".pdf", ".PDF", ".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"],'
 )
 
 LOOP_ANCHOR = '''            # Build translation settings
