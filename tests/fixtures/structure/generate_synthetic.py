@@ -242,53 +242,75 @@ def _slide_pdf_bytes(*, pages: int) -> bytes:
     return _assemble_pdf(objects)
 
 
-_PDF_ID_PATTERN = re.compile(rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]")
-_FIXED_PDF_ID = b"/ID[<" + b"0" * 32 + b"><" + b"0" * 32 + b">]"
-
-
-def _canonicalize_pdf(data: bytes) -> bytes:
-    """把 pymupdf 每次随机生成的 trailer /ID 固定住。
-
-    /ID 在 xref 表之后，改写它不影响 startxref 偏移。不做这一步夹具就不可
-    复现，catalog 的 sha256 每跑一次变一次。
-    """
-    return _PDF_ID_PATTERN.sub(_FIXED_PDF_ID, data)
-
-
 # --- PLAN-030h H4：栏式版式金样 ------------------------------------------------
 #
-# 用 pymupdf 的 insert_textbox 而非裸内容流：裸流里同一行的多段文字会被合并
-# 成一个横跨整页的块，栏式判定看到的 narrow 块数不足，测不出真实行为。
+# 全部用裸内容流手写，不走 pymupdf 的文档生成：pymupdf 的 tobytes(garbage=4)
+# 会重排 xref，产物字节受进程内累积状态影响，在全仓并发跑门时出现过同一夹具
+# 两次生成 hash 不同、catalog 复现断言转红。裸流没有这个问题。
+#
+# 排版上有两处约束必须守住，否则测不出真实的栏式行为：
+#   - 同一基线 y 上的多列文字会被 PyMuPDF 并成一个横跨整页的块，narrow 块数
+#     不足，栏式判定看不到栏。各列整体错开 COLUMN_BASELINE_STAGGER 解决。
+#   - 行距超过约 34pt 时列内各行不再聚成一块，碎成一行一块。保持 LINE_GAP。
 
-MULTI_COLUMN_LAYOUTS: dict[str, tuple[tuple[float, ...], float]] = {
-    "three": ((60.0, 232.0, 404.0), 148.0),
-    "four": ((50.0, 190.0, 330.0, 470.0), 120.0),
+MULTI_COLUMN_LAYOUTS: dict[str, tuple[float, ...]] = {
+    "three": (60.0, 232.0, 404.0),
+    "four": (50.0, 190.0, 330.0, 470.0),
 }
 
+COLUMN_BASELINE_STAGGER = 3.0
+COLUMN_LINE_GAP = 11.0
+COLUMN_LINES = 8
 
-def _column_page(page, column_xs, column_width: float, *, label: str) -> None:
-    import pymupdf
 
-    page.insert_text((72.0, 60.0), f"{label} layout gold sample", fontsize=16)
+def _text_command(x: float, y: float, size: float, text: str) -> str:
+    return f"BT /F1 {size:g} Tf {x:.1f} {y:.1f} Td ({text}) Tj ET"
+
+
+def _column_commands(
+    column_xs: tuple[float, ...],
+    *,
+    top: float,
+    label: str,
+    size: float = 8.0,
+    line_gap: float = COLUMN_LINE_GAP,
+    lines: int = COLUMN_LINES,
+    stagger: float = COLUMN_BASELINE_STAGGER,
+) -> list[str]:
+    commands = []
     for index, x in enumerate(column_xs):
-        rect = pymupdf.Rect(x, 100.0, x + column_width, 700.0)
-        body = " ".join(
-            f"Column {index} sentence {n} carries enough words to wrap inside the box."
-            for n in range(12)
-        )
-        page.insert_textbox(rect, body, fontsize=8)
+        for line in range(lines):
+            y = top - line * line_gap - index * stagger
+            commands.append(
+                _text_command(
+                    x,
+                    y,
+                    size,
+                    f"{label} column {index} line {line} of running body text",
+                )
+            )
+    return commands
+
+
+def _single_page_pdf(commands: list[str], *, width: float, height: float) -> bytes:
+    stream = "\n".join(commands).encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.0f} {height:.0f}] "
+            "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ).encode("ascii"),
+        _stream_object(stream),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    return _assemble_pdf(objects)
 
 
 def _multi_column_pdf_bytes(kind: str) -> bytes:
-    import pymupdf
-
-    column_xs, column_width = MULTI_COLUMN_LAYOUTS[kind]
-    document = pymupdf.open()
-    page = document.new_page(width=612, height=792)
-    _column_page(page, column_xs, column_width, label=kind.capitalize())
-    data = document.tobytes(deflate=True, garbage=4)
-    document.close()
-    return _canonicalize_pdf(data)
+    commands = [_text_command(72.0, 740.0, 16.0, f"{kind.capitalize()} layout gold sample")]
+    commands += _column_commands(MULTI_COLUMN_LAYOUTS[kind], top=700.0, label=kind.capitalize())
+    return _single_page_pdf(commands, width=612.0, height=792.0)
 
 
 def _mixed_columns_pdf_bytes() -> bytes:
@@ -296,57 +318,79 @@ def _mixed_columns_pdf_bytes() -> bytes:
 
     栏式是逐页判定的，「混合栏」在这个模型里只能是文档级的观察结果。
     """
-    import pymupdf
+    pages: list[list[str]] = []
 
-    document = pymupdf.open()
+    front = [_text_command(72.0, 740.0, 18.0, "Mixed layout gold sample")]
+    for line in range(10):
+        front.append(
+            _text_command(
+                72.0,
+                700.0 - line * 13.0,
+                9.0,
+                f"Front matter line {line} runs the full measure of the page width",
+            )
+        )
+    pages.append(front)
 
-    front = document.new_page(width=612, height=792)
-    front.insert_text((72.0, 60.0), "Mixed layout gold sample", fontsize=18)
-    front.insert_textbox(
-        pymupdf.Rect(72.0, 110.0, 540.0, 640.0),
-        " ".join(
-            f"Front matter sentence {n} runs the full measure of the page."
-            for n in range(18)
-        ),
-        fontsize=9,
-    )
+    body = [_text_command(72.0, 740.0, 16.0, "Two-column body")]
+    body += _column_commands((72.0, 330.0), top=700.0, label="Body")
+    pages.append(body)
 
-    body = document.new_page(width=612, height=792)
-    _column_page(body, (72.0, 330.0), 210.0, label="Two-column body")
+    appendix = [_text_command(72.0, 740.0, 16.0, "Three-column appendix")]
+    appendix += _column_commands(MULTI_COLUMN_LAYOUTS["three"], top=700.0, label="Appendix")
+    pages.append(appendix)
 
-    appendix = document.new_page(width=612, height=792)
-    _column_page(appendix, *MULTI_COLUMN_LAYOUTS["three"], label="Three-column appendix")
+    return _multi_page_pdf(pages, width=612.0, height=792.0)
 
-    data = document.tobytes(deflate=True, garbage=4)
-    document.close()
-    return _canonicalize_pdf(data)
+
+def _multi_page_pdf(pages: list[list[str]], *, width: float, height: float) -> bytes:
+    page_count = len(pages)
+    # 对象布局：1 Catalog、2 Pages、3..(2+n) Page、随后各页 Contents，最后 Font
+    first_page_xref = 3
+    first_content_xref = first_page_xref + page_count
+    font_xref = first_content_xref + page_count
+
+    kids = " ".join(f"{first_page_xref + i} 0 R" for i in range(page_count))
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {page_count} >>".encode("ascii"),
+    ]
+    for index in range(page_count):
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.0f} {height:.0f}] "
+                f"/Resources << /Font << /F1 {font_xref} 0 R >> >> "
+                f"/Contents {first_content_xref + index} 0 R >>"
+            ).encode("ascii")
+        )
+    for commands in pages:
+        objects.append(_stream_object("\n".join(commands).encode("ascii")))
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    return _assemble_pdf(objects)
+
+
+POSTER_SIZE = (3370.0, 2384.0)
+POSTER_BAND_TOPS = (2000.0, 1240.0, 480.0)
+POSTER_COLUMN_LEFTS = (160.0, 1180.0, 2200.0)
 
 
 def _poster_pdf_bytes() -> bytes:
     """A0 横版海报：三条分区带，每带三块，标题横跨全宽。"""
-    import pymupdf
-
-    width, height = 3370.0, 2384.0
-    document = pymupdf.open()
-    page = document.new_page(width=width, height=height)
-    page.insert_text((160.0, 200.0), "Poster section gold sample", fontsize=72)
-
-    for band, top in enumerate((360.0, 1120.0, 1880.0)):
-        for column, left in enumerate((160.0, 1180.0, 2200.0)):
-            rect = pymupdf.Rect(left, top, left + 940.0, top + 660.0)
-            page.draw_rect(rect, width=2)
-            page.insert_textbox(
-                pymupdf.Rect(left + 20.0, top + 20.0, left + 920.0, top + 640.0),
-                " ".join(
-                    f"Band {band} panel {column} sentence {n} describing results."
-                    for n in range(10)
-                ),
-                fontsize=24,
-            )
-
-    data = document.tobytes(deflate=True, garbage=4)
-    document.close()
-    return _canonicalize_pdf(data)
+    width, height = POSTER_SIZE
+    commands = [_text_command(160.0, 2240.0, 72.0, "Poster section gold sample")]
+    for band, top in enumerate(POSTER_BAND_TOPS):
+        for column, left in enumerate(POSTER_COLUMN_LEFTS):
+            commands.append(f"2 w {left:.0f} {top - 660:.0f} 940 660 re S")
+            for line in range(6):
+                commands.append(
+                    _text_command(
+                        left + 30.0,
+                        top - 60.0 - line * 30.0 - column * 22.0,
+                        24.0,
+                        f"Band {band} panel {column} line {line} describing results.",
+                    )
+                )
+    return _single_page_pdf(commands, width=width, height=height)
 
 
 # --- PLAN-030h H3：同一逻辑内容的四种承载物 ----------------------------------

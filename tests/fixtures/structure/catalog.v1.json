@@ -249,7 +249,7 @@
       "source_format": "PDF",
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "three-column.pdf",
-      "sha256": "d67dae66860b0e7f4f6b0bab96463b5435234a53901c063b40dfe25d83a83d18",
+      "sha256": "9077182935ff2a360e87914fc7c38715af66ddbbf33b4c4ce8de990125b4097f",
       "expected_objects": [
         "BODY"
       ],
@@ -261,7 +261,7 @@
       "source_format": "PDF",
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "four-column.pdf",
-      "sha256": "b47b7e8d17a4bfb5c5a79135d4136d80b1795afa7f1ec2d68701a58b8d146b91",
+      "sha256": "f8c4d9008cae8b3c00f401475bda29d025d0fa0de9801ab3a33f538c20101746",
       "expected_objects": [
         "BODY"
       ],
@@ -273,7 +273,7 @@
       "source_format": "PDF",
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "mixed-columns.pdf",
-      "sha256": "fc1d088fcf5584b891dfde1ebb17e86c3e4f107cadf8fc4713cdf166263623fe",
+      "sha256": "418a3a3f89b156979c3743d7771508e865a9efd46a3c92b0c8599067ff742df2",
       "expected_objects": [
         "BODY"
       ],
@@ -285,7 +285,7 @@
       "source_format": "PDF",
       "content_profile": "RESEARCH_ARTICLE",
       "relative_path": "poster-sections.pdf",
-      "sha256": "69688bd7e58b2e9ec2e3be4ed15c42a1daab23eb3b770cbae41524bc94a117b4",
+      "sha256": "1a93ed3bcdf323fe112f44522015d198876c97d2a79cf54bf85b0ef4ee7b15f0",
       "expected_objects": [
         "BODY"
       ],
