@@ -150,6 +150,9 @@ async def _qy_run_office_sidecar_task(
 '''
 
 FILE_TYPES_OLD = 'file_types=[".pdf", ".PDF"],'
+FILE_TYPES_DOCIMG = (
+    'file_types=[".pdf", ".PDF", ".doc", ".docx", ".png", ".jpg", ".jpeg"],'
+)
 FILE_TYPES_NEW = (
     'file_types=[".pdf", ".PDF", ".doc", ".docx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg"],'
 )
@@ -253,6 +256,7 @@ def apply(text: str) -> tuple[str, bool]:
         or MARKER not in text
         or "_QY_LANG_TO_SIDECAR" not in text
         or 'payload = {"workflow_type": workflow_type, "to_lang": mapped}' not in text
+        or '".ppt", ".pptx"' not in text
     )
     if needs_refresh:
         text2, n_removed = _strip_all_helpers(text)
@@ -268,6 +272,9 @@ def apply(text: str) -> tuple[str, bool]:
 
     if FILE_TYPES_OLD in text:
         text = text.replace(FILE_TYPES_OLD, FILE_TYPES_NEW, 1)
+        changed = True
+    elif FILE_TYPES_DOCIMG in text:
+        text = text.replace(FILE_TYPES_DOCIMG, FILE_TYPES_NEW, 1)
         changed = True
     elif FILE_TYPES_NEW not in text:
         print("WARN: file_types anchor not found", file=sys.stderr)
@@ -305,6 +312,8 @@ def verify(text: str) -> int:
     need('"to_lang": "简体中文"' not in text or "_qy_map_lang_to_sidecar" in text, "hardcoded to_lang")
     # hardcoded payload should use mapped variable
     need('payload = {"workflow_type": workflow_type, "to_lang": mapped}' in text, "payload must use mapped")
+    need('".ppt", ".pptx"' in text, "sidecar must accept ppt/pptx")
+    need(FILE_TYPES_NEW in text, "file picker must accept ppt/pptx")
     try:
         compile(text, str(GUI), "exec")
     except SyntaxError as e:
