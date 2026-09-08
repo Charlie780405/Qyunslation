@@ -94,6 +94,29 @@ class ManifestStore:
             return None
         return manifest
 
+    def get_current(
+        self,
+        source_sha256: str,
+        *,
+        producer_name: str,
+        producer_version: str,
+        kind: str = "manifest",
+    ) -> DocumentStructureManifest | None:
+        """只返回当前扫描算法版本；过期条目删除后当未命中。"""
+        manifest = self.get(source_sha256, kind=kind)
+        if manifest is None:
+            return None
+        if (
+            manifest.producer.name != producer_name
+            or manifest.producer.version != producer_version
+        ):
+            try:
+                self.path_for(source_sha256, kind=kind).unlink()
+            except OSError:
+                pass
+            return None
+        return manifest
+
     def put_execution(self, manifest: DocumentStructureManifest) -> Path | None:
         """写执行审计快照。
 

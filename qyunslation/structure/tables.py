@@ -34,16 +34,19 @@ class TableRegion:
         return (self.x0, self.y0, self.x1, self.y1)
 
 
-def _horizontal_lines(page) -> list[tuple[float, float, float]]:
+def _horizontal_lines(
+    page, *, drawings: list | None = None
+) -> list[tuple[float, float, float]]:
     """页面横线，返回 (x0, x1, y)，已按 y 合并同一条线的分段。"""
     width = float(page.rect.width)
     if width <= 0:
         return []
     raw: list[tuple[float, float, float]] = []
-    try:
-        drawings = page.get_drawings()
-    except Exception:
-        return []
+    if drawings is None:
+        try:
+            drawings = page.get_drawings()
+        except Exception:
+            return []
     for drawing in drawings:
         for item in drawing.get("items", []):
             if item[0] == "l":
@@ -72,7 +75,9 @@ def _horizontal_lines(page) -> list[tuple[float, float, float]]:
     return [(m[0], m[1], m[2]) for m in merged]
 
 
-def table_regions(page, anchors=None) -> list[TableRegion]:
+def table_regions(
+    page, anchors=None, *, drawings: list | None = None
+) -> list[TableRegion]:
     """由表题注锚点圈定的表格区域。
 
     无表题注的页返回空列表——这是不产生假阳性的关键：图表页的线框再多也不会
@@ -87,7 +92,7 @@ def table_regions(page, anchors=None) -> list[TableRegion]:
     captions = [a for a in anchors if a[0] == "table"]
     if not captions:
         return []
-    lines = _horizontal_lines(page)
+    lines = _horizontal_lines(page, drawings=drawings)
     if not lines:
         return []
 
@@ -127,11 +132,13 @@ def table_regions(page, anchors=None) -> list[TableRegion]:
     return regions
 
 
-def table_exclusion_rects(page, anchors=None) -> list:
+def table_exclusion_rects(
+    page, anchors=None, *, drawings: list | None = None
+) -> list:
     """供正文过滤使用的表格矩形，含题注到底线的整块区域。"""
     import pymupdf
 
     out = []
-    for region in table_regions(page, anchors=anchors):
+    for region in table_regions(page, anchors=anchors, drawings=drawings):
         out.append(pymupdf.Rect(region.x0, region.y0, region.x1, region.y1))
     return out
