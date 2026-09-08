@@ -165,6 +165,7 @@ def translate_pdf_images(
         SLIDE_MIN_DRAWINGS,
         SLIDE_TEXT_OVERLAP,
         crop_png,
+        find_figure_regions,
         find_safe_vector_figures,
         is_slide_page,
     )
@@ -339,14 +340,17 @@ def translate_pdf_images(
                     exclude.append(info["bbox"])
             try:
                 slide = is_slide_page(page)
-                figures = find_safe_vector_figures(
-                    page,
-                    exclude_rects=exclude,
-                    tables=[] if slide else None,
-                    text_overlap_max=SLIDE_TEXT_OVERLAP if slide else None,
-                    max_area_frac=SLIDE_MAX_AREA_FRAC if slide else None,
-                    min_drawings=SLIDE_MIN_DRAWINGS if slide else None,
-                )
+                if slide:
+                    figures = find_safe_vector_figures(
+                        page,
+                        exclude_rects=exclude,
+                        tables=[],
+                        text_overlap_max=SLIDE_TEXT_OVERLAP,
+                        max_area_frac=SLIDE_MAX_AREA_FRAC,
+                        min_drawings=SLIDE_MIN_DRAWINGS,
+                    )
+                else:
+                    figures = find_figure_regions(page, exclude_rects=exclude)
             except Exception as exc:
                 logger.warning("vector detect page %s: %s", pno, exc)
                 continue
