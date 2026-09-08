@@ -19,6 +19,14 @@ bash scripts/verify-plan-030g.sh
 
 `verify-plan-028.sh` 单独跑，不从 030g 脚本内嵌套。
 
+## 四、部署
+
+- main `759a41f`（`--no-ff` 合入 030e/030f + 030g）
+- 已推送 `qyunslation/main`
+- `apply-pdf2zh-office-route.py` 已把 GUI sidecar/文件选择器接入 `.ppt` / `.pptx`
+- `systemctl --user restart qyunslation-office.service pdf2zh.service`
+- `http://127.0.0.1:7860/`、`http://127.0.0.1:8010/` 均 200
+
 ## 三、非目标
 
 - SmartArt / Chart / OLE / 动画
