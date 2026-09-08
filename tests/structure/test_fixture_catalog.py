@@ -61,7 +61,11 @@ def test_catalog_covers_core_formats_and_priority_content_profiles():
         REQUIRED_PROFILES
     )
     assert len({item["id"] for item in fixtures}) == len(fixtures)
-    assert all(item["future_owner"].startswith("PLAN-030") for item in fixtures)
+    assert all(
+        item["future_owner"].startswith("PLAN-030")
+        or item["future_owner"].startswith("PLAN-033")
+        for item in fixtures
+    )
 
 
 def test_synthetic_fixtures_are_reproducible_and_match_catalog(tmp_path: Path):

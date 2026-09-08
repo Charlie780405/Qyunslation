@@ -673,6 +673,24 @@ def _pptx_bytes() -> bytes:
     return _canonicalize_ooxml(stream.getvalue())
 
 
+def _caption_span_gap_pdf_bytes() -> bytes:
+    """复现 ScienceDirect 题注：同一行两个 span，中间没有空格字形。
+
+    旧拼接把 'Table 2' + 'Response...' 合成 'Table 2Response...'，正则因此丢表。
+    正文里的 'see Table 4' 不得被计成对象。
+    """
+    commands = [
+        _text_command(72.0, 740.0, 16.0, "Caption span-gap gold sample"),
+        _text_command(72.0, 700.0, 10.0, "Figure 1. Study flow."),
+        # 两个 Tj 紧挨着，中间不写空格字符
+        "BT /F1 10 Tf 72.0 640.0 Td (Table 2) Tj 42 0 Td (Response to Dupilumab in Acute GvHD.) Tj ET",
+        "BT /F1 10 Tf 72.0 600.0 Td (Table 3) Tj 42 0 Td (Response in Chronic GvHD.) Tj ET",
+        "BT /F1 10 Tf 72.0 560.0 Td (Table 4) Tj 42 0 Td (Baseline and Transplant Characteristics.) Tj ET",
+        _text_command(72.0, 480.0, 10.0, "Patients were enrolled, see Table 4 for details."),
+    ]
+    return _single_page_pdf(commands, width=612.0, height=792.0)
+
+
 GENERATORS: dict[str, Callable[[], bytes]] = {
     "single-column.pdf": lambda: _pdf_bytes(columns=1),
     "double-column.pdf": lambda: _pdf_bytes(columns=2),
@@ -698,6 +716,7 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "four-column.pdf": lambda: _multi_column_pdf_bytes("four"),
     "mixed-columns.pdf": _mixed_columns_pdf_bytes,
     "poster-sections.pdf": _poster_pdf_bytes,
+    "caption-span-gap.pdf": _caption_span_gap_pdf_bytes,
 }
 
 
