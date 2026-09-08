@@ -3,6 +3,8 @@
 > 状态：**已批准，实施中**
 > 日期：2026-09-08
 > 批准记录：用户于 2026-09-08 批准全量范围（含正文 DocLayout、多栏保真、PDF 表格原位重建）
+> 范围修订：2026-09-08 用户决策——正文不接 DocLayout 改自研几何（§五）、表格由「原位重建」降级为「区域保护」（Task 8）。两处均基于实测证据，非实现让步。
+> 进度：Tasks 1–7 已完成并推送（`54d8909`）；Tasks 8–10 未开始。
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)（已批准）
 > 前置阶段：[PLAN-030a](./PLAN-030a-cross-format-contract-baselines.md)、[PLAN-030b](./PLAN-030b-input-adapters-normalized-canvases.md)、[PLAN-030c](./PLAN-030c-unified-semantic-scan.md)（均已完成）
 > 阶段边界：交付父纲领定义的 PDF 纵向闭环——原生/扫描/混合 PDF 的正文、Figure、Table、单/双/多栏的检测—翻译—回写—审计；不迁移 DOCX/PPTX/图片语义对象（030e–030g）。
@@ -30,7 +32,7 @@
 - Tier-3 的 `error` 进入 UI 文案与 `ManifestIssue`，不再显示为「未检测到需要嵌字的插图」。
 - `BODY` 对象进入 manifest，带 `reading_order`；`Canvas.layout_mode` 与 `column_count` 按实际版面填充。
 - 双栏金样阅读顺序断言通过，跨栏串接为 0。
-- 原生表格原位重建后数字集合不变，表格不被误判为 Figure。
+- 表格区域被可靠圈定并受保护，表格不被误判为 Figure。（原为「原位重建后数字集合不变」，2026-09-08 按探底实测降级，见 Task 8）
 - 新增 `scripts/verify-plan-030d.sh`；028/029/030c 三个门保持 PASS。
 
 ## 二、问题证据
@@ -125,7 +127,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | A：SSOT 地基 | Tasks 1–5 | 低 | 纯新增 + 可选参数，`manifest=None` 保留旧路径 |
 | B：版面语义 | Tasks 6–7 | 中 | 依赖 DocLayout 可离线使用；不可用时回退自研列检测 |
-| C：表格原位 | Tasks 8–9 | 高 | 触碰临床数据渲染，fail-closed 优先 |
+| C：表格保护与扫描件 | Tasks 8–9 | 中 | 原为「表格原位重建/高风险」，降级后不再改写表格渲染，仅圈定并保护 |
 
 **为什么先做 A**：正文、多栏、表格的执行状态都需要 manifest 记录，否则 `FAILED_SOFT` 与 `EXPLICITLY_SKIPPED` 无法区分，回归时定位不了是检测问题还是执行问题。030c 已用「先统一口径再改执行」验证过这个节奏。
 
@@ -352,24 +354,44 @@ DocLayout 判定结论见 §五：走自研几何路线。
 
 **验证：** `pytest -q tests/structure/test_column_layout.py --no-cov`
 
-### Task 8：PDF 表格原位重建
+### Task 8：PDF 表格区域保护（原「原位重建」已降级）
 
 **依赖：** Checkpoint A、Task 7
+**状态：** 未开始。范围已于 2026-09-08 经用户决策变更，理由见下。
 
-**文件：** `scripts/pdf_table_rebuild.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_table_rebuild.py`
+**文件：** `qyunslation/structure/tables.py`、`qyunslation/structure/layout.py`、`qyunslation/structure/scan_pdf.py`、`tests/structure/test_table_protection.py`
 
-`TableObject` 从 `planned_action="text_layer"` 升级为可执行对象，填充 `row_count` / `column_count` 与单元格 `translatable_blocks`。
+#### 范围变更依据（PyMuPDF 表格检测探底实测，2026-09-08）
 
-**验收：**
+对两个仓内金样的全部带题注表格，逐一试过 `find_tables()` 的三种策略：
 
-- [ ] 三个金样的 Table 1–3 均产出结构化单元格，行列数与人工真值一致。
-- [ ] **数字保护**：重建后表格内数字、百分比、区间、统计符号集合与原文完全一致（逐 token 比对）。
-- [ ] 表头与文本单元格译文回写原位，列宽与线框不变。
-- [ ] 结构置信度不足时 `FAILED_SOFT` + `reason_code="table_structure_low_confidence"`，保留原表不改动。
-- [ ] 纯表页仍禁止 OCR 嵌字（030c 规则 A 不回归）。
-- [ ] 表格不被误判为 Figure（Figure 计数不变）。
+| 位置 | 题注 | `lines_strict` | `lines` | `text` |
+| --- | --- | --- | --- | --- |
+| ljae439 p5 | Table 1、2 | 0 | 0 | 整页 77×10 |
+| ljae439 p7 | Table 3 | 0 | 0 | 整页 46×15 |
+| Nature p4 | Table 1 | 0 | 1（29×2，**列数错**） | 整页 95×10 |
+| Nature p5 | Table 2 | 0 | 0 | 整页 100×13 |
+| Nature p9 | Table 3 | 1（35×3） | — | — |
 
-**验证：** `pytest -q tests/structure/test_table_rebuild.py --no-cov`
+同时在**无表格**的图表页大量假阳性：Nature p7 测出 6×10 全空表，p10 测出六个 2×7、p8/p11 各四个。
+
+`strategy="text"` 看似召回率高，实为按空白间隙暴力切列：bbox 覆盖整页（y 4%–94%），正文段落被吞入，且**文字被拦腰切断**——实测出现 `Reduce|d dosing`、`tralokinu|mab`、`Age (years), mean ` + `D)`。这种切法会破坏 `44.1 (22.1)` 这类数值，与本任务「数字逐 token 与原文一致」的红线直接冲突。
+
+**根因**：这批临床期刊表格是**无竖线的学术三线表**，线框策略找不到列边界，文本策略必然误切。结论是现有技术栈拿不到可靠的单元格结构，原验收「行列数与人工真值一致」不可达。`pymupdf4llm` / `camelot` / `tabula` 本地均未安装。
+
+**决策**：单元格级原位重建移出 030d，另做技术选型后单独立项；Task 8 收窄为**表格区域保护**——保证表格不被误伤，译文仍走 BabelDOC 文字层。
+
+#### 收窄后的验收
+
+- [ ] 表格区域检测改用「题注锚点 + 三线表横线几何」，不再依赖 `find_tables()`：ljae439 p5/p7 与 Nature p4/p5/p9 的表格区域全部圈定成功。
+- [ ] 消除 Task 6 遗留的 `TABLE_GEOMETRY_MISSING`：Nature p5 表内文字不再计入 `BODY`（当前泄漏 27 个）。
+- [ ] 无表题注的图表页不产生表格区域（Nature p7/p8/p10/p11/p12 假阳性为 0）。
+- [ ] 表格区域内禁止 OCR 嵌字（030c 规则 A 不回归）。
+- [ ] 表格不被误判为 Figure（两金样 Figure 计数保持 5 / 7）。
+- [ ] `TableObject` 保持 `planned_action="text_layer"`，如实标注未做单元格重建，不伪装成已重建。
+- [ ] 圈不定区域时 fail-closed：记 `ManifestIssue`，保留原表不做任何改动。
+
+**验证：** `pytest -q tests/structure/test_table_protection.py --no-cov`
 
 ### Task 9：原生/扫描/混合 PDF 路径对齐
 
@@ -405,7 +427,7 @@ DocLayout 判定结论见 §五：走自研几何路线。
 **验收：**
 
 - [ ] 单命令门区分 PASS / EXPECTED_RED / FAIL。
-- [ ] WT 记录三方对账实测、DocLayout 路线判定依据、表格数字保护实测、部署步骤。
+- [ ] WT 记录三方对账实测、DocLayout 路线判定依据、表格检测探底与降级依据、部署步骤。
 - [ ] 父纲领 Checkpoint B 标为达成，下一批准门更新为 PLAN-030e。
 
 ## 九、阶段验收命令
