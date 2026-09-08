@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import zipfile
 from datetime import UTC, datetime
 from io import BytesIO
@@ -239,6 +240,113 @@ def _slide_pdf_bytes(*, pages: int) -> bytes:
         objects.append(_stream_object("\n".join(commands).encode("ascii")))
 
     return _assemble_pdf(objects)
+
+
+_PDF_ID_PATTERN = re.compile(rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]")
+_FIXED_PDF_ID = b"/ID[<" + b"0" * 32 + b"><" + b"0" * 32 + b">]"
+
+
+def _canonicalize_pdf(data: bytes) -> bytes:
+    """把 pymupdf 每次随机生成的 trailer /ID 固定住。
+
+    /ID 在 xref 表之后，改写它不影响 startxref 偏移。不做这一步夹具就不可
+    复现，catalog 的 sha256 每跑一次变一次。
+    """
+    return _PDF_ID_PATTERN.sub(_FIXED_PDF_ID, data)
+
+
+# --- PLAN-030h H4：栏式版式金样 ------------------------------------------------
+#
+# 用 pymupdf 的 insert_textbox 而非裸内容流：裸流里同一行的多段文字会被合并
+# 成一个横跨整页的块，栏式判定看到的 narrow 块数不足，测不出真实行为。
+
+MULTI_COLUMN_LAYOUTS: dict[str, tuple[tuple[float, ...], float]] = {
+    "three": ((60.0, 232.0, 404.0), 148.0),
+    "four": ((50.0, 190.0, 330.0, 470.0), 120.0),
+}
+
+
+def _column_page(page, column_xs, column_width: float, *, label: str) -> None:
+    import pymupdf
+
+    page.insert_text((72.0, 60.0), f"{label} layout gold sample", fontsize=16)
+    for index, x in enumerate(column_xs):
+        rect = pymupdf.Rect(x, 100.0, x + column_width, 700.0)
+        body = " ".join(
+            f"Column {index} sentence {n} carries enough words to wrap inside the box."
+            for n in range(12)
+        )
+        page.insert_textbox(rect, body, fontsize=8)
+
+
+def _multi_column_pdf_bytes(kind: str) -> bytes:
+    import pymupdf
+
+    column_xs, column_width = MULTI_COLUMN_LAYOUTS[kind]
+    document = pymupdf.open()
+    page = document.new_page(width=612, height=792)
+    _column_page(page, column_xs, column_width, label=kind.capitalize())
+    data = document.tobytes(deflate=True, garbage=4)
+    document.close()
+    return _canonicalize_pdf(data)
+
+
+def _mixed_columns_pdf_bytes() -> bytes:
+    """三页文档，逐页栏式不同：单栏扉页、双栏正文、三栏附录。
+
+    栏式是逐页判定的，「混合栏」在这个模型里只能是文档级的观察结果。
+    """
+    import pymupdf
+
+    document = pymupdf.open()
+
+    front = document.new_page(width=612, height=792)
+    front.insert_text((72.0, 60.0), "Mixed layout gold sample", fontsize=18)
+    front.insert_textbox(
+        pymupdf.Rect(72.0, 110.0, 540.0, 640.0),
+        " ".join(
+            f"Front matter sentence {n} runs the full measure of the page."
+            for n in range(18)
+        ),
+        fontsize=9,
+    )
+
+    body = document.new_page(width=612, height=792)
+    _column_page(body, (72.0, 330.0), 210.0, label="Two-column body")
+
+    appendix = document.new_page(width=612, height=792)
+    _column_page(appendix, *MULTI_COLUMN_LAYOUTS["three"], label="Three-column appendix")
+
+    data = document.tobytes(deflate=True, garbage=4)
+    document.close()
+    return _canonicalize_pdf(data)
+
+
+def _poster_pdf_bytes() -> bytes:
+    """A0 横版海报：三条分区带，每带三块，标题横跨全宽。"""
+    import pymupdf
+
+    width, height = 3370.0, 2384.0
+    document = pymupdf.open()
+    page = document.new_page(width=width, height=height)
+    page.insert_text((160.0, 200.0), "Poster section gold sample", fontsize=72)
+
+    for band, top in enumerate((360.0, 1120.0, 1880.0)):
+        for column, left in enumerate((160.0, 1180.0, 2200.0)):
+            rect = pymupdf.Rect(left, top, left + 940.0, top + 660.0)
+            page.draw_rect(rect, width=2)
+            page.insert_textbox(
+                pymupdf.Rect(left + 20.0, top + 20.0, left + 920.0, top + 640.0),
+                " ".join(
+                    f"Band {band} panel {column} sentence {n} describing results."
+                    for n in range(10)
+                ),
+                fontsize=24,
+            )
+
+    data = document.tobytes(deflate=True, garbage=4)
+    document.close()
+    return _canonicalize_pdf(data)
 
 
 # --- PLAN-030h H3：同一逻辑内容的四种承载物 ----------------------------------
@@ -542,6 +650,10 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "parity.docx": _parity_docx_bytes,
     "parity.pptx": _parity_pptx_bytes,
     "parity.png": _parity_png_bytes,
+    "three-column.pdf": lambda: _multi_column_pdf_bytes("three"),
+    "four-column.pdf": lambda: _multi_column_pdf_bytes("four"),
+    "mixed-columns.pdf": _mixed_columns_pdf_bytes,
+    "poster-sections.pdf": _poster_pdf_bytes,
 }
 
 
