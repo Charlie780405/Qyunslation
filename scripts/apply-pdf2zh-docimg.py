@@ -18,6 +18,7 @@ GUI = Path(
 MARKER = "_qy_imgtr"
 EXEC_MARKER = "_qy_img_task = _qy_aio_img.get_event_loop().run_in_executor"
 CANCEL_MARKER = "except _qy_aio_img.CancelledError"
+MANIFEST_MARKER = "_qy_imgtr_manifest"
 
 SNIPPET = r'''
         # _qy_imgtr: PDF 内嵌插图翻译前置（非扫描件）
@@ -50,12 +51,24 @@ SNIPPET = r'''
                     except Exception:
                         pass
                     _qy_img_src = _qy_Pimg(str(file_path))
+                    # _qy_imgtr_manifest: PLAN-030d 执行侧消费预扫描 manifest。
+                    # 缓存键是全文件 sha256，与 _qy_img_key（前 1MB，仅用于本次去重）不同。
+                    _qy_manifest = None
+                    try:
+                        from qyunslation.structure import ManifestStore as _QyStore
+                        _qy_full = _qy_hashlib.sha256(
+                            _qy_Pimg(str(file_path)).read_bytes()
+                        ).hexdigest()
+                        _qy_manifest = _QyStore().get(_qy_full)
+                    except Exception:
+                        _qy_manifest = None
                     _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(
                         None,
                         lambda: _qy_tr_pdf_img(
                             _qy_img_src,
                             to_lang=str(_qy_to or "简体中文"),
                             progress_cb=_qy_img_progress,
+                            structure_manifest=_qy_manifest,
                         ),
                     )
                     try:
@@ -92,11 +105,64 @@ def _insert_snippet(text: str) -> tuple[str, bool]:
     return text, False
 
 
+MANIFEST_OLD = (
+    "                    _qy_img_src = _qy_Pimg(str(file_path))\n"
+    "                    _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(\n"
+    "                        None,\n"
+    "                        lambda: _qy_tr_pdf_img(\n"
+    "                            _qy_img_src,\n"
+    '                            to_lang=str(_qy_to or "简体中文"),\n'
+    "                            progress_cb=_qy_img_progress,\n"
+    "                        ),\n"
+    "                    )"
+)
+
+MANIFEST_NEW = (
+    "                    _qy_img_src = _qy_Pimg(str(file_path))\n"
+    "                    # _qy_imgtr_manifest: PLAN-030d 执行侧消费预扫描 manifest。\n"
+    "                    # 缓存键是全文件 sha256，与 _qy_img_key（前 1MB）不同。\n"
+    "                    _qy_manifest = None\n"
+    "                    try:\n"
+    "                        from qyunslation.structure import ManifestStore as _QyStore\n"
+    "                        _qy_full = _qy_hashlib.sha256(\n"
+    "                            _qy_Pimg(str(file_path)).read_bytes()\n"
+    "                        ).hexdigest()\n"
+    "                        _qy_manifest = _QyStore().get(_qy_full)\n"
+    "                    except Exception:\n"
+    "                        _qy_manifest = None\n"
+    "                    _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(\n"
+    "                        None,\n"
+    "                        lambda: _qy_tr_pdf_img(\n"
+    "                            _qy_img_src,\n"
+    '                            to_lang=str(_qy_to or "简体中文"),\n'
+    "                            progress_cb=_qy_img_progress,\n"
+    "                            structure_manifest=_qy_manifest,\n"
+    "                        ),\n"
+    "                    )"
+)
+
+
 def apply(text: str) -> tuple[str, bool]:
     changed = False
 
-    if MARKER in text and EXEC_MARKER in text and CANCEL_MARKER in text:
+    if (
+        MARKER in text
+        and EXEC_MARKER in text
+        and CANCEL_MARKER in text
+        and MANIFEST_MARKER in text
+    ):
         return text, False
+
+    # 已有 027d/SSE 补丁但缺 030d manifest 消费：就地升级该块
+    if MARKER in text and EXEC_MARKER in text and MANIFEST_MARKER not in text:
+        if MANIFEST_OLD in text:
+            text = text.replace(MANIFEST_OLD, MANIFEST_NEW, 1)
+            changed = True
+        else:
+            print("WARNING: imgtr manifest upgrade anchor not found", file=sys.stderr)
+
+    if MARKER in text and EXEC_MARKER in text and CANCEL_MARKER in text:
+        return text, changed
 
     if MARKER in text and EXEC_MARKER in text and CANCEL_MARKER not in text:
         old_wait = (

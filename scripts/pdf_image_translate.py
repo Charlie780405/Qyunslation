@@ -151,14 +151,66 @@ def _collect_xref_occurrences(doc) -> dict[int, list[dict]]:
     return occ
 
 
+BITMAP_COVER_FRAC = 0.80
+
+
+def _structure_regions(
+    structure_manifest, page_no: int, page, exclude_rects=None
+) -> list | None:
+    """从 manifest 取该页计划执行的 (对象, rect)；无 manifest 返回 None。
+
+    PLAN-030d：执行侧不再重新检测，改用预扫描已固化的对象集，保证 UI 与执行同源。
+    与位图 xref 重合的对象由策略 A 处理，这里标注跳过，避免同一张图被翻译两次。
+    """
+    if structure_manifest is None:
+        return None
+    import pymupdf
+
+    from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+    covers = [pymupdf.Rect(r) for r in (exclude_rects or [])]
+    canvas_id = f"page:{page_no}"
+    out = []
+    for obj in structure_manifest.objects:
+        if obj.canvas_id != canvas_id:
+            continue
+        if obj.type not in (ObjectType.FIGURE, ObjectType.IMAGE):
+            continue
+        if obj.execution_status is not ExecutionStatus.PENDING:
+            continue
+        box = obj.bbox
+        rect = pymupdf.Rect(box.x0, box.y0, box.x1, box.y1) & page.rect
+        if rect.is_empty or abs(rect) <= 0:
+            _mark(obj, "FAILED_SOFT", "bbox_outside_page")
+            continue
+        if any(abs(rect & c) / abs(rect) >= BITMAP_COVER_FRAC for c in covers):
+            _mark(obj, "EXPLICITLY_SKIPPED", "handled_by_bitmap_path")
+            continue
+        out.append((obj, rect))
+    return out
+
+
+def _mark(obj, status: str, reason: str | None = None) -> None:
+    from qyunslation.structure.models import ExecutionStatus
+
+    obj.execution_status = ExecutionStatus(status)
+    if reason:
+        obj.reason_code = reason
+
+
 def translate_pdf_images(
     src: Path | str,
     *,
     to_lang: str = "简体中文",
     progress_cb=None,
     dest: Path | str | None = None,
+    structure_manifest=None,
 ) -> Path:
-    """位图 replace_image（单引用）+ 矢量 crop/insert_image；无可译图则原样返回 src。"""
+    """位图 replace_image（单引用）+ 矢量 crop/insert_image；无可译图则原样返回 src。
+
+    structure_manifest 为 None 时行为与 PLAN-030c 完全一致（回滚路径）；传入时按
+    manifest 对象执行并回写终态。
+    """
     import pymupdf
     from pdf_figure_crop import crop_png, translatable_regions
 
@@ -173,6 +225,7 @@ def translate_pdf_images(
     try:
         if getattr(doc, "is_encrypted", False) and not doc.authenticate(""):
             logger.warning("encrypted pdf, skip image translate")
+            _persist_structure_manifest(structure_manifest, reason="encrypted")
             return src
 
         occ_map = _collect_xref_occurrences(doc)
@@ -330,16 +383,22 @@ def translate_pdf_images(
             for info in page.get_image_info(xrefs=True) or []:
                 if info.get("bbox"):
                     exclude.append(info["bbox"])
-            try:
-                figures = translatable_regions(page, exclude_rects=exclude)
-            except Exception as exc:
-                logger.warning("vector detect page %s: %s", pno, exc)
-                continue
-            for fi, rect in enumerate(figures):
+            planned = _structure_regions(structure_manifest, pno + 1, page, exclude)
+            if planned is None:
+                try:
+                    planned = [
+                        (None, r) for r in translatable_regions(page, exclude_rects=exclude)
+                    ]
+                except Exception as exc:
+                    logger.warning("vector detect page %s: %s", pno, exc)
+                    continue
+            for fi, (obj, rect) in enumerate(planned):
                 try:
                     png = crop_png(page, rect)
                 except Exception as exc:
                     manifest.vector_skipped += 1
+                    if obj is not None:
+                        _mark(obj, "FAILED_SOFT", "crop_failed")
                     manifest.details.append(
                         {
                             "page": pno + 1,
@@ -358,10 +417,14 @@ def translate_pdf_images(
                 )
                 if not decision.should_translate:
                     manifest.vector_skipped += 1
+                    if obj is not None:
+                        _mark(obj, "EXPLICITLY_SKIPPED", "policy_declined")
                     continue
                 new_png, n, qc = _translate_via_local(png, to_lang)
                 if n <= 0:
                     manifest.vector_skipped += 1
+                    if obj is not None:
+                        _mark(obj, "EXPLICITLY_SKIPPED", "no_translatable_text")
                     continue
                 try:
                     page.insert_image(
@@ -371,6 +434,8 @@ def translate_pdf_images(
                         keep_proportion=False,
                     )
                     manifest.vector_translated += 1
+                    if obj is not None:
+                        _mark(obj, "TRANSLATED")
                     manifest.details.append(
                         {
                             "page": pno + 1,
@@ -381,6 +446,8 @@ def translate_pdf_images(
                     )
                 except Exception as exc:
                     manifest.vector_skipped += 1
+                    if obj is not None:
+                        _mark(obj, "FAILED_SOFT", "overlay_failed")
                     manifest.details.append(
                         {
                             "page": pno + 1,
@@ -394,6 +461,7 @@ def translate_pdf_images(
             and manifest.vector_translated == 0
         ):
             doc.close()
+            _persist_structure_manifest(structure_manifest)
             return src
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -414,7 +482,29 @@ def translate_pdf_images(
     except Exception as exc:
         logger.warning("write pdf imgtr.json failed: %s", exc)
 
+    _persist_structure_manifest(structure_manifest)
     return dest_path if dest_path.is_file() else src
+
+
+def _persist_structure_manifest(structure_manifest, *, reason: str = "not_reached") -> None:
+    """回写执行终态。未被执行触及的对象记为跳过，避免 PENDING 残留。"""
+    if structure_manifest is None:
+        return
+    try:
+        from qyunslation.structure import ManifestStore
+        from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+        for obj in structure_manifest.objects:
+            if (
+                obj.type in (ObjectType.FIGURE, ObjectType.IMAGE)
+                and obj.execution_status is ExecutionStatus.PENDING
+            ):
+                _mark(obj, "EXPLICITLY_SKIPPED", reason)
+        # 状态变更后 summary 必须重算，否则回读时 MANIFEST_SUMMARY_MISMATCH
+        structure_manifest.refresh_summary()
+        ManifestStore().put(structure_manifest)
+    except Exception as exc:
+        logger.warning("persist structure manifest failed: %s", exc)
 
 
 if __name__ == "__main__":

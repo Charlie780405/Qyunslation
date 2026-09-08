@@ -522,6 +522,15 @@ class DocumentStructureManifest(ContractModel):
             raise ValueError("MANIFEST_ID_INVALID: expected manifest:<sha256>")
         return value
 
+    def refresh_summary(self) -> DocumentStructureManifest:
+        """按当前对象与问题重算 summary。
+
+        执行阶段回写 execution_status 后必须调用，否则 summary 与对象不一致，
+        序列化后无法通过 MANIFEST_SUMMARY_MISMATCH 校验。
+        """
+        self.summary = _derive_summary(self.objects, self.issues)
+        return self
+
     @model_validator(mode="after")
     def validate_manifest_invariants(self) -> DocumentStructureManifest:
         expected_manifest_id = build_manifest_id(

@@ -46,11 +46,16 @@ class ManifestStore:
         return self.root / f"v{major}" / f"{digest}.manifest.json"
 
     def put(self, manifest: DocumentStructureManifest) -> Path | None:
-        """原子落盘。失败返回 None，不抛错。"""
+        """原子落盘。失败返回 None，不抛错。
+
+        写入前回读校验一次：summary 与对象不一致等问题若被写进缓存，会退化成永久
+        未命中且不留痕迹，宁可此处拒绝写入。
+        """
         try:
             target = self.path_for(manifest.document.source_sha256)
             target.parent.mkdir(parents=True, exist_ok=True)
             payload = manifest.model_dump_json()
+            DocumentStructureManifest.model_validate_json(payload)
             fd, tmp_name = tempfile.mkstemp(
                 dir=str(target.parent), prefix=".manifest-", suffix=".tmp"
             )

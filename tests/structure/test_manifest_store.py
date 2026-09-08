@@ -116,6 +116,32 @@ def test_overwrite_is_atomic_and_keeps_latest(tmp_path, manifest):
     assert store.get(manifest.document.source_sha256) is not None
 
 
+def test_stale_summary_is_refused_instead_of_silently_unreadable(tmp_path, manifest):
+    """回写 execution_status 后不刷新 summary，会写出读不回的缓存。"""
+    from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+    store = ManifestStore(tmp_path)
+    target = next(o for o in manifest.objects if o.type is ObjectType.FIGURE)
+    target.execution_status = ExecutionStatus.TRANSLATED
+
+    assert store.put(manifest) is None
+
+    manifest.refresh_summary()
+
+    assert store.put(manifest) is not None
+    assert store.get(manifest.document.source_sha256) is not None
+
+
+def test_refresh_summary_tracks_execution_states(tmp_path, manifest):
+    from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+    target = next(o for o in manifest.objects if o.type is ObjectType.FIGURE)
+    target.execution_status = ExecutionStatus.TRANSLATED
+    manifest.refresh_summary()
+
+    assert manifest.summary.status_counts.get("TRANSLATED", 0) >= 1
+
+
 def test_invalidate_removes_the_entry(tmp_path, manifest):
     store = ManifestStore(tmp_path)
     store.put(manifest)
