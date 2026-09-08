@@ -1,4 +1,4 @@
-# DocuTranslate MCP Server
+# Qyunslation MCP Server
 
 [English](#english) | [简体中文](#简体中文)
 
@@ -9,7 +9,7 @@
 ### Installation
 
 ```bash
-pip install docutranslate[mcp]
+pip install qyunslation[mcp]
 ```
 
 ### Usage
@@ -21,7 +21,7 @@ Always use the Python interpreter from your virtual environment in MCP configura
 #### Method 1: Stdio Mode (Recommended for Claude Desktop, Windsurf)
 
 ```bash
-docutranslate --mcp
+qyunslation --mcp
 ```
 
 ##### Using uvx (No Installation Required)
@@ -29,9 +29,9 @@ docutranslate --mcp
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "uvx",
-      "args": ["--from", "docutranslate[mcp]", "docutranslate", "--mcp"],
+      "args": ["--from", "qyunslation[mcp]", "qyunslation", "--mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -51,9 +51,9 @@ Add to your MCP configuration (**use the full Python path from your virtual envi
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "/path/to/your/venv/bin/python",
-      "args": ["-m", "docutranslate.mcp"],
+      "args": ["-m", "qyunslation.mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -73,9 +73,9 @@ Add to your MCP configuration (**use the full Python path from your virtual envi
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "C:\\path\\to\\your\\venv\\Scripts\\python.exe",
-      "args": ["-m", "docutranslate.mcp"],
+      "args": ["-m", "qyunslation.mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -90,13 +90,13 @@ Add to your MCP configuration (**use the full Python path from your virtual envi
 }
 ```
 
-Or if you have `docutranslate` available in PATH:
+Or if you have `qyunslation` available in PATH:
 
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
-      "command": "docutranslate",
+    "qyunslation": {
+      "command": "qyunslation",
       "args": ["--mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
@@ -115,13 +115,13 @@ Or if you have `docutranslate` available in PATH:
 #### Method 2: SSE Mode (Recommended for Cherry Studio)
 
 ```bash
-docutranslate --mcp --transport sse --mcp-host 127.0.0.1 --mcp-port 8000
+qyunslation --mcp --transport sse --mcp-host 127.0.0.1 --mcp-port 8000
 ```
 
 Or using the module directly with virtual environment Python:
 
 ```bash
-/path/to/your/venv/bin/python -m docutranslate.mcp --transport sse --host 127.0.0.1 --port 8000
+/path/to/your/venv/bin/python -m qyunslation.mcp --transport sse --host 127.0.0.1 --port 8000
 ```
 
 Configure the SSE endpoint in your client: `http://127.0.0.1:8000/mcp/sse`
@@ -129,7 +129,7 @@ Configure the SSE endpoint in your client: `http://127.0.0.1:8000/mcp/sse`
 #### Method 3: Streamable HTTP Mode
 
 ```bash
-docutranslate --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8000
+qyunslation --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8000
 ```
 
 #### Method 4: Combined Mode with Web UI (Recommended!)
@@ -137,7 +137,7 @@ docutranslate --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 
 Run both Web UI and MCP server together, sharing the same task queue:
 
 ```bash
-docutranslate -i --with-mcp
+qyunslation -i --with-mcp
 ```
 
 This starts:
@@ -280,7 +280,7 @@ Configure LLM settings. If already configured via environment variables, this to
 
 **Example:**
 ```
-Please configure DocuTranslate with these settings:
+Please configure Qyunslation with these settings:
 - API Key: sk-xxxxxx
 - Base URL: https://api.openai.com/v1
 - Model: gpt-4o
@@ -342,7 +342,7 @@ PDF, DOCX, DOC, XLSX, XLS, CSV, MD, Markdown, TXT, JSON, EPUB, SRT, ASS, PPTX, P
 
 **Solution:** Install MCP dependencies:
 ```bash
-pip install docutranslate[mcp]
+pip install qyunslation[mcp]
 ```
 
 #### Issue: "Client not configured"
@@ -355,7 +355,7 @@ pip install docutranslate[mcp]
 #### Issue: Claude Desktop cannot connect
 
 **Solution:**
-1. Check if `docutranslate` command is in PATH
+1. Check if `qyunslation` command is in PATH
 2. Try using the absolute path from your virtual environment
 3. Restart Claude Desktop
 4. View logs: Help > Debug > Logs
@@ -367,7 +367,7 @@ pip install docutranslate[mcp]
 ### 安装
 
 ```bash
-pip install docutranslate[mcp]
+pip install qyunslation[mcp]
 ```
 
 ### 使用说明
@@ -379,7 +379,7 @@ pip install docutranslate[mcp]
 #### 方式一：Stdio 模式（推荐用于 Claude Desktop、Windsurf）
 
 ```bash
-docutranslate --mcp
+qyunslation --mcp
 ```
 
 ##### 使用 uvx（无需安装）
@@ -387,9 +387,9 @@ docutranslate --mcp
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "uvx",
-      "args": ["--from", "docutranslate[mcp]", "docutranslate", "--mcp"],
+      "args": ["--from", "qyunslation[mcp]", "qyunslation", "--mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -409,9 +409,9 @@ docutranslate --mcp
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "/path/to/your/venv/bin/python",
-      "args": ["-m", "docutranslate.mcp"],
+      "args": ["-m", "qyunslation.mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -431,9 +431,9 @@ docutranslate --mcp
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
+    "qyunslation": {
       "command": "C:\\path\\to\\your\\venv\\Scripts\\python.exe",
-      "args": ["-m", "docutranslate.mcp"],
+      "args": ["-m", "qyunslation.mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
         "DOCUTRANSLATE_BASE_URL": "https://api.openai.com/v1",
@@ -448,13 +448,13 @@ docutranslate --mcp
 }
 ```
 
-如果 PATH 中已有 `docutranslate`，也可以使用：
+如果 PATH 中已有 `qyunslation`，也可以使用：
 
 ```json
 {
   "mcpServers": {
-    "docutranslate": {
-      "command": "docutranslate",
+    "qyunslation": {
+      "command": "qyunslation",
       "args": ["--mcp"],
       "env": {
         "DOCUTRANSLATE_API_KEY": "sk-xxxxxx",
@@ -473,13 +473,13 @@ docutranslate --mcp
 #### 方式二：SSE 模式（推荐用于 Cherry Studio）
 
 ```bash
-docutranslate --mcp --transport sse --mcp-host 127.0.0.1 --mcp-port 8000
+qyunslation --mcp --transport sse --mcp-host 127.0.0.1 --mcp-port 8000
 ```
 
 或直接使用虚拟环境 Python 运行模块：
 
 ```bash
-/path/to/your/venv/bin/python -m docutranslate.mcp --transport sse --host 127.0.0.1 --port 8000
+/path/to/your/venv/bin/python -m qyunslation.mcp --transport sse --host 127.0.0.1 --port 8000
 ```
 
 在客户端中配置 SSE 端点：`http://127.0.0.1:8000/mcp/sse`
@@ -487,7 +487,7 @@ docutranslate --mcp --transport sse --mcp-host 127.0.0.1 --mcp-port 8000
 #### 方式三：Streamable HTTP 模式
 
 ```bash
-docutranslate --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8000
+qyunslation --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8000
 ```
 
 #### 方式四：Web UI + MCP 组合模式（推荐！）
@@ -495,7 +495,7 @@ docutranslate --mcp --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 
 同时运行 Web UI 和 MCP 服务器，共享同一个任务队列：
 
 ```bash
-docutranslate -i --with-mcp
+qyunslation -i --with-mcp
 ```
 
 这会启动：
@@ -638,7 +638,7 @@ docutranslate -i --with-mcp
 
 **示例：**
 ```
-请配置 DocuTranslate，使用以下设置：
+请配置 Qyunslation，使用以下设置：
 - API Key: sk-xxxxxx
 - Base URL: https://api.openai.com/v1
 - Model: gpt-4o
@@ -700,7 +700,7 @@ PDF, DOCX, DOC, XLSX, XLS, CSV, MD, Markdown, TXT, JSON, EPUB, SRT, ASS, PPTX, P
 
 **解决：** 安装 MCP 依赖：
 ```bash
-pip install docutranslate[mcp]
+pip install qyunslation[mcp]
 ```
 
 #### 问题："Client not configured"
@@ -713,7 +713,7 @@ pip install docutranslate[mcp]
 #### 问题：Claude Desktop 无法连接
 
 **解决：**
-1. 检查 `docutranslate` 命令是否在 PATH 中
+1. 检查 `qyunslation` 命令是否在 PATH 中
 2. 尝试使用虚拟环境的绝对路径
 3. 重启 Claude Desktop
 4. 查看日志：Help > Debug > Logs

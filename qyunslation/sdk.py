@@ -149,7 +149,7 @@ class TranslationResult:
 
 class Client:
     """
-    DocuTranslate SDK。
+    Qyunslation SDK。
     """
 
     def __init__(

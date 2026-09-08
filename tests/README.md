@@ -1,4 +1,4 @@
-# DocuTranslate 测试套件
+# Qyunslation 测试套件
 
 ## 环境配置
 
@@ -46,7 +46,7 @@ uv run pytest tests/test_global_values/test_global_values.py::test_use_proxy_dis
 
 ### 生成覆盖率报告
 ```bash
-uv run pytest tests/ -v --cov=docutranslate --cov-report=term --cov-report=html:htmlcov
+uv run pytest tests/ -v --cov=qyunslation --cov-report=term --cov-report=html:htmlcov
 ```
 
 覆盖率报告将生成在 `htmlcov/` 目录下，打开 `htmlcov/index.html` 查看详细报告。

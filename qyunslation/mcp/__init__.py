@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 QinHan
 # SPDX-License-Identifier: MPL-2.0
 """
-DocuTranslate MCP Server Package
+Qyunslation MCP Server Package
 
-This package provides a Model Context Protocol (MCP) server for DocuTranslate,
+This package provides a Model Context Protocol (MCP) server for Qyunslation,
 enabling AI assistants to use document translation capabilities.
 
 Features:
