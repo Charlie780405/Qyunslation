@@ -25,4 +25,4 @@
 
 ## 未做
 
-033c（停止把 `.imgtr.pdf` 喂给 BabelDOC，并改为译文后处理）见 [PLAN-033c](../plans/PLAN-033-pdf-fidelity/PLAN-033c-original-immutable.md)。只砍输入、不做后处理会让图回到未译，禁止单独上线。
+033c 已接着做完，见 [WT-033c](./WT-033c-original-immutable.md)。

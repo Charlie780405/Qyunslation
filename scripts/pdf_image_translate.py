@@ -202,6 +202,25 @@ def _mark(obj, status: str, reason: str | None = None, *, checks: dict | None = 
     )
 
 
+def _region_allowed(
+    bbox: tuple[float, float, float, float],
+    page,
+    *,
+    page_no: int,
+    x_min_frac: float | None,
+    page_parity: str | None,
+) -> bool:
+    """PLAN-033c：双语页只动右侧（或交替页的译文页）。"""
+    if page_parity == "even" and page_no % 2 != 0:
+        return False
+    if page_parity == "odd" and page_no % 2 != 1:
+        return False
+    if x_min_frac is None:
+        return True
+    width = float(page.rect.width) or 1.0
+    return ((bbox[0] + bbox[2]) / 2.0) / width >= x_min_frac
+
+
 def translate_pdf_images(
     src: Path | str,
     *,
@@ -209,11 +228,16 @@ def translate_pdf_images(
     progress_cb=None,
     dest: Path | str | None = None,
     structure_manifest=None,
+    x_min_frac: float | None = None,
+    page_parity: str | None = None,
 ) -> Path:
     """位图 replace_image（单引用）+ 矢量 crop/insert_image；无可译图则原样返回 src。
 
     structure_manifest 为 None 时行为与 PLAN-030c 完全一致（回滚路径）；传入时按
     manifest 对象执行并回写终态。
+
+    x_min_frac / page_parity 只限制处理范围，不改提取逻辑：双语并排页用
+    x_min_frac=0.5 只动右侧；交替页双语用 page_parity='even'|'odd'。
     """
     import pymupdf
     from pdf_figure_crop import crop_png, translatable_regions
@@ -233,6 +257,23 @@ def translate_pdf_images(
             return src
 
         occ_map = _collect_xref_occurrences(doc)
+        if x_min_frac is not None or page_parity is not None:
+            filtered: dict[int, list[dict]] = {}
+            for xref, items in occ_map.items():
+                kept = [
+                    item
+                    for item in items
+                    if _region_allowed(
+                        item["bbox"],
+                        doc[item["page"]],
+                        page_no=item["page"],
+                        x_min_frac=x_min_frac,
+                        page_parity=page_parity,
+                    )
+                ]
+                if kept:
+                    filtered[xref] = kept
+            occ_map = filtered
         # 唯一 xref 列表
         xrefs = sorted(occ_map.keys())
         total_steps = len(xrefs) + max(1, len(doc))
@@ -382,6 +423,10 @@ def translate_pdf_images(
                 except Exception:
                     pass
             page = doc[pno]
+            if page_parity == "even" and pno % 2 != 0:
+                continue
+            if page_parity == "odd" and pno % 2 != 1:
+                continue
             # 排除本页已有位图 bbox
             exclude = []
             for info in page.get_image_info(xrefs=True) or []:
@@ -397,6 +442,14 @@ def translate_pdf_images(
                     logger.warning("vector detect page %s: %s", pno, exc)
                     continue
             for fi, (obj, rect) in enumerate(planned):
+                if x_min_frac is not None and not _region_allowed(
+                    (rect.x0, rect.y0, rect.x1, rect.y1),
+                    page,
+                    page_no=pno,
+                    x_min_frac=x_min_frac,
+                    page_parity=None,
+                ):
+                    continue
                 try:
                     png = crop_png(page, rect)
                 except Exception as exc:
