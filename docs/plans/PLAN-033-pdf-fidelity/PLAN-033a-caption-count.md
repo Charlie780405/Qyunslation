@@ -27,4 +27,4 @@
 | V2 | 合成夹具 `caption_anchors` 得到 table 2/3/4，且无 table 4 来自 `see Table 4` | 通过 |
 | V3 | 外部样本在场时 PdfStructureScanner 为 Figure=2、Table=4 | 通过或 skip |
 | V4 | `tests/structure/test_caption_anchors.py` + catalog | 全绿 |
-| V5 | `PDF_STRUCTURE_SCANNER_VERSION == "1.2.0"` | 通过 |
+| V5 | `PDF_STRUCTURE_SCANNER_VERSION == "1.3.0"`（033b 框线回退后升版） | 通过 |

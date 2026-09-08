@@ -304,6 +304,20 @@
         "TABLE"
       ],
       "future_owner": "PLAN-033a"
+    },
+    {
+      "id": "synthetic-landscape-frame-table",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "landscape-frame-table.pdf",
+      "sha256": "af05421519327cbce5504319a6f90169b48865127544c1abcfb19d47452fe7c0",
+      "expected_objects": [
+        "CAPTION",
+        "TABLE",
+        "BODY"
+      ],
+      "future_owner": "PLAN-033b"
     }
   ]
 }

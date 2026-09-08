@@ -59,7 +59,7 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.2.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.3.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,7 +395,12 @@ class PdfStructureScanner:
                 objects.extend(body)
                 issues.extend(body_issues)
                 canvas.reading_order = [b.object_id for b in body]
-                if any(kind == "table" for kind, *_ in anchors) and not regions_by_number:
+                missing_tables = [
+                    num
+                    for kind, num, *_ in anchors
+                    if kind == "table" and num not in regions_by_number
+                ]
+                if missing_tables:
                     # 有表题注却测不到表格几何：表内文字会漏进正文，必须留痕
                     issues.append(
                         ManifestIssue(
@@ -404,10 +409,10 @@ class PdfStructureScanner:
                             stage=PipelineStage.SCAN,
                             retryable=False,
                             message=(
-                                f"page {i} has a table caption but no table region "
-                                "could be delimited"
+                                f"page {i} has table caption(s) {missing_tables} "
+                                "but no table region could be delimited"
                             ),
-                            details={"page": i},
+                            details={"page": i, "tables": missing_tables},
                         )
                     )
                 for kind, num, y0, bb in anchors:
@@ -505,6 +510,12 @@ class PdfStructureScanner:
                         table_seen.add(num)
                         tab_key = f"table:{num}"
                         tab_cap_text = _clip_text(page, bb)
+                        region = regions_by_number.get(num)
+                        tab_bbox = (
+                            _clip_bbox(_rect_from_bbox(region.as_tuple()), canvas)
+                            if region is not None
+                            else cap_bbox
+                        )
                         tab_id = build_object_id(
                             prepared.source_sha256,
                             canvas.canvas_id,
@@ -539,7 +550,7 @@ class PdfStructureScanner:
                                 type=ObjectType.TABLE,
                                 object_id=tab_id,
                                 canvas_id=canvas.canvas_id,
-                                bbox=cap_bbox,
+                                bbox=tab_bbox,
                                 representation=Representation.NATIVE_TEXT,
                                 source_refs=[
                                     SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=tab_key)

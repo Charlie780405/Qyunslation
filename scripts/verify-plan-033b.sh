@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-033a caption count gate. Do not nest 028-033 other gates.
+# PLAN-033b table geometry gate. Do not nest 028-030h.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,16 +29,16 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-run_pass "PLAN-033a modules compile" "$STAGE_DIR/compile.log" \
-  "$PY" -m compileall -q qyunslation/structure/captions.py qyunslation/structure/scan_pdf.py
+run_pass "PLAN-033b modules compile" "$STAGE_DIR/compile.log" \
+  "$PY" -m compileall -q qyunslation/structure/tables.py qyunslation/structure/scan_pdf.py
 
 run_pass "scanner version is 1.3.0" "$STAGE_DIR/version.log" \
   "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.3.0'"
 
-run_pass "caption join and gold-sample counts" "$STAGE_DIR/captions.log" \
+run_pass "table geometry and catalog" "$STAGE_DIR/tables.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q --no-cov \
-    tests/structure/test_caption_anchors.py \
+    tests/structure/test_table_protection.py \
     tests/structure/test_fixture_catalog.py
 
 if [[ "$FAILURES" -eq 0 ]]; then

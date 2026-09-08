@@ -691,6 +691,28 @@ def _caption_span_gap_pdf_bytes() -> bytes:
     return _single_page_pdf(commands, width=612.0, height=792.0)
 
 
+def _landscape_frame_table_pdf_bytes() -> bytes:
+    """复现侧放整页框线表：题注在框左侧，上下横线间距超过 ROW_GAP_BREAK。
+
+    旧算法只向下找横线群，两条框线相距 >0.20 页高就被拆掉。033b 用两横+两竖
+    封闭框回退圈定。
+    """
+    commands = [
+        "0 0 0 rg",
+        "94 54 234 0.5 re f",
+        "94 740 234 0.5 re f",
+        "94 54 0.5 686 re f",
+        "328 54 0.5 686 re f",
+        _text_command(52.0, 80.0, 10.0, "Table 1"),
+        _text_command(110.0, 700.0, 8.0, "Age (y)"),
+        _text_command(180.0, 700.0, 8.0, "12"),
+        _text_command(110.0, 620.0, 8.0, "Sex"),
+        _text_command(180.0, 620.0, 8.0, "M"),
+        _text_command(72.0, 20.0, 9.0, "Footer outside the framed table stays body text."),
+    ]
+    return _single_page_pdf(commands, width=612.0, height=792.0)
+
+
 GENERATORS: dict[str, Callable[[], bytes]] = {
     "single-column.pdf": lambda: _pdf_bytes(columns=1),
     "double-column.pdf": lambda: _pdf_bytes(columns=2),
@@ -717,6 +739,7 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "mixed-columns.pdf": _mixed_columns_pdf_bytes,
     "poster-sections.pdf": _poster_pdf_bytes,
     "caption-span-gap.pdf": _caption_span_gap_pdf_bytes,
+    "landscape-frame-table.pdf": _landscape_frame_table_pdf_bytes,
 }
 
 

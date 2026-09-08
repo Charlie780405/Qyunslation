@@ -20,7 +20,7 @@
 | V2 合成夹具 table 2/3/4，正文 `see Table 4` 不计第二份 table 4 | 通过 |
 | V3 外部样本 Figure=2 / Table=4 | 通过（本机样本在场，hash 吻合） |
 | V4 caption + catalog | 14 passed |
-| V5 scanner 1.2.0 | 通过 |
+| V5 scanner 1.3.0（033b 升版） | 通过 |
 | 相邻结构套件 | 76 passed（column / unnumbered / table / figure / prescan） |
 
 ## 未做
