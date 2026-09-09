@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-033d：参考文献标题可译、条目保留。
+"""PLAN-033h：参考文献整区 PRESERVE，标题也不译。
 
 只认独立标题行，不认正文里的 see [12] / as shown in References。
+Appendix/Supplement 之后恢复翻译。
 """
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ def classify_body(
 
 
 def text_excluding_reference_entries(doc) -> str:
-    """给术语采集用：丢掉参考文献条目，保留标题和正文。"""
+    """给术语采集用：丢掉整个参考文献区（标题+条目）。"""
     parts: list[str] = []
     in_refs = False
     for page in doc:
@@ -85,10 +86,7 @@ def text_excluding_reference_entries(doc) -> str:
             kind = classify_body(
                 text, y0, in_references=in_refs, heading_y=heading_y
             )
-            if kind == "heading":
-                parts.append(text)
-                continue
-            if kind == "entry":
+            if kind in {"heading", "entry"}:
                 continue
             if is_section_break(text):
                 in_refs = False

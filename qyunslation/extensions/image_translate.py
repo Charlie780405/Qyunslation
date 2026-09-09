@@ -1047,8 +1047,7 @@ def _fit_font_and_lines(
             lo = mid + 1
             continue
         lines = _wrap_text(text, font, max(8, box_w))
-        max_lines = max(1, box_h // max(1, lh))
-        if len(lines) > max_lines:
+        if not lines:
             hi = mid - 1
             continue
         total_h = lh * len(lines) + max(0, len(lines) - 1) * max(1, mid // 8)
@@ -1063,8 +1062,6 @@ def _fit_font_and_lines(
         best_font = ImageFont.truetype(font_path, min_size)
         best_lh = _line_height(best_font, min_size)
         best_lines = _wrap_text(text, best_font, max(8, box_w))
-        max_lines = max(1, box_h // max(1, best_lh))
-        best_lines = best_lines[:max_lines]
     return best_font, best_lines, best_size, best_lh
 
 
@@ -1329,8 +1326,8 @@ def _assign_tier_sizes(
     for t, idxs in by_tier.items():
         ests = [est_sizes[i] for i in idxs if est_sizes[i] > 0]
         orig_em[t] = max(10, int(round(_percentile(ests, 0.75)))) if ests else 24
-        votes = sum(1 for i in idxs if bold_flags[i])
-        tier_bold[t] = votes * 2 >= len(idxs)
+        # 033k：禁止层级多数投票；粗体由块级 source_style 继承
+        tier_bold[t] = False
 
     # 每框最大可行字号（用组粗细）
     for i, b in enumerate(boxes):
@@ -1724,10 +1721,37 @@ def _qc_report(
             }
         )
 
+    from qyunslation.structure.role_fitter import (
+        QC_FONT_BELOW_TARGET,
+        QC_GRAPHICS_DAMAGE,
+        QC_OVERFLOW,
+        QC_TRUNCATED,
+        QC_UNTRANSLATED,
+        QC_WEIGHT_MISMATCH,
+    )
+
+    object_qc = []
+    for issue in issues:
+        code = str(issue.get("code") or "")
+        mapped = {
+            "C1": QC_UNTRANSLATED,
+            "C2": QC_TRUNCATED,
+            "C5": QC_OVERFLOW,
+            "C8": QC_TRUNCATED,
+            "C10": QC_GRAPHICS_DAMAGE,
+        }.get(code)
+        if mapped:
+            object_qc.append(mapped)
+    if graphics_damage and QC_GRAPHICS_DAMAGE not in object_qc:
+        object_qc.append(QC_GRAPHICS_DAMAGE)
+    if any("below" in str(w.get("msg", "")).lower() for w in warnings):
+        object_qc.append(QC_FONT_BELOW_TARGET)
+
     report = {
         "ok": not issues,
         "issues": issues,
         "warnings": warnings,
+        "object_qc": sorted(set(object_qc)),
         "drawn": drawn,
         "boxes": len(boxes),
         "solid_count": sum(1 for st in styles if st.get("solid")),
@@ -2153,7 +2177,7 @@ def translate_image_with_qc(
             ink_cx = ox1 + float(geom["ink_cx"])
             ink_cy = oy1 + float(geom["ink_cy"])
         size = max(10, int(assigned[i]))
-        use_bold = bool(tier_bold.get(tiers[i]))
+        use_bold = bool(styles[i].get("bold"))
         use_path = font_bold if use_bold and font_bold else font_regular
         if use_path:
             font = ImageFont.truetype(use_path, size)
@@ -2161,8 +2185,6 @@ def translate_image_with_qc(
             font = ImageFont.load_default()
         lh = _line_height(font, size)
         lines = _wrap_text(text, font, max(8, box_w))
-        max_lines = max(1, box_h // max(1, lh))
-        lines = lines[:max_lines]
         outlier_set = set(tier_meta.get("outliers") or [])
         if (i + 1) in outlier_set:
             while size > 10:
@@ -2175,8 +2197,6 @@ def translate_image_with_qc(
                     font = ImageFont.truetype(use_path, size)
                 lh = _line_height(font, size)
                 lines = _wrap_text(text, font, max(8, box_w))
-                max_lines = max(1, box_h // max(1, lh))
-                lines = lines[:max_lines]
         # 非 outlier 不降字号，放不下由 C5 报告
 
         sizes[i] = size

@@ -182,11 +182,11 @@ def test_table_objects_carry_region_evidence(nature_manifest):
         assert evidence.details["reconstructed"] is False
 
 
-def test_table_objects_do_not_claim_reconstruction(nature_manifest):
-    """030d 不做单元格重建，对象必须如实标注仍走文字层。"""
+def test_table_objects_queue_structured_cells(nature_manifest):
+    """033i：有区域的表进入单元格翻译队列。"""
     for table in (o for o in nature_manifest.objects if o.type is ObjectType.TABLE):
-        assert table.planned_action == "text_layer"
-        assert table.reason_code == "text_layer_table"
+        assert table.planned_action == "translate_cells"
+        assert table.translatable_blocks
 
 
 def test_exclusion_rects_feed_body_filtering():

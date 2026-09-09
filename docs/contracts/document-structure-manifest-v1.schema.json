@@ -47,6 +47,158 @@
       "title": "AssetRole",
       "type": "string"
     },
+    "BlockExecutionEvidence": {
+      "additionalProperties": true,
+      "properties": {
+        "block_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Id"
+        },
+        "detection": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detection"
+        },
+        "queued": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queued"
+        },
+        "translated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Translated"
+        },
+        "laid_out": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Laid Out"
+        },
+        "validated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validated"
+        },
+        "qc": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Qc"
+        },
+        "final_font_size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Font Size"
+        },
+        "final_font_weight": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Font Weight"
+        },
+        "output_bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "BlockExecutionEvidence",
+      "type": "object"
+    },
+    "BlockRole": {
+      "enum": [
+        "heading",
+        "body",
+        "caption",
+        "table_title",
+        "table_header",
+        "table_group",
+        "table_cell",
+        "table_footnote",
+        "figure_title",
+        "figure_label",
+        "figure_body",
+        "figure_footnote",
+        "reference"
+      ],
+      "title": "BlockRole",
+      "type": "string"
+    },
     "BodyObject": {
       "additionalProperties": true,
       "properties": {
@@ -1205,6 +1357,13 @@
           "additionalProperties": true,
           "title": "Checks",
           "type": "object"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/BlockExecutionEvidence"
+          },
+          "title": "Blocks",
+          "type": "array"
         }
       },
       "title": "OutputEvidence",
@@ -1758,6 +1917,97 @@
       "title": "SourceRefKind",
       "type": "string"
     },
+    "SourceStyle": {
+      "additionalProperties": true,
+      "properties": {
+        "font_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Name"
+        },
+        "font_size": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Size"
+        },
+        "font_weight": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Font Weight"
+        },
+        "italic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Italic"
+        },
+        "alignment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alignment"
+        },
+        "rotation": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rotation"
+        },
+        "writing_direction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Writing Direction"
+        }
+      },
+      "title": "SourceStyle",
+      "type": "object"
+    },
     "TableObject": {
       "additionalProperties": true,
       "properties": {
@@ -2149,6 +2399,99 @@
           ],
           "default": null,
           "title": "Source Language"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlockRole"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "translation_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TranslationPolicy"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Translation Policy"
+        },
+        "source_style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Index"
+        },
+        "column_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Index"
+        },
+        "row_span": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Span"
+        },
+        "column_span": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Span"
         }
       },
       "required": [
@@ -2157,12 +2500,21 @@
       ],
       "title": "TranslatableBlock",
       "type": "object"
+    },
+    "TranslationPolicy": {
+      "enum": [
+        "TRANSLATE",
+        "PRESERVE",
+        "PROTECT_TOKENS"
+      ],
+      "title": "TranslationPolicy",
+      "type": "string"
     }
   },
   "additionalProperties": true,
   "properties": {
     "schema_version": {
-      "default": "1.1.0",
+      "default": "1.2.0",
       "title": "Schema Version",
       "type": "string"
     },

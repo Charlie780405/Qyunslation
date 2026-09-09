@@ -32,6 +32,7 @@ ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-no-stor
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-css-has-fix.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-viewer.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-preview-dpi.py
+ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-fidelity-033h.py
 ExecStart=/home/dev/.local/bin/pdf2zh_next --gui --server-port 7860 --ui-lang zh --config-file /home/dev/pdf2zh/config.toml --disable-config-auto-save --disable-gui-sensitive-input --enabled-services Ollama
 Restart=on-failure
 RestartSec=5

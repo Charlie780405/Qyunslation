@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-033b table geometry gate. Do not nest 028-030h.
+# PLAN-033g execution contract gate. Do not nest 028-030h.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,17 +29,20 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-run_pass "PLAN-033b modules compile" "$STAGE_DIR/compile.log" \
-  "$PY" -m compileall -q qyunslation/structure/tables.py qyunslation/structure/scan_pdf.py
+run_pass "PLAN-033g modules compile" "$STAGE_DIR/compile.log" \
+  "$PY" -m compileall -q \
+    qyunslation/structure/models.py \
+    qyunslation/structure/model_trace.py \
+    qyunslation/structure/scan_pdf.py
 
-run_pass "scanner version is 1.5.0" "$STAGE_DIR/version.log" \
-  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.5.0'"
+run_pass "schema 1.2.0 and scanner 1.5.0" "$STAGE_DIR/version.log" \
+  "$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION; from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert CURRENT_SCHEMA_VERSION == '1.2.0'; assert PDF_STRUCTURE_SCANNER_VERSION == '1.5.0'"
 
-run_pass "table geometry and catalog" "$STAGE_DIR/tables.log" \
+run_pass "033g execution contract" "$STAGE_DIR/contract.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q --no-cov \
-    tests/structure/test_table_protection.py \
-    tests/structure/test_fixture_catalog.py
+    tests/structure/test_execution_contract_033g.py \
+    tests/structure/test_manifest_contract.py
 
 if [[ "$FAILURES" -eq 0 ]]; then
   printf 'SUMMARY: PASS fail=0\n'

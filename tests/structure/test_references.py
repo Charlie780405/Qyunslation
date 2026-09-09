@@ -42,7 +42,7 @@ def test_synthetic_references_scope(generated_structure_fixtures: Path):
     assert cite.semantic_scope == "body"
     entries = [o for o in bodies if o.reason_code == "reference_entry"]
     assert len(entries) == 2
-    assert all(o.planned_action == "skip" for o in entries)
+    assert all(o.planned_action == "preserve" for o in entries)
     assert all(o.semantic_scope == "references" for o in entries)
 
 

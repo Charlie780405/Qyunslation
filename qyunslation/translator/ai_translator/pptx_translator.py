@@ -387,6 +387,9 @@ class PPTXTranslator(AiTranslator):
                 checks={"translated": raw_status == "TRANSLATED"},
             )
         structure_manifest.refresh_summary()
+        from qyunslation.structure.model_trace import apply_current_model_trace
+
+        apply_current_model_trace(structure_manifest)
         ManifestStore().put_execution(structure_manifest)
 
     def _apply_translation(self, element_info: Dict[str, Any], final_text: str):
