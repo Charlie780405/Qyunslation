@@ -79,7 +79,12 @@ def harvest(pdf: Path) -> int:
     manual = _read_sources(MANUAL)
     exclude = set(manual) | set(STOPWORDS)
     doc = pymupdf.open(pdf)
-    blob = "\n".join((page.get_text() or "") for page in doc)
+    try:
+        from qyunslation.structure.references import text_excluding_reference_entries
+
+        blob = text_excluding_reference_entries(doc)
+    except Exception:
+        blob = "\n".join((page.get_text() or "") for page in doc)
     doc.close()
     terms = harvest_from_text(blob, exclude=exclude)
     AUTO.parent.mkdir(parents=True, exist_ok=True)

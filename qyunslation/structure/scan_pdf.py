@@ -23,6 +23,7 @@ from .representation import (
     needs_ocr,
     page_representation,
 )
+from .references import classify_body, heading_y_from_blocks
 from .tables import table_regions
 from .models import (
     AssetRole,
@@ -59,7 +60,7 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.3.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.4.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,7 @@ class _PageAnalysis:
     labeled_figures: dict[int, object]
     unnumbered_regions: list
     body_blocks: list[TextBlock]
+    reference_heading_y: float | None
 
 
 def _clip_bbox(rect, canvas) -> BoundingBox:
@@ -174,11 +176,15 @@ class PdfStructureScanner:
         prepared,
         page_no: int,
         blocks: list[TextBlock],
+        *,
+        in_references: bool = False,
+        heading_y: float | None = None,
     ) -> tuple[list, list]:
         """正文块建模为 BODY 对象，带页内阅读顺序。
 
         030d 只审计正文、不接管译文生成：正文仍由 BabelDOC 文字层翻译，因此对象
-        终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。
+        终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。033d：参考文献条目标
+        skip，标题仍走文字层。
         """
         if not blocks:
             return [], []
@@ -197,6 +203,24 @@ class PdfStructureScanner:
             )
             rect = _rect_from_bbox((block.x0, block.y0, block.x1, block.y1))
             body_bbox = _clip_bbox(rect, canvas)
+            kind = classify_body(
+                block.text,
+                block.y0,
+                in_references=in_references,
+                heading_y=heading_y,
+            )
+            if kind == "entry":
+                reason = "reference_entry"
+                action = "skip"
+                scope = "references"
+            elif kind == "heading":
+                reason = "delegated_to_babeldoc"
+                action = "babeldoc_text_layer"
+                scope = "references"
+            else:
+                reason = "delegated_to_babeldoc"
+                action = "babeldoc_text_layer"
+                scope = "body"
             objects.append(
                 BodyObject(
                     type=ObjectType.BODY,
@@ -208,7 +232,7 @@ class PdfStructureScanner:
                     detector_evidence=[
                         DetectorEvidence(
                             detector="pymupdf_text_blocks",
-                            label="body",
+                            label=kind,
                             confidence=0.7,
                             bbox=body_bbox,
                             details={
@@ -226,10 +250,10 @@ class PdfStructureScanner:
                         )
                     ],
                     execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,
-                    reason_code="delegated_to_babeldoc",
-                    planned_action="babeldoc_text_layer",
+                    reason_code=reason,
+                    planned_action=action,
                     semantic_id=key,
-                    semantic_scope="body",
+                    semantic_scope=scope,
                     reading_order=order,
                 )
             )
@@ -300,6 +324,7 @@ class PdfStructureScanner:
             labeled_figures=labeled,
             unnumbered_regions=unnumbered,
             body_blocks=blocks,
+            reference_heading_y=heading_y_from_blocks(raw_blocks),
         )
 
     def scan(
@@ -351,6 +376,7 @@ class PdfStructureScanner:
             limit = total if max_pages is None else min(total, max(int(max_pages), 0))
             if limit < total:
                 truncated = True
+            in_references = False
             for i, page in enumerate(doc, start=1):
                 if i > limit:
                     break
@@ -389,8 +415,16 @@ class PdfStructureScanner:
                             analysis.unnumbered_regions, canvas, prepared, i
                         )
                     )
+                if analysis.reference_heading_y is not None:
+                    in_references = True
                 body, body_issues = self._body_objects(
-                    page, canvas, prepared, i, analysis.body_blocks
+                    page,
+                    canvas,
+                    prepared,
+                    i,
+                    analysis.body_blocks,
+                    in_references=in_references,
+                    heading_y=analysis.reference_heading_y,
                 )
                 objects.extend(body)
                 issues.extend(body_issues)

@@ -91,7 +91,7 @@ def test_caption_span_gap_fixture_recovers_tables_2_to_4(generated_structure_fix
 
 
 def test_scanner_version_bumped_for_caption_join():
-    assert PDF_STRUCTURE_SCANNER_VERSION == "1.3.0"
+    assert PDF_STRUCTURE_SCANNER_VERSION == "1.4.0"
 
 
 def test_plan033_sample_counts_two_figures_and_four_tables():

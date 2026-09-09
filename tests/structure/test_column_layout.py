@@ -116,6 +116,9 @@ def test_double_column_reading_order_is_left_then_right(nature):
 def test_body_is_delegated_to_babeldoc_not_claimed(nature):
     for body in _bodies(nature):
         assert body.execution_status is ExecutionStatus.EXPLICITLY_SKIPPED
+        if body.semantic_scope == "references" and body.reason_code == "reference_entry":
+            assert body.planned_action == "skip"
+            continue
         assert body.reason_code == "delegated_to_babeldoc"
         assert body.planned_action == "babeldoc_text_layer"
 

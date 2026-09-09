@@ -713,6 +713,37 @@ def _landscape_frame_table_pdf_bytes() -> bytes:
     return _single_page_pdf(commands, width=612.0, height=792.0)
 
 
+def _references_section_pdf_bytes() -> bytes:
+    """一页正文引用句 + 一页参考文献标题与两条条目。"""
+    pages = [
+        [
+            _text_command(72.0, 740.0, 12.0, "Introduction"),
+            _text_command(
+                72.0,
+                700.0,
+                10.0,
+                "Patients were enrolled, see [12] for details. MedImmune staff attended.",
+            ),
+        ],
+        [
+            _text_command(72.0, 740.0, 14.0, "References"),
+            _text_command(
+                72.0,
+                700.0,
+                10.0,
+                "[12] Smith J. Dupilumab and IQVIA trial results. 2024.",
+            ),
+            _text_command(
+                72.0,
+                660.0,
+                10.0,
+                "[13] Jones A. GenScend Biopharma review article. 2023.",
+            ),
+        ],
+    ]
+    return _multi_page_pdf(pages, width=612.0, height=792.0)
+
+
 GENERATORS: dict[str, Callable[[], bytes]] = {
     "single-column.pdf": lambda: _pdf_bytes(columns=1),
     "double-column.pdf": lambda: _pdf_bytes(columns=2),
@@ -740,6 +771,7 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "poster-sections.pdf": _poster_pdf_bytes,
     "caption-span-gap.pdf": _caption_span_gap_pdf_bytes,
     "landscape-frame-table.pdf": _landscape_frame_table_pdf_bytes,
+    "references-section.pdf": _references_section_pdf_bytes,
 }
 
 

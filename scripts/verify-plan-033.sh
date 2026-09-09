@@ -32,6 +32,8 @@ fi
 run_pass "PLAN-033a" "$STAGE_DIR/033a.log" bash scripts/verify-plan-033a.sh
 run_pass "PLAN-033b" "$STAGE_DIR/033b.log" bash scripts/verify-plan-033b.sh
 run_pass "PLAN-033c" "$STAGE_DIR/033c.log" bash scripts/verify-plan-033c.sh
+run_pass "PLAN-033d" "$STAGE_DIR/033d.log" bash scripts/verify-plan-033d.sh
+run_pass "PLAN-033e" "$STAGE_DIR/033e.log" bash scripts/verify-plan-033e.sh
 
 run_pass "structure suite once" "$STAGE_DIR/structure.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \

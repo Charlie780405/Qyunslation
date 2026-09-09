@@ -318,6 +318,18 @@
         "BODY"
       ],
       "future_owner": "PLAN-033b"
+    },
+    {
+      "id": "synthetic-references-section",
+      "origin": "GENERATED",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "references-section.pdf",
+      "sha256": "987a40e03b4b586cae7944c91840ce7915d9003d04c35b708af782efea7c2713",
+      "expected_objects": [
+        "BODY"
+      ],
+      "future_owner": "PLAN-033d"
     }
   ]
 }

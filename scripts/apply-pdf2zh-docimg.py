@@ -72,7 +72,14 @@ POST_SNIPPET = '''
 
                 def _qy_img_progress(cur, total):
                     _qy_img_st["f"] = 0.92 + 0.07 * cur / max(total, 1)
-                    _qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"
+                    try:
+                        from qyunslation.structure.progress import format_from_manifest as _qy_fmt_prog
+                        if _qy_manifest is not None:
+                            _qy_img_st["d"] = _qy_fmt_prog(_qy_manifest, cur, total)
+                        else:
+                            _qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"
+                    except Exception:
+                        _qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"
 
                 def _qy_run_imgtr():
                     out_mono, out_dual = _mono, _dual
@@ -161,6 +168,21 @@ def apply(text: str) -> tuple[str, bool]:
         changed = changed or did
     text, did = _install_post(text)
     changed = changed or did
+    old_prog = '_qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"'
+    if POST_MARKER in text and "format_from_manifest" not in text and old_prog in text:
+        text = text.replace(
+            f"                    {old_prog}\n",
+            "                    try:\n"
+            "                        from qyunslation.structure.progress import format_from_manifest as _qy_fmt_prog\n"
+            "                        if _qy_manifest is not None:\n"
+            "                            _qy_img_st[\"d\"] = _qy_fmt_prog(_qy_manifest, cur, total)\n"
+            "                        else:\n"
+            f"                            {old_prog}\n"
+            "                    except Exception:\n"
+            f"                        {old_prog}\n",
+            1,
+        )
+        changed = True
     if POST_MARKER not in text:
         raise RuntimeError("找不到译文后处理锚点（graphic reinsert / mono fallback）")
     if SWAP_LINE in text:
@@ -188,6 +210,7 @@ def verify(text: str) -> int:
     need("translate_pdf_images" in text, "translate_pdf_images missing")
     need(SWAP_LINE not in text, "BabelDOC input still swapped to imgtr")
     need("x_min_frac" in text, "dual right-half filter missing")
+    need("format_from_manifest" in text, "semantic progress missing")
     need(
         "do_translate_async_stream(settings, file_path)" in text,
         "stream call missing",

@@ -32,8 +32,8 @@ fi
 run_pass "PLAN-033a modules compile" "$STAGE_DIR/compile.log" \
   "$PY" -m compileall -q qyunslation/structure/captions.py qyunslation/structure/scan_pdf.py
 
-run_pass "scanner version is 1.3.0" "$STAGE_DIR/version.log" \
-  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.3.0'"
+run_pass "scanner version is 1.4.0" "$STAGE_DIR/version.log" \
+  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.4.0'"
 
 run_pass "caption join and gold-sample counts" "$STAGE_DIR/captions.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
