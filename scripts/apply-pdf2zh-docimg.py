@@ -103,6 +103,36 @@ POST_SNIPPET = '''
                                 page_parity="even" if _qy_alt else None,
                             )
                         )
+                    try:
+                        from pdf_table_translate import translate_pdf_tables as _qy_tbltr
+                        _qy_tbl_origin = _qy_Pimg(
+                            state.get("_pre_imgtr_origin_path") or file_path
+                        )
+                        if out_mono:
+                            out_mono = str(
+                                _qy_tbltr(
+                                    _qy_Pimg(out_mono),
+                                    origin=_qy_tbl_origin,
+                                    to_lang=str(_qy_to or "简体中文"),
+                                    structure_manifest=_qy_manifest,
+                                )
+                            )
+                        if out_dual and out_dual != out_mono:
+                            out_dual = str(
+                                _qy_tbltr(
+                                    _qy_Pimg(out_dual),
+                                    origin=_qy_tbl_origin,
+                                    to_lang=str(_qy_to or "简体中文"),
+                                    structure_manifest=_qy_manifest,
+                                    x_min_frac=None if _qy_alt else 0.5,
+                                    page_parity="even" if _qy_alt else None,
+                                )
+                            )
+                    except Exception as _qy_tbl_exc:
+                        import logging as _qy_tbl_log
+                        _qy_tbl_log.getLogger(__name__).warning(
+                            "表格写出跳过: %s", _qy_tbl_exc
+                        )
                     return out_mono, out_dual
 
                 _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(
@@ -142,6 +172,53 @@ def _install_pre(text: str) -> tuple[str, bool]:
     return text, False
 
 
+TABLE_MARKER = "_qy_tbltr"
+TABLE_SNIPPET = '''                    try:
+                        from pdf_table_translate import translate_pdf_tables as _qy_tbltr
+                        _qy_tbl_origin = _qy_Pimg(
+                            state.get("_pre_imgtr_origin_path") or file_path
+                        )
+                        if out_mono:
+                            out_mono = str(
+                                _qy_tbltr(
+                                    _qy_Pimg(out_mono),
+                                    origin=_qy_tbl_origin,
+                                    to_lang=str(_qy_to or "简体中文"),
+                                    structure_manifest=_qy_manifest,
+                                )
+                            )
+                        if out_dual and out_dual != out_mono:
+                            out_dual = str(
+                                _qy_tbltr(
+                                    _qy_Pimg(out_dual),
+                                    origin=_qy_tbl_origin,
+                                    to_lang=str(_qy_to or "简体中文"),
+                                    structure_manifest=_qy_manifest,
+                                    x_min_frac=None if _qy_alt else 0.5,
+                                    page_parity="even" if _qy_alt else None,
+                                )
+                            )
+                    except Exception as _qy_tbl_exc:
+                        import logging as _qy_tbl_log
+                        _qy_tbl_log.getLogger(__name__).warning(
+                            "表格写出跳过: %s", _qy_tbl_exc
+                        )
+'''
+
+
+def install_table_post(text: str) -> tuple[str, bool]:
+    if TABLE_MARKER in text and "translate_pdf_tables" in text:
+        return text, False
+    needle = "                    return out_mono, out_dual\n"
+    if needle in text:
+        return text.replace(needle, TABLE_SNIPPET + needle, 1), True
+    alt = "                    return out_mono, out_dual"
+    idx = text.find(alt)
+    if idx < 0:
+        return text, False
+    return text[:idx] + TABLE_SNIPPET + text[idx:], True
+
+
 def _install_post(text: str) -> tuple[str, bool]:
     if POST_MARKER in text:
         return text, False
@@ -167,6 +244,8 @@ def apply(text: str) -> tuple[str, bool]:
         text, did = _install_pre(text)
         changed = changed or did
     text, did = _install_post(text)
+    changed = changed or did
+    text, did = install_table_post(text)
     changed = changed or did
     old_prog = '_qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"'
     if POST_MARKER in text and "format_from_manifest" not in text and old_prog in text:
@@ -208,6 +287,8 @@ def verify(text: str) -> int:
     need("_pre_imgtr_origin_path" in text, "origin path missing")
     need(POST_MARKER in text, "imgtr post marker missing")
     need("translate_pdf_images" in text, "translate_pdf_images missing")
+    need("translate_pdf_tables" in text, "translate_pdf_tables missing")
+    need(TABLE_MARKER in text, "table writeback marker missing")
     need(SWAP_LINE not in text, "BabelDOC input still swapped to imgtr")
     need("x_min_frac" in text, "dual right-half filter missing")
     need("format_from_manifest" in text, "semantic progress missing")
