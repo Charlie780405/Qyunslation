@@ -49,6 +49,8 @@ QC_STRICT = os.environ.get("QYUNSLATION_IMAGE_QC_STRICT", "0").lower() in (
     "on",
 )
 QC_INK_MIN = float(os.environ.get("QYUNSLATION_QC_INK_MIN", "0.005"))
+# 无 draw_bbox 时不用大窗比例：短标签在流程图大盒里会假空白（与 C8/pitfall 21 同类）
+QC_INK_MIN_PX = int(os.environ.get("QYUNSLATION_QC_INK_MIN_PX", "32"))
 TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
 TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
 TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
@@ -1397,6 +1399,58 @@ def _assign_tier_sizes(
     }
 
 
+def _padded_draw_window(
+    db: dict | None, iw: int, ih: int, *, pad: int = 4
+) -> tuple[int, int, int, int] | None:
+    """C3/C8 共用：计划绘制盒外扩 pad，钳在图像内。"""
+    if not isinstance(db, dict):
+        return None
+    try:
+        x1 = max(0, int(db["x1"]) - pad)
+        y1 = max(0, int(db["y1"]) - pad)
+        x2 = min(iw, int(db["x2"]) + pad)
+        y2 = min(ih, int(db["y2"]) + pad)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
+
+
+def _c3_window(
+    box,
+    avail: tuple[int, int, int, int],
+    planned: dict | None,
+    iw: int,
+    ih: int,
+) -> tuple[tuple[int, int, int, int], bool]:
+    db = planned.get("draw_bbox") if isinstance(planned, dict) else None
+    win = _padded_draw_window(db, iw, ih)
+    if win is not None:
+        return win, True
+    x1, y1, x2, y2 = avail
+    ox1, oy1, ox2, oy2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+    return (
+        (
+            max(0, min(x1, ox1)),
+            max(0, min(y1, oy1)),
+            min(iw, max(x2, ox2)),
+            min(ih, max(y2, oy2)),
+        ),
+        False,
+    )
+
+
+def _c3_is_blank(diff: np.ndarray, used_draw_bbox: bool) -> bool:
+    if diff.size == 0:
+        return True
+    ratio = float(diff.mean())
+    ink_px = int(diff.sum())
+    if used_draw_bbox:
+        return ratio < QC_INK_MIN
+    return ink_px < QC_INK_MIN_PX
+
+
 def _qc_report(
     *,
     out_path: Path,
@@ -1437,24 +1491,23 @@ def _qc_report(
     if drawn != expect:
         issues.append({"code": "C2", "msg": f"drawn={drawn} expect={expect}"})
 
-    # C3 墨迹实测：最终相对只擦未写的变化像素（按可用区，因排版可能外扩）
+    # C3 墨迹实测：优先 draw_bbox 小窗（与 C8 同口径）；无计划盒才回退 avail∪ocr，
+    # 且用绝对墨迹像素下限，避免流程图短标签在大白盒里被比例误判空白。
     final_bgr = cv2.cvtColor(final_rgb, cv2.COLOR_RGB2BGR)
+    ih, iw = final_bgr.shape[:2]
     blanks: list[int] = []
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
-        x1, y1, x2, y2 = avails[i]
-        ox1, oy1, ox2, oy2 = b[0], b[1], b[2], b[3]
-        x1, y1 = min(x1, ox1), min(y1, oy1)
-        x2, y2 = max(x2, ox2), max(y2, oy2)
+        planned = (anchors[i] if anchors and i < len(anchors) else None) or {}
+        (x1, y1, x2, y2), used_draw = _c3_window(b, avails[i], planned, iw, ih)
         a = erased_bgr[y1:y2, x1:x2]
         c = final_bgr[y1:y2, x1:x2]
         if a.size == 0 or c.size == 0:
             blanks.append(i + 1)
             continue
         diff = np.abs(a.astype(np.int16) - c.astype(np.int16)).max(axis=2) > 8
-        ratio = float(diff.mean()) if diff.size else 0.0
-        if ratio < QC_INK_MIN:
+        if _c3_is_blank(diff, used_draw):
             blanks.append(i + 1)
     if blanks:
         issues.append({"code": "C3", "msg": f"blank boxes={blanks}"})
@@ -1567,13 +1620,10 @@ def _qc_report(
             ox1, oy1, ox2, oy2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
             planned = (anchors[i] if anchors and i < len(anchors) else None) or {}
             db = planned.get("draw_bbox") if isinstance(planned, dict) else None
-            if not isinstance(db, dict):
+            win = _padded_draw_window(db, iw, ih)
+            if win is None:
                 continue
-            pad = 4
-            mx1 = max(0, int(db["x1"]) - pad)
-            my1 = max(0, int(db["y1"]) - pad)
-            mx2 = min(iw, int(db["x2"]) + pad)
-            my2 = min(ih, int(db["y2"]) + pad)
+            mx1, my1, mx2, my2 = win
             dst_roi = final_bgr[my1:my2, mx1:mx2]
             dst_g = _ink_geometry(dst_roi)
             st = styles[i]

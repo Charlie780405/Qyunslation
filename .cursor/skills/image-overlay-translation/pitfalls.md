@@ -53,3 +53,4 @@
 41. **Gradio `.column` 默认 `flex-wrap:wrap`** → 长预览另起一列落到右邻栏，原文跑进「译文」（PLAN-027 热修）。正解：中右栏 `flex-wrap: nowrap`。
 42. **源像素低于显示尺寸仍原样嵌字** → 回嵌拉伸发糊（PLAN-027g）。正解：`ensure_display_dpi` 升到 300 DPI；矢量默认 300/`MAX_PX=4000`。
 43. **文字带外整段回贴原图** → OCR 框内带外的残画（`c`/`OL`）贴回，译文叠字（PLAN-027g）。正解：回贴避开文字 mask；擦后 `_clear_ocr_leftovers`。
+44. **C3 在 avail∪ocr 大窗上用比例测墨迹** → 流程图短标签（如 `(n = 15)`）在高大白盒里比例低于 `QC_INK_MIN`，假空白记 `TRUNCATED`（PLAN-033k）。正解：优先 `draw_bbox` 小窗（与 C8 同口径）；无计划盒时改用绝对墨迹像素下限 `QC_INK_MIN_PX`。
