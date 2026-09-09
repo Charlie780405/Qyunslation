@@ -24,6 +24,7 @@ from .representation import (
     page_representation,
 )
 from .references import classify_body, heading_y_from_blocks
+from .table_structure import table_blocks_for_manifest
 from .tables import table_regions
 from .models import (
     AssetRole,
@@ -603,9 +604,24 @@ class PdfStructureScanner:
                                         regions_by_number, num, canvas, i
                                     ),
                                 ],
-                                execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,
-                                reason_code="text_layer_table",
-                                planned_action="text_layer",
+                                translatable_blocks=table_blocks_for_manifest(
+                                    page,
+                                    region,
+                                    caption_text=tab_cap_text,
+                                    number=num,
+                                )
+                                if region is not None
+                                else [
+                                    TranslatableBlock(
+                                        block_id=f"table:{num}:title",
+                                        source_text=tab_cap_text,
+                                        bbox=cap_bbox,
+                                        role="table_title",
+                                        translation_policy=TranslationPolicy.TRANSLATE,
+                                    )
+                                ],
+                                execution_status=ExecutionStatus.PENDING,
+                                planned_action="translate_cells",
                                 semantic_id=f"table:{num}",
                                 semantic_scope="main",
                                 caption_ids=[cap_id],
