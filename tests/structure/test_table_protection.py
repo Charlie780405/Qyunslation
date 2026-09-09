@@ -242,3 +242,55 @@ def test_region_tuple_roundtrip():
 def test_gap_break_threshold_stays_within_measured_bounds():
     """下界 0.139（ljae439 表头到底线），上界 0.293（Nature 表底到页脚）。"""
     assert 0.139 < ROW_GAP_BREAK_FRAC < 0.293
+
+
+def test_landscape_frame_table_is_delimited(generated_structure_fixtures: Path):
+    path = generated_structure_fixtures / "landscape-frame-table.pdf"
+    doc = pymupdf.open(path)
+    try:
+        regions = table_regions(doc[0])
+    finally:
+        doc.close()
+
+    assert len(regions) == 1
+    region = regions[0]
+    assert region.number == 1
+    assert region.x0 < 100
+    assert region.x1 > 300
+    assert region.y1 - region.y0 > 600
+
+
+def test_landscape_frame_table_has_region_evidence(generated_structure_fixtures: Path):
+    path = generated_structure_fixtures / "landscape-frame-table.pdf"
+    manifest = PdfStructureScanner().scan(path)
+    tables = [o for o in manifest.objects if o.type is ObjectType.TABLE]
+    assert len(tables) == 1
+    table = tables[0]
+    assert table.bbox.x1 - table.bbox.x0 > 200
+    assert "TABLE_GEOMETRY_MISSING" not in {i.code for i in manifest.issues}
+    evidence = next(e for e in table.detector_evidence if e.detector == "table_rule_lines")
+    assert evidence.details["rule_lines"] >= 2
+
+
+def test_plan033_sample_table_1_has_geometry():
+    from tests.structure.sample_paths import PLAN033_SAMPLE_SHA256, plan033_academic_sample
+
+    path = plan033_academic_sample()
+    if path is None:
+        pytest.skip("PLAN-033 11-page academic PDF is not on this host")
+    import hashlib
+
+    if hashlib.sha256(path.read_bytes()).hexdigest() != PLAN033_SAMPLE_SHA256:
+        pytest.skip("PLAN-033 sample hash drifted")
+    manifest = PdfStructureScanner().scan(path)
+    assert "TABLE_GEOMETRY_MISSING" not in {i.code for i in manifest.issues}
+    tables = {o.semantic_id: o for o in manifest.objects if o.type is ObjectType.TABLE}
+    assert set(tables) == {"table:1", "table:2", "table:3", "table:4"}
+    for table in tables.values():
+        evidence = next(
+            (e for e in table.detector_evidence if e.detector == "table_rule_lines"),
+            None,
+        )
+        assert evidence is not None, table.semantic_id
+        assert table.bbox.x1 - table.bbox.x0 > 20
+        assert table.bbox.y1 - table.bbox.y0 > 20

@@ -75,13 +75,115 @@ def _horizontal_lines(
     return [(m[0], m[1], m[2]) for m in merged]
 
 
+def _vertical_lines(
+    page, *, drawings: list | None = None
+) -> list[tuple[float, float, float]]:
+    """页面竖线，返回 (y0, y1, x)，已按 x 合并同一条线的分段。"""
+    height = float(page.rect.height)
+    if height <= 0:
+        return []
+    raw: list[tuple[float, float, float]] = []
+    if drawings is None:
+        try:
+            drawings = page.get_drawings()
+        except Exception:
+            return []
+    for drawing in drawings:
+        for item in drawing.get("items", []):
+            if item[0] == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.x - p2.x) > 1.0:
+                    continue
+                y0, y1, x = min(p1.y, p2.y), max(p1.y, p2.y), (p1.x + p2.x) / 2
+            elif item[0] == "re":
+                rect = item[1]
+                if rect.width > 2.0:
+                    continue
+                y0, y1, x = rect.y0, rect.y1, (rect.x0 + rect.x1) / 2
+            else:
+                continue
+            if (y1 - y0) / height < MIN_LINE_WIDTH_FRAC:
+                continue
+            raw.append((float(y0), float(y1), float(x)))
+
+    merged: list[list[float]] = []
+    for y0, y1, x in sorted(raw, key=lambda t: t[2]):
+        if merged and abs(x - merged[-1][2]) <= LINE_MERGE_TOL:
+            merged[-1][0] = min(merged[-1][0], y0)
+            merged[-1][1] = max(merged[-1][1], y1)
+        else:
+            merged.append([y0, y1, x])
+    return [(m[0], m[1], m[2]) for m in merged]
+
+
+def _frame_near_caption(
+    h_lines: list[tuple[float, float, float]],
+    v_lines: list[tuple[float, float, float]],
+    caption_bbox: tuple[float, float, float, float],
+    caption_gap: float,
+) -> tuple[float, float, float, float, int] | None:
+    """侧放/整页框线表：两横 + 两竖围成矩形，且与题注相邻。"""
+    if len(h_lines) < 2 or len(v_lines) < 2:
+        return None
+    cx0, cy0, cx1, cy1 = (float(v) for v in caption_bbox)
+    best: tuple[float, float, float, float, int] | None = None
+    best_area = 0.0
+    for i, (hx0_a, hx1_a, hy_a) in enumerate(h_lines):
+        for hx0_b, hx1_b, hy_b in h_lines[i + 1 :]:
+            y0, y1 = (hy_a, hy_b) if hy_a <= hy_b else (hy_b, hy_a)
+            if y1 - y0 < 24.0:
+                continue
+            ox0, ox1 = max(hx0_a, hx0_b), min(hx1_a, hx1_b)
+            if ox1 - ox0 < 24.0:
+                continue
+            lefts = [
+                x
+                for vy0, vy1, x in v_lines
+                if abs(x - ox0) <= 8.0 and vy0 <= y0 + 8.0 and vy1 >= y1 - 8.0
+            ]
+            rights = [
+                x
+                for vy0, vy1, x in v_lines
+                if abs(x - ox1) <= 8.0 and vy0 <= y0 + 8.0 and vy1 >= y1 - 8.0
+            ]
+            if not lefts or not rights:
+                continue
+            fx0, fx1 = min(lefts), max(rights)
+            if fx1 - fx0 < 24.0:
+                continue
+            if not _caption_touches_frame((cx0, cy0, cx1, cy1), (fx0, y0, fx1, y1), caption_gap):
+                continue
+            area = (fx1 - fx0) * (y1 - y0)
+            if area > best_area:
+                best_area = area
+                best = (fx0, y0, fx1, y1, 4)
+    return best
+
+
+def _caption_touches_frame(
+    caption: tuple[float, float, float, float],
+    frame: tuple[float, float, float, float],
+    gap: float,
+) -> bool:
+    cx0, cy0, cx1, cy1 = caption
+    fx0, fy0, fx1, fy1 = frame
+    y_overlap = min(cy1, fy1) - max(cy0, fy0)
+    x_overlap = min(cx1, fx1) - max(cx0, fx0)
+    left = cx1 <= fx0 + 2.0 and (fx0 - cx1) <= gap and y_overlap > 0
+    right = fx1 <= cx0 + 2.0 and (cx0 - fx1) <= gap and y_overlap > 0
+    above = cy1 <= fy0 + 2.0 and (fy0 - cy1) <= gap and x_overlap > 0
+    below = fy1 <= cy0 + 2.0 and (cy0 - fy1) <= gap and x_overlap > 0
+    inside = x_overlap > 0 and y_overlap > 0
+    return left or right or above or below or inside
+
+
 def table_regions(
     page, anchors=None, *, drawings: list | None = None
 ) -> list[TableRegion]:
     """由表题注锚点圈定的表格区域。
 
     无表题注的页返回空列表——这是不产生假阳性的关键：图表页的线框再多也不会
-    被当成表格。
+    被当成表格。PLAN-033b：题注下方横线群失败时，再用封闭框线回退。
     """
     from .captions import caption_anchors
 
@@ -92,14 +194,21 @@ def table_regions(
     captions = [a for a in anchors if a[0] == "table"]
     if not captions:
         return []
+    if drawings is None:
+        try:
+            drawings = page.get_drawings()
+        except Exception:
+            drawings = []
     lines = _horizontal_lines(page, drawings=drawings)
-    if not lines:
+    v_lines = _vertical_lines(page, drawings=drawings)
+    if not lines and not v_lines:
         return []
 
     gap_break = height * ROW_GAP_BREAK_FRAC
     caption_gap = height * CAPTION_TO_TABLE_FRAC
     regions: list[TableRegion] = []
     consumed: set[int] = set()
+    taken: set[int] = set()
 
     for _, number, _, bbox in captions:
         caption_bottom = float(bbox[3])
@@ -117,18 +226,34 @@ def table_regions(
                 break
             group.append((x0, x1, y))
             consumed.add(index)
-        if len(group) < 2:
+        if len(group) >= 2:
+            regions.append(
+                TableRegion(
+                    number=number,
+                    x0=min(g[0] for g in group),
+                    y0=group[0][2],
+                    x1=max(g[1] for g in group),
+                    y1=group[-1][2],
+                    line_count=len(group),
+                )
+            )
+            taken.add(number)
             continue
+        frame = _frame_near_caption(lines, v_lines, bbox, caption_gap)
+        if frame is None or number in taken:
+            continue
+        fx0, fy0, fx1, fy1, nlines = frame
         regions.append(
             TableRegion(
                 number=number,
-                x0=min(g[0] for g in group),
-                y0=group[0][2],
-                x1=max(g[1] for g in group),
-                y1=group[-1][2],
-                line_count=len(group),
+                x0=fx0,
+                y0=fy0,
+                x1=fx1,
+                y1=fy1,
+                line_count=nlines,
             )
         )
+        taken.add(number)
     return regions
 
 

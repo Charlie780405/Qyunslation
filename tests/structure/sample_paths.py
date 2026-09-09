@@ -59,6 +59,30 @@ def pind_ocr_sample() -> Path:
     return sample_root() / PIND_OCR
 
 
+PLAN033_SAMPLE_SHA256 = (
+    "c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc"
+)
+_PLAN033_NAME = "1-s2.0-S2666636725013958-main.pdf"
+_PLAN033_CANDIDATES = (
+    Path("/home/dev/.hermes/attachments") / _PLAN033_NAME,
+    Path(
+        "/home/dev/pdf2zh/pdf2zh_files/"
+        "d10bbff3-0701-431b-ad9e-9992f4f7792c"
+    )
+    / _PLAN033_NAME,
+)
+
+
+def plan033_academic_sample() -> Path | None:
+    """11 页 Dupilumab/GvHD 综述。版权件，不入库；缺席时调用方 skip。"""
+    override = os.environ.get("QYUNSLATION_PLAN033_SAMPLE", "").strip()
+    candidates = ((Path(override),) if override else ()) + _PLAN033_CANDIDATES
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
 def missing_sample_report() -> list[str]:
     """Human-readable list of configured samples that are absent on disk."""
     missing: list[str] = []

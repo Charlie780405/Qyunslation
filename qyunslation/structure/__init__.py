@@ -81,6 +81,8 @@ from .runtime import (
 from .canvases import CanvasLimits, extract_canvases
 from .manifest_store import ManifestStore, default_cache_root
 from .captions import (
+    block_plain_text,
+    join_span_texts,
     CAPTION_LINE,
     FIGURE_LINE,
     caption_anchors,
@@ -171,6 +173,8 @@ __all__ = [
     "extract_canvases",
     "CAPTION_LINE",
     "FIGURE_LINE",
+    "block_plain_text",
+    "join_span_texts",
     "caption_anchors",
     "figure_caption_num",
     "is_continued_caption",

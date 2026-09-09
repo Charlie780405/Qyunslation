@@ -673,6 +673,77 @@ def _pptx_bytes() -> bytes:
     return _canonicalize_ooxml(stream.getvalue())
 
 
+def _caption_span_gap_pdf_bytes() -> bytes:
+    """复现 ScienceDirect 题注：同一行两个 span，中间没有空格字形。
+
+    旧拼接把 'Table 2' + 'Response...' 合成 'Table 2Response...'，正则因此丢表。
+    正文里的 'see Table 4' 不得被计成对象。
+    """
+    commands = [
+        _text_command(72.0, 740.0, 16.0, "Caption span-gap gold sample"),
+        _text_command(72.0, 700.0, 10.0, "Figure 1. Study flow."),
+        # 两个 Tj 紧挨着，中间不写空格字符
+        "BT /F1 10 Tf 72.0 640.0 Td (Table 2) Tj 42 0 Td (Response to Dupilumab in Acute GvHD.) Tj ET",
+        "BT /F1 10 Tf 72.0 600.0 Td (Table 3) Tj 42 0 Td (Response in Chronic GvHD.) Tj ET",
+        "BT /F1 10 Tf 72.0 560.0 Td (Table 4) Tj 42 0 Td (Baseline and Transplant Characteristics.) Tj ET",
+        _text_command(72.0, 480.0, 10.0, "Patients were enrolled, see Table 4 for details."),
+    ]
+    return _single_page_pdf(commands, width=612.0, height=792.0)
+
+
+def _landscape_frame_table_pdf_bytes() -> bytes:
+    """复现侧放整页框线表：题注在框左侧，上下横线间距超过 ROW_GAP_BREAK。
+
+    旧算法只向下找横线群，两条框线相距 >0.20 页高就被拆掉。033b 用两横+两竖
+    封闭框回退圈定。
+    """
+    commands = [
+        "0 0 0 rg",
+        "94 54 234 0.5 re f",
+        "94 740 234 0.5 re f",
+        "94 54 0.5 686 re f",
+        "328 54 0.5 686 re f",
+        _text_command(52.0, 80.0, 10.0, "Table 1"),
+        _text_command(110.0, 700.0, 8.0, "Age (y)"),
+        _text_command(180.0, 700.0, 8.0, "12"),
+        _text_command(110.0, 620.0, 8.0, "Sex"),
+        _text_command(180.0, 620.0, 8.0, "M"),
+        _text_command(72.0, 20.0, 9.0, "Footer outside the framed table stays body text."),
+    ]
+    return _single_page_pdf(commands, width=612.0, height=792.0)
+
+
+def _references_section_pdf_bytes() -> bytes:
+    """一页正文引用句 + 一页参考文献标题与两条条目。"""
+    pages = [
+        [
+            _text_command(72.0, 740.0, 12.0, "Introduction"),
+            _text_command(
+                72.0,
+                700.0,
+                10.0,
+                "Patients were enrolled, see [12] for details. MedImmune staff attended.",
+            ),
+        ],
+        [
+            _text_command(72.0, 740.0, 14.0, "References"),
+            _text_command(
+                72.0,
+                700.0,
+                10.0,
+                "[12] Smith J. Dupilumab and IQVIA trial results. 2024.",
+            ),
+            _text_command(
+                72.0,
+                660.0,
+                10.0,
+                "[13] Jones A. GenScend Biopharma review article. 2023.",
+            ),
+        ],
+    ]
+    return _multi_page_pdf(pages, width=612.0, height=792.0)
+
+
 GENERATORS: dict[str, Callable[[], bytes]] = {
     "single-column.pdf": lambda: _pdf_bytes(columns=1),
     "double-column.pdf": lambda: _pdf_bytes(columns=2),
@@ -698,6 +769,9 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "four-column.pdf": lambda: _multi_column_pdf_bytes("four"),
     "mixed-columns.pdf": _mixed_columns_pdf_bytes,
     "poster-sections.pdf": _poster_pdf_bytes,
+    "caption-span-gap.pdf": _caption_span_gap_pdf_bytes,
+    "landscape-frame-table.pdf": _landscape_frame_table_pdf_bytes,
+    "references-section.pdf": _references_section_pdf_bytes,
 }
 
 

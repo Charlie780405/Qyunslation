@@ -87,6 +87,50 @@ def is_continued_caption(s: str) -> bool:
     return bool(re.match(r"(?i)^\(?continues\)?\.?$", t))
 
 
+_NO_SPACE_BEFORE = set(".,;:)]}%/")
+_NO_SPACE_AFTER = set("([{\"'")
+
+
+def _needs_word_space(prev: str, nxt: str) -> bool:
+    """ScienceDirect 把 'Table 2' 与 'Response' 分成两个 span，中间没有空格字形。"""
+    if not prev or not nxt:
+        return False
+    if prev[-1].isspace() or nxt[0].isspace():
+        return False
+    if nxt[0] in _NO_SPACE_BEFORE or prev[-1] in _NO_SPACE_AFTER:
+        return False
+    # 1,234 / well-known / 3.14 —— 但 'Table 2.' + 'Response' 仍要空格
+    if prev[-1] == "," or prev[-1] == "-":
+        return False
+    if prev[-1] == "." and nxt[0].isdigit():
+        return False
+    return True
+
+
+def join_span_texts(parts: list[str]) -> str:
+    """按阅读顺序拼接 span；缺词界时补一个空格。幂等。"""
+    out: list[str] = []
+    for raw in parts:
+        text = raw or ""
+        if not text:
+            continue
+        if out and _needs_word_space(out[-1], text):
+            out.append(" ")
+        out.append(text)
+    return "".join(out)
+
+
+def block_plain_text(block: dict) -> str:
+    """一个 text block 的可读文本。行与 span 都走 join_span_texts。"""
+    lines: list[str] = []
+    for line in block.get("lines", []) or []:
+        spans = [span.get("text", "") for span in line.get("spans", []) or []]
+        joined = join_span_texts(spans)
+        if joined:
+            lines.append(joined)
+    return join_span_texts(lines).strip()
+
+
 def caption_anchors(page) -> list[tuple[str, int, float, tuple]]:
     """同页 Table/Figure 题注 [(kind, num, y0, bbox)]，按 y 再 x 排。"""
     rows: list[tuple[str, int, float, tuple]] = []
@@ -97,11 +141,7 @@ def caption_anchors(page) -> list[tuple[str, int, float, tuple]]:
     for b in blocks:
         if b.get("type") != 0:
             continue
-        text = "".join(
-            s.get("text", "")
-            for ln in b.get("lines", [])
-            for s in ln.get("spans", [])
-        ).strip()
+        text = block_plain_text(b)
         if not text:
             continue
         bb = tuple(b.get("bbox") or (0, 0, 0, 0))

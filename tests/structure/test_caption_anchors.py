@@ -12,8 +12,14 @@ from qyunslation.structure.captions import (
     figure_caption_num,
     is_continued_caption,
     is_toc_line,
+    join_span_texts,
     table_caption_num,
 )
+from qyunslation.structure.scan_pdf import (
+    PDF_STRUCTURE_SCANNER_VERSION,
+    PdfStructureScanner,
+)
+from tests.structure.sample_paths import PLAN033_SAMPLE_SHA256, plan033_academic_sample
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,6 +58,62 @@ def test_ljae439_page5_has_table_2_anchor():
     finally:
         doc.close()
     assert ("table", 2) in {(k, n) for k, n, _y, _b in anchors}
+
+
+def test_join_span_texts_restores_word_boundary():
+    assert join_span_texts(["Table 2", "Response to Dupilumab"]) == (
+        "Table 2 Response to Dupilumab"
+    )
+    assert join_span_texts(["Fig.", " 2"]) == "Fig. 2"
+    assert join_span_texts(["1", ",", "234"]) == "1,234"
+    assert join_span_texts(["Table 2.", "Response"]) == "Table 2. Response"
+    assert table_caption_num("Table 2Response to Dupilumab") is None
+
+
+def test_caption_span_gap_fixture_recovers_tables_2_to_4(generated_structure_fixtures):
+    doc = pymupdf.open(generated_structure_fixtures / "caption-span-gap.pdf")
+    try:
+        page = doc[0]
+        raw = "".join(
+            span.get("text", "")
+            for block in page.get_text("dict")["blocks"]
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+            for span in line.get("spans", [])
+        )
+        assert "Table 2Response" in raw
+        anchors = {(kind, num) for kind, num, _y, _b in caption_anchors(page)}
+    finally:
+        doc.close()
+    assert ("figure", 1) in anchors
+    assert {("table", 2), ("table", 3), ("table", 4)} <= anchors
+    assert sum(1 for kind, num in anchors if kind == "table" and num == 4) == 1
+
+
+def test_scanner_version_bumped_for_caption_join():
+    assert PDF_STRUCTURE_SCANNER_VERSION == "1.4.0"
+
+
+def test_plan033_sample_counts_two_figures_and_four_tables():
+    path = plan033_academic_sample()
+    if path is None:
+        pytest.skip("PLAN-033 11-page academic PDF is not on this host")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != PLAN033_SAMPLE_SHA256:
+        pytest.skip(f"PLAN-033 sample hash drifted: {digest}")
+    manifest = PdfStructureScanner().scan(path)
+    assert manifest.summary.figure_count == 2
+    assert manifest.summary.table_count == 4
+    assert {item.semantic_id for item in manifest.objects if item.type.value == "FIGURE"} == {
+        "figure:1",
+        "figure:2",
+    }
+    assert {item.semantic_id for item in manifest.objects if item.type.value == "TABLE"} == {
+        "table:1",
+        "table:2",
+        "table:3",
+        "table:4",
+    }
 
 
 def test_nature_page10_has_figure_5_anchor():
