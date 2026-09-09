@@ -1,6 +1,6 @@
 # PLAN-033l：最终产物总门、部署与回滚
 
-> 状态：**总门已落地；真实最终 PDF 验收 FAIL，未部署**
+> 状态：**已合入 main 并部署；最终 PDF 总验收仍为子集 PASS**
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033l.sh` 与重写后的 `bash scripts/verify-plan-033.sh`
 > 前置：033g–033k

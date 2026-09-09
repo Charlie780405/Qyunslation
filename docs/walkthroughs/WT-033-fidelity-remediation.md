@@ -3,7 +3,7 @@
 > 计划：[PLAN-033](../plans/PLAN-033-pdf-fidelity/PLAN-033-pdf-fidelity.md)
 > 分支：`codex/plan-033g-fidelity-remediation`
 > 日期：2026-09-09
-> 结论：**部分通过，未完成、未部署、未推送。** `verify-plan-033l.sh` 对暂存 mono/dual 现为 PASS，但检查器只覆盖 Figure/Table 计数、PENDING 文本和参考文献标题；不得用它代替全部真实产物验收。
+> 结论：**已合并并部署到生产 WebUI；最终产物总验收仍只覆盖子集。** `origin/main` = `dc1bdd3`。`verify-plan-033l.sh` 对暂存 mono/dual 为 PASS，但检查器只覆盖 Figure/Table 计数、PENDING 文本和参考文献标题。
 
 ## 分支与提交
 
@@ -61,7 +61,14 @@ SHA-256 `c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc`。扫
 
 ## 部署 / 烟测 / 回滚
 
-**未部署生产，未重启 `pdf2zh.service`。** 生产 `PYTHONPATH` 仍指向 `/home/dev/qyunslation`（无本分支 `babeldoc_policy`）。
+**已部署。** 2026-09-09T07:39Z 重启 `pdf2zh.service`。
+
+- merge：`dc1bdd3`（`merge: PLAN-033 最终产物保真补救（033g–033l）`）
+- `git push origin main`：`9e2b78f..dc1bdd3`
+- 生产 `PYTHONPATH=/home/dev/qyunslation` 已 fast-forward 到 `dc1bdd3`（`glossaries/auto-proper-nouns.csv` 保持 dirty，未提交）
+- 单元已写入 `ExecStartPre=apply-pdf2zh-fidelity-033h.py`，启动自检退出 0
+- 补丁签名四文件 `:1`；备份 `/home/dev/pdf2zh/bak-plan033l-20260909T073909Z`
+- 烟测：`http://127.0.0.1:7860/` → 200；`paragraph_is_preserved("REFERENCES")` 为 True
 
 回滚 BabelDOC 源文件：
 
@@ -77,7 +84,14 @@ cp -a "$BAK/fontmap.py" "$SITE/babeldoc/format/pdf/document_il/utils/fontmap.py"
 服务回滚：
 
 ```bash
-cp /home/dev/pdf2zh/gui.py.bak-plan033c-20260908T234059Z /home/dev/pdf2zh/gui.py
+cp /home/dev/pdf2zh/bak-plan033l-20260909T073909Z/pdf2zh.service /home/dev/.config/systemd/user/pdf2zh.service
+SITE=/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages
+BAK=/home/dev/pdf2zh/bak-plan033l-20260909T073909Z
+cp -a "$BAK/il_translator_llm_only.py" "$SITE/babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"
+cp -a "$BAK/automatic_term_extractor.py" "$SITE/babeldoc/format/pdf/document_il/midend/automatic_term_extractor.py"
+cp -a "$BAK/il_creater.py" "$SITE/babeldoc/format/pdf/document_il/frontend/il_creater.py"
+cp -a "$BAK/fontmap.py" "$SITE/babeldoc/format/pdf/document_il/utils/fontmap.py"
+cp -a "$BAK/gui.py" "$SITE/pdf2zh_next/gui.py"
 systemctl --user daemon-reload
 systemctl --user restart pdf2zh.service
 ```
@@ -90,5 +104,4 @@ systemctl --user restart pdf2zh.service
 4. 粗体标题 vs 普通正文的渲染字重。
 5. 任务级 `model_trace` 写入成功结果。
 6. 续页与双语续页左侧原稿一致性（本样本未见续页）。
-7. 生产部署、烟测、回滚演练。
-8. 推送 `codex/plan-033g-fidelity-remediation`（须全部门禁 PASS 且不得宣称总完成）。
+7. 修复后的完整 `verify-plan-030e.sh` / `verify-plan-033.sh` 未在本部署窗口重跑收口。
