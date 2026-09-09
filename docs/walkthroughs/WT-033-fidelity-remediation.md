@@ -3,7 +3,7 @@
 > 计划：[PLAN-033](../plans/PLAN-033-pdf-fidelity/PLAN-033-pdf-fidelity.md)
 > 分支：`codex/plan-033g-fidelity-remediation`
 > 日期：2026-09-09
-> 结论：**已合并并部署到生产 WebUI；最终产物总验收仍只覆盖子集。** `origin/main` = `dc1bdd3`。`verify-plan-033l.sh` 对暂存 mono/dual 为 PASS，但检查器只覆盖 Figure/Table 计数、PENDING 文本和参考文献标题。
+> 结论：**表格写出与图片 QC 已合入 `origin/main`=`0547531` 并接到生产 GUI 后处理；11 页样本终态仍未重跑。** 033l 子集验收仍只覆盖 Figure/Table 计数、PENDING 文本和参考文献标题。
 
 ## 分支与提交
 
@@ -20,6 +20,8 @@
 | 028 接受 PRESERVE | `3f7b3c4` |
 | 033h 真正挂钩 `_should_translate` | `2f23d00` |
 | 033h 挂钩 `process_page` 入队 | `a85f18f` |
+| 表格写出与图片 QC 接线 | `a921c2e` |
+| 合入 main | `0547531` |
 
 工作区：`/home/dev/.codex/worktrees/033g/qyunslation`  
 保护：未改动、未提交 `glossaries/auto-proper-nouns.csv`。
@@ -61,11 +63,15 @@ SHA-256 `c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc`。扫
 
 ## 部署 / 烟测 / 回滚
 
-**已部署。** 2026-09-09T07:39Z 重启 `pdf2zh.service`。
+**已部署。** 2026-09-09T07:51Z 再次重启 `pdf2zh.service`，接入表格写出与图片 QC。
 
-- merge：`dc1bdd3`（`merge: PLAN-033 最终产物保真补救（033g–033l）`）
-- `git push origin main`：`9e2b78f..dc1bdd3`
-- 生产 `PYTHONPATH=/home/dev/qyunslation` 已 fast-forward 到 `dc1bdd3`（`glossaries/auto-proper-nouns.csv` 保持 dirty，未提交）
+- merge：`0547531`（`merge: 表格写出与图片 QC 接入生产`）
+- 功能提交：`a921c2e`
+- `git push origin main`：`743382f..0547531`
+- 生产 `PYTHONPATH=/home/dev/qyunslation` 已 fast-forward 到 `0547531`（`glossaries/auto-proper-nouns.csv` 保持 dirty，未提交）
+- 现场 `gui.py` 已含 `translate_pdf_tables` / `_qy_tbltr`；`apply-pdf2zh-docimg.py` verify 退出 0
+- 烟测：`http://127.0.0.1:7860/` → 200
+- `gui.py` 备份：`/home/dev/pdf2zh/bak-plan033-tbltr-20260909T154000Z-gui.py`
 - 单元已写入 `ExecStartPre=apply-pdf2zh-fidelity-033h.py`，启动自检退出 0
 - 补丁签名四文件 `:1`；备份 `/home/dev/pdf2zh/bak-plan033l-20260909T073909Z`
 - 烟测：`http://127.0.0.1:7860/` → 200；`paragraph_is_preserved("REFERENCES")` 为 True
