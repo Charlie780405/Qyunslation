@@ -87,6 +87,29 @@ def _load_fidelity_patcher():
     return module
 
 
+def test_il_patcher_hooks_process_page_enqueue_loop():
+    patcher = _load_fidelity_patcher()
+    source = '''
+            if _pdf2zh_skip_already_target_lang(
+                paragraph.unicode,
+                self.translation_config.lang_in,
+                self.translation_config.lang_out,
+            ):
+                if pbar:
+                    pbar.advance(1)
+                translated_ids.add(id(paragraph))
+                continue
+            total_token_count += self.calc_token_count(paragraph.unicode)
+            paragraphs.append(paragraph)
+'''
+    patched, changed = patcher.patch_il(source)
+    assert changed is True
+    assert "_QY_033H_PRESERVE(paragraph.unicode)" in patched
+    assert patched.index("_QY_033H_PRESERVE(paragraph.unicode)") < patched.index(
+        "paragraphs.append(paragraph)"
+    )
+
+
 def test_il_patcher_hooks_should_translate_even_after_helper_exists():
     patcher = _load_fidelity_patcher()
     source = '''

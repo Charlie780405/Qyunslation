@@ -78,6 +78,24 @@ def patch_il(text: str) -> tuple[str, bool]:
     if old_title in text and "title_is_usable_context" not in text:
         text = text.replace(old_title, new_title, 1)
         changed = True
+    process_page_after = """            if _pdf2zh_skip_already_target_lang(
+                paragraph.unicode,
+                self.translation_config.lang_in,
+                self.translation_config.lang_out,
+            ):
+                if pbar:
+                    pbar.advance(1)
+                translated_ids.add(id(paragraph))
+                continue
+"""
+    process_page_hook = """            if _QY_033H_PRESERVE(paragraph.unicode):
+                if pbar:
+                    pbar.advance(1)
+                translated_ids.add(id(paragraph))
+                continue
+"""
+    text, ok = _once(text, process_page_after, process_page_hook)
+    changed = changed or ok
     return text, changed
 
 
