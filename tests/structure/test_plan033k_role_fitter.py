@@ -3,6 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
+from qyunslation.extensions.image_translate import (
+    QC_INK_MIN,
+    _c3_is_blank,
+    _c3_window,
+)
 from qyunslation.structure.role_fitter import (
     QC_FONT_BELOW_TARGET,
     QC_OVERFLOW,
@@ -68,3 +75,31 @@ def test_overflow_is_hard_fail_untranslated_is_hard_fail():
     )
     assert not tiny.text.endswith("...")
     assert tiny.overflow or QC_OVERFLOW in tiny.qc or QC_FONT_BELOW_TARGET in tiny.qc
+
+
+def test_c3_prefers_draw_bbox_so_sparse_label_is_not_blank():
+    """流程图短标签：大 avail 比例会假空白，draw_bbox 小窗应判有墨迹。"""
+    box = [10, 10, 700, 500, "n=15"]
+    avail = (0, 0, 800, 600)
+    planned = {"draw_bbox": {"x1": 180, "y1": 190, "x2": 260, "y2": 214}}
+    win, used = _c3_window(box, avail, planned, 800, 600)
+    assert used is True
+    assert win[2] - win[0] < 100
+    erased = np.full((600, 800), False)
+    drawn = erased.copy()
+    drawn[194:210, 184:256] = True
+    assert _c3_is_blank(drawn[win[1] : win[3], win[0] : win[2]], used) is False
+    huge = drawn[0:600, 0:800]
+    assert float(huge.mean()) < QC_INK_MIN
+    assert _c3_is_blank(huge, used_draw_bbox=False) is False
+
+
+def test_c3_still_flags_true_blank_even_with_draw_bbox():
+    planned = {"draw_bbox": {"x1": 20, "y1": 20, "x2": 80, "y2": 40}}
+    win, used = _c3_window([0, 0, 200, 200, "x"], (0, 0, 200, 200), planned, 200, 200)
+    empty = np.zeros((win[3] - win[1], win[2] - win[0]), dtype=bool)
+    assert used is True
+    assert _c3_is_blank(empty, used) is True
+    win2, used2 = _c3_window([0, 0, 200, 200, "x"], (0, 0, 200, 200), {}, 200, 200)
+    assert used2 is False
+    assert _c3_is_blank(np.zeros((200, 200), dtype=bool), used2) is True

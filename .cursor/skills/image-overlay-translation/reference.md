@@ -53,6 +53,8 @@ for i, b in enumerate(ocr_image(path), 1):
 | `QYUNSLATION_AVAIL_W_MULT` | 可用区横向上限倍数 | 3.0 |
 | `QYUNSLATION_AVAIL_H_MULT` | 可用区纵向上限倍数 | 1.6 |
 | `QYUNSLATION_IMAGE_QC_STRICT` | QC 硬失败抛错 | 0 |
+| `QYUNSLATION_QC_INK_MIN` | C3 `draw_bbox` 小窗墨迹比例 | 0.005 |
+| `QYUNSLATION_QC_INK_MIN_PX` | C3 无计划盒时绝对墨迹像素下限 | 32 |
 | `QYUNSLATION_TIER_OUTLIER_RATIO` | 比值低于组中位此倍视为 outlier | 0.6 |
 | `QYUNSLATION_TIER_RATIO_TOL` | 组间比例允许偏差 | 0.02 |
 | `QYUNSLATION_ALIGN_TOL_PX` | C8/C9 容差 | 12 |

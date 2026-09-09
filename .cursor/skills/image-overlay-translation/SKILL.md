@@ -72,7 +72,7 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 | 码 | 查什么 |
 | --- | --- |
 | C1/C2 | 覆盖率、绘制块数 |
-| C3/C4 | 墨迹实测、对比度 |
+| C3/C4 | 墨迹实测（优先 `draw_bbox` 小窗）、对比度 |
 | C5/C6 | 溢出、可读性（WARN） |
 | C7a/C7b | 组内字号、组间比例 |
 | C8 | 成品 vs 计划锚点（读 `vertical_mode`） |
