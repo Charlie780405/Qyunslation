@@ -87,6 +87,28 @@ def _load_fidelity_patcher():
     return module
 
 
+def test_il_patcher_hooks_should_translate_even_after_helper_exists():
+    patcher = _load_fidelity_patcher()
+    source = '''
+logger = logging.getLogger(__name__)
+
+    def translate(self, docs: Document) -> None:
+        pass
+
+    def _should_translate_paragraph(self, paragraph, translated_ids=None, require_body_text=False):
+        if require_body_text and not self._is_body_text_paragraph(paragraph):
+            return False
+        return True
+'''
+    patched, changed = patcher.patch_il(source)
+    assert changed is True
+    assert patched.count("_QY_033H_PRESERVE(paragraph.unicode)") == 1
+    assert "reset_preserve_gate" in patched
+    again, second = patcher.patch_il(patched)
+    assert second is False
+    assert again.count("_QY_033H_PRESERVE(paragraph.unicode)") == 1
+
+
 def test_terms_patcher_skips_preserved_paragraphs_with_pbar():
     patcher = _load_fidelity_patcher()
     source = """

@@ -40,7 +40,7 @@ RESET = """
 
 
 def _once(text: str, needle: str, insert: str) -> tuple[str, bool]:
-    if MARKER in text and needle in text:
+    if insert in text:
         return text, False
     if needle not in text:
         return text, False

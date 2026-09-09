@@ -57,7 +57,10 @@ def current_llm_spy() -> LlmRequestSpy | None:
 
 
 def paragraph_is_preserved(text: str | None) -> bool:
-    return _GATE.should_preserve(text or "")
+    blob = text or ""
+    if is_reference_heading(blob) or is_reference_entry(blob):
+        return True
+    return _GATE.should_preserve(blob)
 
 
 def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = None) -> list[str]:
