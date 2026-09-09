@@ -84,20 +84,35 @@ def patch_il(text: str) -> tuple[str, bool]:
 def patch_terms(text: str) -> tuple[str, bool]:
     insert = """            try:
                 from qyunslation.structure.babeldoc_policy import paragraph_is_preserved
-                if paragraph_is_preserved(paragraph.unicode):
+                if paragraph_is_preserved(paragraph.unicode):  # _QY_033H_PRESERVE
                     continue
             except Exception:
                 pass
 """
-    after = """        for paragraph in page.pdf_paragraph:
+    after_plain = """        for paragraph in page.pdf_paragraph:
             if paragraph.debug_id is None or paragraph.unicode is None:
+                continue
+"""
+    after_pbar = """        for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id is None or paragraph.unicode is None:
+                pbar.advance(1)
                 continue
 """
     if "paragraph_is_preserved" in text:
         return text, False
-    if after not in text:
-        return text, False
-    return text.replace(after, after + insert, 1), True
+    if after_pbar in text:
+        insert_pbar = """            try:
+                from qyunslation.structure.babeldoc_policy import paragraph_is_preserved
+                if paragraph_is_preserved(paragraph.unicode):  # _QY_033H_PRESERVE
+                    pbar.advance(1)
+                    continue
+            except Exception:
+                pass
+"""
+        return text.replace(after_pbar, after_pbar + insert_pbar, 1), True
+    if after_plain in text:
+        return text.replace(after_plain, after_plain + insert, 1), True
+    return text, False
 
 
 def patch_creater(text: str) -> tuple[str, bool]:

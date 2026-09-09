@@ -1,6 +1,9 @@
 """PLAN-033h：参考文献硬保留、LLM spy、字重与段距。"""
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 from qyunslation.structure.babeldoc_policy import (
     LlmRequestSpy,
     ReferencePreserveGate,
@@ -73,3 +76,33 @@ def test_manifest_heading_and_entries_are_preserve(generated_structure_fixtures)
         for o in entries
     )
     assert cite.planned_action == "babeldoc_text_layer"
+
+
+def _load_fidelity_patcher():
+    path = Path(__file__).resolve().parents[2] / "scripts/apply-pdf2zh-fidelity-033h.py"
+    spec = importlib.util.spec_from_file_location("apply_pdf2zh_fidelity_033h", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_terms_patcher_skips_preserved_paragraphs_with_pbar():
+    patcher = _load_fidelity_patcher()
+    source = """
+        for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id is None or paragraph.unicode is None:
+                pbar.advance(1)
+                continue
+            if is_cid_paragraph(paragraph):
+                pbar.advance(1)
+                continue
+"""
+    patched, changed = patcher.patch_terms(source)
+    assert changed is True
+    assert "paragraph_is_preserved(paragraph.unicode)" in patched
+    assert "_QY_033H_PRESERVE" in patched
+    assert "pbar.advance(1)" in patched
+    again, second = patcher.patch_terms(patched)
+    assert second is False
+    assert again == patched
