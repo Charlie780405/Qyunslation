@@ -51,6 +51,7 @@ from .models import (
     SourceRef,
     SourceRefKind,
     TableObject,
+    TranslationPolicy,
     build_manifest_id,
     build_object_id,
     CURRENT_SCHEMA_VERSION,
@@ -183,8 +184,8 @@ class PdfStructureScanner:
         """正文块建模为 BODY 对象，带页内阅读顺序。
 
         030d 只审计正文、不接管译文生成：正文仍由 BabelDOC 文字层翻译，因此对象
-        终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。033d：参考文献条目标
-        skip，标题仍走文字层。
+        终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。033h：参考文献标题与
+        条目都 PRESERVE，BabelDOC 送 LLM 前必须消费该策略。
         """
         if not blocks:
             return [], []
@@ -209,18 +210,18 @@ class PdfStructureScanner:
                 in_references=in_references,
                 heading_y=heading_y,
             )
-            if kind == "entry":
-                reason = "reference_entry"
-                action = "skip"
+            if kind in {"entry", "heading"}:
+                reason = "reference_preserve" if kind == "heading" else "reference_entry"
+                action = "preserve"
                 scope = "references"
-            elif kind == "heading":
-                reason = "delegated_to_babeldoc"
-                action = "babeldoc_text_layer"
-                scope = "references"
+                policy = TranslationPolicy.PRESERVE
+                block_role = "reference"
             else:
                 reason = "delegated_to_babeldoc"
                 action = "babeldoc_text_layer"
                 scope = "body"
+                policy = TranslationPolicy.TRANSLATE
+                block_role = "body"
             objects.append(
                 BodyObject(
                     type=ObjectType.BODY,
@@ -247,6 +248,8 @@ class PdfStructureScanner:
                             block_id=f"block:{order}",
                             source_text=block.text,
                             bbox=body_bbox,
+                            role=block_role,
+                            translation_policy=policy,
                         )
                     ],
                     execution_status=ExecutionStatus.EXPLICITLY_SKIPPED,

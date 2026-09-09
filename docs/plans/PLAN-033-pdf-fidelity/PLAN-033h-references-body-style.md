@@ -1,6 +1,6 @@
 # PLAN-033h：参考文献硬保留和正文样式
 
-> 状态：**待实施**
+> 状态：**已实现，门禁待总验收**
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033h.sh`
 > 前置：033g
