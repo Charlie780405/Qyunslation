@@ -755,7 +755,10 @@ class DocumentStructureManifest(ContractModel):
                     )
         object.__setattr__(self, "summary", derived)
 
-        if self.extensions.get("terminal") is True:
+        if (
+            self.extensions.get("terminal") is True
+            or self.extensions.get("kind") == "execution"
+        ):
             pending = [
                 item.object_id
                 for item in self.objects

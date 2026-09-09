@@ -11,7 +11,7 @@ import statistics
 from dataclasses import dataclass
 
 from .models import LayoutMode
-from .references import is_reference_heading
+from .references import is_reference_heading, is_section_break
 
 # 正文块下限：短于此长度多为页眉、页码、图注碎片
 MIN_BODY_CHARS = 40
@@ -86,7 +86,9 @@ def body_blocks(
     source_blocks = page.get_text("blocks") if raw_blocks is None else raw_blocks
     for raw in source_blocks:
         x0, y0, x1, y1, text = raw[0], raw[1], raw[2], raw[3], raw[4]
-        if len(str(text).strip()) < MIN_BODY_CHARS and not is_reference_heading(str(text)):
+        if len(str(text).strip()) < MIN_BODY_CHARS and not is_reference_heading(
+            str(text)
+        ) and not is_section_break(str(text)):
             continue
         frac = (x1 - x0) / width
         if frac < MIN_BLOCK_WIDTH_FRAC or frac > MAX_BLOCK_WIDTH_FRAC:

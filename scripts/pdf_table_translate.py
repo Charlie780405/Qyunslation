@@ -2,7 +2,9 @@
 """PLAN-033j：生产路径表格翻译写出。"""
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -18,12 +20,42 @@ logger = logging.getLogger(__name__)
 def _llm_translator(to_lang: str):
     from qyunslation.extensions.image_translate import translate_texts
 
+    cache_path = Path(
+        os.environ.get(
+            "QYUNSLATION_TABLE_TRANSLATE_CACHE",
+            "/tmp/plan033m-table-zh-cache.json",
+        )
+    )
+    cache: dict = {}
+    if cache_path.is_file():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+
     def translate(payloads):
-        texts = [str(item["text"]) for item in payloads]
-        mapped = translate_texts(texts, to_lang=to_lang)
         out = {}
-        for index, item in enumerate(payloads, start=1):
-            out[item["id"]] = str(mapped.get(index) or "").strip()
+        missing = []
+        for item in payloads:
+            src = str(item["text"])
+            hit = cache.get(item["id"])
+            if isinstance(hit, dict) and hit.get("src") == src and str(hit.get("zh") or "").strip():
+                out[item["id"]] = str(hit["zh"]).strip()
+            else:
+                missing.append(item)
+        if missing:
+            mapped = translate_texts([str(item["text"]) for item in missing], to_lang=to_lang)
+            for index, item in enumerate(missing, start=1):
+                zh = str(mapped.get(index) or "").strip() or str(item["text"]).strip() or "·"
+                cache[item["id"]] = {"src": str(item["text"]), "zh": zh}
+                out[item["id"]] = zh
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(
+                    json.dumps(cache, ensure_ascii=False), encoding="utf-8"
+                )
+            except OSError:
+                pass
         return out
 
     return translate
@@ -163,8 +195,22 @@ def translate_pdf_tables(
 def _persist(manifest) -> None:
     try:
         from qyunslation.structure import ManifestStore
+        from qyunslation.structure.execution_evidence import (
+            merge_prior_execution,
+            write_output_evidence,
+        )
         from qyunslation.structure.model_trace import apply_current_model_trace
+        from qyunslation.structure.models import ExecutionStatus, ObjectType
 
+        merge_prior_execution(manifest, keep_types={ObjectType.FIGURE, ObjectType.IMAGE})
+        for obj in manifest.objects:
+            if obj.execution_status is ExecutionStatus.PENDING:
+                write_output_evidence(
+                    obj,
+                    status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                    reason_code="not_reached",
+                )
+        manifest.extensions["terminal"] = True
         manifest.refresh_summary()
         apply_current_model_trace(manifest)
         ManifestStore().put_execution(manifest)

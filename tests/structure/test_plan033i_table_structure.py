@@ -67,6 +67,39 @@ def _open_grid(path: Path) -> Path:
     return path
 
 
+def _sideways_frame_pdf(path: Path) -> Path:
+    """page.rotation=0 但表内文字 dir=(0,-1) 的侧放框线表。"""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((40, 200), "Table 1", fontsize=11)
+    page.draw_rect(pymupdf.Rect(100, 80, 280, 520), color=(0, 0, 0), width=0.8)
+    page.draw_line(pymupdf.Point(100, 80), pymupdf.Point(280, 80), width=0.6)
+    page.draw_line(pymupdf.Point(100, 520), pymupdf.Point(280, 520), width=0.6)
+    page.draw_line(pymupdf.Point(160, 80), pymupdf.Point(160, 520), width=0.6)
+    page.draw_line(pymupdf.Point(220, 80), pymupdf.Point(220, 520), width=0.6)
+    tw = pymupdf.TextWriter(page.rect)
+    font = pymupdf.Font("helv")
+    cells = [
+        ((110, 480), "Arm"),
+        ((170, 480), "N"),
+        ((230, 480), "Rate"),
+        ((110, 360), "Active"),
+        ((170, 360), "30"),
+        ((230, 360), "42%"),
+        ((110, 240), "Placebo"),
+        ((170, 240), "28"),
+        ((230, 240), "18%"),
+    ]
+    for (x, y), text in cells:
+        origin = pymupdf.Point(x, y)
+        tw.append(origin, text, font=font, fontsize=10)
+        tw.write_text(page, morph=(origin, pymupdf.Matrix(90)))
+        tw = pymupdf.TextWriter(page.rect)
+    doc.save(path)
+    doc.close()
+    return path
+
+
 def test_grid_table_has_stable_cell_ids(tmp_path):
     path = _grid_pdf(tmp_path / "grid.pdf")
     doc = pymupdf.open(path)
@@ -116,6 +149,64 @@ def test_partial_grid_still_clusters_rows_and_cols(tmp_path):
     cols = {cell.column_index for cell in cells if cell.role != BlockRole.TABLE_TITLE.value}
     assert len(rows) >= 2
     assert len(cols) >= 2
+
+
+def test_sideways_text_uses_span_dir_local_frame(tmp_path):
+    path = _sideways_frame_pdf(tmp_path / "sideways.pdf")
+    doc = pymupdf.open(path)
+    try:
+        page = doc[0]
+        assert page.rotation == 0
+        region = TableRegion(number=1, x0=100, y0=80, x1=280, y1=520, line_count=4)
+        frame = local_frame_for(page, region)
+        cells = structure_table(page, region, caption_text="Table 1")
+    finally:
+        doc.close()
+    assert frame.rotation == 90
+    body = [c for c in cells if c.role != BlockRole.TABLE_TITLE.value]
+    assert len(body) >= 6
+    texts = {c.text for c in body}
+    assert "Arm" in texts or any("Arm" in t for t in texts)
+    assert any("42%" in t for t in texts)
+    ids = {c.block_id for c in body}
+    assert len(ids) == len(body)
+
+
+def test_dense_upright_table_does_not_collapse(tmp_path):
+    path = tmp_path / "dense.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 70), "Table 3 Outcomes", fontsize=11)
+    headers = ["Arm", "N", "CR", "PR"]
+    rows = [
+        ["Active", "30", "12", "8"],
+        ["Placebo", "28", "4", "3"],
+        ["Rescue", "10", "2", "1"],
+    ]
+    y = 110
+    for col, text in enumerate(headers):
+        page.insert_text((80 + col * 70, y), text, fontsize=10, fontname="hebo")
+    for row in rows:
+        y += 14
+        for col, text in enumerate(row):
+            page.insert_text((80 + col * 70, y), text, fontsize=9)
+    doc.save(path)
+    doc.close()
+    doc = pymupdf.open(path)
+    try:
+        region = TableRegion(number=3, x0=70, y0=95, x1=380, y1=170, line_count=0)
+        cells = structure_table(doc[0], region, caption_text="Table 3 Outcomes", number=3)
+    finally:
+        doc.close()
+    body = [c for c in cells if c.role != BlockRole.TABLE_TITLE.value]
+    rows_i = {c.row_index for c in body}
+    cols_i = {c.column_index for c in body}
+    assert len(body) >= 8
+    assert len(rows_i) >= 3
+    assert len(cols_i) >= 3
+    bold = [c for c in body if "Arm" in c.text or c.text == "Arm"]
+    assert bold
+    assert any(c.font_weight == "bold" for c in bold)
 
 
 def test_does_not_use_babeldoc_rapidocr_table_adapter():

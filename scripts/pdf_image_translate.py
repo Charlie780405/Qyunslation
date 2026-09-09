@@ -266,6 +266,7 @@ def _structure_regions(
             _mark(obj, "FAILED_SOFT", "bbox_outside_page")
             continue
         if any(abs(rect & c) / abs(rect) >= BITMAP_COVER_FRAC for c in covers):
+            _mark(obj, "EXPLICITLY_SKIPPED", "handled_by_bitmap_path")
             continue
         out.append((obj, rect))
     return out
@@ -657,14 +658,14 @@ def _persist_structure_manifest(structure_manifest, *, reason: str = "not_reache
         return
     try:
         from qyunslation.structure import ManifestStore
+        from qyunslation.structure.execution_evidence import merge_prior_execution
         from qyunslation.structure.models import ExecutionStatus, ObjectType
 
+        merge_prior_execution(structure_manifest, keep_types={ObjectType.TABLE})
         for obj in structure_manifest.objects:
-            if (
-                obj.type in (ObjectType.FIGURE, ObjectType.IMAGE)
-                and obj.execution_status is ExecutionStatus.PENDING
-            ):
+            if obj.execution_status is ExecutionStatus.PENDING:
                 _mark(obj, "EXPLICITLY_SKIPPED", reason)
+        structure_manifest.extensions["terminal"] = True
         # 状态变更后 summary 必须重算，否则回读时 MANIFEST_SUMMARY_MISMATCH
         structure_manifest.refresh_summary()
         from qyunslation.structure.model_trace import apply_current_model_trace

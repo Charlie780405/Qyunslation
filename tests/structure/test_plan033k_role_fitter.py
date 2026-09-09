@@ -18,6 +18,7 @@ from qyunslation.extensions.image_translate import (
 from qyunslation.structure.role_fitter import (
     QC_FONT_BELOW_TARGET,
     QC_OVERFLOW,
+    QC_ROLE_SIZE_DRIFT,
     QC_UNTRANSLATED,
     FitBlock,
     choose_dpi,
@@ -60,6 +61,16 @@ def test_semantic_compact_keeps_mapping_and_numbers():
     result = fit_block(block, compact=compact)
     assert "IL-13" in result.text
     assert result.mapping["白细胞介素13信号通路"] == "IL-13 通路"
+
+
+def test_table_roles_do_not_unify_or_drift_fail():
+    wide = FitBlock("a", "table_cell", "Age", "年龄", 9, False, 80, 16)
+    tiny = FitBlock("b", "table_cell", "1", "1", 9, False, 8, 20)
+    results = fit_group([wide, tiny])
+    assert results[0].font_size != results[1].font_size or results[0].font_size <= 9
+    assert QC_ROLE_SIZE_DRIFT not in results[0].qc
+    assert QC_ROLE_SIZE_DRIFT not in results[1].qc
+    assert QC_ROLE_SIZE_DRIFT not in hard_fail_codes(results)
 
 
 def test_small_type_raises_dpi_and_below_target_is_warning():

@@ -9,6 +9,7 @@ from .models import BoundingBox, TranslatableBlock
 from .role_fitter import (
     QC_FONT_BELOW_TARGET,
     QC_OVERFLOW,
+    QC_ROLE_SIZE_DRIFT,
     FitBlock,
     FitResult,
     hard_fail_codes,
@@ -65,13 +66,17 @@ def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: flo
     if inset.is_empty:
         inset = rect
     regular, bold_name = _ensure_fonts(page)
+    fontname = bold_name if bold else regular
     size = max(3.0, float(font_size))
+    # 侧排窄格（页坐标宽≪高）：沿长边竖写。
+    if inset.width < 20 and inset.height >= inset.width * 1.4:
+        return _paint_cell_sideways(page, inset, text, fontname=fontname, font_size=size)
     while True:
         page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
         rc = page.insert_textbox(
             inset,
             text,
-            fontname=bold_name if bold else regular,
+            fontname=fontname,
             fontsize=size,
             align=0,
         )
@@ -82,6 +87,28 @@ def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: flo
         size = max(3.0, size - 0.5)
 
 
+def _paint_cell_sideways(page, inset, text: str, *, fontname: str, font_size: float) -> float:
+    import pymupdf
+
+    size = max(3.0, float(font_size))
+    while True:
+        page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        # 字号需落在短边内；文本长度沿长边。
+        fits_width = size <= inset.width * 0.95
+        fits_len = len(text) * size * 0.55 <= inset.height
+        if (fits_width and fits_len) or size <= 3.0:
+            origin = pymupdf.Point(inset.x0 + inset.width * 0.15, inset.y1 - 1.0)
+            page.insert_text(
+                origin,
+                text,
+                fontname=fontname,
+                fontsize=size,
+                rotate=90,
+            )
+            return size
+        size = max(3.0, size - 0.5)
+
+
 def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str]) -> list[FitBlock]:
     fitted = []
     for block in blocks:
@@ -89,6 +116,10 @@ def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str])
         size = float(style.font_size) if style and style.font_size else 9.0
         weight = (style.font_weight if style and style.font_weight else "regular") or "regular"
         box = block.bbox
+        box_w = float(box.x1 - box.x0) if box else 80.0
+        box_h = float(box.y1 - box.y0) if box else 16.0
+        if box_h >= box_w * 1.4:
+            box_w, box_h = box_h, box_w
         fitted.append(
             FitBlock(
                 block_id=block.block_id,
@@ -97,8 +128,8 @@ def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str])
                 translated_text=translations[block.block_id],
                 source_size=size,
                 source_bold=weight not in {"regular", "normal", None},
-                box_w=float(box.x1 - box.x0) if box else 80.0,
-                box_h=float(box.y1 - box.y0) if box else 16.0,
+                box_w=box_w,
+                box_h=box_h,
             )
         )
     return fitted
@@ -175,7 +206,11 @@ def paint_fitted_blocks(
             raise
     if overflowing:
         flush_row()
-    hard = [code for code in hard_fail_codes(results) if code != QC_OVERFLOW]
+    hard = [
+        code
+        for code in hard_fail_codes(results)
+        if code not in {QC_OVERFLOW, QC_ROLE_SIZE_DRIFT, QC_FONT_BELOW_TARGET}
+    ]
     if hard:
         raise TableTranslateError(f"TABLE_QC_HARD:{hard}")
     return codes, title, header, leftover

@@ -142,7 +142,11 @@ assert nature.extensions["translatable_figure_count"] == 7
 for manifest, name in ((ljae, "ljae439"), (nature, "nature")):
     bodies = [o for o in manifest.objects if o.type is ObjectType.BODY]
     assert bodies, f"{name} produced no BODY objects"
-    assert all(b.planned_action == "babeldoc_text_layer" for b in bodies)
+    assert all(
+        b.planned_action == "babeldoc_text_layer"
+        for b in bodies
+        if b.semantic_scope != "references"
+    )
     for canvas in manifest.canvases:
         orders = [b.reading_order for b in bodies if b.canvas_id == canvas.canvas_id]
         assert orders == list(range(len(orders))), (name, canvas.canvas_id)

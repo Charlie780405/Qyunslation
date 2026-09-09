@@ -35,6 +35,26 @@ POST_SNIPPET = '''
                 _qy_sys.path.insert(0, "/home/dev/pdf2zh")
                 _qy_sys.path.insert(0, "/home/dev/qyunslation/scripts")
                 from pdf_image_translate import translate_pdf_images as _qy_tr_pdf_img
+                try:
+                    from qyunslation.structure.model_trace import bind_task_model_trace as _qy_bind_trace
+                    _qy_mid = None
+                    _qy_ep = None
+                    try:
+                        _qy_ollama = getattr(settings, "ollama_detail", None)
+                        if _qy_ollama is not None:
+                            _qy_mid = getattr(_qy_ollama, "ollama_model", None)
+                            _qy_ep = getattr(_qy_ollama, "ollama_host", None)
+                        if _qy_ep and not str(_qy_ep).rstrip("/").endswith("/v1"):
+                            _qy_ep = str(_qy_ep).rstrip("/") + "/v1"
+                    except Exception:
+                        pass
+                    import os as _qy_os
+                    _qy_mid = _qy_mid or _qy_os.environ.get("DOCUTRANSLATE_MODEL_ID")
+                    _qy_ep = _qy_ep or _qy_os.environ.get("DOCUTRANSLATE_BASE_URL")
+                    if _qy_mid and _qy_ep:
+                        _qy_bind_trace(model_id=str(_qy_mid), endpoint=str(_qy_ep))
+                except Exception:
+                    pass
                 _qy_to = "简体中文"
                 try:
                     if hasattr(settings, "translate") and getattr(
@@ -103,35 +123,29 @@ POST_SNIPPET = '''
                                 page_parity="even" if _qy_alt else None,
                             )
                         )
-                    try:
-                        from pdf_table_translate import translate_pdf_tables as _qy_tbltr
-                        _qy_tbl_origin = _qy_Pimg(
-                            state.get("_pre_imgtr_origin_path") or file_path
+                    from pdf_table_translate import translate_pdf_tables as _qy_tbltr
+                    _qy_tbl_origin = _qy_Pimg(
+                        state.get("_pre_imgtr_origin_path") or file_path
+                    )
+                    if out_mono:
+                        out_mono = str(
+                            _qy_tbltr(
+                                _qy_Pimg(out_mono),
+                                origin=_qy_tbl_origin,
+                                to_lang=str(_qy_to or "简体中文"),
+                                structure_manifest=_qy_manifest,
+                            )
                         )
-                        if out_mono:
-                            out_mono = str(
-                                _qy_tbltr(
-                                    _qy_Pimg(out_mono),
-                                    origin=_qy_tbl_origin,
-                                    to_lang=str(_qy_to or "简体中文"),
-                                    structure_manifest=_qy_manifest,
-                                )
+                    if out_dual and out_dual != out_mono:
+                        out_dual = str(
+                            _qy_tbltr(
+                                _qy_Pimg(out_dual),
+                                origin=_qy_tbl_origin,
+                                to_lang=str(_qy_to or "简体中文"),
+                                structure_manifest=_qy_manifest,
+                                x_min_frac=None if _qy_alt else 0.5,
+                                page_parity="even" if _qy_alt else None,
                             )
-                        if out_dual and out_dual != out_mono:
-                            out_dual = str(
-                                _qy_tbltr(
-                                    _qy_Pimg(out_dual),
-                                    origin=_qy_tbl_origin,
-                                    to_lang=str(_qy_to or "简体中文"),
-                                    structure_manifest=_qy_manifest,
-                                    x_min_frac=None if _qy_alt else 0.5,
-                                    page_parity="even" if _qy_alt else None,
-                                )
-                            )
-                    except Exception as _qy_tbl_exc:
-                        import logging as _qy_tbl_log
-                        _qy_tbl_log.getLogger(__name__).warning(
-                            "表格写出跳过: %s", _qy_tbl_exc
                         )
                     return out_mono, out_dual
 
@@ -144,9 +158,10 @@ POST_SNIPPET = '''
                 _mono, _dual = await _qy_img_task
             except Exception as _qy_img_exc:
                 import logging as _qy_img_log
-                _qy_img_log.getLogger(__name__).warning(
-                    "译文插图翻译跳过: %s", _qy_img_exc
+                _qy_img_log.getLogger(__name__).error(
+                    "译文插图/表格后处理失败: %s", _qy_img_exc
                 )
+                raise
 '''
 
 _PRE_BLOCK_RE = re.compile(
@@ -173,41 +188,44 @@ def _install_pre(text: str) -> tuple[str, bool]:
 
 
 TABLE_MARKER = "_qy_tbltr"
-TABLE_SNIPPET = '''                    try:
-                        from pdf_table_translate import translate_pdf_tables as _qy_tbltr
-                        _qy_tbl_origin = _qy_Pimg(
-                            state.get("_pre_imgtr_origin_path") or file_path
+TABLE_SNIPPET = '''                    from pdf_table_translate import translate_pdf_tables as _qy_tbltr
+                    _qy_tbl_origin = _qy_Pimg(
+                        state.get("_pre_imgtr_origin_path") or file_path
+                    )
+                    if out_mono:
+                        out_mono = str(
+                            _qy_tbltr(
+                                _qy_Pimg(out_mono),
+                                origin=_qy_tbl_origin,
+                                to_lang=str(_qy_to or "简体中文"),
+                                structure_manifest=_qy_manifest,
+                            )
                         )
-                        if out_mono:
-                            out_mono = str(
-                                _qy_tbltr(
-                                    _qy_Pimg(out_mono),
-                                    origin=_qy_tbl_origin,
-                                    to_lang=str(_qy_to or "简体中文"),
-                                    structure_manifest=_qy_manifest,
-                                )
+                    if out_dual and out_dual != out_mono:
+                        out_dual = str(
+                            _qy_tbltr(
+                                _qy_Pimg(out_dual),
+                                origin=_qy_tbl_origin,
+                                to_lang=str(_qy_to or "简体中文"),
+                                structure_manifest=_qy_manifest,
+                                x_min_frac=None if _qy_alt else 0.5,
+                                page_parity="even" if _qy_alt else None,
                             )
-                        if out_dual and out_dual != out_mono:
-                            out_dual = str(
-                                _qy_tbltr(
-                                    _qy_Pimg(out_dual),
-                                    origin=_qy_tbl_origin,
-                                    to_lang=str(_qy_to or "简体中文"),
-                                    structure_manifest=_qy_manifest,
-                                    x_min_frac=None if _qy_alt else 0.5,
-                                    page_parity="even" if _qy_alt else None,
-                                )
-                            )
-                    except Exception as _qy_tbl_exc:
-                        import logging as _qy_tbl_log
-                        _qy_tbl_log.getLogger(__name__).warning(
-                            "表格写出跳过: %s", _qy_tbl_exc
                         )
 '''
 
+_POST_BLOCK_RE = re.compile(
+    r"\n[ \t]*# _qy_imgtr_post\n.*?(?=\n[ \t]*result_entry = \{)",
+    re.S,
+)
+
 
 def install_table_post(text: str) -> tuple[str, bool]:
-    if TABLE_MARKER in text and "translate_pdf_tables" in text:
+    if (
+        TABLE_MARKER in text
+        and "translate_pdf_tables" in text
+        and "表格写出跳过" not in text
+    ):
         return text, False
     needle = "                    return out_mono, out_dual\n"
     if needle in text:
@@ -217,6 +235,23 @@ def install_table_post(text: str) -> tuple[str, bool]:
     if idx < 0:
         return text, False
     return text[:idx] + TABLE_SNIPPET + text[idx:], True
+
+
+def upgrade_post_if_stale(text: str) -> tuple[str, bool]:
+    """旧现场吞掉 tbltr/imgtr 异常或缺少 model_trace 时，整段替换 POST。"""
+    if POST_MARKER not in text:
+        return text, False
+    stale = (
+        "表格写出跳过" in text
+        or "译文插图翻译跳过" in text
+        or "bind_task_model_trace" not in text
+    )
+    if not stale:
+        return text, False
+    if not _POST_BLOCK_RE.search(text):
+        return text, False
+    updated, n = _POST_BLOCK_RE.subn("\n" + POST_SNIPPET.rstrip() + "\n", text, count=1)
+    return updated, n > 0
 
 
 def _install_post(text: str) -> tuple[str, bool]:
@@ -244,6 +279,8 @@ def apply(text: str) -> tuple[str, bool]:
         text, did = _install_pre(text)
         changed = changed or did
     text, did = _install_post(text)
+    changed = changed or did
+    text, did = upgrade_post_if_stale(text)
     changed = changed or did
     text, did = install_table_post(text)
     changed = changed or did
@@ -289,6 +326,9 @@ def verify(text: str) -> int:
     need("translate_pdf_images" in text, "translate_pdf_images missing")
     need("translate_pdf_tables" in text, "translate_pdf_tables missing")
     need(TABLE_MARKER in text, "table writeback marker missing")
+    need("表格写出跳过" not in text, "tbltr still soft-swallows exceptions")
+    need("译文插图翻译跳过" not in text, "imgtr still soft-swallows exceptions")
+    need("bind_task_model_trace" in text, "GUI model_trace bind missing")
     need(SWAP_LINE not in text, "BabelDOC input still swapped to imgtr")
     need("x_min_frac" in text, "dual right-half filter missing")
     need("format_from_manifest" in text, "semantic progress missing")
