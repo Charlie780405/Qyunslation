@@ -24,21 +24,22 @@ def resolve_sample() -> Path | None:
 def resolve_outputs() -> dict[str, Path | None]:
     mono = os.environ.get("QYUNSLATION_PLAN033_MONO", "").strip()
     dual = os.environ.get("QYUNSLATION_PLAN033_DUAL", "").strip()
+    staging = Path("/tmp/plan033-staging")
+    stem = "1-s2.0-S2666636725013958-main.no_watermark.zh"
+    prod = Path("/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40")
     candidates_mono = [
         Path(mono) if mono else None,
-        Path("/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.mono.pdf"),
-        Path(
-            "/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40"
-            "/1-s2.0-S2666636725013958-main.no_watermark.zh-CN.mono.pdf"
-        ),
+        staging / f"{stem}.mono.imgtr.tbltr.pdf",
+        staging / f"{stem}.mono.imgtr.pdf",
+        staging / f"{stem}.mono.pdf",
+        prod / "1-s2.0-S2666636725013958-main.no_watermark.zh-CN.mono.pdf",
     ]
     candidates_dual = [
         Path(dual) if dual else None,
-        Path("/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.dual.pdf"),
-        Path(
-            "/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40"
-            "/1-s2.0-S2666636725013958-main.no_watermark.zh-CN.dual.pdf"
-        ),
+        staging / f"{stem}.dual.imgtr.tbltr.pdf",
+        staging / f"{stem}.dual.imgtr.pdf",
+        staging / f"{stem}.dual.pdf",
+        prod / "1-s2.0-S2666636725013958-main.no_watermark.zh-CN.dual.pdf",
     ]
     return {
         "mono": next((p for p in candidates_mono if p is not None and p.is_file()), None),
@@ -109,6 +110,60 @@ def patch_signature() -> dict[str, str]:
         marked = "033h" in text or "_QY_033H_PRESERVE" in text or "infer_bold" in text
         out[name] = f"{digest}:{int(marked)}"
     return out
+
+
+def _endpoint_matches(endpoint: str) -> bool:
+    got = (endpoint or "").rstrip("/")
+    want = EXPECTED_ENDPOINT.rstrip("/")
+    return got == want or got.startswith(want) or want.startswith(got)
+
+
+def attach_execution_assertions(report: dict, source_sha256: str, exe=None) -> None:
+    """把执行 Manifest 的 model_trace / 对象终态并入 033l 总门。"""
+    from qyunslation.structure.models import ExecutionStatus, ObjectType
+    from qyunslation.structure.role_fitter import HARD_FAIL, QC_FONT_BELOW_TARGET
+
+    if exe is None:
+        from qyunslation.structure import ManifestStore
+
+        exe = ManifestStore().get_execution(source_sha256)
+    if exe is None:
+        report["fail"].append("EXECUTION_MANIFEST_MISSING")
+        return
+    trace = dict((exe.extensions or {}).get("model_trace") or {})
+    report["model_trace"] = trace
+    if trace.get("model_id") == EXPECTED_MODEL and _endpoint_matches(
+        str(trace.get("endpoint") or "")
+    ):
+        report["pass"].append("model_trace")
+    else:
+        report["fail"].append(f"MODEL_TRACE:{trace}")
+    for obj in exe.objects:
+        status = obj.execution_status
+        if obj.type is ObjectType.TABLE:
+            if not obj.translatable_blocks:
+                report["fail"].append(f"TABLE_NO_BLOCKS:{obj.semantic_id}")
+            elif status is ExecutionStatus.FAILED_HARD:
+                report["fail"].append(f"TABLE_FAILED_HARD:{obj.semantic_id}:{obj.reason_code}")
+            elif status is ExecutionStatus.TRANSLATED:
+                report["pass"].append(f"table:{obj.semantic_id}")
+            elif status is not ExecutionStatus.EXPLICITLY_SKIPPED:
+                report["fail"].append(f"TABLE_STATUS:{obj.semantic_id}:{status}")
+            continue
+        if obj.type not in (ObjectType.FIGURE, ObjectType.IMAGE):
+            continue
+        checks = (obj.output_evidence.checks if obj.output_evidence else {}) or {}
+        qc = list(checks.get("object_qc") or [])
+        if any(code in HARD_FAIL for code in qc):
+            report["fail"].append(f"FIGURE_QC_HARD:{obj.semantic_id}:{qc}")
+        elif status is ExecutionStatus.TRANSLATED:
+            report["pass"].append(f"figure:{obj.semantic_id}")
+            if QC_FONT_BELOW_TARGET in qc and checks.get("dpi") not in (450, 600):
+                report["fail"].append(f"FIGURE_DPI:{obj.semantic_id}:{checks.get('dpi')}")
+        elif status is ExecutionStatus.EXPLICITLY_SKIPPED:
+            continue
+        else:
+            report["fail"].append(f"FIGURE_STATUS:{obj.semantic_id}:{status}")
 
 
 def inspect_final() -> dict:
@@ -187,6 +242,7 @@ def inspect_final() -> dict:
     finally:
         dual.close()
         src.close()
+    attach_execution_assertions(report, digest)
     return report
 
 

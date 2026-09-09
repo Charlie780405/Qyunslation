@@ -11,7 +11,12 @@ from qyunslation.structure import (
     DocumentStructureManifest,
     build_manifest_id,
 )
-from qyunslation.structure.model_trace import build_model_trace, resolve_model_trace
+from qyunslation.structure.model_trace import (
+    _CURRENT_TRACE,
+    apply_current_model_trace,
+    build_model_trace,
+    resolve_model_trace,
+)
 from qyunslation.structure.models import (
     BlockRole,
     SourceStyle,
@@ -149,3 +154,20 @@ def test_terminal_manifest_rejects_model_trace_secrets():
     with pytest.raises(ValidationError) as exc_info:
         DocumentStructureManifest.model_validate(payload)
     assert "MODEL_TRACE_SECRET" in str(exc_info.value)
+
+
+def test_apply_current_model_trace_falls_back_to_env(monkeypatch):
+    class Holder:
+        def __init__(self) -> None:
+            self.extensions: dict = {}
+
+    holder = Holder()
+    monkeypatch.setenv("DOCUTRANSLATE_MODEL_ID", "qwen3.6:35b-a3b")
+    monkeypatch.setenv("DOCUTRANSLATE_BASE_URL", "http://100.67.66.123:11434/v1")
+    token = _CURRENT_TRACE.set(None)
+    try:
+        apply_current_model_trace(holder)
+    finally:
+        _CURRENT_TRACE.reset(token)
+    assert holder.extensions["model_trace"]["model_id"] == "qwen3.6:35b-a3b"
+    assert holder.extensions["model_trace"]["endpoint"] == "http://100.67.66.123:11434/v1"

@@ -9,6 +9,8 @@ from qyunslation.extensions.image_translate import (
     QC_INK_MIN,
     _c3_is_blank,
     _c3_window,
+    _c6_em,
+    _font_below_warned,
 )
 from qyunslation.structure.role_fitter import (
     QC_FONT_BELOW_TARGET,
@@ -103,3 +105,10 @@ def test_c3_still_flags_true_blank_even_with_draw_bbox():
     win2, used2 = _c3_window([0, 0, 200, 200, "x"], (0, 0, 200, 200), {}, 200, 200)
     assert used2 is False
     assert _c3_is_blank(np.zeros((200, 200), dtype=bool), used2) is True
+
+
+def test_c6_uses_short_side_for_tall_phase_bar():
+    assert _c6_em([10, 10, 50, 198]) == 40
+    assert _c6_em([10, 10, 130, 46]) == 36
+    assert _font_below_warned([{"code": "C6", "msg": "size=10 < 0.6*em=36"}]) is True
+    assert _font_below_warned([{"code": "C5", "msg": "overflow"}]) is False

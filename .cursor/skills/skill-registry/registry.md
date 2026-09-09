@@ -22,3 +22,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-06 | SK-Q002 增补 OCR 依赖转正 / 引擎可观测 / 跨 venv 门控铁律（PLAN-027f） |
 | 2026-09-06 | SK-Q002 增补 300 DPI 回嵌与擦除残留铁律（PLAN-027g） |
 | 2026-09-09 | SK-Q002 C3 改 draw_bbox 小窗，避免流程图短标签假空白（PLAN-033k） |
+| 2026-09-09 | SK-Q002 C6 短边参照并映射 FONT_BELOW，触发高分率重绘（PLAN-033l） |

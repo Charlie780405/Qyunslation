@@ -2,6 +2,7 @@
 """PLAN-033g：记录最终解析后的模型与去凭据 endpoint。"""
 from __future__ import annotations
 
+import os
 from contextvars import ContextVar
 from urllib.parse import urlsplit, urlunsplit
 
@@ -68,7 +69,30 @@ def current_model_trace() -> dict[str, str] | None:
     return _CURRENT_TRACE.get()
 
 
+def trace_from_env() -> dict[str, str] | None:
+    model = (
+        os.environ.get("QYUNSLATION_MODEL_ID")
+        or os.environ.get("DOCUTRANSLATE_MODEL_ID")
+        or ""
+    ).strip()
+    endpoint = (
+        os.environ.get("QYUNSLATION_BASE_URL")
+        or os.environ.get("DOCUTRANSLATE_BASE_URL")
+        or ""
+    ).strip()
+    if not model or not endpoint:
+        return None
+    return resolve_model_trace(model_id=model, endpoint=endpoint)
+
+
 def apply_current_model_trace(manifest) -> None:
     trace = current_model_trace()
+    if not trace:
+        try:
+            trace = trace_from_env()
+        except ValueError:
+            trace = None
+        if trace:
+            _CURRENT_TRACE.set(trace)
     if trace:
         manifest.extensions["model_trace"] = dict(trace)
