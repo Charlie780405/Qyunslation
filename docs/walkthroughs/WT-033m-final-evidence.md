@@ -57,9 +57,27 @@ SHA-256 `c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc`。禁
 
 保护：未改、未提交 `glossaries/auto-proper-nouns.csv`。
 
+## 部署
+
+**已部署。** 2026-09-09T13:11Z 重启 `pdf2zh.service`。
+
+- 功能提交：`b888fd8`
+- merge：`dfdb511`（`merge: PLAN-033m 终态证据收口`）
+- `git push origin main`：`55ccbbb..dfdb511`
+- 生产 `PYTHONPATH=/home/dev/qyunslation` HEAD=`dfdb511`
+- 现场 GUI：有 `translate_pdf_tables` / `bind_task_model_trace`，无「表格写出跳过」
+- 烟测：`http://127.0.0.1:7860/` → 200
+- GUI 备份：`/home/dev/pdf2zh/bak-plan033m-20260909T131131Z-gui.py`
+
 ## 回滚
 
-工作区未合 main。丢弃本分支即可回到 `55ccbbb`。
+```bash
+cd /home/dev/qyunslation-plan-028d
+git revert --no-edit dfdb511
+git push origin main
+cp /home/dev/pdf2zh/bak-plan033m-20260909T131131Z-gui.py \
+  /home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/pdf2zh_next/gui.py
+systemctl --user restart pdf2zh.service
+```
 
-现场 GUI 若已打 033m 补丁：用 `/home/dev/pdf2zh/bak-plan033-tbltr-20260909T154000Z-gui.py` 或再跑 `scripts/apply-pdf2zh-docimg.py`。  
-BabelDOC 四文件补丁签名见 `033m-inspect.json` `patch_signature`。
+BabelDOC 四文件补丁签名见 `/tmp/plan033m-55ccbbb/033m-inspect.json` `patch_signature`。
