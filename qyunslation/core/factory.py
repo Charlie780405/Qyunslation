@@ -51,6 +51,17 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
     if logger is None:
         logger = logging.getLogger("qyunslation.factory")
 
+    if not getattr(payload, "skip_translate", False):
+        try:
+            from qyunslation.structure.model_trace import bind_task_model_trace
+
+            bind_task_model_trace(
+                model_id=getattr(payload, "model_id", None),
+                endpoint=getattr(payload, "base_url", None),
+            )
+        except Exception as exc:
+            logger.warning("bind task model_trace failed: %s", exc)
+
     # 辅助函数：构建术语表生成配置
     def build_glossary_agent_config():
         if payload.glossary_generate_enable and payload.glossary_agent_config:

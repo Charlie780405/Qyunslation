@@ -81,6 +81,9 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
         )
         self._apply_execution_audit(structure_manifest, block_count=n, qc=qc or {})
         if structure_manifest is not None:
+            from qyunslation.structure.model_trace import apply_current_model_trace
+
+            apply_current_model_trace(structure_manifest)
             ManifestStore().put_execution(structure_manifest.refresh_summary())
         stem = self.document_original.stem or "image"
         self.document_translated = Document.from_bytes(

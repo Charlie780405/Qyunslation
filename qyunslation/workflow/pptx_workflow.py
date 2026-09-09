@@ -106,6 +106,9 @@ class PPTXWorkflow(Workflow[PPTXWorkflowConfig, Document, Document], HTMLExporta
                     reason_code="SKIP_TRANSLATE" if skip else None,
                     checks={"rendered": True},
                 )
+            from qyunslation.structure.model_trace import apply_current_model_trace
+
+            apply_current_model_trace(structure_manifest)
             ManifestStore().put_execution(structure_manifest.refresh_summary())
         return Document.from_bytes(packed, suffix=".pptx", stem=f"{document.stem or 'deck'}.zh")
 

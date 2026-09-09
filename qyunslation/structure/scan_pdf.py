@@ -60,7 +60,7 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.4.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.5.0"
 
 
 @dataclass(frozen=True, slots=True)

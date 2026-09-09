@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-CURRENT_SCHEMA_VERSION = "1.1.0"
+CURRENT_SCHEMA_VERSION = "1.2.0"
 SUPPORTED_SCHEMA_MAJOR = 1
 _SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -120,6 +120,28 @@ class ExecutionStatus(ContractEnum):
     EXPLICITLY_SKIPPED = "EXPLICITLY_SKIPPED"
     FAILED_SOFT = "FAILED_SOFT"
     FAILED_HARD = "FAILED_HARD"
+
+
+class BlockRole(ContractEnum):
+    HEADING = "heading"
+    BODY = "body"
+    CAPTION = "caption"
+    TABLE_TITLE = "table_title"
+    TABLE_HEADER = "table_header"
+    TABLE_GROUP = "table_group"
+    TABLE_CELL = "table_cell"
+    TABLE_FOOTNOTE = "table_footnote"
+    FIGURE_TITLE = "figure_title"
+    FIGURE_LABEL = "figure_label"
+    FIGURE_BODY = "figure_body"
+    FIGURE_FOOTNOTE = "figure_footnote"
+    REFERENCE = "reference"
+
+
+class TranslationPolicy(ContractEnum):
+    TRANSLATE = "TRANSLATE"
+    PRESERVE = "PRESERVE"
+    PROTECT_TOKENS = "PROTECT_TOKENS"
 
 
 class IssueSeverity(ContractEnum):
@@ -294,16 +316,47 @@ class DetectorEvidence(ContractModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceStyle(ContractModel):
+    font_name: str | None = None
+    font_size: float | None = None
+    font_weight: str | None = None
+    italic: bool | None = None
+    alignment: str | None = None
+    rotation: float | None = None
+    writing_direction: str | None = None
+
+
 class TranslatableBlock(ContractModel):
     block_id: str = Field(min_length=1)
     source_text: str
     bbox: BoundingBox | None = None
     source_language: str | None = None
+    role: BlockRole | str | None = None
+    translation_policy: TranslationPolicy | str | None = None
+    source_style: SourceStyle | None = None
+    row_index: int | None = Field(default=None, ge=0)
+    column_index: int | None = Field(default=None, ge=0)
+    row_span: int | None = Field(default=None, ge=1)
+    column_span: int | None = Field(default=None, ge=1)
+
+
+class BlockExecutionEvidence(ContractModel):
+    block_id: str | None = None
+    detection: str | None = None
+    queued: bool | None = None
+    translated: bool | None = None
+    laid_out: bool | None = None
+    validated: bool | None = None
+    qc: list[str] | dict[str, Any] | None = None
+    final_font_size: float | None = None
+    final_font_weight: str | None = None
+    output_bbox: BoundingBox | None = None
 
 
 class OutputEvidence(ContractModel):
     asset_ids: list[str] = Field(default_factory=list)
     checks: dict[str, Any] = Field(default_factory=dict)
+    blocks: list[BlockExecutionEvidence] = Field(default_factory=list)
 
 
 class SemanticObjectBase(ContractModel):
@@ -701,4 +754,27 @@ class DocumentStructureManifest(ContractModel):
                         f"MANIFEST_SUMMARY_MISMATCH: {field_name} is not derived from objects/issues"
                     )
         object.__setattr__(self, "summary", derived)
+
+        if self.extensions.get("terminal") is True:
+            pending = [
+                item.object_id
+                for item in self.objects
+                if item.execution_status is ExecutionStatus.PENDING
+            ]
+            if pending:
+                raise ValueError(
+                    "MANIFEST_PENDING_IN_SUCCESS: terminal results cannot contain PENDING objects"
+                )
+        _reject_model_trace_secrets(self.extensions.get("model_trace"))
         return self
+
+
+_SECRET_MARKERS = ("api_key", "authorization", "sk-", "token=", "password")
+
+
+def _reject_model_trace_secrets(trace: Any) -> None:
+    if not trace:
+        return
+    blob = _canonical_json(trace).lower()
+    if any(marker in blob for marker in _SECRET_MARKERS):
+        raise ValueError("MODEL_TRACE_SECRET: credentials must not be recorded")
