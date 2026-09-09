@@ -23,7 +23,7 @@ from .representation import (
     needs_ocr,
     page_representation,
 )
-from .references import classify_body, heading_y_from_blocks
+from .references import classify_body, heading_y_from_blocks, is_section_break
 from .table_structure import table_blocks_for_manifest
 from .tables import table_regions
 from .models import (
@@ -62,7 +62,7 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.5.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.6.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,19 +181,21 @@ class PdfStructureScanner:
         *,
         in_references: bool = False,
         heading_y: float | None = None,
-    ) -> tuple[list, list]:
+    ) -> tuple[list, list, bool]:
         """正文块建模为 BODY 对象，带页内阅读顺序。
 
         030d 只审计正文、不接管译文生成：正文仍由 BabelDOC 文字层翻译，因此对象
         终态为 EXPLICITLY_SKIPPED/delegated_to_babeldoc。033h：参考文献标题与
         条目都 PRESERVE，BabelDOC 送 LLM 前必须消费该策略。
+        返回 (objects, issues, still_in_references)。
         """
         if not blocks:
-            return [], []
+            return [], [], in_references
         mode = canvas.layout_mode
         ordered = reading_order(page, mode, blocks)
         objects: list = []
         issues: list[ManifestIssue] = []
+        refs_active = in_references
         for order, block in enumerate(ordered):
             key = f"body:page:{page_no}:{order}"
             object_id = build_object_id(
@@ -205,12 +207,16 @@ class PdfStructureScanner:
             )
             rect = _rect_from_bbox((block.x0, block.y0, block.x1, block.y1))
             body_bbox = _clip_bbox(rect, canvas)
+            if is_section_break(block.text):
+                refs_active = False
             kind = classify_body(
                 block.text,
                 block.y0,
-                in_references=in_references,
+                in_references=refs_active,
                 heading_y=heading_y,
             )
+            if kind == "heading":
+                refs_active = True
             if kind in {"entry", "heading"}:
                 reason = "reference_preserve" if kind == "heading" else "reference_entry"
                 action = "preserve"
@@ -275,7 +281,7 @@ class PdfStructureScanner:
                         details={"page": page_no},
                     )
                 )
-        return objects, issues
+        return objects, issues, refs_active
 
     @staticmethod
     def _analyze_page(page) -> _PageAnalysis:
@@ -421,7 +427,7 @@ class PdfStructureScanner:
                     )
                 if analysis.reference_heading_y is not None:
                     in_references = True
-                body, body_issues = self._body_objects(
+                body, body_issues, in_references = self._body_objects(
                     page,
                     canvas,
                     prepared,

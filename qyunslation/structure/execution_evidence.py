@@ -2,7 +2,9 @@
 """Shared helpers for manifest execution audit fields."""
 from __future__ import annotations
 
-from .models import ExecutionStatus, OutputEvidence, SemanticObject
+from .models import ExecutionStatus, ObjectType, OutputEvidence, SemanticObject
+
+_KEEP_ON_MERGE = {ObjectType.FIGURE, ObjectType.IMAGE, ObjectType.TABLE}
 
 
 def write_output_evidence(
@@ -28,3 +30,28 @@ def write_output_evidence(
         ExecutionStatus.FAILED_HARD,
     }:
         obj.output_evidence = OutputEvidence(checks=payload)
+
+
+def merge_prior_execution(manifest, *, keep_types: set[ObjectType] | None = None) -> None:
+    """后处理分阶段回写时，保留另一阶段已落地的终态。"""
+    from .manifest_store import ManifestStore
+
+    keep = keep_types or _KEEP_ON_MERGE
+    try:
+        prior = ManifestStore().get_execution(manifest.document.source_sha256)
+    except Exception:
+        return
+    if prior is None:
+        return
+    by_id = {obj.semantic_id: obj for obj in prior.objects}
+    for obj in manifest.objects:
+        prev = by_id.get(obj.semantic_id)
+        if prev is None or obj.type not in keep:
+            continue
+        if (
+            obj.execution_status is ExecutionStatus.PENDING
+            and prev.execution_status is not ExecutionStatus.PENDING
+        ):
+            obj.execution_status = prev.execution_status
+            obj.reason_code = prev.reason_code
+            obj.output_evidence = prev.output_evidence

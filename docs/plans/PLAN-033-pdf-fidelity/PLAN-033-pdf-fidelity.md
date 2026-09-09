@@ -1,6 +1,6 @@
 # PLAN-033：学术 PDF 图表识别与原文不可变
 
-> 状态：**已部署，但真实最终产物验收失败，补救中**
+> 状态：**033m 已验收，合 main 后关闭**
 > 日期：2026-09-09
 > 基线：`775d0c1`（PLAN-030h）
 > 033a–033f 合入：`f83c5ff`（已部署生产）
@@ -42,6 +42,7 @@
 | [033j](./PLAN-033j-table-translate-continuation.md) | 表格批量翻译、矢量重排、单语/双语续页 | 033i |
 | [033k](./PLAN-033k-image-fit-qc.md) | role-aware fitter、等义精简、对象级 QC | 033g |
 | [033l](./PLAN-033l-final-gate-deploy.md) | 最终 PDF 总门、部署自检、回滚与 WT | 033g–033k |
+| [033m](./PLAN-033m-final-evidence.md) | 诚实总门 + Table 1–4 切格写出 + HEAD 绑定产物 | 033l |
 
 ## Out of Scope
 

@@ -180,6 +180,8 @@ def fit_group(blocks: list[FitBlock], **kwargs) -> list[FitResult]:
     for index, block in enumerate(blocks):
         by_role.setdefault(block.role, []).append(index)
     for role, idxs in by_role.items():
+        if str(role).startswith("table_"):
+            continue
         sizes = [results[i].font_size for i in idxs]
         if max(sizes) - min(sizes) > 0.75:
             shared = min(sizes)

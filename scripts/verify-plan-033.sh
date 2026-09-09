@@ -38,7 +38,7 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-for gate in 033a 033b 033c 033d 033e 033g 033h 033i 033j 033k 033l; do
+for gate in 033a 033b 033c 033d 033e 033g 033h 033i 033j 033k 033l 033m; do
   run_pass "PLAN-$gate" "$STAGE_DIR/$gate.log" bash "$ROOT/scripts/verify-plan-$gate.sh"
 done
 
@@ -55,7 +55,8 @@ run_pass "structure suite once" "$STAGE_DIR/structure.log" \
     tests/structure/test_plan033i_table_structure.py \
     tests/structure/test_plan033j_table_translate.py \
     tests/structure/test_plan033k_role_fitter.py \
-    tests/structure/test_plan033_table_image_prod.py
+    tests/structure/test_plan033_table_image_prod.py \
+    tests/structure/test_plan033m_honest_gate.py
 
 if [[ "$BLOCKED" -gt 0 ]]; then
   printf 'SUMMARY: BLOCKED blocked=%d fail=%d\n' "$BLOCKED" "$FAILURES"

@@ -14,6 +14,7 @@ def test_execution_gate_requires_model_and_hires_when_below_target():
         "blocks": [],
     }
     payload["extensions"] = {
+        "terminal": True,
         "model_trace": {
             "model_id": "qwen3.6:35b-a3b",
             "endpoint": "http://100.67.66.123:11434/v1",
