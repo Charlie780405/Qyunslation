@@ -1736,6 +1736,7 @@ def _qc_report(
         mapped = {
             "C1": QC_UNTRANSLATED,
             "C2": QC_TRUNCATED,
+            "C3": QC_TRUNCATED,
             "C5": QC_OVERFLOW,
             "C8": QC_TRUNCATED,
             "C10": QC_GRAPHICS_DAMAGE,

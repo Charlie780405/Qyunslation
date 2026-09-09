@@ -9,6 +9,7 @@ Environment=PATH=/home/dev/.local/bin:/usr/bin:/bin
 Environment=PYTHONPATH=/home/dev/qyunslation
 Environment=PDF2ZH_LLM_BATCH_PARAS=3
 Environment=PDF2ZH_LLM_BATCH_TOKENS=120
+EnvironmentFile=-/home/dev/pdf2zh/office.env
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-throughput.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-brand.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-hpd.py

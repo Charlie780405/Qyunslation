@@ -6,12 +6,17 @@ import os
 from pathlib import Path
 
 from .models import BoundingBox, TranslatableBlock
-from .role_fitter import FitBlock, FitResult, hard_fail_codes
+from .role_fitter import (
+    QC_FONT_BELOW_TARGET,
+    QC_OVERFLOW,
+    FitBlock,
+    FitResult,
+    hard_fail_codes,
+)
 from .table_translate import (
     CONTINUATION_LABEL,
     TableTranslateError,
     plan_dual_continuations,
-    plan_mono_continuations,
 )
 
 CJK_REGULAR = Path(
@@ -50,7 +55,7 @@ def _ensure_fonts(page) -> tuple[str, str]:
     return regular, bold
 
 
-def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: float) -> None:
+def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: float) -> float:
     import pymupdf
 
     rect = pymupdf.Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
@@ -59,17 +64,22 @@ def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: flo
     inset = pymupdf.Rect(rect.x0 + 0.6, rect.y0 + 0.6, rect.x1 - 0.6, rect.y1 - 0.6)
     if inset.is_empty:
         inset = rect
-    page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
     regular, bold_name = _ensure_fonts(page)
-    rc = page.insert_textbox(
-        inset,
-        text,
-        fontname=bold_name if bold else regular,
-        fontsize=max(3.0, float(font_size)),
-        align=0,
-    )
-    if rc < 0:
-        raise TableTranslateError("TABLE_OVERFLOW")
+    size = max(3.0, float(font_size))
+    while True:
+        page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        rc = page.insert_textbox(
+            inset,
+            text,
+            fontname=bold_name if bold else regular,
+            fontsize=size,
+            align=0,
+        )
+        if rc >= 0:
+            return size
+        if size <= 3.0:
+            raise TableTranslateError("TABLE_OVERFLOW")
+        size = max(3.0, size - 0.5)
 
 
 def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str]) -> list[FitBlock]:
@@ -94,49 +104,98 @@ def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str])
     return fitted
 
 
+def _is_body_role(role: str) -> bool:
+    value = (role or "table_cell").lower()
+    return "title" not in value and "header" not in value and "footnote" not in value
+
+
 def paint_fitted_blocks(
     page,
     blocks: list[TranslatableBlock],
     results: list[FitResult],
     *,
     x_min_frac: float | None,
-) -> list[str]:
+) -> tuple[list[str], str, list[str], list[list[str]]]:
     codes: list[str] = []
     width = float(page.rect.width)
-    for block, result in zip(blocks, results, strict=True):
+    title = ""
+    header: list[str] = []
+    leftover: list[list[str]] = []
+    overflowing = False
+    current_row: int | None = None
+    row_cells: list[str] = []
+
+    def flush_row() -> None:
+        nonlocal current_row, row_cells
+        if current_row is not None:
+            leftover.append(row_cells)
+        current_row = None
+        row_cells = []
+
+    paired = sorted(
+        zip(blocks, results, strict=True),
+        key=lambda item: (item[0].row_index or 0, item[0].column_index or 0),
+    )
+    for block, result in paired:
+        role = str(block.role or "table_cell")
+        if "title" in role.lower():
+            title = result.text
+        elif "header" in role.lower():
+            header.append(result.text)
+        if overflowing and _is_body_role(role):
+            row = block.row_index if block.row_index is not None else 0
+            if current_row != row:
+                flush_row()
+                current_row = row
+            row_cells.append(result.text)
+            continue
         codes.extend(result.qc)
         if not block.bbox:
             raise TableTranslateError(f"TABLE_CELL_BOX_MISSING:{block.block_id}")
-        paint_cell(
-            page,
-            output_bbox(block.bbox, width, x_min_frac=x_min_frac),
-            result.text,
-            bold=result.bold,
-            font_size=result.font_size,
-        )
-    hard = hard_fail_codes(results)
+        try:
+            used = paint_cell(
+                page,
+                output_bbox(block.bbox, width, x_min_frac=x_min_frac),
+                result.text,
+                bold=result.bold,
+                font_size=result.font_size,
+            )
+            if used + 1e-6 < result.font_size and QC_FONT_BELOW_TARGET not in result.qc:
+                result.qc.append(QC_FONT_BELOW_TARGET)
+                result.font_size = used
+        except TableTranslateError as exc:
+            if "OVERFLOW" in str(exc) and _is_body_role(role):
+                overflowing = True
+                row = block.row_index if block.row_index is not None else 0
+                if current_row != row:
+                    flush_row()
+                    current_row = row
+                row_cells.append(result.text)
+                continue
+            raise
+    if overflowing:
+        flush_row()
+    hard = [code for code in hard_fail_codes(results) if code != QC_OVERFLOW]
     if hard:
         raise TableTranslateError(f"TABLE_QC_HARD:{hard}")
-    return codes
+    return codes, title, header, leftover
+
+
+def _write_lines(page, lines: list[str], *, x: float = 36.0, y: float = 36.0) -> None:
+    regular, _bold = _ensure_fonts(page)
+    for line in lines:
+        page.insert_text((x, y), line, fontname=regular, fontsize=10)
+        y += 14
 
 
 def append_mono_continuation(doc, *, title: str, header: list[str], rows: list[list[str]]) -> int:
-    import pymupdf
-
-    pages = plan_mono_continuations(
-        table_number=_table_number_from_title(title),
-        title=title,
-        header=header,
-        rows=rows,
-        rows_per_page=max(1, len(rows)),
-    )
+    number = _table_number_from_title(title)
     page = doc.new_page()
-    y = 36.0
-    page.insert_text((36, y), pages[0].heading() if not pages[0].is_continuation else pages[-1].heading())
-    y += 18
-    for line in ([header] + rows):
-        page.insert_text((36, y), "  ".join(line))
-        y += 14
+    lines = [f"表 {number}{CONTINUATION_LABEL}"]
+    if header:
+        lines.append("  ".join(header))
+    lines.extend("  ".join(row) for row in rows)
+    _write_lines(page, lines)
     return len(doc) - 1
 
 
@@ -156,13 +215,12 @@ def append_dual_continuation(
     page = doc.new_page(width=src.rect.width * 2, height=src.rect.height)
     left = pymupdf.Rect(0, 0, src.rect.width, src.rect.height)
     page.show_pdf_page(left, origin_doc, source_page_index)
-    y = 36.0
-    x = src.rect.width + 36.0
-    page.insert_text((x, y), f"{title}{CONTINUATION_LABEL}")
-    y += 18
-    for line in ([header] + rows):
-        page.insert_text((x, y), "  ".join(line))
-        y += 14
+    number = _table_number_from_title(title)
+    lines = [f"表 {number}{CONTINUATION_LABEL}"]
+    if header:
+        lines.append("  ".join(header))
+    lines.extend("  ".join(row) for row in rows)
+    _write_lines(page, lines, x=src.rect.width + 36.0)
     return len(doc) - 1
 
 
