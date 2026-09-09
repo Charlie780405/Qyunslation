@@ -17,6 +17,18 @@ fail() { printf 'FAIL: %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 pass() { printf 'PASS: %s\n' "$1"; }
 blocked() { printf 'BLOCKED: %s\n' "$1"; BLOCKED=$((BLOCKED + 1)); }
 
+if [[ -z "${QYUNSLATION_PLAN033_SAMPLE:-}" ]]; then
+  for cand in \
+    "/home/dev/.hermes/attachments/1-s2.0-S2666636725013958-main.pdf" \
+    "/home/dev/pdf2zh/pdf2zh_files/d10bbff3-0701-431b-ad9e-9992f4f7792c/1-s2.0-S2666636725013958-main.pdf"
+  do
+    if [[ -f "$cand" ]]; then
+      export QYUNSLATION_PLAN033_SAMPLE="$cand"
+      break
+    fi
+  done
+fi
+
 if [[ ! -x "$PY" ]]; then
   printf 'SUMMARY: FAIL blocked=1 fail=0\n'
   exit 1

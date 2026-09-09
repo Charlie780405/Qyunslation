@@ -3,7 +3,7 @@
 > 计划：[PLAN-033](../plans/PLAN-033-pdf-fidelity/PLAN-033-pdf-fidelity.md)
 > 分支：`codex/plan-033g-fidelity-remediation`
 > 日期：2026-09-09
-> 结论：**未完成。** 子计划代码与聚焦门禁已入库，但真实 11 页最终 PDF 仍是补救前产物，`verify-plan-033l.sh` 报 `REFERENCES_HEADING_TRANSLATED`。不得宣称 PLAN-033 修订完成。
+> 结论：**部分通过，未完成、未部署、未推送。** `verify-plan-033l.sh` 对暂存 mono/dual 现为 PASS，但检查器只覆盖 Figure/Table 计数、PENDING 文本和参考文献标题；不得用它代替全部真实产物验收。
 
 ## 分支与提交
 
@@ -15,16 +15,20 @@
 | 033i 表格结构化 | `97d197f` |
 | 033j 表格翻译与续页 | `ddcfcad` |
 | 033k 图片排版与 QC | `9b1c805` |
-| 033l 总门与本 WT | 本提交 |
+| 033l 总门初稿 | `5a65132` |
+| 033h 术语补丁锚点 | `690af8b` |
+| 028 接受 PRESERVE | `3f7b3c4` |
+| 033h 真正挂钩 `_should_translate` | `2f23d00` |
+| 033h 挂钩 `process_page` 入队 | `a85f18f` |
 
 工作区：`/home/dev/.codex/worktrees/033g/qyunslation`  
 保护：未改动、未提交 `glossaries/auto-proper-nouns.csv`。
 
 ## 模型与端点
 
-- 锁定：`qwen3.6:35b-a3b` @ `http://100.67.66.123:11434/v1`
-- 代码：`bind_task_model_trace` 写入去凭据 `extensions.model_trace`
-- **真实样本验收未重跑翻译**，因此没有新任务的实际命中日志。不得用 `.env` 默认值代替。
+- 锁定并实际用于暂存重译：`qwen3.6:35b-a3b` @ `http://100.67.66.123:11434`（Ollama host；OpenAI 兼容形态为 `http://100.67.66.123:11434/v1`）
+- 配置来自 `/tmp/plan033-staging/config.toml`（`gui=false` 副本），CLI 显式传入 `--ollama-model` / `--ollama-host`
+- `model_trace` 代码路径已有；**本轮 CLI 重译没有写入任务 Manifest 的 model_trace**
 
 ## 门禁
 
@@ -35,48 +39,56 @@
 | verify-plan-033i.sh | PASS |
 | verify-plan-033j.sh | PASS |
 | verify-plan-033k.sh | PASS |
-| verify-plan-033l.sh | **FAIL** `REFERENCES_HEADING_TRANSLATED` |
-| verify-plan-033.sh | **FAIL**（033l 失败） |
-| verify-plan-028.sh | 未因 033l 失败而宣称通过；本 WT 提交后另跑 |
-| verify-plan-029.sh | 同上 |
-| verify-plan-030e.sh | 同上 |
+| verify-plan-033l.sh | **PASS**（暂存 PDF；断言子集） |
+| verify-plan-033.sh | 本 WT 更新后另跑 |
+| verify-plan-028.sh | **PASS**（修复列布局断言后） |
+| verify-plan-029.sh | **PASS** |
+| verify-plan-030e.sh | 先前串行被 `tail` 拖住，另跑中 |
 
-样本 `QYUNSLATION_PLAN033_SAMPLE` 本机在场：`/home/dev/.hermes/attachments/1-s2.0-S2666636725013958-main.pdf`（hash 吻合）。扫描计数 Figure=2 / Table=4。
+样本：`/home/dev/.hermes/attachments/1-s2.0-S2666636725013958-main.pdf`  
+SHA-256 `c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc`。扫描 Figure=2 / Table=4。
 
 ## 真实产物
 
-现用输出仍是补救前会话，不是本分支重译：
+暂存重译（033h `process_page` 挂钩生效后）：
 
-- mono：`/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40/1-s2.0-S2666636725013958-main.no_watermark.zh-CN.mono.pdf`
-- dual：`.../1-s2.0-S2666636725013958-main.no_watermark.zh-CN.dual.pdf`
-- 旧 dual 末页出现「参考文献」而看不到原标题 `References` → 033l 硬失败
+- mono：`/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.mono.pdf`
+- dual：`/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.dual.pdf`
+- 第 10 页标题为 `REFERENCES`（不是「参考文献」），条目保持英文作者/期刊/DOI
+- 当前 033l 检查器：`fail=[]`，`pass=figure_count=2, table_count=4, no_pending_text`
 
-未证明：Table 1–4 终态执行证据、Table 1 旋转表已译、Figure 1 零截断、粗体标题、参考文献 LLM 请求数为 0、双语左侧 hash、续页左侧原稿一致。
+补丁现场：`scripts/check-babeldoc-fidelity-033l.py` 现为 4 个文件 `:1`。备份在 `/home/dev/pdf2zh/babeldoc-bak-plan033l-20260909T150000Z`。
 
 ## 部署 / 烟测 / 回滚
 
-**未部署生产。** BabelDOC 现场补丁签名自检 `scripts/check-babeldoc-fidelity-033l.py` 在未 apply 033h 前应停止部署。
+**未部署生产，未重启 `pdf2zh.service`。** 生产 `PYTHONPATH` 仍指向 `/home/dev/qyunslation`（无本分支 `babeldoc_policy`）。
 
-暂存验收顺序（通过后才允许）：
+回滚 BabelDOC 源文件：
 
-1. `python3 scripts/apply-pdf2zh-fidelity-033h.py`
-2. `python3 scripts/check-babeldoc-fidelity-033l.py`
-3. 用泰州端点重译 11 页样本，设置 `QYUNSLATION_PLAN033_MONO` / `DUAL`
-4. `bash scripts/verify-plan-033l.sh` 与 `verify-plan-033.sh` 必须 PASS
-5. 再备份、`systemctl --user restart pdf2zh.service`、烟测 `:7860`
+```bash
+SITE=/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages
+BAK=/home/dev/pdf2zh/babeldoc-bak-plan033l-20260909T150000Z
+cp -a "$BAK/il_translator_llm_only.py" "$SITE/babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"
+cp -a "$BAK/automatic_term_extractor.py" "$SITE/babeldoc/format/pdf/document_il/midend/automatic_term_extractor.py"
+cp -a "$BAK/il_creater.py" "$SITE/babeldoc/format/pdf/document_il/frontend/il_creater.py"
+cp -a "$BAK/fontmap.py" "$SITE/babeldoc/format/pdf/document_il/utils/fontmap.py"
+```
 
-回滚：
+服务回滚：
 
 ```bash
 cp /home/dev/pdf2zh/gui.py.bak-plan033c-20260908T234059Z /home/dev/pdf2zh/gui.py
-# 从 pdf2zh.service 去掉 apply-pdf2zh-fidelity-033h.py 后
 systemctl --user daemon-reload
 systemctl --user restart pdf2zh.service
 ```
 
-## 尚未完成
+## 尚未完成 / 无法证明
 
-1. 对现场 BabelDOC 应用 033h 补丁并重译 11 页样本。
-2. 用新 mono/dual 通过 033l 全部最终 PDF 断言。
-3. 生产部署、烟测、回滚演练。
-4. 推送 `codex/plan-033g-fidelity-remediation`（须全部门禁 PASS 后）。
+1. Table 1–4 表题/单元格/脚注的终态执行证据与矢量重排（033j 策略未接到 PDF 写出）。
+2. Table 1 旋转整页表已翻译。
+3. Figure 1 零截断/越框/漏译，以及 `FONT_BELOW_TARGET` / 450–600 DPI。
+4. 粗体标题 vs 普通正文的渲染字重。
+5. 任务级 `model_trace` 写入成功结果。
+6. 续页与双语续页左侧原稿一致性（本样本未见续页）。
+7. 生产部署、烟测、回滚演练。
+8. 推送 `codex/plan-033g-fidelity-remediation`（须全部门禁 PASS 且不得宣称总完成）。

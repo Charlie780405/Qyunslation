@@ -15,38 +15,34 @@ EXPECTED_ENDPOINT = "http://100.67.66.123:11434/v1"
 
 def resolve_sample() -> Path | None:
     override = os.environ.get("QYUNSLATION_PLAN033_SAMPLE", "").strip()
-    candidates = []
     if override:
-        candidates.append(Path(override))
-    candidates.extend(
-        [
-            Path("/home/dev/.hermes/attachments/1-s2.0-S2666636725013958-main.pdf"),
-            Path(
-                "/home/dev/pdf2zh/pdf2zh_files/"
-                "d10bbff3-0701-431b-ad9e-9992f4f7792c/"
-                "1-s2.0-S2666636725013958-main.pdf"
-            ),
-        ]
-    )
-    for path in candidates:
-        if path.is_file():
-            return path
+        path = Path(override)
+        return path if path.is_file() else None
     return None
 
 
 def resolve_outputs() -> dict[str, Path | None]:
     mono = os.environ.get("QYUNSLATION_PLAN033_MONO", "").strip()
     dual = os.environ.get("QYUNSLATION_PLAN033_DUAL", "").strip()
-    default_dir = Path(
-        "/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40"
-    )
+    candidates_mono = [
+        Path(mono) if mono else None,
+        Path("/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.mono.pdf"),
+        Path(
+            "/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40"
+            "/1-s2.0-S2666636725013958-main.no_watermark.zh-CN.mono.pdf"
+        ),
+    ]
+    candidates_dual = [
+        Path(dual) if dual else None,
+        Path("/tmp/plan033-staging/1-s2.0-S2666636725013958-main.no_watermark.zh.dual.pdf"),
+        Path(
+            "/home/dev/pdf2zh/pdf2zh_files/a0de9853-5da9-4db3-a989-b74b0ab87d40"
+            "/1-s2.0-S2666636725013958-main.no_watermark.zh-CN.dual.pdf"
+        ),
+    ]
     return {
-        "mono": Path(mono) if mono else _first_existing(
-            default_dir / "1-s2.0-S2666636725013958-main.no_watermark.zh-CN.mono.pdf"
-        ),
-        "dual": Path(dual) if dual else _first_existing(
-            default_dir / "1-s2.0-S2666636725013958-main.no_watermark.zh-CN.dual.pdf"
-        ),
+        "mono": next((p for p in candidates_mono if p is not None and p.is_file()), None),
+        "dual": next((p for p in candidates_dual if p is not None and p.is_file()), None),
     }
 
 
