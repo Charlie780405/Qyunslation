@@ -15,3 +15,7 @@
 | V1 非当前页不是 300 DPI | 通过 |
 | V2 当前页长边 = 页 pt × 300/72 | 通过 |
 | V3 进度分母为 figure+table | 通过 |
+
+## 部署
+
+已合 `main`（`f83c5ff`）。GUI 有 `_qy_preview_dpi` / `format_from_manifest`，无 `file_path = _qy_new`。`pdf2zh.service` 23 条 ExecStartPre，`:7860` 200。

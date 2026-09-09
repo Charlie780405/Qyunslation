@@ -1,12 +1,12 @@
 # PLAN-033：学术 PDF 图表识别与原文不可变
 
-> 状态：**033a–033f 已完成（未合 main）**
+> 状态：**033a–033f 已合 main 并部署生产**（`f83c5ff`）
 > 日期：2026-09-09
 > 基线：`775d0c1`（PLAN-030h）
 > 原作者：Codex（2026-09-09 递交）
 > 修订：对照仓库实现后收口范围
 > 验收门：各子计划独立 `scripts/verify-plan-033a.sh` …；总门 `scripts/verify-plan-033.sh` 禁止嵌套 028–030h 全门
-> 分支：`codex/plan-033-pdf-fidelity`（已从 main 派生）
+> 分支：`codex/plan-033-pdf-fidelity`（已 `--no-ff` 合入 `main`）
 
 ## 一句话
 

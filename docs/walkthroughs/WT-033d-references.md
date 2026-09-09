@@ -19,3 +19,7 @@
 | V3 harvest 不含 IQVIA / GenScend，含 MedImmune | 通过 |
 
 未做 BabelDOC IL 禁译；验收走 manifest `planned_action` + harvest。
+
+## 部署
+
+已合 `main`（`f83c5ff`）。生产 `pdf2zh.service` 已重启：23 条 ExecStartPre status=0，`:7860` 200。
