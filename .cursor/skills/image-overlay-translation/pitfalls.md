@@ -55,3 +55,4 @@
 43. **文字带外整段回贴原图** → OCR 框内带外的残画（`c`/`OL`）贴回，译文叠字（PLAN-027g）。正解：回贴避开文字 mask；擦后 `_clear_ocr_leftovers`。
 44. **C3 在 avail∪ocr 大窗上用比例测墨迹** → 流程图短标签（如 `(n = 15)`）在高大白盒里比例低于 `QC_INK_MIN`，假空白记 `TRUNCATED`（PLAN-033k）。正解：优先 `draw_bbox` 小窗（与 C8 同口径）；无计划盒时改用绝对墨迹像素下限 `QC_INK_MIN_PX`。
 45. **C6 用 OCR 框高且警告无 below** → 竖排阶段条全员假过小；`FONT_BELOW_TARGET` 写不进，450/600 DPI 重绘不触发（PLAN-033l）。正解：高盒用短边；按 C6 码映射。
+46. **线保护把竖排字当贯穿竖线回贴** → `horiz_ink` 在无非文字候选时整词返回，擦完又贴回 Identification/Included，译文叠残影（PLAN-033）。正解：只保护扁的贯穿行；清残字后不再从原图回贴 guard；嵌字前按原文文字 mask 再擦残留。
