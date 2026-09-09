@@ -48,6 +48,8 @@ def translate_pdf_tables(
     from qyunslation.structure.scan_pdf import PdfStructureScanner
     from qyunslation.structure.table_translate import translate_table_blocks
     from qyunslation.structure.table_writeback import (
+        append_dual_continuation,
+        append_mono_continuation,
         blocks_to_fit,
         paint_fitted_blocks,
     )
@@ -68,6 +70,7 @@ def translate_pdf_tables(
         return src_path
     dest = src_path.with_name(src_path.stem + ".tbltr.pdf")
     doc = pymupdf.open(src_path)
+    origin_doc = pymupdf.open(origin_path) if origin_path.is_file() else None
     try:
         worker = translator or _llm_translator(to_lang)
         changed = False
@@ -95,16 +98,34 @@ def translate_pdf_tables(
             try:
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(blocks_to_fit(blocks, translations))
-                paint_fitted_blocks(
+                _codes, title, header, leftover = paint_fitted_blocks(
                     doc[page_index],
                     blocks,
                     results,
                     x_min_frac=x_min_frac,
                 )
+                if leftover:
+                    if x_min_frac and origin_doc is not None:
+                        append_dual_continuation(
+                            doc,
+                            origin_doc,
+                            page_index,
+                            title=title or obj.semantic_id or "表",
+                            header=header,
+                            rows=leftover,
+                        )
+                    else:
+                        append_mono_continuation(
+                            doc,
+                            title=title or obj.semantic_id or "表",
+                            header=header,
+                            rows=leftover,
+                        )
                 write_output_evidence(
                     obj,
                     status=ExecutionStatus.TRANSLATED,
                     checks={
+                        "continuation_rows": len(leftover),
                         "blocks": {
                             block.block_id: {
                                 "translate": True,
@@ -135,6 +156,8 @@ def translate_pdf_tables(
         return dest if dest.is_file() else src_path
     finally:
         doc.close()
+        if origin_doc is not None:
+            origin_doc.close()
 
 
 def _persist(manifest) -> None:

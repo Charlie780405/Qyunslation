@@ -49,6 +49,11 @@ if ! grep -q 'apply-pdf2zh-fidelity-033h.py' "$ROOT/scripts/pdf2zh.service"; the
 else
   pass "pdf2zh.service lists 033h patch"
 fi
+if ! grep -q 'office.env' "$ROOT/scripts/pdf2zh.service"; then
+  fail "pdf2zh.service missing office.env"
+else
+  pass "pdf2zh.service loads office.env"
+fi
 
 "$PY" - <<'PY' >"$STAGE_DIR/final.json"
 import json

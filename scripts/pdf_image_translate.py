@@ -47,9 +47,7 @@ def detail_with_qc(detail: dict, qc: dict | None) -> dict:
     payload = dict(detail)
     if not isinstance(qc, dict):
         return payload
-    object_qc = list(qc.get("object_qc") or [])
-    if object_qc:
-        payload["object_qc"] = object_qc
+    payload["object_qc"] = list(qc.get("object_qc") or [])
     if qc.get("dpi"):
         payload["dpi"] = qc["dpi"]
     return payload
@@ -81,6 +79,29 @@ def _mark_image(obj, qc, *, fallback_reason: str | None = None) -> str:
     if obj is not None:
         _mark(obj, status, reason, checks=_image_checks(qc))
     return status
+
+
+def _mark_figures_for_bitmap(structure_manifest, occurrences: list[dict], qc) -> None:
+    if structure_manifest is None:
+        return
+    import pymupdf
+
+    from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+    for occ in occurrences:
+        cover = pymupdf.Rect(*occ["bbox"])
+        canvas_id = f"page:{int(occ['page']) + 1}"
+        for obj in structure_manifest.objects:
+            if obj.canvas_id != canvas_id or obj.type not in (ObjectType.FIGURE, ObjectType.IMAGE):
+                continue
+            if obj.execution_status is not ExecutionStatus.PENDING:
+                continue
+            box = obj.bbox
+            rect = pymupdf.Rect(box.x0, box.y0, box.x1, box.y1)
+            if rect.is_empty or abs(rect) <= 0:
+                continue
+            if abs(rect & cover) / abs(rect) >= BITMAP_COVER_FRAC:
+                _mark_image(obj, qc)
 
 
 def _load_policy():
@@ -245,7 +266,6 @@ def _structure_regions(
             _mark(obj, "FAILED_SOFT", "bbox_outside_page")
             continue
         if any(abs(rect & c) / abs(rect) >= BITMAP_COVER_FRAC for c in covers):
-            _mark(obj, "EXPLICITLY_SKIPPED", "handled_by_bitmap_path")
             continue
         out.append((obj, rect))
     return out
@@ -441,6 +461,7 @@ def translate_pdf_images(
                             qc,
                         )
                     )
+                    _mark_figures_for_bitmap(structure_manifest, occurrences, qc)
                 except Exception as exc:
                     manifest.bitmap_skipped += 1
                     manifest.details.append(
@@ -489,6 +510,7 @@ def translate_pdf_images(
                             qc,
                         )
                     )
+                    _mark_figures_for_bitmap(structure_manifest, occurrences, qc)
                 else:
                     manifest.bitmap_skipped += 1
 
