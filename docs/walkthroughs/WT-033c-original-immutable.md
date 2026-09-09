@@ -31,4 +31,4 @@
 
 ## 未做
 
-033d / 033e 已接着做完。未把 Elsevier PDF 入库。代码仍在 `codex/plan-033-pdf-fidelity`，未合 main。
+033d / 033e 已接着做完。未把 Elsevier PDF 入库。已合 `main`（`f83c5ff`）并重启生产 `pdf2zh.service`。
