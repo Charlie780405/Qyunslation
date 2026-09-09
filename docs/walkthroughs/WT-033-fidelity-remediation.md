@@ -96,11 +96,19 @@ systemctl --user daemon-reload
 systemctl --user restart pdf2zh.service
 ```
 
+## 表格写出与图片 QC 接线
+
+生产 GUI 后处理现在会在嵌图之后调用 `translate_pdf_tables`：白底重铺单元格、可搜索文字、矢量框保留；失败标 `FAILED_HARD` 并写入 Manifest。已打过 `_qy_imgtr_post` 的现场 `gui.py` 由 `install_table_post` 升级插入，不依赖重写整段 snippet。
+
+图片路径把 `object_qc` 写入 `.imgtr.json` 与结构 Manifest；硬失败码标 `FAILED_HARD`；`FONT_BELOW_TARGET` 只警告，并按 450/600 DPI 再绘一次。`verify-plan-033j.sh` / `033k.sh` 已覆盖接线测试。
+
+**仍未证明**：11 页样本 Table 1–4 / Figure 1 的真实终态 QC、旋转表、续页、任务级 `model_trace`。
+
 ## 尚未完成 / 无法证明
 
-1. Table 1–4 表题/单元格/脚注的终态执行证据与矢量重排（033j 策略未接到 PDF 写出）。
+1. Table 1–4 表题/单元格/脚注的真实终态执行证据（写出已接线，样本未重跑）。
 2. Table 1 旋转整页表已翻译。
-3. Figure 1 零截断/越框/漏译，以及 `FONT_BELOW_TARGET` / 450–600 DPI。
+3. Figure 1 零截断/越框/漏译，以及 `FONT_BELOW_TARGET` / 450–600 DPI 的成品证据。
 4. 粗体标题 vs 普通正文的渲染字重。
 5. 任务级 `model_trace` 写入成功结果。
 6. 续页与双语续页左侧原稿一致性（本样本未见续页）。

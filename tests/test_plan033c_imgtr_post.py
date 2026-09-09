@@ -91,6 +91,8 @@ def test_docimg_patch_moves_imgtr_after_babeldoc():
     assert "_qy_imgtr_post" in updated
     assert "x_min_frac" in updated
     assert "do_translate_async_stream(settings, file_path)" in updated
+    assert "translate_pdf_tables" in updated
+    assert "_qy_tbltr" in updated
 
 
 def _half_hash(pdf: Path, *, left: bool) -> str:

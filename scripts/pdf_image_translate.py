@@ -43,6 +43,46 @@ class PdfImgManifest:
         return asdict(self)
 
 
+def detail_with_qc(detail: dict, qc: dict | None) -> dict:
+    payload = dict(detail)
+    if not isinstance(qc, dict):
+        return payload
+    object_qc = list(qc.get("object_qc") or [])
+    if object_qc:
+        payload["object_qc"] = object_qc
+    if qc.get("dpi"):
+        payload["dpi"] = qc["dpi"]
+    return payload
+
+
+def image_status_from_qc(object_qc: list[str] | None) -> str:
+    from qyunslation.structure.role_fitter import HARD_FAIL
+
+    codes = list(object_qc or [])
+    if any(code in HARD_FAIL for code in codes):
+        return "FAILED_HARD"
+    return "TRANSLATED"
+
+
+def _image_checks(qc: dict | None) -> dict:
+    if not isinstance(qc, dict):
+        return {}
+    out = {}
+    if qc.get("object_qc"):
+        out["object_qc"] = list(qc["object_qc"])
+    if qc.get("dpi"):
+        out["dpi"] = qc["dpi"]
+    return out
+
+
+def _mark_image(obj, qc, *, fallback_reason: str | None = None) -> str:
+    status = image_status_from_qc(list((qc or {}).get("object_qc") or []))
+    reason = "object_qc_hard" if status == "FAILED_HARD" else fallback_reason
+    if obj is not None:
+        _mark(obj, status, reason, checks=_image_checks(qc))
+    return status
+
+
 def _load_policy():
     import importlib.util
     import sys
@@ -100,6 +140,27 @@ def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, di
     except Exception as exc:
         logger.warning("sidecar translate failed: %s", exc)
     return png_bytes, 0, {}
+
+
+def _upsample_if_below_target(policy, png, width_pt, height_pt, to_lang, new_png, n, qc):
+    from qyunslation.structure.role_fitter import QC_FONT_BELOW_TARGET
+
+    codes = list((qc or {}).get("object_qc") or [])
+    if QC_FONT_BELOW_TARGET not in codes or n <= 0:
+        return new_png, n, qc
+    best_png, best_n, best_qc = new_png, n, qc
+    for dpi in (450, 600):
+        boosted = policy.ensure_display_dpi(png, width_pt, height_pt, target_dpi=dpi)
+        again, n2, qc2 = _translate_via_local(boosted, to_lang)
+        if n2 <= 0:
+            continue
+        merged = dict(qc2 or {})
+        merged["dpi"] = dpi
+        merged["object_qc"] = list(merged.get("object_qc") or [])
+        best_png, best_n, best_qc = again, n2, merged
+        if QC_FONT_BELOW_TARGET not in merged["object_qc"]:
+            return again, n2, merged
+    return best_png, best_n, best_qc
 
 
 def _pixmap_png(doc, xref: int) -> tuple[bytes, int, int]:
@@ -333,6 +394,9 @@ def translate_pdf_images(
                 policy.ensure_display_dpi(png, best["w"], best["h"]),
                 to_lang,
             )
+            new_png, n, qc = _upsample_if_below_target(
+                policy, png, best["w"], best["h"], to_lang, new_png, n, qc
+            )
             if n <= 0:
                 manifest.bitmap_skipped += 1
                 manifest.details.append(
@@ -361,14 +425,21 @@ def translate_pdf_images(
                     # replace on the page that owns it
                     page = doc[occurrences[0]["page"]]
                     page.replace_image(xref, stream=new_png)
-                    manifest.bitmap_translated += 1
+                    status = image_status_from_qc(list((qc or {}).get("object_qc") or []))
+                    if status == "FAILED_HARD":
+                        manifest.bitmap_skipped += 1
+                    else:
+                        manifest.bitmap_translated += 1
                     manifest.details.append(
-                        {
-                            "xref": xref,
-                            "status": "replaced",
-                            "blocks": n,
-                            "occurrences": 1,
-                        }
+                        detail_with_qc(
+                            {
+                                "xref": xref,
+                                "status": "replaced",
+                                "blocks": n,
+                                "occurrences": 1,
+                            },
+                            qc,
+                        )
                     )
                 except Exception as exc:
                     manifest.bitmap_skipped += 1
@@ -401,15 +472,22 @@ def translate_pdf_images(
                     except Exception as exc:
                         logger.warning("overlay xref %s page %s: %s", xref, o["page"], exc)
                 if ok_n:
-                    manifest.bitmap_translated += 1
+                    status = image_status_from_qc(list((qc or {}).get("object_qc") or []))
+                    if status == "FAILED_HARD":
+                        manifest.bitmap_skipped += 1
+                    else:
+                        manifest.bitmap_translated += 1
                     manifest.details.append(
-                        {
-                            "xref": xref,
-                            "status": "overlay_instances",
-                            "blocks": n,
-                            "instances": ok_n,
-                            "occurrences": len(occurrences),
-                        }
+                        detail_with_qc(
+                            {
+                                "xref": xref,
+                                "status": "overlay_instances",
+                                "blocks": n,
+                                "instances": ok_n,
+                                "occurrences": len(occurrences),
+                            },
+                            qc,
+                        )
                     )
                 else:
                     manifest.bitmap_skipped += 1
@@ -478,6 +556,9 @@ def translate_pdf_images(
                         _mark(obj, "EXPLICITLY_SKIPPED", "policy_declined")
                     continue
                 new_png, n, qc = _translate_via_local(png, to_lang)
+                new_png, n, qc = _upsample_if_below_target(
+                    policy, png, float(rect.width), float(rect.height), to_lang, new_png, n, qc
+                )
                 if n <= 0:
                     manifest.vector_skipped += 1
                     if obj is not None:
@@ -490,16 +571,21 @@ def translate_pdf_images(
                         overlay=True,
                         keep_proportion=False,
                     )
-                    manifest.vector_translated += 1
-                    if obj is not None:
-                        _mark(obj, "TRANSLATED")
+                    status = _mark_image(obj, qc)
+                    if status == "FAILED_HARD":
+                        manifest.vector_skipped += 1
+                    else:
+                        manifest.vector_translated += 1
                     manifest.details.append(
-                        {
-                            "page": pno + 1,
-                            "status": "vector_overlay",
-                            "blocks": n,
-                            "bbox": [round(x, 1) for x in (rect.x0, rect.y0, rect.x1, rect.y1)],
-                        }
+                        detail_with_qc(
+                            {
+                                "page": pno + 1,
+                                "status": "vector_overlay",
+                                "blocks": n,
+                                "bbox": [round(x, 1) for x in (rect.x0, rect.y0, rect.x1, rect.y1)],
+                            },
+                            qc,
+                        )
                     )
                 except Exception as exc:
                     manifest.vector_skipped += 1

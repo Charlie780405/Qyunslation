@@ -54,7 +54,8 @@ run_pass "structure suite once" "$STAGE_DIR/structure.log" \
     tests/structure/test_plan033h_references_style.py \
     tests/structure/test_plan033i_table_structure.py \
     tests/structure/test_plan033j_table_translate.py \
-    tests/structure/test_plan033k_role_fitter.py
+    tests/structure/test_plan033k_role_fitter.py \
+    tests/structure/test_plan033_table_image_prod.py
 
 if [[ "$BLOCKED" -gt 0 ]]; then
   printf 'SUMMARY: BLOCKED blocked=%d fail=%d\n' "$BLOCKED" "$FAILURES"
