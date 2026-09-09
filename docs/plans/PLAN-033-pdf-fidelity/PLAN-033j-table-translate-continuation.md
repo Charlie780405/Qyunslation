@@ -1,6 +1,6 @@
 # PLAN-033j：表格翻译、矢量重排和续页
 
-> 状态：**待实施**
+> 状态：**已实现，门禁待总验收**
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033j.sh`
 > 前置：033i
