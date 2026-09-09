@@ -752,13 +752,29 @@ def _fill_band(roi: np.ndarray, *, pad: int = FILL_BAND_PAD) -> tuple[int, int]:
     return y1, y2
 
 
+def _thin_rule_mask(roi: np.ndarray) -> np.ndarray:
+    """扁的贯穿行（括号线）。竖排字不能进线保护。"""
+    h, w = roi.shape[:2]
+    thin = np.zeros((h, w), bool)
+    rows = (_ink_geometry(roi).get("rows") or [])
+    if not rows:
+        return thin
+    heights = [max(1, int(r["y2"]) - int(r["y1"])) for r in rows]
+    h_max = max(heights)
+    for r in rows:
+        rh = max(1, int(r["y2"]) - int(r["y1"]))
+        if rh <= 3 or _is_rule_row(r, h_max):
+            thin[int(r["y1"]) : int(r["y2"]) + 1, :] = True
+    return thin
+
+
 def _line_guard_mask(
     roi: np.ndarray, bg_bgr: tuple[int, int, int], tm: np.ndarray | None = None
 ) -> np.ndarray:
     """贯穿性线条/色带保护掩膜（uint8 0/255）。
 
     对「非背景且非文字」像素做 1×K / K×1 开运算，存活者即长线图元。
-    挡住填充/inpaint 抹掉穿过文字带的竖线或箭头杆。
+    被 Otsu 标成字的扁横线仍保护；竖排字不得整块当线回贴。
     """
     if roi.size == 0:
         return np.zeros((0, 0), np.uint8)
@@ -776,14 +792,15 @@ def _line_guard_mask(
         kx += 1
     if ky % 2 == 0:
         ky += 1
-    # 含文字 mask 的长横线（括号顶边常被 Otsu 标成字，排除后线保护为 0）
     all_ink = ((diff > 40).astype(np.uint8) * 255)
     horiz_ink = cv2.morphologyEx(all_ink, cv2.MORPH_OPEN, np.ones((1, kx), np.uint8))
+    thin = _thin_rule_mask(roi)
+    horiz_rules = ((horiz_ink > 0) & thin).astype(np.uint8) * 255
     if not u8.any():
-        return horiz_ink
+        return horiz_rules
     horiz = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((1, kx), np.uint8))
     vert = cv2.morphologyEx(u8, cv2.MORPH_OPEN, np.ones((ky, 1), np.uint8))
-    return np.maximum(np.maximum(horiz, vert), horiz_ink)
+    return np.maximum(np.maximum(horiz, vert), horiz_rules)
 
 
 def _infer_align(rows: list[dict], *, solid: bool = False) -> str:
@@ -933,6 +950,40 @@ def _clear_ocr_leftovers(
             img_cv[oy1:oy2, ox1:ox2][m] = bg
             cleared += 1
     return cleared
+
+
+def _wipe_remaining_source_ink(
+    img_cv: np.ndarray,
+    orig: np.ndarray,
+    boxes: list,
+    styles: list[dict],
+    redraw: list[bool],
+) -> int:
+    """嵌字前：原文文字像素若还在，填回背景。不依赖二次 OCR 能否认出残画。"""
+    wiped = 0
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        roi_o = orig[y1:y2, x1:x2]
+        roi = img_cv[y1:y2, x1:x2]
+        if roi.size == 0 or roi_o.size == 0:
+            continue
+        bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
+        tm = _text_mask_u8(roi_o, heavy=True)
+        if not tm.size or int(tm.max()) == 0:
+            continue
+        g = _line_guard_mask(roi_o, bg, _text_mask_u8(roi_o, heavy=False))
+        still = (tm > 0) & (
+            np.abs(roi.astype(np.int16) - np.array(bg, dtype=np.int16)).max(axis=2) > 40
+        )
+        if g.size and int(g.max()) > 0:
+            still = still & (g == 0)
+        if int(still.sum()) < 4:
+            continue
+        img_cv[y1:y2, x1:x2][still] = bg
+        wiped += 1
+    return wiped
 
 
 def _erase_text_local(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, tm: np.ndarray) -> None:
@@ -2167,16 +2218,13 @@ def translate_image_with_qc(
     leftover_cleared = _clear_ocr_leftovers(
         img_cv, boxes, styles, redraw, orig_texts=texts
     )
-    if leftover_cleared:
-        logger.info("cleared leftover OCR ink in %d boxes", leftover_cleared)
-    for i, b in enumerate(boxes):
-        if not redraw[i]:
-            continue
-        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
-        roi = orig[y1:y2, x1:x2]
-        guard = _line_guard_mask(roi, styles[i]["bg_bgr"])
-        if guard.size and int(guard.max()) > 0:
-            img_cv[y1:y2, x1:x2][guard > 0] = roi[guard > 0]
+    wiped = _wipe_remaining_source_ink(img_cv, orig, boxes, styles, redraw)
+    if leftover_cleared or wiped:
+        logger.info(
+            "cleared leftover OCR ink in %d boxes, wiped source ink in %d",
+            leftover_cleared,
+            wiped,
+        )
 
     for (x1, y1, x2, y2), roi in kept_rois:
         img_cv[y1:y2, x1:x2] = roi

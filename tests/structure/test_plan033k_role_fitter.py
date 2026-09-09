@@ -11,6 +11,9 @@ from qyunslation.extensions.image_translate import (
     _c3_window,
     _c6_em,
     _font_below_warned,
+    _line_guard_mask,
+    _text_mask_u8,
+    _wipe_remaining_source_ink,
 )
 from qyunslation.structure.role_fitter import (
     QC_FONT_BELOW_TARGET,
@@ -112,3 +115,36 @@ def test_c6_uses_short_side_for_tall_phase_bar():
     assert _c6_em([10, 10, 130, 46]) == 36
     assert _font_below_warned([{"code": "C6", "msg": "size=10 < 0.6*em=36"}]) is True
     assert _font_below_warned([{"code": "C5", "msg": "overflow"}]) is False
+
+
+def test_line_guard_does_not_swallow_vertical_word():
+    roi = np.full((180, 36, 3), 255, np.uint8)
+    roi[12:168, 8:28] = 20
+    tm = _text_mask_u8(roi)
+    guard = _line_guard_mask(roi, (255, 255, 255), tm)
+    overlap = int(((guard > 0) & (tm > 0)).sum()) if guard.size and tm.size else 0
+    assert overlap < 80
+
+
+def test_wipe_remaining_source_ink_clears_letter_stems():
+    orig = np.full((40, 80, 3), 255, np.uint8)
+    orig[12:28, 20:28] = 10
+    img = orig.copy()
+    img[12:20, 20:28] = 255
+    n = _wipe_remaining_source_ink(
+        img,
+        orig,
+        [[5, 5, 75, 35, "AB"]],
+        [{"bg_bgr": (255, 255, 255)}],
+        [True],
+    )
+    assert n == 1
+    assert int((img[12:28, 20:28] < 200).sum()) == 0
+
+
+def test_line_guard_keeps_thin_rule():
+    roi = np.full((80, 160, 3), 255, np.uint8)
+    roi[28:58, 20:140] = 20
+    roi[10:12, 8:152] = (40, 200, 200)
+    guard = _line_guard_mask(roi, (255, 255, 255))
+    assert int((guard[10:12] > 0).sum()) >= 80
