@@ -42,7 +42,11 @@ run_pass() {
 }
 
 run_pass "033l modules compile" "$STAGE_DIR/compile.log" \
-  "$PY" -m compileall -q qyunslation/structure/plan033_final.py scripts/check-babeldoc-fidelity-033l.py
+  "$PY" -m compileall -q qyunslation/structure/plan033_final.py \
+  qyunslation/structure/model_trace.py scripts/check-babeldoc-fidelity-033l.py
+run_pass "033l inspect tests" "$STAGE_DIR/inspect.log" \
+  timeout --signal=INT --kill-after=10s 60s "$PY" -m pytest -q --no-cov \
+  tests/structure/test_plan033l_inspect.py
 
 if ! grep -q 'apply-pdf2zh-fidelity-033h.py' "$ROOT/scripts/pdf2zh.service"; then
   fail "pdf2zh.service missing 033h ExecStartPre"

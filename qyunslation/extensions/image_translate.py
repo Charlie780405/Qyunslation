@@ -1441,6 +1441,20 @@ def _c3_window(
     )
 
 
+def _c6_em(box) -> int:
+    """C6 字号参照：竖排/高盒用短边，避免阶段条被 OCR 框高误判过小。"""
+    ow = max(1, int(box[2]) - int(box[0]))
+    oh = max(1, int(box[3]) - int(box[1]))
+    return min(ow, oh) if oh >= 2 * ow else oh
+
+
+def _font_below_warned(warnings: list[dict]) -> bool:
+    return any(
+        w.get("code") == "C6" or "below" in str(w.get("msg", "")).lower()
+        for w in warnings
+    )
+
+
 def _c3_is_blank(diff: np.ndarray, used_draw_bbox: bool) -> bool:
     if diff.size == 0:
         return True
@@ -1539,17 +1553,17 @@ def _qc_report(
     if overflows:
         issues.append({"code": "C5", "msg": f"overflow boxes={overflows}"})
 
-    # C6 可读性（WARN）
+    # C6 可读性（WARN）：参照短边/行高，不拿竖排阶段条的 OCR 框高当字号目标
     for i, b in enumerate(boxes):
         if not redraw[i]:
             continue
-        oh = max(1, b[3] - b[1])
-        if sizes[i] < 0.6 * oh:
+        em = _c6_em(b)
+        if sizes[i] < 0.6 * em:
             warnings.append(
                 {
                     "code": "C6",
                     "box": i + 1,
-                    "msg": f"size={sizes[i]} < 0.6*ocr_h={oh}",
+                    "msg": f"size={sizes[i]} < 0.6*em={em}",
                     "text": (trans.get(i + 1) or "")[:40],
                 }
             )
@@ -1795,7 +1809,7 @@ def _qc_report(
             object_qc.append(mapped)
     if graphics_damage and QC_GRAPHICS_DAMAGE not in object_qc:
         object_qc.append(QC_GRAPHICS_DAMAGE)
-    if any("below" in str(w.get("msg", "")).lower() for w in warnings):
+    if _font_below_warned(warnings):
         object_qc.append(QC_FONT_BELOW_TARGET)
 
     report = {
