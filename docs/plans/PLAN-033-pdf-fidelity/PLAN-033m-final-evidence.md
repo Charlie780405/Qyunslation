@@ -1,6 +1,6 @@
 # PLAN-033m：终态证据与未关缺口收口
 
-> 状态：**已验收（未合 main）**
+> 状态：**已关闭并部署**（`dfdb511`）
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033m.sh`；样本终态 `inspect_final()`
 > 分支：`feat/PLAN-033m-final-evidence`
