@@ -78,12 +78,18 @@ def translate_pdf_tables(
     from qyunslation.structure.models import ExecutionStatus, ObjectType
     from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.scan_pdf import PdfStructureScanner
-    from qyunslation.structure.table_translate import translate_table_blocks
+    from qyunslation.structure.table_qc import (
+        assert_table_qc_clean,
+        evaluate_table_qc,
+        source_residue_on_page,
+    )
+    from qyunslation.structure.table_translate import TableTranslateError, translate_table_blocks
     from qyunslation.structure.table_writeback import (
         append_dual_continuation,
         append_mono_continuation,
         blocks_to_fit,
         paint_fitted_blocks,
+        redact_source_blocks,
     )
 
     src_path = Path(src)
@@ -110,6 +116,7 @@ def translate_pdf_tables(
         worker = translator or _llm_translator(to_lang)
         changed = False
         touched = False
+        failed = False
         for obj in tables:
             page_no = int(str(obj.canvas_id).split(":")[-1])
             page_index = page_no - 1
@@ -133,12 +140,31 @@ def translate_pdf_tables(
             try:
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(blocks_to_fit(blocks, translations))
+                records, hard = evaluate_table_qc(blocks, translations, results)
+                pre_hard = [code for code in hard if code != "OVERFLOW"]
+                if pre_hard:
+                    raise TableTranslateError(f"TABLE_QC_HARD:{pre_hard}")
+                redact_source_blocks(
+                    doc[page_index],
+                    blocks,
+                    x_min_frac=x_min_frac,
+                )
                 _codes, title, header, leftover = paint_fitted_blocks(
                     doc[page_index],
                     blocks,
                     results,
                     x_min_frac=x_min_frac,
                 )
+                records, hard = evaluate_table_qc(
+                    blocks, translations, results, leftover=leftover
+                )
+                hard.extend(
+                    source_residue_on_page(
+                        doc[page_index], blocks, translations, x_min_frac=x_min_frac
+                    )
+                )
+                hard = list(dict.fromkeys(hard))
+                assert_table_qc_clean(records, hard)
                 if leftover:
                     if x_min_frac and origin_doc is not None:
                         append_dual_continuation(
@@ -156,17 +182,7 @@ def translate_pdf_tables(
                             header=header,
                             rows=leftover,
                         )
-                block_checks = {
-                    block.block_id: {
-                        "translate": True,
-                        "layout": True,
-                        "qc": result.qc,
-                        "font_size": result.font_size,
-                        "font_weight": "bold" if result.bold else "regular",
-                        "digits_preserved": True,
-                    }
-                    for block, result in zip(blocks, results, strict=True)
-                }
+                block_checks = {record.block_id: record.as_dict() for record in records}
                 write_output_evidence(
                     obj,
                     status=ExecutionStatus.TRANSLATED,
@@ -174,10 +190,12 @@ def translate_pdf_tables(
                         "digits_preserved": True,
                         "continuation_rows": len(leftover),
                         "blocks": block_checks,
+                        "cells": [record.as_dict() for record in records],
                     },
                 )
                 changed = True
             except Exception as exc:
+                failed = True
                 logger.warning("table writeback failed %s: %s", obj.semantic_id, exc)
                 message = str(exc)
                 if "TABLE_DIGIT_DRIFT" in message:
@@ -193,8 +211,8 @@ def translate_pdf_tables(
                     checks={"error": message, "digits_preserved": False},
                 )
         if touched:
-            _persist(manifest)
-        if not changed:
+            _persist(manifest, terminal_success=not failed)
+        if failed or not changed:
             return src_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         doc.save(dest, garbage=3, deflate=True)
@@ -205,7 +223,7 @@ def translate_pdf_tables(
             origin_doc.close()
 
 
-def _persist(manifest) -> None:
+def _persist(manifest, *, terminal_success: bool = True) -> None:
     try:
         from qyunslation.structure import ManifestStore
         from qyunslation.structure.execution_evidence import (
@@ -234,6 +252,7 @@ def _persist(manifest) -> None:
         except Exception:
             pass
         manifest.extensions["terminal"] = True
+        manifest.extensions["terminal_success"] = bool(terminal_success)
         manifest.refresh_summary()
         apply_current_model_trace(manifest)
         ManifestStore().put_execution(manifest)

@@ -6,6 +6,7 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | --- | --- | --- | --- | --- |
 | SK-Q001 | scanned-doc-layout-fidelity | active | 本仓 | pitfalls.md |
 | SK-Q002 | image-overlay-translation | active | 本仓 | pitfalls.md |
+| SK-Q003 | pdf-regulatory-form-fidelity | active | 本仓 | pitfalls.md |
 
 ## 审计
 
@@ -24,3 +25,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-09 | SK-Q002 C3 改 draw_bbox 小窗，避免流程图短标签假空白（PLAN-033k） |
 | 2026-09-09 | SK-Q002 C6 短边参照并映射 FONT_BELOW，触发高分率重绘（PLAN-033l） |
 | 2026-09-09 | SK-Q002 线保护不覆盖竖排字，避免擦后残影回贴（PLAN-033） |
+| 2026-09-11 | 登记 SK-Q003（PLAN-041 监管表单保真） |

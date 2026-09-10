@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
@@ -378,6 +379,98 @@ def _assign_role(
     return BlockRole.TABLE_CELL.value
 
 
+def _edge_interval(edges: tuple[float, ...], value: float) -> int:
+    return max(0, min(bisect_right(edges, value) - 1, len(edges) - 2))
+
+
+def _vertical_boundary_at(region: TableRegion, x: float, y: float) -> bool:
+    return any(
+        abs(axis - x) <= 1.5 and start - 1.5 <= y <= end + 1.5
+        for start, end, axis in region.vertical_segments
+    )
+
+
+def _horizontal_boundary_at(region: TableRegion, y: float, x: float) -> bool:
+    return any(
+        abs(axis - y) <= 1.5 and start - 1.5 <= x <= end + 1.5
+        for start, end, axis in region.horizontal_segments
+    )
+
+
+def _vector_grid_cells(
+    page,
+    region: TableRegion,
+    *,
+    table_no: int,
+    base_row_offset: int,
+) -> list[StructuredTableCell]:
+    """Map text to exact vector-grid cells, including missing-edge merges."""
+    rows = region.row_edges
+    columns = region.column_edges
+    if len(rows) < 2 or len(columns) < 2:
+        return []
+    units = _spans_in_region(page, region) or _words_in_region(page, region)
+    buckets: dict[tuple[int, int, int, int], list[TextUnit]] = {}
+    for item in units:
+        x0, y0, x1, y1, _text = item[:5]
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        row0 = _edge_interval(rows, cy)
+        col0 = _edge_interval(columns, cx)
+        row1 = row0 + 1
+        col1 = col0 + 1
+        while col0 > 0 and not _vertical_boundary_at(region, columns[col0], cy):
+            col0 -= 1
+        while col1 < len(columns) - 1 and not _vertical_boundary_at(
+            region, columns[col1], cy
+        ):
+            col1 += 1
+        while row0 > 0 and not _horizontal_boundary_at(region, rows[row0], cx):
+            row0 -= 1
+        while row1 < len(rows) - 1 and not _horizontal_boundary_at(
+            region, rows[row1], cx
+        ):
+            row1 += 1
+        buckets.setdefault((row0, row1, col0, col1), []).append(item)
+
+    filled_by_row: dict[int, int] = {}
+    for row0, _row1, _col0, _col1 in buckets:
+        filled_by_row[row0] = filled_by_row.get(row0, 0) + 1
+
+    cells: list[StructuredTableCell] = []
+    n_rows = len(rows) - 1
+    n_cols = len(columns) - 1
+    for (row0, row1, col0, col1), items in sorted(buckets.items()):
+        ordered = sorted(items, key=lambda item: (item[1], item[0]))
+        text = " ".join(item[4] for item in ordered).strip()
+        if not text:
+            continue
+        role = _assign_role(
+            text,
+            row0,
+            n_cols,
+            n_rows,
+            is_title=bool(_TITLE_RE.match(text)),
+            header_row=0,
+            filled_in_row=filled_by_row.get(row0, 0),
+        )
+        cells.append(
+            StructuredTableCell(
+                block_id=f"table:{table_no}:r{row0 + base_row_offset}c{col0}",
+                role=role,
+                text=text,
+                row_index=row0 + base_row_offset,
+                column_index=col0,
+                row_span=row1 - row0,
+                column_span=col1 - col0,
+                bbox=(columns[col0], rows[row0], columns[col1], rows[row1]),
+                font_weight=_cell_font_weight(items),
+                font_size=_cell_font_size(items),
+            )
+        )
+    return cells
+
+
 def structure_table(
     page,
     region: TableRegion,
@@ -387,6 +480,13 @@ def structure_table(
     base_row_offset: int = 0,
 ) -> list[StructuredTableCell]:
     table_no = int(number if number is not None else region.number)
+    if region.detector == "vector_grid" and region.row_edges and region.column_edges:
+        return _vector_grid_cells(
+            page,
+            region,
+            table_no=table_no,
+            base_row_offset=base_row_offset,
+        )
     frame = local_frame_for(page, region)
     units = _text_units_in_region(page, region, frame)
     h_lines = _horizontal_lines(page)

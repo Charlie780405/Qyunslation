@@ -22,6 +22,11 @@ HARD_FAIL = {
     QC_ROLE_SIZE_DRIFT,
 }
 
+# PLAN-041 makes the readability floor a hard error for tables.  Figures keep
+# their established high-DPI warning path, so this must not leak into the
+# shared image status calculation through ``HARD_FAIL``.
+TABLE_HARD_FAIL = HARD_FAIL | {QC_FONT_BELOW_TARGET}
+
 ROLE_MIN_RATIO = {
     "figure_title": 0.80,
     "table_title": 0.80,
@@ -37,10 +42,11 @@ ROLE_MIN_PT = {
     "table_title": 7.0,
     "figure_label": 6.0,
     "figure_body": 6.0,
-    "table_cell": 6.0,
-    "table_header": 6.0,
+    "table_cell": 7.0,
+    "table_header": 7.0,
+    "table_group": 7.0,
     "figure_footnote": 5.0,
-    "table_footnote": 5.0,
+    "table_footnote": 5.5,
 }
 
 
@@ -181,6 +187,24 @@ def fit_group(blocks: list[FitBlock], **kwargs) -> list[FitResult]:
         by_role.setdefault(block.role, []).append(index)
     for role, idxs in by_role.items():
         if str(role).startswith("table_"):
+            by_tier: dict[float, list[int]] = {}
+            for index in idxs:
+                tier = round(blocks[index].source_size * 2.0) / 2.0
+                by_tier.setdefault(tier, []).append(index)
+            for tier_idxs in by_tier.values():
+                sizes = [results[i].font_size for i in tier_idxs]
+                if max(sizes) - min(sizes) <= 0.75:
+                    continue
+                shared = min(sizes)
+                for i in tier_idxs:
+                    results[i].font_size = shared
+                    results[i].dpi = choose_dpi(shared)
+                    if (
+                        shared + 1e-6
+                        < target_min_size(blocks[i].role, blocks[i].source_size)
+                        and QC_FONT_BELOW_TARGET not in results[i].qc
+                    ):
+                        results[i].qc.append(QC_FONT_BELOW_TARGET)
             continue
         sizes = [results[i].font_size for i in idxs]
         if max(sizes) - min(sizes) > 0.75:
@@ -199,4 +223,11 @@ def hard_fail_codes(results: list[FitResult]) -> list[str]:
     codes = []
     for result in results:
         codes.extend(code for code in result.qc if code in HARD_FAIL)
+    return codes
+
+
+def table_hard_fail_codes(results: list[FitResult]) -> list[str]:
+    codes = []
+    for result in results:
+        codes.extend(code for code in result.qc if code in TABLE_HARD_FAIL)
     return codes

@@ -255,6 +255,7 @@ import os
 
 # PLAN-004b/c throughput knobs (apply-pdf2zh-throughput.py)
 _PDF2ZH_SKIP_ALREADY_TARGET_COUNT = 0
+_PDF2ZH_SKIP_REASONS: dict[str, int] = {{}}
 _PDF2ZH_LLM_BATCH_TOKENS = int(os.environ.get("PDF2ZH_LLM_BATCH_TOKENS", "200"))
 _PDF2ZH_LLM_BATCH_PARAS = int(os.environ.get("PDF2ZH_LLM_BATCH_PARAS", "5"))
 
@@ -280,12 +281,17 @@ def {MARKER_SKIP}(text: str, lang_in: str, lang_out: str) -> bool:
     han = _pdf2zh_han_ratio(text)
     latin = _pdf2zh_latin_ratio(text)
     skip = False
+    reason = "source-script-present"
     if lang_out.startswith("zh"):
         skip = han >= 0.8 and latin <= 0.15
     elif lang_in.startswith("zh") and lang_out.startswith("en"):
-        skip = han < 0.8
+        # A mixed paragraph is still source-language text.  The old 80% ratio
+        # dropped clinical labels containing abbreviations, doses and IDs.
+        skip = han == 0.0
     if skip:
+        reason = "already-target"
         _PDF2ZH_SKIP_ALREADY_TARGET_COUNT += 1
+        _PDF2ZH_SKIP_REASONS[reason] = _PDF2ZH_SKIP_REASONS.get(reason, 0) + 1
     return skip
 
 '''
@@ -297,6 +303,31 @@ def {MARKER_SKIP}(text: str, lang_in: str, lang_out: str) -> bool:
             return text, changed
         text = text.replace(anchor, anchor + helper_block, 1)
         changed = True
+    else:
+        old_ratio = '        skip = han < 0.8'
+        if old_ratio in text:
+            text = text.replace(old_ratio, '        skip = han == 0.0', 1)
+            changed = True
+        counter = "_PDF2ZH_SKIP_ALREADY_TARGET_COUNT = 0"
+        reasons = "_PDF2ZH_SKIP_REASONS: dict[str, int] = {}"
+        if reasons not in text and counter in text:
+            text = text.replace(counter, counter + "\n" + reasons, 1)
+            changed = True
+        reason_anchor = "    skip = False\n"
+        reason_line = '    reason = "source-script-present"\n'
+        if reason_line not in text and reason_anchor in text:
+            text = text.replace(reason_anchor, reason_anchor + reason_line, 1)
+            changed = True
+        count_anchor = "    if skip:\n        _PDF2ZH_SKIP_ALREADY_TARGET_COUNT += 1\n"
+        audited_count = (
+            '    if skip:\n        reason = "already-target"\n'
+            "        _PDF2ZH_SKIP_ALREADY_TARGET_COUNT += 1\n"
+            "        _PDF2ZH_SKIP_REASONS[reason] = "
+            "_PDF2ZH_SKIP_REASONS.get(reason, 0) + 1\n"
+        )
+        if count_anchor in text and audited_count not in text:
+            text = text.replace(count_anchor, audited_count, 1)
+            changed = True
 
     skip_check = f"""            if {MARKER_SKIP}(
                 paragraph.unicode,
@@ -315,7 +346,8 @@ def {MARKER_SKIP}(text: str, lang_in: str, lang_out: str) -> bool:
                 continue
 
             # self.translate_paragraph"""
-    if MARKER_SKIP not in text.split("process_page")[1][:2500]:
+    process_page = text.split("process_page", 1)[1] if "process_page" in text else ""
+    if process_page and MARKER_SKIP not in process_page[:2500]:
         if placeholder_anchor in text:
             text = text.replace(
                 placeholder_anchor,
@@ -337,12 +369,23 @@ def {MARKER_SKIP}(text: str, lang_in: str, lang_out: str) -> bool:
     summary_anchor = """        path = self.translation_config.get_working_file_path("translate_tracking.json")"""
     summary_log = f"""        if _PDF2ZH_SKIP_ALREADY_TARGET_COUNT:
             logger.info(
+                "skip already-target-lang count=%s reasons=%s",
+                _PDF2ZH_SKIP_ALREADY_TARGET_COUNT,
+                _PDF2ZH_SKIP_REASONS,
+            )
+
+        path = self.translation_config.get_working_file_path("translate_tracking.json")"""
+    old_summary = '''        if _PDF2ZH_SKIP_ALREADY_TARGET_COUNT:
+            logger.info(
                 "skip already-target-lang count=%s",
                 _PDF2ZH_SKIP_ALREADY_TARGET_COUNT,
             )
 
-        path = self.translation_config.get_working_file_path("translate_tracking.json")"""
-    if "skip already-target-lang count" not in text and summary_anchor in text:
+'''
+    if old_summary in text:
+        text = text.replace(old_summary, summary_log.split(summary_anchor)[0], 1)
+        changed = True
+    elif "skip already-target-lang count" not in text and summary_anchor in text:
         text = text.replace(summary_anchor, summary_log, 1)
         changed = True
 
