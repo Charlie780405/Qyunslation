@@ -84,6 +84,7 @@ def translate_pdf_tables(
         append_mono_continuation,
         blocks_to_fit,
         paint_fitted_blocks,
+        redact_source_blocks,
     )
 
     src_path = Path(src)
@@ -110,6 +111,7 @@ def translate_pdf_tables(
         worker = translator or _llm_translator(to_lang)
         changed = False
         touched = False
+        failed = False
         for obj in tables:
             page_no = int(str(obj.canvas_id).split(":")[-1])
             page_index = page_no - 1
@@ -133,6 +135,11 @@ def translate_pdf_tables(
             try:
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(blocks_to_fit(blocks, translations))
+                redact_source_blocks(
+                    doc[page_index],
+                    blocks,
+                    x_min_frac=x_min_frac,
+                )
                 _codes, title, header, leftover = paint_fitted_blocks(
                     doc[page_index],
                     blocks,
@@ -178,6 +185,7 @@ def translate_pdf_tables(
                 )
                 changed = True
             except Exception as exc:
+                failed = True
                 logger.warning("table writeback failed %s: %s", obj.semantic_id, exc)
                 message = str(exc)
                 if "TABLE_DIGIT_DRIFT" in message:
@@ -194,7 +202,7 @@ def translate_pdf_tables(
                 )
         if touched:
             _persist(manifest)
-        if not changed:
+        if failed or not changed:
             return src_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         doc.save(dest, garbage=3, deflate=True)

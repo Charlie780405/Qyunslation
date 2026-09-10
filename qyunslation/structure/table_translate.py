@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import TranslationPolicy, TranslatableBlock
-from .protect import protect_tokens, restore_tokens
+from .protect import missing_protected_tokens, protect_tokens, restore_tokens
 from .table_cell_policy import assert_digit_tokens_preserved
 
 CONTINUATION_LABEL = "（续）"
@@ -90,6 +90,11 @@ def translate_table_blocks(
             )
         except ValueError as exc:
             raise TableTranslateError(str(exc)) from exc
+        missing_tokens = missing_protected_tokens(block.source_text, text)
+        if missing_tokens:
+            raise TableTranslateError(
+                f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"
+            )
         out[block.block_id] = text
     return out
 

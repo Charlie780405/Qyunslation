@@ -33,6 +33,10 @@ class TableRegion:
     row_count: int | None = None
     column_count: int | None = None
     detector: str = "caption_rules"
+    row_edges: tuple[float, ...] = ()
+    column_edges: tuple[float, ...] = ()
+    horizontal_segments: tuple[tuple[float, float, float], ...] = ()
+    vertical_segments: tuple[tuple[float, float, float], ...] = ()
 
     def as_tuple(self) -> tuple[float, float, float, float]:
         return (self.x0, self.y0, self.x1, self.y1)
@@ -106,14 +110,14 @@ def _thin_rule_segments(
     return out
 
 
-def _cluster_count(values: list[float], tolerance: float = 1.0) -> int:
+def _cluster_values(values: list[float], tolerance: float = 1.0) -> list[float]:
     groups: list[list[float]] = []
     for value in sorted(values):
         if groups and abs(value - groups[-1][-1]) <= tolerance:
             groups[-1].append(value)
         else:
             groups.append([value])
-    return len(groups)
+    return [sum(group) / len(group) for group in groups]
 
 
 def _component_has_text(page, bbox, text_blocks: list | None) -> bool:
@@ -198,14 +202,16 @@ def captionless_table_regions(
     for index, segment in enumerate(segments):
         components.setdefault(root(index), []).append(segment)
 
-    candidates: list[tuple[float, float, float, float, int, int, int]] = []
+    candidates: list[dict] = []
     for component in components.values():
         horizontal = [line for line in component if line.orientation == "h"]
         vertical = [line for line in component if line.orientation == "v"]
         if len(horizontal) < 2 or len(vertical) < 2:
             continue
-        row_count = _cluster_count([line.axis for line in horizontal]) - 1
-        column_count = _cluster_count([line.axis for line in vertical]) - 1
+        row_edges = _cluster_values([line.axis for line in horizontal])
+        column_edges = _cluster_values([line.axis for line in vertical])
+        row_count = len(row_edges) - 1
+        column_count = len(column_edges) - 1
         if row_count < 1 or column_count < 1 or row_count * column_count < 2:
             continue
         xs = [line.start for line in horizontal]
@@ -220,19 +226,31 @@ def captionless_table_regions(
         if bbox[3] - bbox[1] < 8.0 or not _component_has_text(page, bbox, text_blocks):
             continue
         candidates.append(
-            (
-                *bbox,
-                len(horizontal) + len(vertical),
-                row_count,
-                column_count,
-            )
+            {
+                "bbox": bbox,
+                "line_count": len(horizontal) + len(vertical),
+                "row_count": row_count,
+                "column_count": column_count,
+                "row_edges": tuple(row_edges),
+                "column_edges": tuple(column_edges),
+                "horizontal_segments": tuple(
+                    (line.start, line.end, line.axis) for line in horizontal
+                ),
+                "vertical_segments": tuple(
+                    (line.start, line.end, line.axis) for line in vertical
+                ),
+            }
         )
 
     regions = []
     for number, candidate in enumerate(
-        sorted(candidates, key=lambda item: (item[1], item[0])), start=1
+        sorted(
+            candidates,
+            key=lambda item: (item["bbox"][1], item["bbox"][0]),
+        ),
+        start=1,
     ):
-        x0, y0, x1, y1, line_count, row_count, column_count = candidate
+        x0, y0, x1, y1 = candidate["bbox"]
         regions.append(
             TableRegion(
                 number=number,
@@ -240,10 +258,14 @@ def captionless_table_regions(
                 y0=y0,
                 x1=x1,
                 y1=y1,
-                line_count=line_count,
-                row_count=row_count,
-                column_count=column_count,
+                line_count=candidate["line_count"],
+                row_count=candidate["row_count"],
+                column_count=candidate["column_count"],
                 detector="vector_grid",
+                row_edges=candidate["row_edges"],
+                column_edges=candidate["column_edges"],
+                horizontal_segments=candidate["horizontal_segments"],
+                vertical_segments=candidate["vertical_segments"],
             )
         )
     return regions

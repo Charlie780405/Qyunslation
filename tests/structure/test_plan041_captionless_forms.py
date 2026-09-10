@@ -9,6 +9,7 @@ import pytest
 
 from qyunslation.structure.models import ContentProfile, ObjectType
 from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION, PdfStructureScanner
+from qyunslation.structure.table_structure import structure_table
 from qyunslation.structure.tables import captionless_table_regions
 
 
@@ -88,6 +89,43 @@ def test_scanner_emits_tables_and_regulatory_profile_without_find_tables(
     assert manifest.document.content_profile is ContentProfile.REGULATORY
     assert [(table.row_count, table.column_count) for table in tables] == [(3, 4), (12, 2)]
     assert all(table.planned_action == "translate_cells" for table in tables)
+    for table in tables:
+        assert table.translatable_blocks
+        assert max(block.row_index for block in table.translatable_blocks) < table.row_count
+        assert max(block.column_index for block in table.translatable_blocks) < table.column_count
+
+
+def test_captionless_grid_recovers_merged_cell_and_bold_style(tmp_path):
+    path = tmp_path / "merged-grid.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=500, height=300)
+    x_edges = [50, 180, 310, 450]
+    y_edges = [50, 90, 140, 190]
+    for y in y_edges:
+        page.draw_line((x_edges[0], y), (x_edges[-1], y), width=0.5)
+    page.draw_line((x_edges[0], y_edges[0]), (x_edges[0], y_edges[-1]), width=0.5)
+    page.draw_line((x_edges[-1], y_edges[0]), (x_edges[-1], y_edges[-1]), width=0.5)
+    page.draw_line((x_edges[1], y_edges[1]), (x_edges[1], y_edges[-1]), width=0.5)
+    page.draw_line((x_edges[2], y_edges[0]), (x_edges[2], y_edges[-1]), width=0.5)
+    page.insert_text((60, 75), "Merged heading", fontname="hebo", fontsize=10)
+    page.insert_text((320, 75), "Status", fontname="hebo", fontsize=10)
+    page.insert_text((60, 120), "Row 2", fontsize=9)
+    page.insert_text((190, 120), "Value", fontsize=9)
+    page.insert_text((320, 120), "N/A", fontsize=9)
+    doc.save(path)
+    doc.close()
+
+    doc = pymupdf.open(path)
+    try:
+        regions = captionless_table_regions(doc[0])
+        assert len(regions) == 1
+        cells = structure_table(doc[0], regions[0], number=1)
+    finally:
+        doc.close()
+
+    heading = next(cell for cell in cells if cell.text == "Merged heading")
+    assert (heading.row_index, heading.column_index, heading.column_span) == (0, 0, 2)
+    assert heading.font_weight == "bold"
 
 
 @pytest.mark.skipif(

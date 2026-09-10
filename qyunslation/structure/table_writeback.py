@@ -12,7 +12,7 @@ from .role_fitter import (
     QC_ROLE_SIZE_DRIFT,
     FitBlock,
     FitResult,
-    hard_fail_codes,
+    table_hard_fail_codes,
 )
 from .table_translate import (
     CONTINUATION_LABEL,
@@ -54,6 +54,34 @@ def _ensure_fonts(page) -> tuple[str, str]:
     else:
         bold = regular
     return regular, bold
+
+
+def redact_source_blocks(
+    page,
+    blocks: list[TranslatableBlock],
+    *,
+    x_min_frac: float | None,
+) -> int:
+    """Permanently remove source text while preserving table graphics."""
+    import pymupdf
+
+    width = float(page.rect.width)
+    seen: set[tuple[float, float, float, float]] = set()
+    for block in blocks:
+        if not block.bbox or not (block.source_text or "").strip():
+            continue
+        bbox = output_bbox(block.bbox, width, x_min_frac=x_min_frac)
+        key = tuple(round(value, 3) for value in (bbox.x0, bbox.y0, bbox.x1, bbox.y1))
+        if key in seen:
+            continue
+        seen.add(key)
+        rect = pymupdf.Rect(*key)
+        if rect.is_empty or rect.width < 1 or rect.height < 1:
+            raise TableTranslateError(f"TABLE_CELL_BOX_INVALID:{block.block_id}")
+        page.add_redact_annot(rect, fill=False, cross_out=False)
+    if seen:
+        page.apply_redactions(images=0, graphics=0, text=0)
+    return len(seen)
 
 
 def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: float) -> float:
@@ -208,7 +236,7 @@ def paint_fitted_blocks(
         flush_row()
     hard = [
         code
-        for code in hard_fail_codes(results)
+        for code in table_hard_fail_codes(results)
         if code not in {QC_OVERFLOW, QC_ROLE_SIZE_DRIFT, QC_FONT_BELOW_TARGET}
     ]
     if hard:
