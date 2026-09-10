@@ -81,6 +81,9 @@ def translate_table_blocks(
         else:
             text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
         if not text.strip():
+            if _policy_value(block) is TranslationPolicy.PRESERVE:
+                out[block.block_id] = text
+                continue
             raise TableTranslateError(f"TABLE_CELL_EMPTY:{block.block_id}")
         if _looks_truncated(block.source_text, text):
             raise TableTranslateError(f"TABLE_TRUNCATED:{block.block_id}")
