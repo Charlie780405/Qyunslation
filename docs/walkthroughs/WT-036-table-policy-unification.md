@@ -28,6 +28,15 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify-release.sh
 ```
 
+## 部署
+
+| 项 | 值 |
+| --- | --- |
+| merge | `2c83927`（main → origin/main） |
+| 服务 | `pdf2zh.service`、`qyunslation-office.service` → active |
+| verify-plan-036 | PASS |
+| verify-release | 030i/035/036/030-table PASS；033l 可无样本 BLOCKED |
+
 ## 遗留
 
 - Tailoring 型 `Table N continued`（窄空格、无 `\| (Continued)`）仍不解析
