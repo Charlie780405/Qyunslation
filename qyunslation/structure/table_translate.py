@@ -2,10 +2,11 @@
 """PLAN-033j：按稳定块 ID 翻译表格，并生成单语/双语续页。"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from .models import TranslatableBlock
+from .models import TranslationPolicy, TranslatableBlock
 from .protect import protect_tokens, restore_tokens
+from .table_cell_policy import assert_digit_tokens_preserved
 
 CONTINUATION_LABEL = "（续）"
 
@@ -34,32 +35,61 @@ class DualContinuationPage:
     right_is_continuation: bool
 
 
+def _policy_value(block: TranslatableBlock) -> TranslationPolicy:
+    policy = block.translation_policy
+    if policy is None:
+        return TranslationPolicy.TRANSLATE
+    if isinstance(policy, TranslationPolicy):
+        return policy
+    return TranslationPolicy(str(policy))
+
+
 def translate_table_blocks(
     blocks: list[TranslatableBlock],
     translator,
 ) -> dict[str, str]:
     payloads = []
     maps: dict[str, dict[str, str]] = {}
+    preserved: dict[str, str] = {}
     for block in blocks:
+        policy = _policy_value(block)
+        if policy is TranslationPolicy.PRESERVE:
+            preserved[block.block_id] = block.source_text
+            continue
         protected, mapping = protect_tokens(block.source_text)
         maps[block.block_id] = mapping
         payloads.append({"id": block.block_id, "text": protected})
-    raw = translator(payloads)
-    if not isinstance(raw, dict):
-        raise TableTranslateError("TABLE_LLM_INVALID: expected id→text map")
-    missing = [block.block_id for block in blocks if block.block_id not in raw]
+    raw: dict[str, str] = {}
+    if payloads:
+        raw = translator(payloads)
+        if not isinstance(raw, dict):
+            raise TableTranslateError("TABLE_LLM_INVALID: expected id→text map")
+    missing = [
+        block.block_id
+        for block in blocks
+        if block.block_id not in preserved and block.block_id not in raw
+    ]
     if missing:
         raise TableTranslateError(f"TABLE_LLM_INCOMPLETE: missing {missing}")
     footnotes = [b.block_id for b in blocks if str(b.role) in {"table_footnote", "TABLE_FOOTNOTE"}]
-    if any(fid not in raw for fid in footnotes):
+    if any(fid not in raw and fid not in preserved for fid in footnotes):
         raise TableTranslateError("TABLE_FOOTNOTE_MISSING")
-    out = {}
+    out = dict(preserved)
     for block in blocks:
-        text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
+        if block.block_id in preserved:
+            text = preserved[block.block_id]
+        else:
+            text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
         if not text.strip():
             raise TableTranslateError(f"TABLE_CELL_EMPTY:{block.block_id}")
         if _looks_truncated(block.source_text, text):
             raise TableTranslateError(f"TABLE_TRUNCATED:{block.block_id}")
+        try:
+            assert_digit_tokens_preserved(
+                block.source_text, text, block_id=block.block_id
+            )
+        except ValueError as exc:
+            raise TableTranslateError(str(exc)) from exc
         out[block.block_id] = text
     return out
 

@@ -9,6 +9,7 @@ from typing import Literal
 
 from .font_style import infer_font_weight
 from .models import BlockRole, BoundingBox, SourceStyle, TranslationPolicy, TranslatableBlock
+from .table_cell_policy import classify_cell_policy
 from .tables import TableRegion, _horizontal_lines, _vertical_lines
 
 _TITLE_RE = re.compile(r"^\s*table\s+\d+\b", re.IGNORECASE)
@@ -67,7 +68,7 @@ class StructuredTableCell:
             source_text=self.text,
             bbox=BoundingBox(x0=x0, y0=y0, x1=max(x1, x0 + 1.0), y1=max(y1, y0 + 1.0)),
             role=self.role,
-            translation_policy=TranslationPolicy.TRANSLATE,
+            translation_policy=classify_cell_policy(self.text),
             source_style=SourceStyle(font_weight=self.font_weight, font_size=self.font_size),
             row_index=self.row_index,
             column_index=self.column_index,
@@ -383,6 +384,7 @@ def structure_table(
     *,
     caption_text: str = "",
     number: int | None = None,
+    base_row_offset: int = 0,
 ) -> list[StructuredTableCell]:
     table_no = int(number if number is not None else region.number)
     frame = local_frame_for(page, region)
@@ -444,16 +446,16 @@ def structure_table(
                 block_id=f"table:{table_no}:title",
                 role=BlockRole.TABLE_TITLE.value,
                 text=caption_text.strip(),
-                row_index=0,
+                row_index=base_row_offset,
                 column_index=0,
                 column_span=len(col_centers),
                 bbox=(region.x0, max(region.y0 - 18.0, 0.0), region.x1, region.y0 + 2.0),
             )
         ]
-        row_offset = 1
+        row_offset = base_row_offset + 1
     else:
         cells = []
-        row_offset = 0
+        row_offset = base_row_offset
 
     filled_by_row: dict[int, int] = {}
     for (row, col), items in buckets.items():
@@ -532,11 +534,16 @@ def table_grid_dimensions(
     *,
     caption_text: str = "",
     number: int | None = None,
+    base_row_offset: int = 0,
 ) -> tuple[int, int]:
     """Return (row_count, column_count) for manifest TableObject fields."""
 
     cells = structure_table(
-        page, region, caption_text=caption_text, number=number
+        page,
+        region,
+        caption_text=caption_text,
+        number=number,
+        base_row_offset=base_row_offset,
     )
     if not cells:
         return 0, 0
@@ -546,11 +553,20 @@ def table_grid_dimensions(
 
 
 def table_blocks_for_manifest(
-    page, region: TableRegion, *, caption_text: str = "", number: int | None = None
+    page,
+    region: TableRegion,
+    *,
+    caption_text: str = "",
+    number: int | None = None,
+    base_row_offset: int = 0,
 ) -> list[TranslatableBlock]:
     return [
         cell.as_block()
         for cell in structure_table(
-            page, region, caption_text=caption_text, number=number
+            page,
+            region,
+            caption_text=caption_text,
+            number=number,
+            base_row_offset=base_row_offset,
         )
     ]

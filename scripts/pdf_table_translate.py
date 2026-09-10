@@ -97,7 +97,10 @@ def translate_pdf_tables(
         except Exception as exc:
             logger.warning("table scan failed: %s", exc)
             return src_path
-    tables = [obj for obj in manifest.objects if obj.type is ObjectType.TABLE]
+    tables = sorted(
+        [obj for obj in manifest.objects if obj.type is ObjectType.TABLE],
+        key=lambda obj: (obj.semantic_id or "", int(obj.semantic_occurrence_index or 1)),
+    )
     if not tables:
         return src_path
     dest = src_path.with_name(src_path.stem + ".tbltr.pdf")
@@ -153,21 +156,24 @@ def translate_pdf_tables(
                             header=header,
                             rows=leftover,
                         )
+                block_checks = {
+                    block.block_id: {
+                        "translate": True,
+                        "layout": True,
+                        "qc": result.qc,
+                        "font_size": result.font_size,
+                        "font_weight": "bold" if result.bold else "regular",
+                        "digits_preserved": True,
+                    }
+                    for block, result in zip(blocks, results, strict=True)
+                }
                 write_output_evidence(
                     obj,
                     status=ExecutionStatus.TRANSLATED,
                     checks={
+                        "digits_preserved": True,
                         "continuation_rows": len(leftover),
-                        "blocks": {
-                            block.block_id: {
-                                "translate": True,
-                                "layout": True,
-                                "qc": result.qc,
-                                "font_size": result.font_size,
-                                "font_weight": "bold" if result.bold else "regular",
-                            }
-                            for block, result in zip(blocks, results, strict=True)
-                        }
+                        "blocks": block_checks,
                     },
                 )
                 changed = True
@@ -202,7 +208,9 @@ def _persist(manifest) -> None:
         from qyunslation.structure.model_trace import apply_current_model_trace
         from qyunslation.structure.models import ExecutionStatus, ObjectType
 
-        merge_prior_execution(manifest, keep_types={ObjectType.FIGURE, ObjectType.IMAGE})
+        merge_prior_execution(
+            manifest, keep_types={ObjectType.FIGURE, ObjectType.IMAGE, ObjectType.TABLE}
+        )
         for obj in manifest.objects:
             if obj.execution_status is ExecutionStatus.PENDING:
                 write_output_evidence(

@@ -36,7 +36,7 @@ run_pass "PLAN-033g modules compile" "$STAGE_DIR/compile.log" \
     qyunslation/structure/scan_pdf.py
 
 run_pass "schema 1.2.0 and scanner 1.6.0" "$STAGE_DIR/version.log" \
-  "$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION; from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert CURRENT_SCHEMA_VERSION == '1.2.0'; assert PDF_STRUCTURE_SCANNER_VERSION == '1.6.0'"
+  "$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION; from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert CURRENT_SCHEMA_VERSION == '1.2.0'; assert PDF_STRUCTURE_SCANNER_VERSION == '1.7.0'"
 
 run_pass "033g execution contract" "$STAGE_DIR/contract.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \

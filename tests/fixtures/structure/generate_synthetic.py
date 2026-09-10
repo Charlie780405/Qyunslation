@@ -713,6 +713,34 @@ def _landscape_frame_table_pdf_bytes() -> bytes:
     return _single_page_pdf(commands, width=612.0, height=792.0)
 
 
+def _continued_table_pdf_bytes() -> bytes:
+    """PLAN-035：两页 Table 2 + Table 2 Continued，带横线网格。"""
+    page1 = [
+        _text_command(72.0, 740.0, 16.0, "Continued table gold sample"),
+        _text_command(72.0, 680.0, 10.0, "Table 2. Safety outcomes."),
+        "0.5 w",
+        "72 650 m 540 650 l S",
+        "72 600 m 540 600 l S",
+        "72 550 m 540 550 l S",
+        _text_command(80.0, 610.0, 9.0, "Endpoint"),
+        _text_command(220.0, 610.0, 9.0, "Value"),
+        _text_command(80.0, 560.0, 9.0, "Age"),
+        _text_command(220.0, 560.0, 9.0, "42"),
+    ]
+    page2 = [
+        _text_command(72.0, 680.0, 10.0, "Table 2 Continued"),
+        "0.5 w",
+        "72 650 m 540 650 l S",
+        "72 600 m 540 600 l S",
+        "72 550 m 540 550 l S",
+        _text_command(80.0, 610.0, 9.0, "Sex"),
+        _text_command(220.0, 610.0, 9.0, "Male"),
+        _text_command(80.0, 560.0, 9.0, "Weight"),
+        _text_command(220.0, 560.0, 9.0, "72.5"),
+    ]
+    return _multi_page_pdf([page1, page2], width=612.0, height=792.0)
+
+
 def _references_section_pdf_bytes() -> bytes:
     """一页正文引用句 + 一页参考文献标题与两条条目。"""
     pages = [
@@ -772,6 +800,7 @@ GENERATORS: dict[str, Callable[[], bytes]] = {
     "caption-span-gap.pdf": _caption_span_gap_pdf_bytes,
     "landscape-frame-table.pdf": _landscape_frame_table_pdf_bytes,
     "references-section.pdf": _references_section_pdf_bytes,
+    "continued-table.pdf": _continued_table_pdf_bytes,
 }
 
 

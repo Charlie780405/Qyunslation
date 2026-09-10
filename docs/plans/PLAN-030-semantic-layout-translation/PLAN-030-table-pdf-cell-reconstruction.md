@@ -63,8 +63,9 @@ table_regions() [030d 已有]
 - 030d 区域保护回归不退化
 - Nature p5 `TABLE_GEOMETRY_MISSING` 收敛为 0 或降级为已知 WARN
 
-## 七、非目标
+## 七、非目标（后续承接）
 
 - DOCX 表格（030e 已单元格级）
-- 跨页续表合并
+- 跨页续表合并 → [PLAN-035](../PLAN-035-table-execution-fidelity/PLAN-035-table-execution-fidelity.md)
+- 执行侧数字 token 保护断言 → [PLAN-035](../PLAN-035-table-execution-fidelity/PLAN-035-table-execution-fidelity.md)
 - Markdown 抽表替代 PDF 原位

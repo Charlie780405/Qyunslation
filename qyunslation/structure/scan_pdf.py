@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .captions import caption_anchors
+from .captions import caption_anchors, continued_table_anchors
 from .ingest import prepare_document
 from .layout import (
     TextBlock,
@@ -62,7 +62,7 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.6.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.7.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +375,8 @@ class PdfStructureScanner:
         issues: list[ManifestIssue] = []
         figure_seen: set[int] = set()
         table_seen: set[int] = set()
+        table_occurrence_count: dict[int, int] = {}
+        table_max_row: dict[int, int] = {}
 
         started = time.monotonic()
         pages_scanned = 0
@@ -641,8 +643,157 @@ class PdfStructureScanner:
                                 semantic_id=f"table:{num}",
                                 semantic_scope="main",
                                 caption_ids=[cap_id],
+                                semantic_occurrence_index=1,
                             )
                         )
+                        blocks = objects[-1].translatable_blocks or []
+                        row_indexes = [
+                            b.row_index for b in blocks if b.row_index is not None
+                        ]
+                        if row_indexes:
+                            table_max_row[num] = max(
+                                table_max_row.get(num, -1), max(row_indexes)
+                            )
+                        table_occurrence_count[num] = 1
+                continued = continued_table_anchors(page)
+                if continued:
+                    try:
+                        cont_drawings = page.get_drawings() or []
+                    except Exception:
+                        cont_drawings = []
+                    cont_rows = [
+                        ("table", num, y0, bb) for num, y0, bb in continued
+                    ]
+                    cont_regions = {
+                        region.number: region
+                        for region in table_regions(
+                            page, anchors=cont_rows, drawings=cont_drawings
+                        )
+                    }
+                    for num, _y0, bb in continued:
+                        occurrence_index = table_occurrence_count.get(num, 1) + 1
+                        table_occurrence_count[num] = occurrence_index
+                        cap_bbox = _clip_bbox(_rect_from_bbox(bb), canvas)
+                        cap_key = f"table:{num}:caption:continued:{i}"
+                        cap_id = build_object_id(
+                            prepared.source_sha256,
+                            canvas.canvas_id,
+                            ObjectType.CAPTION,
+                            cap_key,
+                            [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": cap_key}],
+                        )
+                        tab_cap_text = _clip_text(page, bb)
+                        region = cont_regions.get(num)
+                        tab_bbox = (
+                            _clip_bbox(_rect_from_bbox(region.as_tuple()), canvas)
+                            if region is not None
+                            else cap_bbox
+                        )
+                        tab_key = f"table:{num}:occ{occurrence_index}"
+                        tab_id = build_object_id(
+                            prepared.source_sha256,
+                            canvas.canvas_id,
+                            ObjectType.TABLE,
+                            tab_key,
+                            [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": tab_key}],
+                        )
+                        base_row = table_max_row.get(num, -1) + 1
+                        row_count = column_count = None
+                        blocks: list[TranslatableBlock] = []
+                        if region is not None:
+                            row_count, column_count = table_grid_dimensions(
+                                page,
+                                region,
+                                caption_text="",
+                                number=num,
+                                base_row_offset=base_row,
+                            )
+                            blocks = table_blocks_for_manifest(
+                                page,
+                                region,
+                                caption_text="",
+                                number=num,
+                                base_row_offset=base_row,
+                            )
+                        else:
+                            issues.append(
+                                ManifestIssue(
+                                    code="TABLE_CONTINUATION_UNLINKED",
+                                    severity=IssueSeverity.WARNING,
+                                    stage=PipelineStage.SCAN,
+                                    retryable=False,
+                                    message=(
+                                        f"page {i} continued table {num} "
+                                        "has caption but no table region"
+                                    ),
+                                    details={"page": i, "table": num},
+                                )
+                            )
+                        objects.append(
+                            CaptionObject(
+                                type=ObjectType.CAPTION,
+                                object_id=cap_id,
+                                canvas_id=canvas.canvas_id,
+                                bbox=cap_bbox,
+                                representation=Representation.NATIVE_TEXT,
+                                source_refs=[
+                                    SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=cap_key)
+                                ],
+                                translatable_blocks=[
+                                    TranslatableBlock(
+                                        block_id=f"block:caption:table:{num}:occ{occurrence_index}",
+                                        source_text=tab_cap_text,
+                                        bbox=cap_bbox,
+                                    )
+                                ],
+                                caption_for=[tab_id],
+                                semantic_id=f"caption:table:{num}",
+                                semantic_scope="main",
+                            )
+                        )
+                        objects.append(
+                            TableObject(
+                                type=ObjectType.TABLE,
+                                object_id=tab_id,
+                                canvas_id=canvas.canvas_id,
+                                bbox=tab_bbox,
+                                representation=Representation.NATIVE_TEXT,
+                                row_count=row_count,
+                                column_count=column_count,
+                                source_refs=[
+                                    SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=tab_key)
+                                ],
+                                detector_evidence=[
+                                    DetectorEvidence(
+                                        detector="continued_table_anchors",
+                                        label=f"table:{num}:occ{occurrence_index}",
+                                        bbox=cap_bbox,
+                                        details={"page": i, "continued": True},
+                                    ),
+                                    *(
+                                        self._table_region_evidence(
+                                            cont_regions, num, canvas, i
+                                        )
+                                        if region is not None
+                                        else []
+                                    ),
+                                ],
+                                translatable_blocks=blocks,
+                                execution_status=ExecutionStatus.PENDING,
+                                planned_action="translate_cells",
+                                semantic_id=f"table:{num}",
+                                semantic_scope="main",
+                                caption_ids=[cap_id],
+                                semantic_occurrence_index=occurrence_index,
+                            )
+                        )
+                        row_indexes = [
+                            b.row_index for b in blocks if b.row_index is not None
+                        ]
+                        if row_indexes:
+                            table_max_row[num] = max(
+                                table_max_row.get(num, -1), max(row_indexes)
+                            )
         finally:
             doc.close()
 
