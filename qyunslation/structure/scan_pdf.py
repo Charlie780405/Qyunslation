@@ -24,7 +24,7 @@ from .representation import (
     page_representation,
 )
 from .references import classify_body, heading_y_from_blocks, is_section_break
-from .table_structure import table_blocks_for_manifest
+from .table_structure import table_blocks_for_manifest, table_grid_dimensions
 from .tables import table_regions
 from .models import (
     AssetRole,
@@ -567,6 +567,14 @@ class PdfStructureScanner:
                             tab_key,
                             [{"kind": SourceRefKind.PDF_TEXT_BLOCK.value, "ref": tab_key}],
                         )
+                        row_count = column_count = None
+                        if region is not None:
+                            row_count, column_count = table_grid_dimensions(
+                                page,
+                                region,
+                                caption_text=tab_cap_text,
+                                number=num,
+                            )
                         objects.append(
                             CaptionObject(
                                 type=ObjectType.CAPTION,
@@ -596,6 +604,8 @@ class PdfStructureScanner:
                                 canvas_id=canvas.canvas_id,
                                 bbox=tab_bbox,
                                 representation=Representation.NATIVE_TEXT,
+                                row_count=row_count,
+                                column_count=column_count,
                                 source_refs=[
                                     SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=tab_key)
                                 ],

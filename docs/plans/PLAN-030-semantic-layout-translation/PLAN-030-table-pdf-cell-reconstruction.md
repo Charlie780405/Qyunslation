@@ -1,6 +1,8 @@
 # PLAN-030-table 子计划：PDF 三线表单元格级重建
 
-**状态**：待批准（技术选型门）  
+**状态**：**已完成**（2026-09-10）  
+**验收**：[WT-030-table](../../walkthroughs/WT-030-table-closure.md) / `bash scripts/verify-plan-030-table.sh`  
+**ADR**：[ADR-030-table-cell-extraction](../../decisions/ADR-030-table-cell-extraction.md)  
 **类型**：横切能力（PDF 专用，不阻塞 030f/030g 主链）  
 **依赖**：PLAN-030d Task 8 区域保护已交付；WT-030d 已记录 `find_tables()` 失败证据  
 **与主链关系**：可与 PLAN-030f 并行立项；**实施建议排在 030g 之后、030h 之前**（避免同时动 PDF 表与 PPT 嵌图）

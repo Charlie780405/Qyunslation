@@ -526,6 +526,25 @@ def _band_edges(centers: list[float], span: float) -> list[tuple[float, float]]:
     return edges
 
 
+def table_grid_dimensions(
+    page,
+    region: TableRegion,
+    *,
+    caption_text: str = "",
+    number: int | None = None,
+) -> tuple[int, int]:
+    """Return (row_count, column_count) for manifest TableObject fields."""
+
+    cells = structure_table(
+        page, region, caption_text=caption_text, number=number
+    )
+    if not cells:
+        return 0, 0
+    max_row = max(cell.row_index + cell.row_span - 1 for cell in cells)
+    max_col = max(cell.column_index + cell.column_span - 1 for cell in cells)
+    return max_row + 1, max_col + 1
+
+
 def table_blocks_for_manifest(
     page, region: TableRegion, *, caption_text: str = "", number: int | None = None
 ) -> list[TranslatableBlock]:
