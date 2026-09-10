@@ -43,3 +43,11 @@ bash scripts/verify-plan-039.sh
 | GenScend | GenScend（非金斯瑞） |
 | primary endpoint | 主要终点 |
 | CRSwNP | 伴鼻息肉的慢性鼻窦炎 |
+
+## 部署
+
+| 项 | 值 |
+| --- | --- |
+| merge | `8ac8749`（039a–f → origin/main） |
+| 服务 | `pdf2zh.service`、`qyunslation-office.service` |
+| verify-plan-039 | PASS |
