@@ -1,6 +1,6 @@
 # PLAN-033：学术 PDF 图表识别与原文不可变
 
-> 状态：**已关闭并部署**（033m 合入 `dfdb511`）
+> 状态：**已关闭并部署**（033n @ HEAD `76c75cf`，`verify-plan-033.sh` PASS）
 > 日期：2026-09-09
 > 基线：`775d0c1`（PLAN-030h）
 > 033a–033f 合入：`f83c5ff`（已部署生产）
@@ -43,6 +43,7 @@
 | [033k](./PLAN-033k-image-fit-qc.md) | role-aware fitter、等义精简、对象级 QC | 033g |
 | [033l](./PLAN-033l-final-gate-deploy.md) | 最终 PDF 总门、部署自检、回滚与 WT | 033g–033k |
 | [033m](./PLAN-033m-final-evidence.md) | 诚实总门 + Table 1–4 切格写出 + HEAD 绑定产物 | 033l |
+| [033n](./PLAN-033n-head-evidence-rebind.md) | 当前 HEAD 重跑全链路并重绑 `/tmp/plan033m-<HEAD>/` | 033m |
 
 ## Out of Scope
 
