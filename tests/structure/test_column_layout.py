@@ -66,7 +66,9 @@ def test_full_width_front_matter_is_single_column():
 
     assert modes[0] is LayoutMode.SINGLE
     assert modes[1] is LayoutMode.SINGLE
-    assert Counter(modes)[LayoutMode.DOUBLE] == 8
+    counts = Counter(modes)
+    assert counts[LayoutMode.DOUBLE] == 7
+    assert counts[LayoutMode.MULTI] == 1
 
 
 @both_slides

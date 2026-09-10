@@ -67,6 +67,7 @@ class DocxStructureScanner:
         source: Path | str | bytes,
         *,
         source_name: str = "document.docx",
+        content_profile: ContentProfile | None = None,
     ) -> DocumentStructureManifest:
         if isinstance(source, (Path, str)):
             path = Path(source)
@@ -283,11 +284,17 @@ class DocxStructureScanner:
 
         fig_n = len(figure_nums)
         tab_n = len({k for k in caption_by_num if k[0] == "table"})
+        from .profiles import suggest_content_profile
+
+        suggested, confidence, evidence = suggest_content_profile(
+            figure_caption_count=fig_n,
+            table_caption_count=tab_n,
+        )
         decision = resolve_profile(
-            auto_suggestion=ContentProfile.REVIEW_ARTICLE,
-            confidence=0.85 if fig_n or tab_n else 0.5,
-            evidence=[f"figure_captions:{fig_n}", f"table_captions:{tab_n}"],
-            user_override=None,
+            auto_suggestion=suggested,
+            confidence=confidence,
+            evidence=evidence,
+            user_override=content_profile,
         )
 
         document = DocumentInfo(

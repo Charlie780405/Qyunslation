@@ -47,54 +47,36 @@ def poster(generated_structure_fixtures):
     yield from _page(generated_structure_fixtures, "poster-sections.pdf")
 
 
-def test_multi_column_mode_is_never_produced(three_column, four_column):
-    """已知债：三栏与四栏都被判成 DOUBLE，LayoutMode.MULTI 是死枚举。
-
-    detect_layout_mode 只按「窄块中心点是否分居中线两侧」二分，栏数一律
-    归结为两栏。RESEARCH_ARTICLE 的 expected_layout_modes 却声明支持 MULTI，
-    契约与实现在此背离。
-    """
-    assert detect_layout_mode(three_column) is LayoutMode.DOUBLE
-    assert detect_layout_mode(four_column) is LayoutMode.DOUBLE
-    assert LayoutMode.MULTI in set(LayoutMode)
-
-
-def test_middle_column_is_assigned_by_which_side_of_the_midline_it_lands_on(
-    three_column,
+def test_multi_column_mode_is_produced_for_three_and_four_columns(
+    three_column, four_column
 ):
-    """三栏被判 DOUBLE 的实际后果：中间栏按中线机械二分，归左归右全看它压在哪侧。
+    """030j D1：三栏与四栏产出 MULTI，不再一律压成 DOUBLE。"""
+    assert detect_layout_mode(three_column) is LayoutMode.MULTI
+    assert detect_layout_mode(four_column) is LayoutMode.MULTI
 
-    中栏中心落在 0.501 就归右、落在 0.499 就归左——两者相差千分之二，阅读
-    顺序却完全不同。译文按「左串自上而下 → 右串自上而下」拼接，三栏原文的
-    顺序在扫描阶段就已经错了，后续无论怎么排版都补不回来。
-    """
+
+def test_middle_column_gets_middle_label_in_multi_layout(three_column):
+    """030j D2：三栏中栏标 middle，不再按中线二分归左/右。"""
     mode = detect_layout_mode(three_column)
-    ordered = reading_order(three_column, mode)
     width = float(three_column.rect.width)
+    blocks = body_blocks(three_column)
 
-    assert len(ordered) == 3
-    columns = [column_of(block, three_column, mode) for block in ordered]
-    # 三栏被压成两串；具体哪一串多一列取决于中栏压在中线哪侧
-    assert set(columns) == {"left", "right"}
-    assert columns.count("left") + columns.count("right") == 3
-
-    middle = ordered[1]
-    assert 0.45 < middle.center_x / width < 0.55, "中栏确实压在中线上"
+    assert mode is LayoutMode.MULTI
+    middle_blocks = [b for b in blocks if 0.33 < b.center_x / width < 0.67]
+    assert middle_blocks
+    for block in middle_blocks:
+        assert column_of(block, three_column, mode) == "middle"
 
 
-def test_two_column_page_with_few_blocks_falls_back_to_single(
+def test_two_column_page_with_few_blocks_is_double(
     generated_structure_fixtures,
 ):
-    """已知债：正文块少于 3 的双栏页被判成 SINGLE。
-
-    detect_layout_mode 在 len(items) < 3 时直接短路返回 SINGLE，一页只有
-    两大块正文的双栏版面（短文、附录、表格页）因此被当成单栏。
-    """
+    """030j D3：仅两块正文的双栏页仍判 DOUBLE，不短路 SINGLE。"""
     document = pymupdf.open(generated_structure_fixtures / "mixed-columns.pdf")
     try:
         page = document[1]
         assert len(body_blocks(page)) == 2
-        assert detect_layout_mode(page) is LayoutMode.SINGLE
+        assert detect_layout_mode(page) is LayoutMode.DOUBLE
     finally:
         document.close()
 
@@ -112,7 +94,7 @@ def test_mixed_document_resolves_layout_per_page(generated_structure_fixtures):
 
     assert len(modes) == 3
     assert modes[0] is LayoutMode.SINGLE  # 通栏扉页
-    assert modes[2] is LayoutMode.DOUBLE  # 三栏附录，被判成两栏
+    assert modes[2] is LayoutMode.MULTI  # 三栏附录
     assert LayoutMode.MIXED not in modes
 
 

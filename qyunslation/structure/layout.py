@@ -29,6 +29,8 @@ POSTER_FREEFORM_ASPECT = 1.38
 POSTER_MIN_BODY_BLOCKS = 6
 # 与 Figure/Table 区域重叠超过此比例的文本块不算正文
 MAX_FIGURE_OVERLAP = 0.20
+# 窄块中心相距超过此比例视为不同栏（030j D1/D2/D3）
+COLUMN_SPLIT_GAP = 0.12
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,34 @@ def figure_table_rects(page) -> list:
     return rects
 
 
+def _narrow_blocks(items: list[TextBlock], width: float) -> list[TextBlock]:
+    if width <= 0:
+        return []
+    return [
+        block
+        for block in items
+        if (block.x1 - block.x0) / width < COLUMN_BLOCK_WIDTH_FRAC
+    ]
+
+
+def column_cluster_means(
+    page, blocks: list[TextBlock] | None = None
+) -> list[float]:
+    """窄块中心聚类后的栏位均值（0–1），从左到右排序。"""
+    width = float(page.rect.width)
+    items = body_blocks(page) if blocks is None else blocks
+    centers = sorted(block.center_x / width for block in _narrow_blocks(items, width))
+    if len(centers) < 2:
+        return []
+    clusters: list[list[float]] = [[centers[0]]]
+    for center in centers[1:]:
+        if center - clusters[-1][-1] > COLUMN_SPLIT_GAP:
+            clusters.append([center])
+        else:
+            clusters[-1].append(center)
+    return [statistics.mean(cluster) for cluster in clusters]
+
+
 def detect_layout_mode(page, blocks: list[TextBlock] | None = None) -> LayoutMode:
     """判定页面栏式。幻灯/海报先行短路，避免把自由版面当成栏式。"""
     width = float(page.rect.width)
@@ -168,26 +198,20 @@ def detect_layout_mode(page, blocks: list[TextBlock] | None = None) -> LayoutMod
     items = body_blocks(page) if blocks is None else blocks
     if aspect >= POSTER_FREEFORM_ASPECT and len(items) >= POSTER_MIN_BODY_BLOCKS:
         return LayoutMode.FREEFORM
-    if len(items) < 3:
-        return LayoutMode.SINGLE
-    narrow = [
-        b.center_x / width
-        for b in items
-        if (b.x1 - b.x0) / width < COLUMN_BLOCK_WIDTH_FRAC
-    ]
-    if len(narrow) < 2:
-        return LayoutMode.SINGLE
-    left = [c for c in narrow if c < 0.5]
-    right = [c for c in narrow if c >= 0.5]
-    if not left or not right:
-        return LayoutMode.SINGLE
-    if statistics.mean(right) - statistics.mean(left) > COLUMN_CENTER_GAP:
+    clusters = column_cluster_means(page, items)
+    if len(clusters) >= 3 and clusters[-1] - clusters[0] > COLUMN_CENTER_GAP:
+        return LayoutMode.MULTI
+    if len(clusters) >= 2 and clusters[-1] - clusters[0] > COLUMN_CENTER_GAP:
         return LayoutMode.DOUBLE
     return LayoutMode.SINGLE
 
 
 def column_count(mode: LayoutMode) -> int | None:
-    return {LayoutMode.SINGLE: 1, LayoutMode.DOUBLE: 2}.get(mode)
+    return {
+        LayoutMode.SINGLE: 1,
+        LayoutMode.DOUBLE: 2,
+        LayoutMode.MULTI: 3,
+    }.get(mode)
 
 
 def reading_order(page, mode: LayoutMode, blocks: list[TextBlock] | None = None) -> list[TextBlock]:
@@ -198,12 +222,20 @@ def reading_order(page, mode: LayoutMode, blocks: list[TextBlock] | None = None)
     items = body_blocks(page) if blocks is None else list(blocks)
     if not items:
         return []
-    if mode is not LayoutMode.DOUBLE:
-        return sorted(items, key=lambda b: (round(b.y0, 1), b.x0))
     width = float(page.rect.width)
+    key = lambda b: (round(b.y0, 1), b.x0)  # noqa: E731
+    if mode is LayoutMode.MULTI:
+        means = column_cluster_means(page, items)
+
+        def _col_index(block: TextBlock) -> int:
+            cx = block.center_x / width
+            return min(range(len(means)), key=lambda i: abs(cx - means[i]))
+
+        return sorted(items, key=lambda b: (_col_index(b), round(b.y0, 1), b.x0))
+    if mode is not LayoutMode.DOUBLE:
+        return sorted(items, key=key)
     left = [b for b in items if b.center_x / width < 0.5]
     right = [b for b in items if b.center_x / width >= 0.5]
-    key = lambda b: (round(b.y0, 1), b.x0)  # noqa: E731
     return sorted(left, key=key) + sorted(right, key=key)
 
 
@@ -213,13 +245,22 @@ def column_of(block: TextBlock, page, mode: LayoutMode) -> str:
     双栏页上的标题、图题、表格标题本来就横跨两栏，属于合法的 full 元素，不是
     跨栏串接缺陷；把它们标出来而不是报警，执行阶段才能据此判断译文能否膨胀。
     """
-    if mode is not LayoutMode.DOUBLE:
-        return "single"
     width = float(page.rect.width)
     if width <= 0:
         return "single"
     if (block.x1 - block.x0) / width >= COLUMN_BLOCK_WIDTH_FRAC:
         return "full"
+    if mode is LayoutMode.MULTI:
+        means = column_cluster_means(page)
+        if not means:
+            return "single"
+        cx = block.center_x / width
+        index = min(range(len(means)), key=lambda i: abs(cx - means[i]))
+        if len(means) == 3:
+            return ("left", "middle", "right")[index]
+        return f"col_{index}"
+    if mode is not LayoutMode.DOUBLE:
+        return "single"
     return "left" if block.center_x / width < 0.5 else "right"
 
 
