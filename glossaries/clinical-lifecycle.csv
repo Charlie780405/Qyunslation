@@ -1,0 +1,190 @@
+source,target,src_lng,tgt_lng,layer,domain,sponsor,status,notes
+atopic dermatitis,特应性皮炎,en,zh,clinical,clinical,,curated,from PRESET
+eczema,湿疹,en,zh,clinical,clinical,,curated,from PRESET
+pruritus,瘙痒,en,zh,clinical,clinical,,curated,from PRESET
+erythema,红斑,en,zh,clinical,clinical,,curated,from PRESET
+placebo,安慰剂,en,zh,clinical,clinical,,curated,from PRESET
+randomized,随机,en,zh,clinical,clinical,,curated,from PRESET
+double-blind,双盲,en,zh,clinical,clinical,,curated,from PRESET
+single-blind,单盲,en,zh,clinical,clinical,,curated,
+open-label,开放标签,en,zh,clinical,clinical,,curated,from PRESET
+primary endpoint,主要终点,en,zh,clinical,clinical,,curated,from PRESET
+secondary endpoint,次要终点,en,zh,clinical,clinical,,curated,from PRESET
+exploratory endpoint,探索性终点,en,zh,clinical,clinical,,curated,
+adverse event,不良事件,en,zh,clinical,safety,,curated,from PRESET
+serious adverse event,严重不良事件,en,zh,clinical,safety,,curated,from PRESET
+treatment-emergent adverse event,治疗期间出现的不良事件,en,zh,clinical,safety,,curated,
+informed consent,知情同意,en,zh,clinical,clinical,,curated,from PRESET
+informed consent form,知情同意书,en,zh,clinical,clinical,,curated,
+inclusion criteria,纳入标准,en,zh,clinical,clinical,,curated,from PRESET
+exclusion criteria,排除标准,en,zh,clinical,clinical,,curated,from PRESET
+extension study,扩展研究,en,zh,clinical,clinical,,curated,from PRESET
+maintenance therapy,维持治疗,en,zh,clinical,clinical,,curated,from PRESET
+T-cell activation,T细胞活化,en,zh,clinical,discovery,,curated,from PRESET
+monoclonal antibody,单克隆抗体,en,zh,clinical,discovery,,curated,from PRESET
+bispecific antibody,双特异性抗体,en,zh,clinical,discovery,,curated,
+subcutaneous injection,皮下注射,en,zh,clinical,clinpharm,,curated,from PRESET
+intravenous infusion,静脉输注,en,zh,clinical,clinpharm,,curated,
+dose escalation,剂量递增,en,zh,clinical,clinpharm,,curated,from PRESET
+dose expansion,剂量扩展,en,zh,clinical,clinpharm,,curated,
+efficacy,疗效,en,zh,clinical,clinical,,curated,from PRESET
+safety,安全性,en,zh,clinical,safety,,curated,from PRESET
+tolerability,耐受性,en,zh,clinical,safety,,curated,from PRESET
+pharmacokinetics,药代动力学,en,zh,clinical,clinpharm,,curated,
+pharmacodynamics,药效动力学,en,zh,clinical,clinpharm,,curated,
+immunogenicity,免疫原性,en,zh,clinical,clinpharm,,curated,
+bioavailability,生物利用度,en,zh,clinical,clinpharm,,curated,
+half-life,半衰期,en,zh,clinical,clinpharm,,curated,
+Cmax,Cmax,en,en,clinical,clinpharm,,curated,identity
+AUC,AUC,en,en,clinical,clinpharm,,curated,identity
+nonclinical,非临床,en,zh,clinical,nonclinical,,curated,
+Clinical Pharmacology,临床药理,en,zh,clinical,clinpharm,,curated,
+toxicology,毒理学,en,zh,clinical,nonclinical,,curated,
+carcinogenicity,致癌性,en,zh,clinical,nonclinical,,curated,
+genotoxicity,遗传毒性,en,zh,clinical,nonclinical,,curated,
+reproductive toxicity,生殖毒性,en,zh,clinical,nonclinical,,curated,
+good laboratory practice,良好实验室规范,en,zh,clinical,nonclinical,,curated,
+GLP,GLP,en,en,clinical,nonclinical,,curated,identity
+good manufacturing practice,药品生产质量管理规范,en,zh,clinical,cmc,,curated,
+GMP,GMP,en,en,clinical,cmc,,curated,identity
+good clinical practice,药物临床试验质量管理规范,en,zh,clinical,clinical,,curated,
+GCP,GCP,en,en,clinical,clinical,,curated,identity
+chemistry manufacturing and controls,化学、生产和控制,en,zh,clinical,cmc,,curated,
+drug substance,原料药,en,zh,clinical,cmc,,curated,
+drug product,制剂,en,zh,clinical,cmc,,curated,
+formulation,处方工艺,en,zh,clinical,cmc,,curated,
+stability study,稳定性研究,en,zh,clinical,cmc,,curated,
+process validation,工艺验证,en,zh,clinical,cmc,,curated,
+impurity,杂质,en,zh,clinical,cmc,,curated,
+titer,滴度,en,zh,clinical,cmc,,curated,
+harvest volume,收获体积,en,zh,clinical,cmc,,curated,
+cell line,细胞株,en,zh,clinical,cmc,,curated,
+master cell bank,主细胞库,en,zh,clinical,cmc,,curated,
+working cell bank,工作细胞库,en,zh,clinical,cmc,,curated,
+target product profile,目标产品概况,en,zh,clinical,discovery,,curated,
+TPP,目标产品概况,en,zh,clinical,discovery,,curated,
+mechanism of action,作用机制,en,zh,clinical,discovery,,curated,
+MOA,作用机制,en,zh,clinical,discovery,,curated,
+biomarker,生物标志物,en,zh,clinical,discovery,,curated,
+companion diagnostic,伴随诊断,en,zh,clinical,discovery,,curated,
+investigational new drug,研究性新药,en,zh,clinical,regulatory,,curated,
+IND,IND,en,en,clinical,regulatory,,curated,identity
+new drug application,新药申请,en,zh,clinical,regulatory,,curated,
+NDA,NDA,en,en,clinical,regulatory,,curated,identity
+biologics license application,生物制品许可申请,en,zh,clinical,regulatory,,curated,
+BLA,BLA,en,en,clinical,regulatory,,curated,identity
+breakthrough therapy,突破性疗法,en,zh,clinical,regulatory,,curated,
+fast track,快速通道,en,zh,clinical,regulatory,,curated,
+priority review,优先审评,en,zh,clinical,regulatory,,curated,
+orphan drug,孤儿药,en,zh,clinical,regulatory,,curated,
+protocol,试验方案,en,zh,clinical,clinical,,curated,
+statistical analysis plan,统计分析计划,en,zh,clinical,stats,,curated,
+SAP,统计分析计划,en,zh,clinical,stats,,curated,
+intent-to-treat,意向性分析,en,zh,clinical,stats,,curated,
+ITT,意向性分析,en,zh,clinical,stats,,curated,
+per-protocol,符合方案集,en,zh,clinical,stats,,curated,
+PP,符合方案集,en,zh,clinical,stats,,curated,
+full analysis set,全分析集,en,zh,clinical,stats,,curated,
+FAS,全分析集,en,zh,clinical,stats,,curated,
+safety set,安全集,en,zh,clinical,stats,,curated,
+SS,安全集,en,zh,clinical,stats,,curated,
+confidence interval,置信区间,en,zh,clinical,stats,,curated,
+p-value,P值,en,zh,clinical,stats,,curated,
+hazard ratio,风险比,en,zh,clinical,stats,,curated,
+odds ratio,比值比,en,zh,clinical,stats,,curated,
+randomized controlled trial,随机对照试验,en,zh,clinical,clinical,,curated,
+RCT,随机对照试验,en,zh,clinical,clinical,,curated,
+phase I,I期,en,zh,clinical,clinical,,curated,
+phase II,II期,en,zh,clinical,clinical,,curated,
+phase III,III期,en,zh,clinical,clinical,,curated,
+phase IV,IV期,en,zh,clinical,clinical,,curated,
+first-in-human,首次人体试验,en,zh,clinical,clinical,,curated,
+FIH,首次人体试验,en,zh,clinical,clinical,,curated,
+dose-limiting toxicity,剂量限制性毒性,en,zh,clinical,safety,,curated,
+DLT,剂量限制性毒性,en,zh,clinical,safety,,curated,
+maximum tolerated dose,最大耐受剂量,en,zh,clinical,safety,,curated,
+MTD,最大耐受剂量,en,zh,clinical,safety,,curated,
+recommended phase 2 dose,推荐II期剂量,en,zh,clinical,clinpharm,,curated,
+RP2D,推荐II期剂量,en,zh,clinical,clinpharm,,curated,
+baseline,基线,en,zh,clinical,clinical,,curated,
+screening,筛选,en,zh,clinical,clinical,,curated,
+randomization,随机化,en,zh,clinical,clinical,,curated,
+washout,洗脱期,en,zh,clinical,clinical,,curated,
+follow-up,随访,en,zh,clinical,clinical,,curated,
+discontinuation,停药,en,zh,clinical,clinical,,curated,
+withdrawal,退出,en,zh,clinical,clinical,,curated,
+sponsor,申办方,en,zh,clinical,clinical,,curated,
+investigator,研究者,en,zh,clinical,clinical,,curated,
+principal investigator,主要研究者,en,zh,clinical,clinical,,curated,
+contract research organization,合同研究组织,en,zh,clinical,clinical,,curated,
+CRO,合同研究组织,en,zh,clinical,clinical,,curated,
+case report form,病例报告表,en,zh,clinical,clinical,,curated,
+CRF,病例报告表,en,zh,clinical,clinical,,curated,
+electronic data capture,电子数据采集,en,zh,clinical,clinical,,curated,
+EDC,电子数据采集,en,zh,clinical,clinical,,curated,
+CRSwNP,伴鼻息肉的慢性鼻窦炎,en,zh,clinical,clinical,,curated,
+chronic rhinosinusitis with nasal polyps,伴鼻息肉的慢性鼻窦炎,en,zh,clinical,clinical,,curated,
+nasal polyp score,鼻息肉评分,en,zh,clinical,clinical,,curated,
+NPS,鼻息肉评分,en,zh,clinical,clinical,,curated,
+nasal congestion score,鼻塞评分,en,zh,clinical,clinical,,curated,
+NCS,鼻塞评分,en,zh,clinical,clinical,,curated,
+EASI,EASI,en,en,clinical,clinical,,curated,identity score
+IGA,IGA,en,en,clinical,clinical,,curated,identity score
+DLQI,DLQI,en,en,clinical,clinical,,curated,identity score
+AAER,年急性加重率,en,zh,clinical,clinical,,curated,
+moderate-to-severe atopic dermatitis,中重度特应性皮炎,en,zh,clinical,clinical,,curated,
+severe CRSwNP,重度伴鼻息肉的慢性鼻窦炎,en,zh,clinical,clinical,,curated,
+asthma,哮喘,en,zh,clinical,clinical,,curated,
+COPD,慢性阻塞性肺疾病,en,zh,clinical,clinical,,curated,
+intellectual property,知识产权,en,zh,clinical,ip,,curated,
+IP,知识产权,en,zh,clinical,ip,,curated,
+patent,专利,en,zh,clinical,ip,,curated,
+priority application,优先权申请,en,zh,clinical,ip,,curated,
+PCT,PCT,en,en,clinical,ip,,curated,identity
+composition of matter,物质组合物,en,zh,clinical,ip,,curated,
+health economics and outcomes research,卫生经济学与结局研究,en,zh,clinical,heor,,curated,
+HEOR,卫生经济学与结局研究,en,zh,clinical,heor,,curated,
+quality of life,生活质量,en,zh,clinical,heor,,curated,
+QoL,生活质量,en,zh,clinical,heor,,curated,
+patient-reported outcome,患者报告结局,en,zh,clinical,heor,,curated,
+PRO,患者报告结局,en,zh,clinical,heor,,curated,
+cost-effectiveness,成本效果,en,zh,clinical,heor,,curated,
+主要终点,primary endpoint,zh,en,clinical,clinical,,curated,bidirectional
+次要终点,secondary endpoint,zh,en,clinical,clinical,,curated,bidirectional
+不良事件,adverse event,zh,en,clinical,safety,,curated,bidirectional
+知情同意,informed consent,zh,en,clinical,clinical,,curated,bidirectional
+特应性皮炎,atopic dermatitis,zh,en,clinical,clinical,,curated,bidirectional
+单克隆抗体,monoclonal antibody,zh,en,clinical,discovery,,curated,bidirectional
+双特异性抗体,bispecific antibody,zh,en,clinical,discovery,,curated,bidirectional
+药代动力学,pharmacokinetics,zh,en,clinical,clinpharm,,curated,bidirectional
+临床试验,clinical trial,zh,en,clinical,clinical,,curated,bidirectional
+clinical trial,临床试验,en,zh,clinical,clinical,,curated,
+Clinical Development Plan,临床开发计划,en,zh,clinical,clinical,,curated,
+Indication,适应症,en,zh,clinical,clinical,,curated,
+Regulatory Pathway,监管路径,en,zh,clinical,regulatory,,curated,
+PRELIMINARY MEETING COMMENTS,会议初步意见,en,zh,clinical,regulatory,,curated,
+PRELIMINARY RESPONSES TO THE QUESTIONS,对问题的初步回复,en,zh,clinical,regulatory,,curated,
+ADDITIONAL COMMENTS,补充意见,en,zh,clinical,regulatory,,curated,
+Additional Comments,补充意见,en,zh,clinical,regulatory,,curated,
+PREA REQUIREMENTS,PREA要求,en,zh,clinical,regulatory,,curated,
+DATA STANDARDS FOR STUDIES,研究数据标准,en,zh,clinical,regulatory,,curated,
+SECURE EMAIL COMMUNICATIONS,安全电子邮件通信,en,zh,clinical,regulatory,,curated,
+LABORATORY TEST UNITS FOR CLINICAL TRIALS,临床试验实验室检测单位,en,zh,clinical,clinical,,curated,
+Meeting Type,会议类型,en,zh,clinical,regulatory,,curated,
+Meeting Category,会议类别,en,zh,clinical,regulatory,,curated,
+Meeting Date and Time,会议日期和时间,en,zh,clinical,regulatory,,curated,
+Meeting Location,会议地点,en,zh,clinical,regulatory,,curated,
+Application Number,申请编号,en,zh,clinical,regulatory,,curated,
+Product Name,产品名称,en,zh,clinical,regulatory,,curated,
+Sponsor Name,申办方名称,en,zh,clinical,regulatory,,curated,
+351(k) of the Public Health Service Act,《公共卫生服务法》第351(k)条,en,zh,clinical,regulatory,,curated,
+Nonclinical,非临床,en,zh,clinical,nonclinical,,curated,
+Clinical,临床,en,zh,clinical,clinical,,curated,
+Statistics,统计,en,zh,clinical,stats,,curated,
+Immunogenicity,免疫原性,en,zh,clinical,clinpharm,,curated,
+Q12W,每12周,en,zh,clinical,clinpharm,,curated,
+Q24W,每24周,en,zh,clinical,clinpharm,,curated,
+SC,皮下注射,en,zh,clinical,clinpharm,,curated,
+PBO-adjusted,安慰剂校正,en,zh,clinical,stats,,curated,
+BL,基线,en,zh,clinical,clinical,,curated,
+Wk24,第24周,en,zh,clinical,clinical,,curated,

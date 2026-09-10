@@ -9,7 +9,7 @@
 | --- | --- |
 | G-CAP-005 | **closed**：`apply-pdf2zh-brand.py` 清 `PDFMathTranslate` / `tech_details_string`，SiliconFlow 致谢 `visible=False`+空文案 |
 | G-CAP-006 | **closed**：`/home/dev/pdf2zh/auth.csv`（mode 600）+ `config.toml` `auth_file`；Gradio `/config` 未登录 401，`POST /login` 后可取配置 |
-| G-CAP-007 | **closed**：`config.toml` 默认 `glossaries`=`proper-nouns,auto-proper-nouns,qx027n` |
+| G-CAP-007 | **closed**：`config.toml` 默认 `glossaries`=`merged.csv`（PLAN-039 治理并表；原 proper/auto/qx027n 由 merge 承接） |
 | G-CAP-008 | **closed**：`apply-pdf2zh-038g-session-cancel.py`（throughput 之后）；`_ACTIVE_TRANSLATION_TASKS` 按 `session_hash` 隔离 unload 取消 |
 | G-CAP-009 | **closed**（DOCX）/ **wontfix**（PPTX）：`scan_docx` 续表 `semantic_id=table:N` + occurrence；PPTX 无跨页续表语义 |
 
@@ -17,6 +17,7 @@
 
 - 密码在 `auth.csv` 与 `office.env`（`QYUNSLATION_GUI_*`）；**勿提交 git**
 - 补丁序见 [`pdf2zh-patch-order.md`](../contracts/pdf2zh-patch-order.md)（038g session-cancel 为第 2 步）
+- 术语表默认已由 [PLAN-039](../plans/PLAN-039-glossary-governance/PLAN-039-glossary-governance.md) 并表为 `merged.csv`（治理见 WT-039）
 
 ## 验收
 

@@ -1,0 +1,43 @@
+source,target,src_lng,tgt_lng,layer,domain,sponsor,status,notes
+Jiangsu GenScend Biopharma Co. Ltd.,江苏景行生物医药有限公司,en,zh,org,org,,curated,PLAN-039b
+"Jiangsu GenScend Biopharma Co., Ltd.",江苏景行生物医药有限公司,en,zh,org,org,,curated,PLAN-039b
+GenScend,GenScend,en,en,org,org,,curated,identity protect
+景行生物,GenScend,zh,en,org,org,,curated,PLAN-039b bidirectional
+景行生物医药,GenScend,zh,en,org,org,,curated,PLAN-039b
+江苏景行生物医药有限公司,GenScend,zh,en,org,org,,curated,PLAN-039b
+江苏景行生物医药股份有限公司,GenScend,zh,en,org,org,,curated,variant
+Jiangsu Qyuns Therapeutics Co. Ltd.,江苏荃信生物医药有限公司,en,zh,org,org,,curated,
+江苏荃信生物医药有限公司,江苏荃信生物医药有限公司,zh,zh,org,org,,curated,identity
+江苏荃信生物医药股份有限公司,江苏荃信生物医药股份有限公司,zh,zh,org,org,,curated,identity
+Qyuns,Qyuns,en,en,org,org,,curated,identity
+荃信生物,Qyuns,zh,en,org,org,,curated,
+荃信,Qyuns,zh,en,org,org,,curated,
+IQVIA,IQVIA,en,en,org,org,,curated,identity
+Vabysmo,Vabysmo,en,en,org,org,,curated,identity
+US-Vabysmo,US-Vabysmo,en,en,org,org,,curated,identity
+faricimab-svoa,faricimab-svoa,en,en,org,org,,curated,identity
+Crystal Bland,Crystal Bland,en,en,org,org,,curated,person identity
+Mei-Fei Yueh,Mei-Fei Yueh,en,en,org,org,,curated,person identity
+MSHA,MSHA,en,en,org,org,,curated,identity
+FDA,FDA,en,en,org,org,,curated,identity
+U.S. FOOD & DRUG ADMINISTRATION,美国食品与药品管理局,en,zh,org,org,,curated,
+U.S. Food & Drug Administration,美国食品与药品管理局,en,zh,org,org,,curated,
+Food and Drug Administration,美国食品与药品管理局,en,zh,org,org,,curated,
+FOOD & DRUG ADMINISTRATION,食品与药品管理局,en,zh,org,org,,curated,
+美国食品与药品管理局,FDA,zh,en,org,org,,curated,bidirectional
+CDE,CDE,en,en,org,org,,curated,identity
+国家药品监督管理局,NMPA,zh,en,org,org,,curated,
+NMPA,国家药品监督管理局,en,zh,org,org,,curated,
+Center for Drug Evaluation and Research,药品评价与研究中心,en,zh,org,org,,curated,
+Office of New Drugs,新药办公室,en,zh,org,org,,curated,
+Office of Regulatory Operations,监管运营办公室,en,zh,org,org,,curated,
+Division of Regulatory Operations for Specialty Medicine,专科药物监管运营处,en,zh,org,org,,curated,
+Regulatory Health Project Manager,监管健康项目经理,en,zh,org,org,,curated,
+Regulatory Affairs Lead,监管事务负责人,en,zh,org,org,,curated,
+Ophthalmology,眼科,en,zh,org,org,,curated,
+Ophalmology,眼科,en,zh,org,org,,curated,typo protect
+CMC,CMC,en,en,org,org,,curated,identity acronym
+Biosimilar,生物类似药,en,zh,org,org,,curated,
+BPD Type 2b,BPD 2b型,en,zh,org,org,,curated,
+QX027N,QX027N,en,en,org,org,qx027n,curated,product code identity
+GS301,GS301,en,en,org,org,,curated,product code identity
