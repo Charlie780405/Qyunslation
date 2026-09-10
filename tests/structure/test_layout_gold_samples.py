@@ -116,31 +116,26 @@ def test_mixed_document_resolves_layout_per_page(generated_structure_fixtures):
     assert LayoutMode.MIXED not in modes
 
 
-def test_poster_is_not_recognised_as_freeform(poster):
-    """已知债：A0 海报宽高比 1.41 低于 1.55 的幻灯阈值，没走自由版面短路。
-
-    结果是九块彼此独立的分区被当成期刊双栏正文，按中线劈成两串串接。海报
-    分区（POSTER_SECTION）在 PDF 通道上因此完全没有被识别。
-    """
+def test_poster_is_recognised_as_freeform(poster):
+    """030j D4：A0 横版海报（宽高比 ~1.41）须走 FREEFORM，不得误判 DOUBLE。"""
     aspect = float(poster.rect.width) / float(poster.rect.height)
 
     assert aspect == pytest.approx(1.41, abs=0.01)
     assert aspect < SLIDE_ASPECT
-    assert detect_layout_mode(poster) is not LayoutMode.FREEFORM
-    assert detect_layout_mode(poster) is LayoutMode.DOUBLE
+    assert aspect >= 1.38
+    assert detect_layout_mode(poster) is LayoutMode.FREEFORM
 
 
-def test_poster_panels_are_serialised_into_two_column_order(poster):
-    """海报九分区被串成两串的直接证据。"""
+def test_poster_panels_keep_spatial_reading_order(poster):
+    """FREEFORM 下九分区按 y→x 排序，不再被中线劈成两串。"""
     mode = detect_layout_mode(poster)
     blocks = body_blocks(poster)
     ordered = reading_order(poster, mode)
 
+    assert mode is LayoutMode.FREEFORM
     assert len(blocks) == 9
-    columns = {column_of(block, poster, mode) for block in ordered}
-    assert columns <= {"left", "right", "full"}
-    # 九块被压成左右两串，分区的二维结构在这一步丢失
-    assert len({column_of(block, poster, mode) for block in ordered}) <= 3
+    assert ordered == sorted(blocks, key=lambda b: (round(b.y0, 1), b.x0))
+    assert ordered[0].y0 < ordered[-1].y0
 
 
 def test_slide_aspect_short_circuit_still_guards_real_slides(

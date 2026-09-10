@@ -145,7 +145,7 @@ DocumentStructureManifest
 | 030f | 图片与 Poster 纵向闭环 | 常见图片格式、超大画布分区、方向/透明度/色彩保护、无接缝回填与 Poster 画像 | 030c |
 | 030g | [PPT/PPTX 双模式闭环](./PLAN-030g-pptx-dual-mode-closure.md)（已完成） | 原生嵌图关 `QY030-PPT-001`、`.ppt` 规范化、逐页图片化打包；瘦门禁不嵌套全门 | 030b–030f |
 | 030h | [跨格式版式保真与入口一致性](./PLAN-030h-cross-format-fidelity.md)（已完成） | 验收脱离运行时样本目录、GUI 入口格式统一到能力矩阵、跨格式语义对账、单/双/多/混合栏与 Poster 分区版式金样；栏式判定的五处缺口已登记为 D1–D5 待另立子计划 | 030d–030g |
-| 030j | [栏式判定债 D1–D5](./PLAN-030j-layout-debt.md)（纲领待批后编码） | 海报/多栏/少块双栏/profile 解耦；030h 锁缺陷测试转 PASS | 030h |
+| 030j | [栏式判定债 D1–D5](./PLAN-030j-layout-debt.md)（D4 已完成） | 海报 FREEFORM（030ja）；D1–D3/D5 待续 | 030h |
 | 030i | UI、可观测、兼容与交付 | 格式/画像/模式选择、可编辑性提示、manifest 下载、依赖门禁、Checkpoint D | 030j |
 
 ### Checkpoint A：030a 后

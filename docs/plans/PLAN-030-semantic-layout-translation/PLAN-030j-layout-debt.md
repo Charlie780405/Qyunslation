@@ -1,10 +1,11 @@
 # PLAN-030j：栏式判定债 D1–D5
 
-> 状态：**待批准**（纲领已写，未编码）
+> 状态：**已批准，D4 已完成**（030ja @ feat/PLAN-030j-d4-poster；D1–D3/D5 待后续子计划）
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)
 > 前置：030h 已完成并登记五处债
 > 阻塞：030i（UI/可观测/Checkpoint D）不得在本计划未清 D1–D5 前实施
-> 验收门：`bash scripts/verify-plan-030j.sh`（待 030j 编码后创建）
+> 验收门：`bash scripts/verify-plan-030j.sh`
+> 批准记录：用户于 2026-09-10 批准 PLAN-030j 并开 D4 编码
 
 ## 目标
 
@@ -14,7 +15,7 @@
 
 | 阶段 | 编号 | 交付 | 关键文件 |
 | --- | --- | --- | --- |
-| 1 | D4 | A0 海报识别为 FREEFORM/POSTER，九分区不串成双栏正文 | `qyunslation/structure/layout.py` |
+| 1 | [D4](./PLAN-030ja-poster-freeform.md) | A0 海报识别为 FREEFORM，九分区不串成双栏正文 | `layout.py`（**已完成**） |
 | 2 | D1/D2 | 三/四栏产出 MULTI；中栏不吞进左栏 | 同上 + `scan_pdf.py` 阅读顺序 |
 | 3 | D3 | 少块双栏不短路 SINGLE | `layout.py` |
 | 4 | D5 | `content_profile` 与容器解耦（可用户覆盖） | `scan_*.py`、`profiles.py` |
