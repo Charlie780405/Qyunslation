@@ -25,7 +25,7 @@ from .representation import (
 )
 from .references import classify_body, heading_y_from_blocks, is_section_break
 from .table_structure import table_blocks_for_manifest, table_grid_dimensions
-from .tables import table_regions
+from .tables import captionless_table_regions, table_regions
 from .models import (
     AssetRole,
     BodyObject,
@@ -62,17 +62,32 @@ from .profiles import resolve_profile
 
 
 PDF_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030c"
-PDF_STRUCTURE_SCANNER_VERSION = "1.7.0"
+PDF_STRUCTURE_SCANNER_VERSION = "1.8.0"
+
+
+_REGULATORY_TEXT_SIGNALS = (
+    ("clinical_trial", ("clinical trial", "临床试验")),
+    ("registration", ("registration form", "registration number", "登记号")),
+    ("eligibility", ("eligibility criteria", "inclusion criteria", "入选标准", "入组标准")),
+    ("exclusion", ("exclusion criteria", "排除标准")),
+    ("protocol", ("protocol number", "方案编号")),
+    ("endpoint", ("primary endpoint", "secondary endpoint", "终点指标")),
+    ("investigator", ("investigator", "研究者信息")),
+    ("trial_status", ("trial status", "试验状态")),
+    ("study_drug", ("investigational product", "试验药")),
+)
 
 
 @dataclass(frozen=True, slots=True)
 class _PageAnalysis:
     anchors: list
     table_regions_by_number: dict
+    captionless_tables: list
     labeled_figures: dict[int, object]
     unnumbered_regions: list
     body_blocks: list[TextBlock]
     reference_heading_y: float | None
+    regulatory_signals: tuple[str, ...]
 
 
 def _clip_bbox(rect, canvas) -> BoundingBox:
@@ -102,6 +117,27 @@ def _clip_text(page, bb) -> str:
         return (page.get_text("text", clip=pymupdf.Rect(bb)) or "").strip()
     except Exception:
         return ""
+
+
+def _regulatory_signals(raw_blocks: list) -> tuple[str, ...]:
+    text = "\n".join(
+        str(block[4]) for block in raw_blocks if len(block) >= 5 and block[4]
+    ).casefold()
+    return tuple(
+        name
+        for name, variants in _REGULATORY_TEXT_SIGNALS
+        if any(variant.casefold() in text for variant in variants)
+    )
+
+
+def _overlaps_existing_table(candidate, existing) -> bool:
+    x0 = max(float(candidate.x0), float(existing.x0))
+    y0 = max(float(candidate.y0), float(existing.y0))
+    x1 = min(float(candidate.x1), float(existing.x1))
+    y1 = min(float(candidate.y1), float(existing.y1))
+    intersection = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    candidate_area = max(1.0, (candidate.x1 - candidate.x0) * (candidate.y1 - candidate.y0))
+    return intersection / candidate_area >= 0.8
 
 
 class PdfStructureScanner:
@@ -284,7 +320,7 @@ class PdfStructureScanner:
         return objects, issues, refs_active
 
     @staticmethod
-    def _analyze_page(page) -> _PageAnalysis:
+    def _analyze_page(page, *, allow_captionless: bool = False) -> _PageAnalysis:
         from pdf_figure_crop import (
             labeled_figure_regions,
             page_caption_profile,
@@ -303,12 +339,26 @@ class PdfStructureScanner:
             raw_blocks = page.get_text("blocks") or []
         except Exception:
             raw_blocks = []
-        detected_tables = table_regions(
-            page, anchors=anchors, drawings=drawings
-        )
+        page_regulatory_signals = _regulatory_signals(raw_blocks)
+        detected_tables = table_regions(page, anchors=anchors, drawings=drawings)
+        anonymous_tables = []
+        if allow_captionless or len(page_regulatory_signals) >= 2:
+            anonymous_tables = [
+                region
+                for region in captionless_table_regions(
+                    page,
+                    drawings=drawings,
+                    text_blocks=raw_blocks,
+                )
+                if not any(
+                    _overlaps_existing_table(region, detected)
+                    for detected in detected_tables
+                )
+            ]
         regions_by_number = {region.number: region for region in detected_tables}
         table_rectangles = [
-            pymupdf.Rect(region.as_tuple()) for region in detected_tables
+            pymupdf.Rect(region.as_tuple())
+            for region in [*detected_tables, *anonymous_tables]
         ]
         labeled = labeled_figure_regions(
             page,
@@ -331,10 +381,12 @@ class PdfStructureScanner:
         return _PageAnalysis(
             anchors=anchors,
             table_regions_by_number=regions_by_number,
+            captionless_tables=anonymous_tables,
             labeled_figures=labeled,
             unnumbered_regions=unnumbered,
             body_blocks=blocks,
             reference_heading_y=heading_y_from_blocks(raw_blocks),
+            regulatory_signals=page_regulatory_signals,
         )
 
     def scan(
@@ -377,6 +429,9 @@ class PdfStructureScanner:
         table_seen: set[int] = set()
         table_occurrence_count: dict[int, int] = {}
         table_max_row: dict[int, int] = {}
+        captionless_table_count = 0
+        regulatory_signals: set[str] = set()
+        regulatory_form_detected = False
 
         started = time.monotonic()
         pages_scanned = 0
@@ -404,7 +459,10 @@ class PdfStructureScanner:
                 pages_scanned += 1
                 page_modes[i] = page_representation(page)
                 try:
-                    analysis = self._analyze_page(page)
+                    analysis = self._analyze_page(
+                        page,
+                        allow_captionless=regulatory_form_detected,
+                    )
                 except Exception as exc:
                     # 单页失败不得丢掉整份结构，但必须留痕而非静默
                     issues.append(
@@ -421,6 +479,61 @@ class PdfStructureScanner:
                 anchors = analysis.anchors
                 labeled = analysis.labeled_figures
                 regions_by_number = analysis.table_regions_by_number
+                regulatory_signals.update(analysis.regulatory_signals)
+                if analysis.captionless_tables and len(analysis.regulatory_signals) >= 2:
+                    regulatory_form_detected = True
+                for index, region in enumerate(analysis.captionless_tables, start=1):
+                    captionless_table_count += 1
+                    key = f"table:page:{i}:anonymous:{index}"
+                    table_id = build_object_id(
+                        prepared.source_sha256,
+                        canvas.canvas_id,
+                        ObjectType.TABLE,
+                        key,
+                        [{"kind": SourceRefKind.PDF_DRAWING.value, "ref": key}],
+                    )
+                    bbox = _clip_bbox(_rect_from_bbox(region.as_tuple()), canvas)
+                    blocks = table_blocks_for_manifest(
+                        page,
+                        region,
+                        number=captionless_table_count,
+                    )
+                    objects.append(
+                        TableObject(
+                            type=ObjectType.TABLE,
+                            object_id=table_id,
+                            canvas_id=canvas.canvas_id,
+                            bbox=bbox,
+                            representation=Representation.NATIVE_TEXT,
+                            row_count=region.row_count,
+                            column_count=region.column_count,
+                            source_refs=[
+                                SourceRef(kind=SourceRefKind.PDF_DRAWING, ref=key)
+                            ],
+                            detector_evidence=[
+                                DetectorEvidence(
+                                    detector=region.detector,
+                                    label="captionless_table",
+                                    confidence=0.9,
+                                    bbox=bbox,
+                                    details={
+                                        "page": i,
+                                        "index": index,
+                                        "rule_lines": region.line_count,
+                                        "row_count": region.row_count,
+                                        "column_count": region.column_count,
+                                        "captionless": True,
+                                    },
+                                )
+                            ],
+                            translatable_blocks=blocks,
+                            execution_status=ExecutionStatus.PENDING,
+                            planned_action="translate_cells",
+                            semantic_id=key,
+                            semantic_scope="page",
+                            semantic_occurrence_index=index,
+                        )
+                    )
                 if analysis.unnumbered_regions:
                     objects.extend(
                         self._unnumbered_images(
@@ -817,6 +930,8 @@ class PdfStructureScanner:
         suggested, confidence, evidence = suggest_content_profile(
             figure_caption_count=fig_n,
             table_caption_count=tab_n,
+            captionless_table_count=captionless_table_count,
+            regulatory_signals=tuple(sorted(regulatory_signals)),
         )
         decision = resolve_profile(
             auto_suggestion=suggested,

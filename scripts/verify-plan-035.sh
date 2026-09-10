@@ -36,7 +36,7 @@ run_pass "035 compile" "$STAGE_DIR/compile.log" \
     scripts/pdf_table_translate.py
 
 run_pass "035 scanner version" "$STAGE_DIR/version.log" \
-  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.7.0'"
+  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.8.0'"
 
 run_pass "035 digit policy tests" "$STAGE_DIR/digit.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \

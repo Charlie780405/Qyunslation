@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 # 同一条横线被切成多段时的 y 合并容差（pt）
 LINE_MERGE_TOL = 1.5
@@ -29,9 +30,223 @@ class TableRegion:
     x1: float
     y1: float
     line_count: int
+    row_count: int | None = None
+    column_count: int | None = None
+    detector: str = "caption_rules"
 
     def as_tuple(self) -> tuple[float, float, float, float]:
         return (self.x0, self.y0, self.x1, self.y1)
+
+
+@dataclass(frozen=True, slots=True)
+class _RuleSegment:
+    orientation: Literal["h", "v"]
+    start: float
+    end: float
+    axis: float
+
+
+def _thin_rule_segments(
+    page, *, drawings: list | None = None, min_length: float = 4.0
+) -> list[_RuleSegment]:
+    """Return short cell-border segments before page-relative filtering.
+
+    Word emits each cell edge as a separate 0.48pt rectangle.  Filtering each
+    piece by page height, as the caption-table detector does, removes nearly all
+    vertical rules before they can be joined into a grid.
+    """
+    if drawings is None:
+        try:
+            drawings = page.get_drawings() or []
+        except Exception:
+            return []
+    out: list[_RuleSegment] = []
+    for drawing in drawings:
+        for item in drawing.get("items", []):
+            if item[0] == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.y - p2.y) <= 1.0 and abs(p1.x - p2.x) >= min_length:
+                    out.append(
+                        _RuleSegment(
+                            "h",
+                            float(min(p1.x, p2.x)),
+                            float(max(p1.x, p2.x)),
+                            float((p1.y + p2.y) / 2.0),
+                        )
+                    )
+                elif abs(p1.x - p2.x) <= 1.0 and abs(p1.y - p2.y) >= min_length:
+                    out.append(
+                        _RuleSegment(
+                            "v",
+                            float(min(p1.y, p2.y)),
+                            float(max(p1.y, p2.y)),
+                            float((p1.x + p2.x) / 2.0),
+                        )
+                    )
+            elif item[0] == "re":
+                rect = item[1]
+                if rect.height <= 2.0 and rect.width >= min_length:
+                    out.append(
+                        _RuleSegment(
+                            "h",
+                            float(rect.x0),
+                            float(rect.x1),
+                            float((rect.y0 + rect.y1) / 2.0),
+                        )
+                    )
+                elif rect.width <= 2.0 and rect.height >= min_length:
+                    out.append(
+                        _RuleSegment(
+                            "v",
+                            float(rect.y0),
+                            float(rect.y1),
+                            float((rect.x0 + rect.x1) / 2.0),
+                        )
+                    )
+    return out
+
+
+def _cluster_count(values: list[float], tolerance: float = 1.0) -> int:
+    groups: list[list[float]] = []
+    for value in sorted(values):
+        if groups and abs(value - groups[-1][-1]) <= tolerance:
+            groups[-1].append(value)
+        else:
+            groups.append([value])
+    return len(groups)
+
+
+def _component_has_text(page, bbox, text_blocks: list | None) -> bool:
+    x0, y0, x1, y1 = bbox
+    if text_blocks is None:
+        try:
+            text_blocks = page.get_text("blocks") or []
+        except Exception:
+            return False
+    for block in text_blocks:
+        if len(block) < 5 or not str(block[4] or "").strip():
+            continue
+        cx = (float(block[0]) + float(block[2])) / 2.0
+        cy = (float(block[1]) + float(block[3])) / 2.0
+        if x0 - 1.0 <= cx <= x1 + 1.0 and y0 - 1.0 <= cy <= y1 + 1.0:
+            return True
+    return False
+
+
+def captionless_table_regions(
+    page,
+    *,
+    drawings: list | None = None,
+    text_blocks: list | None = None,
+) -> list[TableRegion]:
+    """Detect disconnected vector grids without relying on captions/find_tables.
+
+    Segments are connected only when they intersect or are collinear and touch.
+    Consequently, multiple forms sharing page margins remain distinct when a
+    vertical gap separates them.  A component must contain at least two cells
+    and text, which excludes standalone flowchart boxes.
+    """
+    try:
+        page_width = float(page.rect.width)
+    except Exception:
+        return []
+    if page_width <= 0:
+        return []
+    segments = _thin_rule_segments(page, drawings=drawings)
+    if not segments:
+        return []
+
+    parents = list(range(len(segments)))
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def join(left: int, right: int) -> None:
+        a, b = root(left), root(right)
+        if a != b:
+            parents[b] = a
+
+    tolerance = 1.0
+    for left, first in enumerate(segments):
+        for right in range(left):
+            second = segments[right]
+            if first.orientation == second.orientation:
+                if (
+                    abs(first.axis - second.axis) <= tolerance
+                    and max(first.start, second.start)
+                    <= min(first.end, second.end) + tolerance
+                ):
+                    join(left, right)
+                continue
+            horizontal, vertical = (
+                (first, second) if first.orientation == "h" else (second, first)
+            )
+            if (
+                horizontal.start - tolerance
+                <= vertical.axis
+                <= horizontal.end + tolerance
+                and vertical.start - tolerance
+                <= horizontal.axis
+                <= vertical.end + tolerance
+            ):
+                join(left, right)
+
+    components: dict[int, list[_RuleSegment]] = {}
+    for index, segment in enumerate(segments):
+        components.setdefault(root(index), []).append(segment)
+
+    candidates: list[tuple[float, float, float, float, int, int, int]] = []
+    for component in components.values():
+        horizontal = [line for line in component if line.orientation == "h"]
+        vertical = [line for line in component if line.orientation == "v"]
+        if len(horizontal) < 2 or len(vertical) < 2:
+            continue
+        row_count = _cluster_count([line.axis for line in horizontal]) - 1
+        column_count = _cluster_count([line.axis for line in vertical]) - 1
+        if row_count < 1 or column_count < 1 or row_count * column_count < 2:
+            continue
+        xs = [line.start for line in horizontal]
+        xs.extend(line.end for line in horizontal)
+        xs.extend(line.axis for line in vertical)
+        ys = [line.axis for line in horizontal]
+        ys.extend(line.start for line in vertical)
+        ys.extend(line.end for line in vertical)
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+        if bbox[2] - bbox[0] < page_width * MIN_LINE_WIDTH_FRAC:
+            continue
+        if bbox[3] - bbox[1] < 8.0 or not _component_has_text(page, bbox, text_blocks):
+            continue
+        candidates.append(
+            (
+                *bbox,
+                len(horizontal) + len(vertical),
+                row_count,
+                column_count,
+            )
+        )
+
+    regions = []
+    for number, candidate in enumerate(
+        sorted(candidates, key=lambda item: (item[1], item[0])), start=1
+    ):
+        x0, y0, x1, y1, line_count, row_count, column_count = candidate
+        regions.append(
+            TableRegion(
+                number=number,
+                x0=x0,
+                y0=y0,
+                x1=x1,
+                y1=y1,
+                line_count=line_count,
+                row_count=row_count,
+                column_count=column_count,
+                detector="vector_grid",
+            )
+        )
+    return regions
 
 
 def _horizontal_lines(

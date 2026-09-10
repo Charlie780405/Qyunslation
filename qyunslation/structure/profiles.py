@@ -159,6 +159,8 @@ def suggest_content_profile(
     *,
     figure_caption_count: int = 0,
     table_caption_count: int = 0,
+    captionless_table_count: int = 0,
+    regulatory_signals: tuple[str, ...] = (),
 ) -> tuple[ContentProfile, float, list[str]]:
     """030j D5：按语义对象推断 profile，与容器格式解耦。"""
     evidence: list[str] = []
@@ -166,9 +168,17 @@ def suggest_content_profile(
         evidence.append(f"figure_captions:{figure_caption_count}")
     if table_caption_count:
         evidence.append(f"table_captions:{table_caption_count}")
+    if captionless_table_count:
+        evidence.append(f"captionless_tables:{captionless_table_count}")
+    if regulatory_signals:
+        evidence.extend(f"regulatory_signal:{signal}" for signal in regulatory_signals)
     if figure_caption_count or table_caption_count:
         confidence = 0.92 if figure_caption_count and table_caption_count else 0.75
         return ContentProfile.RESEARCH_ARTICLE, confidence, evidence
+    if captionless_table_count and len(regulatory_signals) >= 2:
+        return ContentProfile.REGULATORY, 0.94, evidence
+    if captionless_table_count:
+        return ContentProfile.GENERIC, 0.65, evidence
     return ContentProfile.GENERIC, 0.4, evidence or ["no_numbered_semantics"]
 
 
