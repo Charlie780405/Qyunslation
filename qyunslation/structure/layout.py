@@ -24,6 +24,9 @@ COLUMN_BLOCK_WIDTH_FRAC = 0.62
 COLUMN_CENTER_GAP = 0.22
 # 宽高比达到此值按幻灯处理；与 pdf_figure_crop.is_slide_page 口径一致
 SLIDE_ASPECT = 1.55
+# A0 横版海报约 1.41，低于 SLIDE 阈值但仍须 FREEFORM（030j D4）
+POSTER_FREEFORM_ASPECT = 1.38
+POSTER_MIN_BODY_BLOCKS = 6
 # 与 Figure/Table 区域重叠超过此比例的文本块不算正文
 MAX_FIGURE_OVERLAP = 0.20
 
@@ -156,12 +159,15 @@ def figure_table_rects(page) -> list:
 
 
 def detect_layout_mode(page, blocks: list[TextBlock] | None = None) -> LayoutMode:
-    """判定页面栏式。幻灯先行短路，避免把自由版面当成栏式。"""
+    """判定页面栏式。幻灯/海报先行短路，避免把自由版面当成栏式。"""
     width = float(page.rect.width)
     height = float(page.rect.height)
-    if height > 0 and width / height >= SLIDE_ASPECT:
+    aspect = width / height if height > 0 else 0.0
+    if aspect >= SLIDE_ASPECT:
         return LayoutMode.FREEFORM
     items = body_blocks(page) if blocks is None else blocks
+    if aspect >= POSTER_FREEFORM_ASPECT and len(items) >= POSTER_MIN_BODY_BLOCKS:
+        return LayoutMode.FREEFORM
     if len(items) < 3:
         return LayoutMode.SINGLE
     narrow = [
