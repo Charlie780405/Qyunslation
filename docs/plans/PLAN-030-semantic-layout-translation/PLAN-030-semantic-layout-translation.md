@@ -5,8 +5,8 @@
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
 > 阶段门：030a–030h、030j 已完成。Checkpoint C 三条已闭合；D1–D5 已清。
-> 阶段门：030a–030j、**030i 已完成**。Checkpoint D 发布门已交付。
-> 下一步：030-table Camelot 选型（Task 0）或 PLAN-034（暂停中）。
+> 状态：**已收口**（030a–030j、030i、030-table 均已完成，2026-09-10）  
+> Checkpoint C/D 已交付。PLAN-034 仍暂停。
 
 ## 一、执行基线提示词
 
@@ -148,6 +148,7 @@ DocumentStructureManifest
 | 030h | [跨格式版式保真与入口一致性](./PLAN-030h-cross-format-fidelity.md)（已完成） | 验收脱离运行时样本目录、GUI 入口格式统一到能力矩阵、跨格式语义对账、单/双/多/混合栏与 Poster 分区版式金样；栏式判定的五处缺口已登记为 D1–D5 待另立子计划 | 030d–030g |
 | 030j | [栏式判定债 D1–D5](./PLAN-030j-layout-debt.md)（**已完成**） | 030ja–030jd | 030h |
 | 030i | [UI、可观测、兼容与交付](./PLAN-030i-delivery-closure.md)（**已完成**） | 030ia–030id：画像/模式 UI、manifest 下载、依赖探针、补丁供应链与 Checkpoint D | 030j |
+| 030-table | [PDF 单元格网格](./PLAN-030-table-pdf-cell-reconstruction.md)（**已完成**） | 033i `table_structure` 收口 + `row_count`/`column_count` + Task 0 ADR | 030d |
 
 ### Checkpoint A：030a 后
 
@@ -266,4 +267,6 @@ D1、D2、D4 等五处债已于 [PLAN-030j](./PLAN-030j-layout-debt.md) 清理�
 
 030d 完成记录：[PLAN-030d](./PLAN-030d-manifest-ssot-execution-parity.md) / [WT-030d](../../walkthroughs/WT-030d-pdf-vertical-closure.md)。用户于 2026-09-08 批准全量范围并在实施中据实测证据决策两处修订：正文不接 BabelDOC DocLayout（本仓 venv 缺 `babeldoc`、CPU 1.08s/页超预扫描预算、且它不产出栏位与阅读顺序），改自研几何；PDF 表格由「原位重建」降级为「区域保护」（`find_tables()` 在无竖线三线表上召回 2/6 且假阳性严重，`strategy="text"` 会拦腰切断数值，无法满足数字逐 token 保护红线）。单元格级重建待技术选型后另立项。
 
-Checkpoint C 尚未达成：它要求 030d–030g 四条纵向闭环齐备，030d 只交付了 PDF 一条。
+030-table 完成记录：[PLAN-030-table](./PLAN-030-table-pdf-cell-reconstruction.md) / [WT-030-table](../../walkthroughs/WT-030-table-closure.md)。
+
+**PLAN-030 父纲领已于 2026-09-10 收口。**
