@@ -11,7 +11,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
-MANUAL = ROOT / "glossaries" / "proper-nouns.csv"
+# PLAN-039：人工专名 SSOT 迁至 org-proper-nouns.csv；旧 proper-nouns.csv 仅兼容回退
+_ORG = ROOT / "glossaries" / "org-proper-nouns.csv"
+_LEGACY = ROOT / "glossaries" / "proper-nouns.csv"
+MANUAL = _ORG if _ORG.is_file() else _LEGACY
 AUTO = ROOT / "glossaries" / "auto-proper-nouns.csv"
 
 PATTERNS = (
@@ -98,12 +101,19 @@ def harvest(pdf: Path) -> int:
 
 
 def glossary_args(extra: list[Path] | None = None) -> str:
-    """逗号串给 --glossaries：manual → auto → extra。"""
+    """逗号串给 --glossaries：优先 merged；否则 manual → auto → extra。"""
+    merged = ROOT / "glossaries" / "merged.csv"
+    runtime_merged = Path("/home/dev/pdf2zh/glossaries/merged.csv")
     paths: list[Path] = []
-    if MANUAL.is_file():
-        paths.append(MANUAL)
-    if AUTO.is_file():
-        paths.append(AUTO)
+    if runtime_merged.is_file():
+        paths.append(runtime_merged)
+    elif merged.is_file():
+        paths.append(merged)
+    else:
+        if MANUAL.is_file():
+            paths.append(MANUAL)
+        if AUTO.is_file():
+            paths.append(AUTO)
     for p in extra or []:
         pp = Path(p)
         if pp.is_file() and pp.resolve() not in {x.resolve() for x in paths}:
