@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "document_id": "cai-2025-pharmacoepidemiology-table1-continued",
+  "title": "Efficacy and Safety of All Monoclonal Antibodies in Moderate-to-Severe Atopic Dermatitis",
+  "scope": "MAIN_ARTICLE",
+  "usage_scope": "TEST_FIXTURE_ONLY",
+  "source": {
+    "kind": "LOCAL_WORKFLOW",
+    "runtime_dependency": false,
+    "locator": "pdf2zh_files/ce918e54-7a18-49af-968e-7440bcdb4ade",
+    "materialized_path": "tests/fixtures/structure/reference/cai-2025-table1-continued.pdf",
+    "import_state": "IMPORTED",
+    "sha256": "b5ec069391306f5a1dd3155ae60ba5c25e3205d8b74ac4a617d3214158ebb0a8",
+    "integrity_policy": "The committed TEST_FIXTURE_ONLY copy must match this full lowercase SHA-256."
+  },
+  "semantic_ids": {
+    "tables": ["table:1"]
+  },
+  "continued_table": {
+    "semantic_id": "table:1",
+    "min_occurrences": 2,
+    "summary_table_count": 1
+  },
+  "counting_rules": [
+    "Wiley TABLE 1 | (Continued) spans multiple pages as one semantic table.",
+    "Occurrence count may exceed 2 when the source PDF has multiple continuation pages."
+  ]
+}

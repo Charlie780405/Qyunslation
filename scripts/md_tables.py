@@ -11,9 +11,11 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 from pathlib import Path
 from typing import Callable
 
+_ROOT = Path(__file__).resolve().parents[1]
 HERMES_SCRIPTS = Path("/home/dev/Hermes/scripts")
-if str(HERMES_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(HERMES_SCRIPTS))
+for path in (_ROOT, HERMES_SCRIPTS):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from lit_tables import (  # noqa: E402
     ExtractedTable,
@@ -25,7 +27,7 @@ from lit_tables import (  # noqa: E402
     rows_to_markdown,
     trim_glued_rows,
 )
-from lit_tables import NUM_RE  # noqa: E402
+from qyunslation.structure.table_cell_policy import is_preserve_cell  # noqa: E402
 
 logger = logging.getLogger("md_tables")
 
@@ -36,28 +38,6 @@ _PIPE_CAPTION = re.compile(
     re.M,
 )
 
-_PRESERVE_CELL = re.compile(
-    r"^(?:"
-    r"[-+±]?\d+(?:\.\d+)?(?:%|(?:\s*\([^)]*\))?)?"
-    r"|n\s*=\s*\d+"
-    r"|\(\d+(?:[.,]\d+)?%?\)"
-    r"|\d+/\d+"
-    r"|N/?A"
-    r")$",
-    re.I,
-)
-
-
-def _is_preserve_cell(text: str) -> bool:
-    """纯数值/占位单元格不进 LLM，原样透传。"""
-    t = (text or "").strip()
-    if not t:
-        return True
-    if NUM_RE.fullmatch(t):
-        return True
-    return bool(_PRESERVE_CELL.fullmatch(t))
-
-
 def _translate_rows(
     rows: list[list[str]],
     translate_fn: Callable[[list[str]], list[str]],
@@ -67,7 +47,7 @@ def _translate_rows(
     for row in rows:
         for cell in row:
             raw = (cell or "").strip()
-            if not raw or _is_preserve_cell(raw):
+            if not raw or is_preserve_cell(raw):
                 continue
             if raw not in index:
                 index[raw] = len(unique)
@@ -87,7 +67,7 @@ def _translate_rows(
         new_row: list[str] = []
         for cell in row:
             raw = (cell or "").strip()
-            if not raw or _is_preserve_cell(raw):
+            if not raw or is_preserve_cell(raw):
                 new_row.append(cell)
             else:
                 new_row.append(trans_map.get(raw, cell))

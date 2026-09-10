@@ -65,6 +65,7 @@ def test_catalog_covers_core_formats_and_priority_content_profiles():
         item["future_owner"].startswith("PLAN-030")
         or item["future_owner"].startswith("PLAN-033")
         or item["future_owner"].startswith("PLAN-035")
+        or item["future_owner"].startswith("PLAN-036")
         for item in fixtures
     )
 
