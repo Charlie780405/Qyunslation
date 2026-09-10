@@ -6,6 +6,36 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _profile_dropdown_block() -> str:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from _content_profile_ui import dropdown_choices_literal, pptx_mode_choices
+
+    choices = dropdown_choices_literal()
+    pptx_choices = repr(pptx_mode_choices())
+    return (
+        DROP_ANCHOR
+        + f"""
+                        doc_profile_dropdown = gr.Dropdown(
+                            label="内容画像",
+                            choices={choices},
+                            value="自动",
+                            interactive=True,
+                        )
+                        # _qy_pptx_mode
+                        pptx_processing_mode = gr.Radio(
+                            label="PPTX 处理模式",
+                            choices={pptx_choices},
+                            value="原生可编辑",
+                            visible=False,
+                            interactive=True,
+                        )
+"""
+    )
+
+
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/pdf2zh_next/gui.py"
 )
@@ -21,15 +51,8 @@ DROP_ANCHOR = """                        primary_font_family = gr.Dropdown(
                         )
 """
 
-DROP_NEW = DROP_ANCHOR + """
-                        doc_profile_dropdown = gr.Dropdown(
-                            label="文档类型模板",
-                            choices=["自动", "正式书信", "学术文献", "IND递交资料", "通用"],
-                            value="自动",
-                            interactive=True,
-                            allow_custom_value=True,
-                        )
-"""
+DROP_NEW = _profile_dropdown_block()
+DROP_BODY = DROP_NEW.replace(DROP_ANCHOR, "", 1)
 
 DROP_OLD_NO_CUSTOM = """                        doc_profile_dropdown = gr.Dropdown(
                             label="文档类型模板",
@@ -60,24 +83,47 @@ UPLOAD_NEW = UPLOAD_ANCHOR + """
             import sys as _sys
             from pathlib import Path as _P
             _sys.path.insert(0, "/home/dev/qyunslation/scripts")
-            from doc_profile import hint_choice, detect, AUTO_CHOICE
+            from _content_profile_ui import (
+                AUTO_CHOICE,
+                choice_to_content_profile,
+                hint_choice,
+                legacy_template_name,
+            )
+            from qyunslation.structure.models import ContentProfile
             st = st or {}
-            if choice and not str(choice).startswith(AUTO_CHOICE):
-                st["_doc_profile_ui"] = choice
-                return gr.update(), st
             path = None
             if files:
                 f0 = files[0]
                 path = _P(f0.name if hasattr(f0, "name") else f0)
-            detected = detect(path) if path and path.is_file() else "generic"
+            pptx_update = gr.update(visible=bool(path and path.suffix.lower() == ".pptx"))
+            override = choice_to_content_profile(choice)
+            if override is not None:
+                st["_doc_profile_ui"] = choice
+                st["_content_profile_override"] = override.value
+                st["_doc_profile_detected"] = legacy_template_name(override)
+                return gr.update(), st, pptx_update
+            meta = st.get("_prescan_meta") or {}
+            fh = st.get("_prescan_active_hash")
+            entry = (meta.get("files") or {}).get(fh) if fh else {}
+            cp_value = entry.get("content_profile")
+            if cp_value:
+                cp = ContentProfile(cp_value)
+                st["_doc_profile_ui"] = AUTO_CHOICE
+                st["_doc_profile_detected"] = legacy_template_name(cp)
+                st["_content_profile_auto"] = cp.value
+                return (
+                    gr.update(value=hint_choice(cp, profile_source=entry.get("profile_source") or "AUTO")),
+                    st,
+                    pptx_update,
+                )
             st["_doc_profile_ui"] = AUTO_CHOICE
-            st["_doc_profile_detected"] = detected
-            return gr.update(value=hint_choice(detected)), st
+            st["_doc_profile_detected"] = "generic"
+            return gr.update(value=AUTO_CHOICE), st, pptx_update
 
         file_input.upload(
             _qy_hint_doc_profile,
             inputs=[file_input, doc_profile_dropdown, state],
-            outputs=[doc_profile_dropdown, state],
+            outputs=[doc_profile_dropdown, state, pptx_processing_mode],
         )
 """
 
@@ -92,8 +138,14 @@ APPLY_NEW = """        import sys as _qy_sys
         from pathlib import Path as _qy_P
         _qy_sys.path.insert(0, "/home/dev/qyunslation/scripts")
         from doc_profile import apply as _qy_apply, patch_line_skip as _qy_patch_ls, patch_letter_typesetting as _qy_patch_letter, resolve as _qy_resolve
+        from _content_profile_ui import choice_to_content_profile, legacy_template_name
         _qy_choice = (state or {}).get("_doc_profile_ui") or "自动"
-        _qy_name = _qy_resolve(_qy_choice, _qy_P(file_path))
+        _qy_cp = choice_to_content_profile(_qy_choice)
+        if _qy_cp is not None:
+            _qy_name = legacy_template_name(_qy_cp)
+            state["_content_profile_override"] = _qy_cp.value
+        else:
+            _qy_name = _qy_resolve(_qy_choice, _qy_P(file_path))
         _qy_prof = _qy_apply(_qy_name, settings)
         _qy_patch_ls(float(_qy_prof.get("line_skip") or 1.5))
         if _qy_name == "letter":
@@ -375,6 +427,23 @@ def apply_fixed(text: str) -> str:
         else:
             text = text.replace(DROP_ANCHOR, DROP_NEW, 1)
             changed = True
+    elif "内容画像" not in text or "_qy_pptx_mode" not in text:
+        for old_block in (
+            DROP_OLD_NO_CUSTOM,
+            DROP_WITH_CUSTOM,
+            """                        doc_profile_dropdown = gr.Dropdown(
+                            label="文档类型模板",
+                            choices=["自动", "正式书信", "学术文献", "IND递交资料", "通用"],
+                            value="自动",
+                            interactive=True,
+                            allow_custom_value=True,
+                        )
+""",
+        ):
+            if old_block in text:
+                text = text.replace(old_block, DROP_BODY, 1)
+                changed = True
+                break
     elif "allow_custom_value=True" not in text.split("doc_profile_dropdown", 1)[-1][:400]:
         if DROP_OLD_NO_CUSTOM in text:
             text = text.replace(DROP_OLD_NO_CUSTOM, DROP_WITH_CUSTOM, 1)

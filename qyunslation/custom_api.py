@@ -12,8 +12,38 @@ from qyunslation.extensions.image_translate import probe_image, translate_image
 from qyunslation.server.uploads import read_upload_limited
 from qyunslation.structure.capabilities import gui_image_extensions
 from qyunslation.structure.ingest import InputPreparationError
+from qyunslation.structure.manifest_store import ManifestStore
+from qyunslation.structure.runtime_probe import run_environment_probes
+from qyunslation.structure.scan_pdf import (
+    PDF_STRUCTURE_SCANNER_NAME,
+    PDF_STRUCTURE_SCANNER_VERSION,
+)
 
 router = APIRouter(tags=["Custom Extensions"])
+
+
+@router.get("/runtime-probe", summary="PLAN-030ic：运行环境探针")
+async def runtime_probe_endpoint():
+    report = run_environment_probes(include_sidecar=True)
+    return report.model_dump()
+
+
+@router.get("/manifest/{source_sha256}", summary="PLAN-030ib：下载结构清单 JSON")
+async def manifest_download_endpoint(source_sha256: str):
+    digest = source_sha256.strip().lower()
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise HTTPException(400, "需要完整小写 SHA-256")
+    store = ManifestStore()
+    manifest = store.get_current(
+        digest,
+        producer_name=PDF_STRUCTURE_SCANNER_NAME,
+        producer_version=PDF_STRUCTURE_SCANNER_VERSION,
+    )
+    if manifest is None:
+        manifest = store.get_execution(digest)
+    if manifest is None:
+        raise HTTPException(404, "未找到该文件的 structure manifest")
+    return JSONResponse(manifest.model_dump(mode="json"))
 
 
 @router.post("/image-translate", summary="图片嵌字翻译（上传图→返回译后图）")
@@ -25,6 +55,9 @@ async def image_translate_endpoint(
     suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
     if suffix not in gui_image_extensions():
         raise HTTPException(400, f"不支持的图片格式: {suffix}")
+    from qyunslation.structure.runtime_probe import assert_environment_for_filename
+
+    assert_environment_for_filename(file.filename)
     tmp_in = None
     tmp_out = None
     n = 0

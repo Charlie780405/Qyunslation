@@ -4,8 +4,9 @@
 > 日期：2026-09-07
 > 批准记录：用户于 2026-09-07 明确批准 PLAN-030
 > 关联：PLAN-027（文档内嵌图）、PLAN-028（预扫描）、PLAN-029（表格结构化）
-> 阶段门：030a–030h 已完成。Checkpoint C 三条已闭合，跨格式对账已交付。
-> 下一步：[030j 栏式债 D1–D5](./PLAN-030j-layout-debt.md) → 030i（UI、可观测、兼容与交付）。030i 编码前须清 D1–D5。
+> 阶段门：030a–030h、030j 已完成。Checkpoint C 三条已闭合；D1–D5 已清。
+> 阶段门：030a–030j、**030i 已完成**。Checkpoint D 发布门已交付。
+> 下一步：030-table Camelot 选型（Task 0）或 PLAN-034（暂停中）。
 
 ## 一、执行基线提示词
 
@@ -146,7 +147,7 @@ DocumentStructureManifest
 | 030g | [PPT/PPTX 双模式闭环](./PLAN-030g-pptx-dual-mode-closure.md)（已完成） | 原生嵌图关 `QY030-PPT-001`、`.ppt` 规范化、逐页图片化打包；瘦门禁不嵌套全门 | 030b–030f |
 | 030h | [跨格式版式保真与入口一致性](./PLAN-030h-cross-format-fidelity.md)（已完成） | 验收脱离运行时样本目录、GUI 入口格式统一到能力矩阵、跨格式语义对账、单/双/多/混合栏与 Poster 分区版式金样；栏式判定的五处缺口已登记为 D1–D5 待另立子计划 | 030d–030g |
 | 030j | [栏式判定债 D1–D5](./PLAN-030j-layout-debt.md)（**已完成**） | 030ja–030jd | 030h |
-| 030i | UI、可观测、兼容与交付 | 格式/画像/模式选择、可编辑性提示、manifest 下载、依赖门禁、Checkpoint D | 030j |
+| 030i | [UI、可观测、兼容与交付](./PLAN-030i-delivery-closure.md)（**已完成**） | 030ia–030id：画像/模式 UI、manifest 下载、依赖探针、补丁供应链与 Checkpoint D | 030j |
 
 ### Checkpoint A：030a 后
 
@@ -171,7 +172,7 @@ DocumentStructureManifest
 
 判定（030h 后）：前两项闭合，第三项闭合。第二项的「阅读顺序无跨栏串接」仅在单/双栏成立——
 030h 的版式金样查明三栏及以上被判成 DOUBLE 后中栏归左，海报九分区被串成两栏，均属跨栏串接。
-这两条记为 D1、D2、D4，见 [PLAN-030h](./PLAN-030h-cross-format-fidelity.md)「发现的债」，须在 030i 前清理。
+D1、D2、D4 等五处债已于 [PLAN-030j](./PLAN-030j-layout-debt.md) 清理；030i 负责 Checkpoint D 发布门。
 
 ### Checkpoint D：030h–030i 发布前
 

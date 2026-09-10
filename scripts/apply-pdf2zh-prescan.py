@@ -42,17 +42,17 @@ HELPER = r'''
             st.setdefault("_prescan_meta", {"files": {}})
             if not files:
                 st["_prescan_meta"] = {"files": {}, "current_generation": gen}
-                return gr.update(value="", visible=False), st
+                return gr.update(value="", visible=False), st, gr.update(value=None, visible=False)
             f0 = files[0]
             path = _P(f0.name if hasattr(f0, "name") else f0)
             if not path.is_file():
-                return gr.update(value="无法读取上传文件", visible=True), st
+                return gr.update(value="无法读取上传文件", visible=True), st, gr.update()
             try:
                 t1 = scan_file_tier1(path)
             except Exception as exc:
                 logger.warning("prescan tier1 failed: %s", exc)
                 st["_prescan_meta"]["current_generation"] = gen
-                return gr.update(value=f"预扫描失败：{exc}", visible=True), st
+                return gr.update(value=f"预扫描失败：{exc}", visible=True), st, gr.update()
             entry = t1.to_dict()
             entry["generation"] = gen
             entry["tier1_done"] = True
@@ -61,7 +61,7 @@ HELPER = r'''
             st["_prescan_meta"]["current_generation"] = gen
             st["_prescan_meta"]["files"][t1.file_hash] = entry
             st["_prescan_active_hash"] = t1.file_hash
-            return gr.update(value=t1.summary_text, visible=True), st
+            return gr.update(value=t1.summary_text, visible=True), st, gr.update()
 
 
         def _qy_prescan_tier2(files, state, lang_to=None):
@@ -78,15 +78,15 @@ HELPER = r'''
             fh = st.get("_prescan_active_hash")
             entry = (meta.get("files") or {}).get(fh) if fh else None
             if not entry or int(entry.get("generation") or -1) != gen:
-                return gr.update(), st
+                return gr.update(), st, gr.update()
             if entry.get("file_type") in ("encrypted", "corrupt", "unsupported"):
-                return gr.update(), st
+                return gr.update(), st, gr.update()
             cands = entry.get("candidates") or []
             if not cands:
                 text = (entry.get("summary_text") or "").replace("，正在检测文本…", "。")
                 entry["tier2_done"] = True
                 entry["summary_text"] = text
-                return gr.update(value=text, visible=True), st
+                return gr.update(value=text, visible=True), st, gr.update()
 
             # 探针优先走 sidecar：pdf2zh 与 qyunslation 是两个独立 venv，只有后者
             # 装了 rapidocr。本地 probe_image 在缺失时会静默回退到弱检测器，把
@@ -137,7 +137,7 @@ HELPER = r'''
                     with zipfile.ZipFile(path) as z:
                         for c in cands[:10]:
                             if int(st.get("_prescan_generation") or 0) != gen:
-                                return gr.update(), st
+                                return gr.update(), st, gr.update()
                             part = c.get("part_name")
                             if not part:
                                 continue
@@ -169,7 +169,7 @@ HELPER = r'''
                     try:
                         for c in cands[:10]:
                             if int(st.get("_prescan_generation") or 0) != gen:
-                                return gr.update(), st
+                                return gr.update(), st, gr.update()
                             xref = c.get("xref")
                             if not xref:
                                 continue
@@ -207,11 +207,11 @@ HELPER = r'''
             except Exception as exc:
                 logger.warning("prescan tier2 failed: %s", exc)
                 if int(st.get("_prescan_generation") or 0) != gen:
-                    return gr.update(), st
-                return gr.update(value="插图文本检测失败，翻译时将重试", visible=True), st
+                    return gr.update(), st, gr.update()
+                return gr.update(value="插图文本检测失败，翻译时将重试", visible=True), st, gr.update()
 
             if int(st.get("_prescan_generation") or 0) != gen:
-                return gr.update(), st
+                return gr.update(), st, gr.update()
 
             text = format_tier2_summary(entry, translatable=translatable, errors=errors)
             entry["tier2_done"] = True
@@ -219,7 +219,7 @@ HELPER = r'''
             entry["summary_text"] = text
             meta.setdefault("files", {})[fh] = entry
             st["_prescan_meta"] = meta
-            return gr.update(value=text, visible=True), st
+            return gr.update(value=text, visible=True), st, gr.update()
 
 
         def _qy_prescan_tier3(files, state):
@@ -236,31 +236,36 @@ HELPER = r'''
             fh = st.get("_prescan_active_hash")
             entry = (meta.get("files") or {}).get(fh) if fh else None
             if not entry or int(entry.get("generation") or -1) != gen:
-                return gr.update(), st
+                return gr.update(), st, gr.update()
             if entry.get("file_type") not in ("pdf",):
-                return gr.update(), st
+                return gr.update(), st, gr.update()
             if entry.get("tier3_done"):
-                return gr.update(value=entry.get("summary_text"), visible=True), st
+                manifest_path = entry.get("manifest_path")
+                return (
+                    gr.update(value=entry.get("summary_text"), visible=True),
+                    st,
+                    gr.update(value=manifest_path, visible=bool(manifest_path)),
+                )
 
             f0 = files[0] if files else None
             path = _P(f0.name if hasattr(f0, "name") else f0) if f0 else None
             if not path or not path.is_file():
-                return gr.update(), st
+                return gr.update(), st, gr.update()
 
             def _abort() -> bool:
                 return int(st.get("_prescan_generation") or 0) != gen
 
             if _abort():
-                return gr.update(), st
+                return gr.update(), st, gr.update()
 
             try:
                 t3 = scan_pdf_tier3(path, should_abort=_abort)
             except Exception as exc:
                 logger.warning("prescan tier3 failed: %s", exc)
-                return gr.update(), st
+                return gr.update(), st, gr.update()
 
             if _abort():
-                return gr.update(), st
+                return gr.update(), st, gr.update()
 
             text = format_tier3_summary(
                 entry,
@@ -284,9 +289,22 @@ HELPER = r'''
             entry["tier3_error"] = getattr(t3, "error", None)
             entry["tier3_truncated"] = t3.truncated
             entry["summary_text"] = text
+            entry["source_sha256"] = getattr(t3, "source_sha256", None) or fh
+            entry["content_profile"] = getattr(t3, "content_profile", None)
+            entry["profile_source"] = getattr(t3, "profile_source", None)
+            entry["output_editability"] = getattr(t3, "output_editability", None)
+            manifest_path = None
+            manifest_json = getattr(t3, "manifest_json", None)
+            if manifest_json:
+                import tempfile as _tmp
+
+                manifest_path = str(_P(_tmp.gettempdir()) / f"qy-manifest-{fh}.json")
+                _P(manifest_path).write_text(manifest_json, encoding="utf-8")
+                entry["manifest_path"] = manifest_path
             meta.setdefault("files", {})[fh] = entry
             st["_prescan_meta"] = meta
-            return gr.update(value=text, visible=True), st
+            manifest_update = gr.update(value=manifest_path, visible=bool(manifest_path))
+            return gr.update(value=text, visible=True), st, manifest_update
 
 
         def _qy_prescan_clear(state):
@@ -294,7 +312,7 @@ HELPER = r'''
             _qy_prescan_bump(st)
             st["_prescan_meta"] = {"files": {}}
             st.pop("_prescan_active_hash", None)
-            return gr.update(value="", visible=False), st
+            return gr.update(value="", visible=False), st, gr.update(value=None, visible=False)
 '''.replace("__QY_IMAGE_EXT__", set_literal("image"))
 
 CSS = """
@@ -330,6 +348,12 @@ def apply(text: str) -> str:
                                 value="",
                                 visible=False,
                                 elem_classes=["qy-prescan-bar"],
+                            )
+                            # _qy_prescan_manifest
+                            qy_manifest_download = gr.File(
+                                label="结构清单 (manifest JSON)",
+                                visible=False,
+                                interactive=False,
                             )
 '''
         text = text.replace(anchor, insert, 1)
@@ -372,20 +396,29 @@ def apply(text: str) -> str:
         _qy_upload_evt.then(
             _qy_prescan_tier1,
             inputs=[file_input, state, lang_to],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         ).then(
             _qy_prescan_tier2,
             inputs=[file_input, state, lang_to],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         ).then(
             _qy_prescan_tier3,
             inputs=[file_input, state],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         )
 '''
         if old_then not in text:
             raise RuntimeError("找不到 _qy_upload_evt.then dual_payload 锚点")
         text = text.replace(old_then, new_then, 1)
+    elif "qy_manifest_download" not in text and "_qy_prescan_tier1," in text:
+        text = text.replace(
+            "outputs=[qy_prescan_status, state]",
+            "outputs=[qy_prescan_status, state, qy_manifest_download]",
+        )
+        text = text.replace(
+            "outputs=[qy_prescan_status, state]\n        )",
+            "outputs=[qy_prescan_status, state, qy_manifest_download]\n        )",
+        )
     elif "_qy_prescan_tier3," not in text and "_qy_prescan_tier2," in text:
         old_t2_end = """        ).then(
             _qy_prescan_tier2,
@@ -396,11 +429,11 @@ def apply(text: str) -> str:
         new_t2_t3 = """        ).then(
             _qy_prescan_tier2,
             inputs=[file_input, state, lang_to],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         ).then(
             _qy_prescan_tier3,
             inputs=[file_input, state],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         )
 """
         if old_t2_end in text:
@@ -421,7 +454,7 @@ def apply(text: str) -> str:
         file_input.clear(
             _qy_prescan_clear,
             inputs=[state],
-            outputs=[qy_prescan_status, state],
+            outputs=[qy_prescan_status, state, qy_manifest_download],
         )
 '''
                 text = text[:insert_at] + bind + text[insert_at:]
@@ -448,6 +481,8 @@ def verify(text: str) -> int:
     need("_qy_prescan_tier3," in text, "tier3 not wired")
     need("vector_count" in text, "vector_count missing")
     need("def _qy_prescan_clear(" in text, "clear helper missing")
+    need("qy_manifest_download" in text, "manifest download missing")
+    need("manifest_path" in text, "manifest export missing")
     try:
         compile(text, str(GUI), "exec")
     except SyntaxError as e:

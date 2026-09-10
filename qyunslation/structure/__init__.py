@@ -82,6 +82,12 @@ from .runtime import (
     decide_runtime_capability,
     probe_runtime_capabilities,
 )
+from .runtime_probe import (
+    EnvironmentProbeReport,
+    ProbeResult,
+    assert_environment_for_upload,
+    run_environment_probes,
+)
 from .canvases import CanvasLimits, extract_canvases
 from .manifest_store import ManifestStore, default_cache_root
 from .captions import (
@@ -171,6 +177,10 @@ __all__ = [
     "RuntimeCapabilitySnapshot",
     "decide_runtime_capability",
     "probe_runtime_capabilities",
+    "EnvironmentProbeReport",
+    "ProbeResult",
+    "assert_environment_for_upload",
+    "run_environment_probes",
     "CanvasLimits",
     "ManifestStore",
     "PdfStructureScanner",

@@ -1,0 +1,35 @@
+{
+  "schema": "versions-030/v1",
+  "packages": {
+    "pymupdf": {
+      "min_version": "1.25.0",
+      "context": "qyunslation",
+      "distribution": "pymupdf"
+    },
+    "Pillow": {
+      "min_version": "10.0.0",
+      "context": "qyunslation",
+      "distribution": "pillow"
+    },
+    "babeldoc": {
+      "min_version": "0.6.2",
+      "context": "pdf2zh",
+      "distribution": "babeldoc"
+    },
+    "pdf2zh-next": {
+      "min_version": "2.9.0",
+      "context": "pdf2zh",
+      "distribution": "pdf2zh-next"
+    }
+  },
+  "office": {
+    "commands": ["soffice", "libreoffice"],
+    "version_stdout_contains": "LibreOffice"
+  },
+  "sidecar": {
+    "url_env": "QYUNSLATION_SIDECAR_URL",
+    "default_url": "http://127.0.0.1:8010"
+  },
+  "image_core_extensions": [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"],
+  "babeldoc_layout_module": "babeldoc.format.pdf.document_il.frontend.il_creater"
+}
