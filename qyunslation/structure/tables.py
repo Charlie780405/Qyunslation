@@ -177,6 +177,54 @@ def _caption_touches_frame(
     return left or right or above or below or inside
 
 
+def picture_table_region(page, caption_bbox, number: int) -> TableRegion | None:
+    """题注下方最大位图块 → 纯图片表区域。无合适位图则 None（fail-closed）。"""
+    try:
+        blocks = page.get_text("dict").get("blocks", []) or []
+    except Exception:
+        return None
+    try:
+        page_w = float(page.rect.width)
+        page_h = float(page.rect.height)
+    except Exception:
+        return None
+    if page_w <= 0 or page_h <= 0:
+        return None
+    caption_bottom = float(caption_bbox[3])
+    best: tuple[float, float, float, float] | None = None
+    best_area = 0.0
+    min_area = page_w * page_h * 0.02
+    max_gap = page_h * 0.35
+    for block in blocks:
+        if block.get("type") != 1:
+            continue
+        bbox = block.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+        x0, y0, x1, y1 = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        if y1 <= caption_bottom + 1.0:
+            continue
+        if y0 - caption_bottom > max_gap:
+            continue
+        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        if area < min_area:
+            continue
+        if area > best_area:
+            best_area = area
+            best = (x0, y0, x1, y1)
+    if best is None:
+        return None
+    x0, y0, x1, y1 = best
+    return TableRegion(
+        number=int(number),
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        line_count=0,
+    )
+
+
 def table_regions(
     page, anchors=None, *, drawings: list | None = None
 ) -> list[TableRegion]:
@@ -184,6 +232,7 @@ def table_regions(
 
     无表题注的页返回空列表——这是不产生假阳性的关键：图表页的线框再多也不会
     被当成表格。PLAN-033b：题注下方横线群失败时，再用封闭框线回退。
+    PLAN-038d：无线条时回退题注下方最大位图（纯图片表）。
     """
     from .captions import caption_anchors
 
@@ -201,59 +250,66 @@ def table_regions(
             drawings = []
     lines = _horizontal_lines(page, drawings=drawings)
     v_lines = _vertical_lines(page, drawings=drawings)
-    if not lines and not v_lines:
-        return []
-
-    gap_break = height * ROW_GAP_BREAK_FRAC
-    caption_gap = height * CAPTION_TO_TABLE_FRAC
     regions: list[TableRegion] = []
-    consumed: set[int] = set()
     taken: set[int] = set()
 
-    for _, number, _, bbox in captions:
-        caption_bottom = float(bbox[3])
-        group: list[tuple[float, float, float]] = []
-        for index, (x0, x1, y) in enumerate(lines):
-            if index in consumed or y < caption_bottom:
-                continue
-            if not group:
-                if y - caption_bottom > caption_gap:
+    if lines or v_lines:
+        gap_break = height * ROW_GAP_BREAK_FRAC
+        caption_gap = height * CAPTION_TO_TABLE_FRAC
+        consumed: set[int] = set()
+
+        for _, number, _, bbox in captions:
+            caption_bottom = float(bbox[3])
+            group: list[tuple[float, float, float]] = []
+            for index, (x0, x1, y) in enumerate(lines):
+                if index in consumed or y < caption_bottom:
+                    continue
+                if not group:
+                    if y - caption_bottom > caption_gap:
+                        break
+                    group.append((x0, x1, y))
+                    consumed.add(index)
+                    continue
+                if y - group[-1][2] > gap_break:
                     break
                 group.append((x0, x1, y))
                 consumed.add(index)
+            if len(group) >= 2:
+                regions.append(
+                    TableRegion(
+                        number=number,
+                        x0=min(g[0] for g in group),
+                        y0=group[0][2],
+                        x1=max(g[1] for g in group),
+                        y1=group[-1][2],
+                        line_count=len(group),
+                    )
+                )
+                taken.add(number)
                 continue
-            if y - group[-1][2] > gap_break:
-                break
-            group.append((x0, x1, y))
-            consumed.add(index)
-        if len(group) >= 2:
+            frame = _frame_near_caption(lines, v_lines, bbox, caption_gap)
+            if frame is None or number in taken:
+                continue
+            fx0, fy0, fx1, fy1, nlines = frame
             regions.append(
                 TableRegion(
                     number=number,
-                    x0=min(g[0] for g in group),
-                    y0=group[0][2],
-                    x1=max(g[1] for g in group),
-                    y1=group[-1][2],
-                    line_count=len(group),
+                    x0=fx0,
+                    y0=fy0,
+                    x1=fx1,
+                    y1=fy1,
+                    line_count=nlines,
                 )
             )
             taken.add(number)
+
+    for _, number, _, bbox in captions:
+        if number in taken:
             continue
-        frame = _frame_near_caption(lines, v_lines, bbox, caption_gap)
-        if frame is None or number in taken:
-            continue
-        fx0, fy0, fx1, fy1, nlines = frame
-        regions.append(
-            TableRegion(
-                number=number,
-                x0=fx0,
-                y0=fy0,
-                x1=fx1,
-                y1=fy1,
-                line_count=nlines,
-            )
-        )
-        taken.add(number)
+        pic = picture_table_region(page, bbox, number)
+        if pic is not None:
+            regions.append(pic)
+            taken.add(number)
     return regions
 
 

@@ -1,6 +1,6 @@
 # PLAN-033j：表格翻译、矢量重排和续页
 
-> 状态：**已接到生产后处理，真实样本终态待验收**
+> 状态：**已完成**（033n / WT-033n 已关）
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033j.sh`
 > 前置：033i

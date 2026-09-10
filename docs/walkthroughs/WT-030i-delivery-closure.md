@@ -36,4 +36,10 @@ python3 scripts/check-babeldoc-fidelity-033l.py
 
 ## 视觉金样
 
-见 [`visual-gold-030.md`](../contracts/visual-gold-030.md)（INFO，未批准不 block）。
+见 [`visual-gold-030.md`](../contracts/visual-gold-030.md)。
+
+| 项 | 值 |
+| --- | --- |
+| 批准 | 用户 2026-09-10 明确批准三项 |
+| HEAD | `e19e686` |
+| 缺口 | G-DOC-009 → closed（PLAN-038a） |

@@ -51,6 +51,6 @@
 
 ## 遗留问题与下阶段输入
 
-- [ ] 手动 sudo：`sudo systemctl disable --now docutranslate.service`（PLAN-002 遗留）
+- [x] 手动 sudo：`sudo systemctl disable --now docutranslate.service`（已由 PLAN-038c / G-OPS-001 关闭；`is-enabled`=disabled）
 - [ ] 荃信白牌 → 后续 PLAN
 - [ ] 手动术语表 `--glossaries` 接入 → 可选

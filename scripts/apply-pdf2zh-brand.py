@@ -88,6 +88,7 @@ def apply(text: str) -> str:
         "                    )\n",
         footer,
     )
+    # PLAN-038g：隐藏 SiliconFlow 免费致谢（本部署用 Ollama，勿露上游死链）
     text = text.replace(
         '                    siliconflow_free_acknowledgement = gr.Markdown(\n'
         '                        _(\n'
@@ -96,9 +97,19 @@ def apply(text: str) -> str:
         '                        visible=True,\n'
         '                    )',
         '                    siliconflow_free_acknowledgement = gr.Markdown(\n'
+        '                        "",\n'
+        '                        visible=False,\n'
+        '                    )',
+    )
+    text = text.replace(
+        '                    siliconflow_free_acknowledgement = gr.Markdown(\n'
         '                        _(\n'
         '                            "Free translation service provided by [SiliconFlow](https://siliconflow.cn)"\n'
         '                        ),\n'
+        '                        visible=False,\n'
+        '                    )',
+        '                    siliconflow_free_acknowledgement = gr.Markdown(\n'
+        '                        "",\n'
         '                        visible=False,\n'
         '                    )',
     )
@@ -119,6 +130,21 @@ def apply(text: str) -> str:
         text = text.replace(
             'brand_logo_path = BRAND_DIR / "qyunslation.png"',
             'brand_logo_path = BRAND_DIR / "quanxin-logo.svg"',
+        )
+
+    # PLAN-038g: scrub leftover upstream brand strings in GUI source
+    if "PDFMathTranslate" in text:
+        text = text.replace("PDFMathTranslate Next", "Qyunslation")
+        text = text.replace("PDFMathTranslate", "Qyunslation")
+    if "tech_details_string = f" in text and "SiliconFlow" in text:
+        import re as _re
+
+        text = _re.sub(
+            r"tech_details_string = f\"\"\".*?\"\"\"",
+            'tech_details_string = f"""<summary>Qyunslation</summary>Qyunslation@荃信生物 · version {__version__}"""',
+            text,
+            count=1,
+            flags=_re.DOTALL,
         )
 
     old_css_start = "    .qy-brand {"

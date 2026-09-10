@@ -605,7 +605,11 @@ class PdfStructureScanner:
                                 object_id=tab_id,
                                 canvas_id=canvas.canvas_id,
                                 bbox=tab_bbox,
-                                representation=Representation.NATIVE_TEXT,
+                                representation=(
+                                    Representation.BITMAP
+                                    if region is not None and region.line_count == 0
+                                    else Representation.NATIVE_TEXT
+                                ),
                                 row_count=row_count,
                                 column_count=column_count,
                                 source_refs=[
@@ -613,10 +617,19 @@ class PdfStructureScanner:
                                 ],
                                 detector_evidence=[
                                     DetectorEvidence(
-                                        detector="caption_anchors",
+                                        detector=(
+                                            "picture_table"
+                                            if region is not None and region.line_count == 0
+                                            else "caption_anchors"
+                                        ),
                                         label=f"table:{num}",
                                         bbox=cap_bbox,
-                                        details={"page": i},
+                                        details={
+                                            "page": i,
+                                            "picture_table": bool(
+                                                region is not None and region.line_count == 0
+                                            ),
+                                        },
                                     ),
                                     *self._table_region_evidence(
                                         regions_by_number, num, canvas, i

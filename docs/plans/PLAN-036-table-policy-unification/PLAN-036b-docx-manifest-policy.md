@@ -1,6 +1,6 @@
 # PLAN-036b：DOCX 表格 manifest translation_policy
 
-> 状态：**待批准**
+> 状态：**已完成**（PLAN-036 / WT-036）
 > 前置：036a
 
 ## 改

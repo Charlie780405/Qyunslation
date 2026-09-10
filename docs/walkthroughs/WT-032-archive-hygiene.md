@@ -40,7 +40,12 @@ bash scripts/verify-plan-032.sh
 
 `plan019-zh_translated.docx` → `plan019-zh.docx`：`-zh` 是原文件名的一部分（连字符而非点），未被误剥。
 
-**存量写入需人工确认后执行**，本 WT 记录时尚未 `--apply`。
+**存量写入已于 2026-09-10 由 PLAN-038c 执行**（G-OPS-002）：
+
+```text
+python scripts/fix-archive-filenames.py --apply
+# 已修正 11 条；备份：/home/dev/pdf2zh/archive/index.bak-20260910T120940Z.db
+```
 
 ## 五、影响面核实
 

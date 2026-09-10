@@ -50,17 +50,20 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 
 ## 遗留
 
-- ljae439 无跨页续表样本：V6 降级为 INFO
-- DOCX/PPTX 表格 policy 对齐：后续引用同一 SSOT
-- WT-030-table「跨页续表 out of scope」文案待指向 PLAN-035
+- ljae439 无跨页续表样本：V6 降级为 INFO（已由 036c Wiley 金样覆盖主路径）
+- DOCX/PPTX 表格 policy：已由 PLAN-036 / PLAN-037 关闭
+- 纯图片表 / PPT OCR：→ PLAN-038d / 038e（G-CAP-001 / G-CAP-002）
+
+## 运维说明（038c）
+
+- **重新预扫**（G-OPS-004）：scanner ≥1.7.0 后，同一 PDF 须重新上传/预扫才能看到续表 occurrence 与 policy 字段。
+- **STRICT_SAMPLE**（G-OPS-003）：样本机可选设 `QYUNSLATION_RELEASE_STRICT_SAMPLE=1`，使 `verify-release` 中 033l 无样本时 hard-fail；本机未强制启用。
 
 ## 下一步建议
 
 | 优先级 | 项 | 说明 |
 | --- | --- | --- |
-| P0 | 真实续表金样 | 从知识库/生产找 `Table N Continued` PDF，补 `tests/fixtures/structure/reference/`，把 035 continuation 从合成件升级为硬金样 |
-| P1 | `table_cell_policy` 跨格式 | 让 `scan_docx`、`md_tables`、`doc_image_policy` 引用同一 SSOT，消除三处 numeric 规则漂移 |
-| P1 | UI 可观测 | manifest/执行失败展示 `TABLE_DIGIT_DRIFT`、`digits_preserved`、`TABLE_CONTINUATION_UNLINKED` |
-| P2 | ~~PLAN-036 立项~~ | 已开 [PLAN-036](../plans/PLAN-036-table-policy-unification/PLAN-036-table-policy-unification.md)（policy 统一 + 续表金样） |
-| P3 | 纯图片表 / PPT OCR | 036 后再立项，勿空开 PLAN-034 |
-| P2 | 发布纪律 | CI/部署前固定跑 `verify-release.sh`；样本机设 `QYUNSLATION_RELEASE_STRICT_SAMPLE=1` 使 033l 也 hard-fail |
+| ~~P0~~ | ~~真实续表金样~~ | 已由 [PLAN-036c](../plans/PLAN-036-table-policy-unification/PLAN-036c-continued-table-gold.md) / WT-036 关闭 |
+| ~~P1~~ | ~~policy 跨格式 / UI 可观测~~ | 已由 PLAN-036 / PLAN-037 关闭 |
+| P1 | 纯图片表 / PPT OCR | [PLAN-038](../plans/PLAN-038-gap-closure/PLAN-038-gap-closure.md) 038d/038e |
+| INFO | STRICT_SAMPLE | 可选；见上 |

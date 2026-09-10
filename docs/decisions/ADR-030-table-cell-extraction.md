@@ -29,4 +29,4 @@ Task 0 证据：`python scripts/spike-plan030-table-task0.py` → `/tmp/plan030-
 ## 后果
 
 - 正面：零新系统依赖；与 030d 区域保护同栈；030h 跨格式对账可比对 DOCX `row_count`。
-- 负面：极弱线框 / 纯图片表仍可能只有区域保护；跨页续表仍 out of scope。
+- 负面：极弱线框仍可能只有区域保护。纯图片表已由 PLAN-038d（题注下位图 + OCR cell）承接；跨页续表已由 PLAN-035/036 承接。

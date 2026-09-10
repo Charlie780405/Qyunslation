@@ -62,12 +62,12 @@
 
 - **仅 PDF**：Word/图嵌字/多格式不再经此入口
 - **UI**：Gradio 默认界面，非荃信白牌
-- **`docutranslate.service`**：仍 enabled 但 `203/EXEC`（需 sudo 执行 `systemctl disable --now`）
+- **`docutranslate.service`**：已由 PLAN-038c 关闭 — `systemctl is-enabled` → `disabled`（G-OPS-001）
 - **CLI 烟测**：须用 `smoke-config.toml`（`gui=false`），勿与 `--config-file` 中 `gui=true` 混跑
 
 ## 遗留问题与下阶段输入
 
-- [ ] 手动 sudo：`sudo systemctl disable --now docutranslate.service` → 002d 卫生
+- [x] 手动 sudo：`sudo systemctl disable --now docutranslate.service` → 已关闭（038c / G-OPS-001；`is-enabled`=disabled）
 - [ ] 可选：荃信白牌 / `--auth-file` 登录墙 → 后续 PLAN
 - [ ] 术语表 CSV 迁入 pdf2zh `--glossaries` → 后续
 
