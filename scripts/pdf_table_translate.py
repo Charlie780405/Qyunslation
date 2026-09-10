@@ -179,11 +179,18 @@ def translate_pdf_tables(
                 changed = True
             except Exception as exc:
                 logger.warning("table writeback failed %s: %s", obj.semantic_id, exc)
+                message = str(exc)
+                if "TABLE_DIGIT_DRIFT" in message:
+                    reason_code = "table_digit_drift"
+                elif "TABLE_" in message:
+                    reason_code = "table_translate_failed"
+                else:
+                    reason_code = "table_writeback_failed"
                 write_output_evidence(
                     obj,
                     status=ExecutionStatus.FAILED_HARD,
-                    reason_code="table_writeback_failed",
-                    checks={"error": str(exc)},
+                    reason_code=reason_code,
+                    checks={"error": message, "digits_preserved": False},
                 )
         if touched:
             _persist(manifest)
@@ -218,6 +225,14 @@ def _persist(manifest) -> None:
                     status=ExecutionStatus.EXPLICITLY_SKIPPED,
                     reason_code="not_reached",
                 )
+        try:
+            from qyunslation.structure.table_execution_observability import (
+                table_fidelity_payload,
+            )
+
+            manifest.extensions["table_fidelity"] = table_fidelity_payload(manifest)
+        except Exception:
+            pass
         manifest.extensions["terminal"] = True
         manifest.refresh_summary()
         apply_current_model_trace(manifest)

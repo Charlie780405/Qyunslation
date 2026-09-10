@@ -147,6 +147,20 @@ POST_SNIPPET = '''
                                 page_parity="even" if _qy_alt else None,
                             )
                         )
+                    try:
+                        from qyunslation.structure.table_execution_observability import (
+                            execution_table_fidelity_hint as _qy_tbl_fid_hint,
+                        )
+                        from qyunslation.structure import ManifestStore as _QyTblStore
+
+                        _qy_tbl_exe = _QyTblStore().get_execution(_qy_full)
+                        _qy_tbl_hint = _qy_tbl_fid_hint(_qy_tbl_exe)
+                        if _qy_tbl_hint:
+                            _qy_img_st["d"] = (
+                                f"{_qy_img_st.get('d') or '译文后处理完成'} {_qy_tbl_hint}"
+                            )
+                    except Exception:
+                        pass
                     return out_mono, out_dual
 
                 _qy_img_task = _qy_aio_img.get_event_loop().run_in_executor(
@@ -212,6 +226,20 @@ TABLE_SNIPPET = '''                    from pdf_table_translate import translate
                                 page_parity="even" if _qy_alt else None,
                             )
                         )
+                    try:
+                        from qyunslation.structure.table_execution_observability import (
+                            execution_table_fidelity_hint as _qy_tbl_fid_hint,
+                        )
+                        from qyunslation.structure import ManifestStore as _QyTblStore
+
+                        _qy_tbl_exe = _QyTblStore().get_execution(_qy_full)
+                        _qy_tbl_hint = _qy_tbl_fid_hint(_qy_tbl_exe)
+                        if _qy_tbl_hint:
+                            _qy_img_st["d"] = (
+                                f"{_qy_img_st.get('d') or '译文后处理完成'} {_qy_tbl_hint}"
+                            )
+                    except Exception:
+                        pass
 '''
 
 _POST_BLOCK_RE = re.compile(

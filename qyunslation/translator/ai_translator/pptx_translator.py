@@ -14,6 +14,7 @@ from pptx.text.text import _Paragraph, TextFrame
 
 from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
 from qyunslation.ir.document import Document
+from qyunslation.structure.pptx_table_exec import merge_docx_translations, partition_pptx_segments
 from qyunslation.translator.ai_translator.base import AiTranslatorConfig, AiTranslator
 
 
@@ -192,11 +193,30 @@ class PPTXTranslator(AiTranslator):
 
     # ---------------- 核心遍历逻辑 ----------------
 
-    def _process_text_frame(self, text_frame: TextFrame, elements: List[Dict[str, Any]], texts: List[str]):
+    def _process_text_frame(
+        self,
+        text_frame: TextFrame,
+        elements: List[Dict[str, Any]],
+        texts: List[str],
+        *,
+        table_cell_ref: tuple[int, int, int, int] | None = None,
+    ):
         for paragraph in text_frame.paragraphs:
-            self._process_paragraph(paragraph, elements, texts)
+            self._process_paragraph(
+                paragraph,
+                elements,
+                texts,
+                table_cell_ref=table_cell_ref,
+            )
 
-    def _process_paragraph(self, paragraph: _Paragraph, elements: List[Dict[str, Any]], texts: List[str]):
+    def _process_paragraph(
+        self,
+        paragraph: _Paragraph,
+        elements: List[Dict[str, Any]],
+        texts: List[str],
+        *,
+        table_cell_ref: tuple[int, int, int, int] | None = None,
+    ):
         if not paragraph.runs: return
 
         state = {'current_runs': []}
@@ -210,7 +230,8 @@ class PPTXTranslator(AiTranslator):
                     "type": "text_runs",
                     "runs": list(current_runs),
                     "paragraph": paragraph,
-                    "text_frame": paragraph._parent
+                    "text_frame": paragraph._parent,
+                    "table_cell_ref": table_cell_ref,
                 })
                 texts.append(full_text)
             current_runs.clear()
@@ -242,10 +263,18 @@ class PPTXTranslator(AiTranslator):
             return
 
         if shape.has_table:
-            for row in shape.table.rows:
-                for cell in row.cells:
+            for row_i, row in enumerate(shape.table.rows):
+                for col_i, cell in enumerate(row.cells):
                     if hasattr(cell, "text_frame") and cell.text_frame:
-                        self._process_text_frame(cell.text_frame, elements, texts)
+                        table_cell_ref = None
+                        if slide_index is not None:
+                            table_cell_ref = (slide_index, shape.shape_id, row_i, col_i)
+                        self._process_text_frame(
+                            cell.text_frame,
+                            elements,
+                            texts,
+                            table_cell_ref=table_cell_ref,
+                        )
             return
 
         if shape.has_text_frame:
@@ -297,6 +326,32 @@ class PPTXTranslator(AiTranslator):
         self._scan_presentation_content(prs, elements, texts)
         self.logger.info(f"Extracted {len(texts)} text segments.")
         return prs, elements, texts
+
+    def _translate_segments(
+        self,
+        originals: List[str],
+        elements: List[Dict[str, Any]],
+        *,
+        structure_manifest=None,
+    ) -> List[str]:
+        text_elements = [info for info in elements if info.get("type") != "image"]
+        batch = partition_pptx_segments(originals, text_elements, structure_manifest)
+        if not batch.llm_texts:
+            return list(originals)
+        if not self.translate_agent:
+            llm_texts = batch.llm_texts
+        else:
+            llm_texts = self.translate_agent.send_segments(
+                batch.llm_texts,
+                self.chunk_size,
+            )
+        return merge_docx_translations(
+            originals,
+            llm_texts,
+            batch.llm_to_original,
+            batch.token_maps,
+            batch.preserved_indices,
+        )
 
     def _replace_picture_blob(self, shape, new_bytes: bytes) -> None:
         blip = shape._element.blipFill.blip
@@ -454,8 +509,11 @@ class PPTXTranslator(AiTranslator):
             if self.translate_agent and self.glossary: self.translate_agent.update_glossary_dict(
                 self.glossary.glossary_dict)
 
-        translated = self.translate_agent.send_segments(originals,
-                                                        self.chunk_size) if self.translate_agent else originals
+        translated = self._translate_segments(
+            originals,
+            elements,
+            structure_manifest=structure_manifest,
+        )
         document.content = self._after_translate(prs, elements, translated, originals)
         self._writeback_manifest(structure_manifest, elements)
         return self
@@ -474,8 +532,12 @@ class PPTXTranslator(AiTranslator):
             if self.translate_agent and self.glossary: self.translate_agent.update_glossary_dict(
                 self.glossary.glossary_dict)
 
-        translated = await self.translate_agent.send_segments_async(originals,
-                                                                    self.chunk_size) if self.translate_agent else originals
+        translated = await asyncio.to_thread(
+            self._translate_segments,
+            originals,
+            elements,
+            structure_manifest=structure_manifest,
+        )
         document.content = await asyncio.to_thread(self._after_translate, prs, elements, translated, originals)
         self._writeback_manifest(structure_manifest, elements)
         return self

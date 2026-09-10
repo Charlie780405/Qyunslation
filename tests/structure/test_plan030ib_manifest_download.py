@@ -51,3 +51,5 @@ def test_manifest_api_returns_cached_manifest():
     assert response.status_code == 200
     payload = response.json()
     assert payload["document"]["source_sha256"] == digest
+    assert "table_fidelity" in payload
+    assert "summary_text" in payload["table_fidelity"]

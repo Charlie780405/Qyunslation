@@ -288,6 +288,7 @@ HELPER = r'''
             entry["unnumbered_count"] = getattr(t3, "unnumbered_count", 0)
             entry["tier3_error"] = getattr(t3, "error", None)
             entry["tier3_truncated"] = t3.truncated
+            entry["table_fidelity_hint"] = getattr(t3, "table_fidelity_hint", None)
             entry["summary_text"] = text
             entry["source_sha256"] = getattr(t3, "source_sha256", None) or fh
             entry["content_profile"] = getattr(t3, "content_profile", None)

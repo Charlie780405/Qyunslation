@@ -65,6 +65,7 @@ class Tier3Result:
     profile_source: str | None = None
     output_editability: str | None = None
     manifest_json: str | None = None
+    table_fidelity_hint: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -473,6 +474,15 @@ def scan_pdf_tier3(
     )
     unnumbered = sum(1 for item in manifest.objects if item.type is ObjectType.IMAGE)
     digest = manifest.document.source_sha256
+    table_fidelity_hint = None
+    try:
+        from qyunslation.structure.table_execution_observability import (
+            scan_table_fidelity_hint,
+        )
+
+        table_fidelity_hint = scan_table_fidelity_hint(manifest) or None
+    except Exception:
+        table_fidelity_hint = None
     return Tier3Result(
         vector_count=trans_n,
         table_count=tab_n,
@@ -487,6 +497,7 @@ def scan_pdf_tier3(
         profile_source=manifest.document.profile_source.value,
         output_editability=manifest.document.output_editability.value,
         manifest_json=manifest.model_dump_json(),
+        table_fidelity_hint=table_fidelity_hint,
     )
 
 
@@ -578,6 +589,9 @@ def format_tier3_summary(
     tier3_error = entry.get("tier3_error")
     if tier3_error and not err:
         text += f" ⚠ Tier-3：{tier3_error}。"
+    table_fidelity = entry.get("table_fidelity_hint")
+    if table_fidelity:
+        text = text.rstrip("。") + f" {table_fidelity}。"
     return text
 
 

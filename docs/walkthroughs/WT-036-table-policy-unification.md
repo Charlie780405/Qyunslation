@@ -46,6 +46,15 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 | DOCX 执行 | `docx_table_exec.partition_docx_segments`；`DocxTranslator` 跳过 PRESERVE、PROTECT_TOKENS |
 | PPT 扫描 | `scan_pptx` 表格块 `translation_policy` + `BlockRole.TABLE_CELL` |
 
+## 037 P1-A/P1-B（表格可观测 + PPT 执行 policy）
+
+| 项 | 交付 |
+| --- | --- |
+| P1-A | `table_execution_observability`；预扫摘要 + manifest API + tbltr 后进度展示 |
+| P1-B | `pptx_table_exec` + `PPTXTranslator` 按 policy 分流 |
+
+验收：`bash scripts/verify-plan-037-table-observability.sh`
+
 ## 遗留
 
-- UI 展示 `TABLE_DIGIT_DRIFT`、`digits_preserved`、`TABLE_CONTINUATION_UNLINKED`（PLAN-035 范围）
+- （035/036 表格 policy 主线已收口；纯图片表 / PPT OCR 仍 out of scope）

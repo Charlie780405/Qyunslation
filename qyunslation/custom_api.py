@@ -43,7 +43,16 @@ async def manifest_download_endpoint(source_sha256: str):
         manifest = store.get_execution(digest)
     if manifest is None:
         raise HTTPException(404, "未找到该文件的 structure manifest")
-    return JSONResponse(manifest.model_dump(mode="json"))
+    payload = manifest.model_dump(mode="json")
+    try:
+        from qyunslation.structure.table_execution_observability import (
+            table_fidelity_payload,
+        )
+
+        payload["table_fidelity"] = table_fidelity_payload(manifest)
+    except Exception:
+        payload["table_fidelity"] = {"scan": [], "execution": [], "summary_text": ""}
+    return JSONResponse(payload)
 
 
 @router.post("/image-translate", summary="图片嵌字翻译（上传图→返回译后图）")
