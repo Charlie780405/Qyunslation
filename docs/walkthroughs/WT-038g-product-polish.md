@@ -18,6 +18,8 @@
 - 密码在 `auth.csv` 与 `office.env`（`QYUNSLATION_GUI_*`）；**勿提交 git**
 - 补丁序见 [`pdf2zh-patch-order.md`](../contracts/pdf2zh-patch-order.md)（038g session-cancel 为第 2 步）
 - 术语表默认已由 [PLAN-039](../plans/PLAN-039-glossary-governance/PLAN-039-glossary-governance.md) 并表为 `merged.csv`（治理见 WT-039）
+- **登录墙副作用**（刷新白屏 / 重启丢会话 / 上传假转圈）由 [PLAN-040](../plans/PLAN-040-upload-auth-ux/PLAN-040-upload-auth-ux.md) 承接
+- **unload 杀任务**：038g 的 per-session unload 在刷新后仍会排程取消；已由 [PLAN-040d](../plans/PLAN-040-upload-auth-ux/PLAN-040d-refresh-keep.md) 改为保活（仅手动 Stop）
 
 ## 验收
 

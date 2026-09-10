@@ -21,14 +21,17 @@
 | 15 | `apply-pdf2zh-left-dock.py` | 左栏 |
 | 16 | `apply-pdf2zh-prescan.py` | **030ib** 预扫/manifest |
 | 17 | `apply-pdf2zh-stale-guard.py` | 陈旧任务 |
-| 18 | `apply-pdf2zh-sse-recover.py` | SSE 恢复 |
-| 19 | `apply-pdf2zh-preview-url.py` | 预览 URL |
-| 20 | `apply-pdf2zh-glossary-encoding.py` | 术语编码 |
-| 21 | `apply-pdf2zh-no-store.py` | 无存储 |
-| 22 | `apply-pdf2zh-css-has-fix.py` | CSS |
-| 23 | `apply-pdf2zh-viewer.py` | 021 查看器 |
-| 24 | `apply-pdf2zh-preview-dpi.py` | 预览 DPI |
-| 25 | `apply-pdf2zh-fidelity-033h.py` | 033h 保真 |
+| 18 | `apply-pdf2zh-040a-auth-shell.py` | **040a** 稳定 cookie / token / 401 横幅 |
+| 19 | `apply-pdf2zh-040b-upload-settle.py` | **040b** 上传完成态 |
+| 20 | `apply-pdf2zh-040d-refresh-keep.py` | **040d** 刷新不杀翻译（仅手动 Stop） |
+| 21 | `apply-pdf2zh-sse-recover.py` | SSE 恢复 |
+| 22 | `apply-pdf2zh-preview-url.py` | 预览 URL |
+| 23 | `apply-pdf2zh-glossary-encoding.py` | 术语编码 |
+| 24 | `apply-pdf2zh-no-store.py` | 无存储 |
+| 25 | `apply-pdf2zh-css-has-fix.py` | CSS |
+| 26 | `apply-pdf2zh-viewer.py` | 021 查看器 |
+| 27 | `apply-pdf2zh-preview-dpi.py` | 预览 DPI |
+| 28 | `apply-pdf2zh-fidelity-033h.py` | 033h 保真 |
 
 部署前自检：
 
