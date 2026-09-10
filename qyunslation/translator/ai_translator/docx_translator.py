@@ -19,6 +19,7 @@ from docx.text.run import Run
 from docx.table import _Cell, Table
 
 from qyunslation.agents.segments_agent import SegmentsTranslateAgentConfig, SegmentsTranslateAgent
+from qyunslation.structure.docx_table_exec import merge_docx_translations, partition_docx_segments
 from qyunslation.structure.docx_walk import walk_docx
 from qyunslation.structure.execution_evidence import write_output_evidence
 from qyunslation.structure.manifest_store import ManifestStore
@@ -313,6 +314,31 @@ class DocxTranslator(AiTranslator):
         content = self._decrypt_if_needed(document.content)
         doc, _segments, elements, texts = walk_docx(content)
         return doc, elements, texts
+
+    def _translate_segments(
+        self,
+        originals: List[str],
+        elements: List[Dict[str, Any]],
+        *,
+        structure_manifest=None,
+    ) -> List[str]:
+        batch = partition_docx_segments(originals, elements, structure_manifest)
+        if not batch.llm_texts:
+            return list(originals)
+        if not self.translate_agent:
+            llm_texts = batch.llm_texts
+        else:
+            llm_texts = self.translate_agent.send_segments(
+                batch.llm_texts,
+                self.chunk_size,
+            )
+        return merge_docx_translations(
+            originals,
+            llm_texts,
+            batch.llm_to_original,
+            batch.token_maps,
+            batch.preserved_indices,
+        )
 
     def _writeback_manifest(
         self,
@@ -766,8 +792,11 @@ class DocxTranslator(AiTranslator):
             if self.translate_agent and self.glossary:
                 self.translate_agent.update_glossary_dict(self.glossary.glossary_dict)
 
-        translated = self.translate_agent.send_segments(originals,
-                                                        self.chunk_size) if self.translate_agent else originals
+        translated = self._translate_segments(
+            originals,
+            elements,
+            structure_manifest=structure_manifest,
+        )
         document.content = self._after_translate(doc, elements, translated, originals)
         self._writeback_manifest(structure_manifest, elements, translated, originals)
         return self
@@ -787,8 +816,12 @@ class DocxTranslator(AiTranslator):
             if self.translate_agent and self.glossary:
                 self.translate_agent.update_glossary_dict(self.glossary.glossary_dict)
 
-        translated = await self.translate_agent.send_segments_async(originals,
-                                                                    self.chunk_size) if self.translate_agent else originals
+        translated = await asyncio.to_thread(
+            self._translate_segments,
+            originals,
+            elements,
+            structure_manifest=structure_manifest,
+        )
         document.content = await asyncio.to_thread(self._after_translate, doc, elements, translated, originals)
         self._writeback_manifest(structure_manifest, elements, translated, originals)
         return self

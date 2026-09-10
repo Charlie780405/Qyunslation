@@ -17,6 +17,7 @@ from pptx.util import Emu
 
 from .ingest import InputPreparationError, prepare_document
 from .models import (
+    BlockRole,
     CURRENT_SCHEMA_VERSION,
     AssetRef,
     AssetRole,
@@ -41,6 +42,7 @@ from .models import (
     build_object_id,
 )
 from .profiles import resolve_profile
+from .table_cell_policy import classify_cell_policy
 
 EMU_PER_PT = 12_700.0
 PPTX_STRUCTURE_SCANNER_NAME = "qyunslation-plan-030g"
@@ -280,6 +282,10 @@ class PptxStructureScanner:
                                     TranslatableBlock(
                                         block_id=f"{key}:r{row_i}c{col_i}",
                                         source_text=text,
+                                        role=BlockRole.TABLE_CELL,
+                                        translation_policy=classify_cell_policy(text),
+                                        row_index=row_i,
+                                        column_index=col_i,
                                     )
                                 )
                     objects.append(

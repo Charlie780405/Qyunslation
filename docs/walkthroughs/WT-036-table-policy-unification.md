@@ -11,6 +11,7 @@
 | 036b | `scan_docx` 表格块 `translation_policy` + `BlockRole.TABLE_CELL` |
 | 036c | `reference/cai-2025-table1-continued.pdf` + truth JSON + 金样 scan 断言 |
 | 036d | `verify-plan-036.sh`；`verify-release.sh` 增加 036 门 |
+| 036e | Tailoring 续表题注；DOCX 执行器消费 policy；PPT 表格 policy |
 
 ## 金样
 
@@ -37,8 +38,14 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 | verify-plan-036 | PASS |
 | verify-release | 030i/035/036/030-table PASS；033l 可无样本 BLOCKED |
 
+## 036e 补充（遗留收口）
+
+| 项 | 交付 |
+| --- | --- |
+| 续表题注 | `continued_table_caption_num`；Tailoring `Table 1  continued` 可解析 |
+| DOCX 执行 | `docx_table_exec.partition_docx_segments`；`DocxTranslator` 跳过 PRESERVE、PROTECT_TOKENS |
+| PPT 扫描 | `scan_pptx` 表格块 `translation_policy` + `BlockRole.TABLE_CELL` |
+
 ## 遗留
 
-- Tailoring 型 `Table N continued`（窄空格、无 `\| (Continued)`）仍不解析
-- DOCX 执行器消费 `translation_policy`（manifest 已对齐，执行路径待后续）
-- PPT 表格 policy 未纳入
+- UI 展示 `TABLE_DIGIT_DRIFT`、`digits_preserved`、`TABLE_CONTINUATION_UNLINKED`（PLAN-035 范围）

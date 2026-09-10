@@ -37,6 +37,9 @@ run_pass "036 compile" "$STAGE_DIR/compile.log" \
   "$PY" -m compileall -q \
     qyunslation/structure/table_cell_policy.py \
     qyunslation/structure/scan_docx.py \
+    qyunslation/structure/docx_table_exec.py \
+    qyunslation/structure/captions.py \
+    qyunslation/structure/scan_pptx.py \
     qyunslation/extensions/doc_image_policy.py \
     scripts/md_tables.py
 
@@ -44,6 +47,9 @@ run_pass "036 policy tests" "$STAGE_DIR/policy.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q --no-cov tests/structure/test_plan036_policy_parity.py \
     tests/structure/test_plan036_docx_table_policy.py \
+    tests/structure/test_plan036_docx_table_exec.py \
+    tests/structure/test_plan036_pptx_table_policy.py \
+    tests/structure/test_plan036_continued_caption_tailoring.py \
     tests/structure/test_plan036_continued_table_gold.py
 
 run_pass "035 regression" "$STAGE_DIR/035.log" \

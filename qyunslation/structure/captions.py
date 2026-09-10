@@ -56,6 +56,12 @@ def _cap_num(m) -> int:
     return int(g) if g.isdigit() else _ROMAN_VAL.get(g.upper(), 0)
 
 
+_CONTINUED_TABLE_NUM = re.compile(
+    rf"^{_SP}*(?:[Tt]able|TABLE|表){_SP}*({_ROMAN})(?:{_SP}|[|(])+.*continued\s*$",
+    re.I,
+)
+
+
 def table_caption_num(text: str) -> int | None:
     t = squeeze_caps(text)
     m = CAPTION_LINE.match(t)
@@ -66,6 +72,16 @@ def table_caption_num(text: str) -> int | None:
     if m:
         return _ROMAN_VAL.get(m.group(1).upper())
     return None
+
+
+def continued_table_caption_num(text: str) -> int | None:
+    """续表题注编号；兼容 Wiley、Tailoring 窄空格与小写 continued。"""
+    if not is_continued_caption(text):
+        return None
+    num = table_caption_num(text)
+    if num:
+        return num
+    return _cap_num(_CONTINUED_TABLE_NUM.match(squeeze_caps(text)))
 
 
 def figure_caption_num(text: str) -> int | None:
@@ -144,7 +160,7 @@ def continued_table_anchors(page) -> list[tuple[int, float, tuple]]:
         text = block_plain_text(b)
         if not text or is_toc_line(text) or not is_continued_caption(text):
             continue
-        num = table_caption_num(text)
+        num = continued_table_caption_num(text)
         if not num:
             continue
         bb = tuple(b.get("bbox") or (0, 0, 0, 0))
