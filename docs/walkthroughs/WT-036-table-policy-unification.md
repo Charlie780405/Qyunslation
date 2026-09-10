@@ -33,10 +33,11 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 
 | 项 | 值 |
 | --- | --- |
-| merge | `ab01544`（036e → `origin/main`） |
+| merge | `a4b61a8`（037 P1-A/P1-B → `origin/main`） |
 | 服务 | `pdf2zh.service`、`qyunslation-office.service` → active |
-| verify-plan-036 | PASS（036e 部署后复验） |
-| verify-release | 030i/035/036/030-table PASS；033l 可无样本 BLOCKED |
+| verify-plan-037 | PASS |
+| verify-plan-036 | PASS |
+| verify-release | 030i/035/036/037/030-table PASS；033l 可无样本 BLOCKED |
 
 ## 036e 补充（遗留收口）
 
