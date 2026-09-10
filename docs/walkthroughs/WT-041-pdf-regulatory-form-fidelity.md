@@ -53,4 +53,8 @@
 
 ## 部署
 
-待所有硬门禁通过后填写；失败或 BLOCKED 时不得标记已部署。
+| 项 | 值 |
+| --- | --- |
+| merge | `252b9aa`（041a–e → origin/main） |
+| 服务 | `pdf2zh.service` 已重启；`PYTHONPATH=/home/dev/qyunslation` |
+| verify-plan-041 | PASS（含实样） |
