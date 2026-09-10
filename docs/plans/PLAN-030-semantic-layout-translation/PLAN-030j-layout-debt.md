@@ -3,7 +3,7 @@
 > 状态：**已完成**（030ja–030jd；D1–D5 已清，可开 030i）
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)
 > 前置：030h 已完成并登记五处债
-> 阻塞：030i（UI/可观测/Checkpoint D）不得在本计划未清 D1–D5 前实施
+> 后续：[PLAN-030i](./PLAN-030i-delivery-closure.md)（纲领待批）
 > 验收门：`bash scripts/verify-plan-030j.sh`
 > 批准记录：用户于 2026-09-10 批准 PLAN-030j 并开 D4 编码
 

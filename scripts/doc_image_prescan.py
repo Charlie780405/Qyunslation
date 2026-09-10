@@ -60,6 +60,11 @@ class Tier3Result:
     pages_scanned: int = 0
     truncated: bool = False
     error: str | None = None
+    source_sha256: str | None = None
+    content_profile: str | None = None
+    profile_source: str | None = None
+    output_editability: str | None = None
+    manifest_json: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -467,6 +472,7 @@ def scan_pdf_tier3(
         and item.execution_status is ExecutionStatus.PENDING
     )
     unnumbered = sum(1 for item in manifest.objects if item.type is ObjectType.IMAGE)
+    digest = manifest.document.source_sha256
     return Tier3Result(
         vector_count=trans_n,
         table_count=tab_n,
@@ -476,6 +482,11 @@ def scan_pdf_tier3(
         unnumbered_count=unnumbered,
         pages_scanned=int(manifest.extensions.get("pages_scanned") or 0),
         truncated=bool(manifest.extensions.get("truncated")),
+        source_sha256=digest,
+        content_profile=manifest.document.content_profile.value,
+        profile_source=manifest.document.profile_source.value,
+        output_editability=manifest.document.output_editability.value,
+        manifest_json=manifest.model_dump_json(),
     )
 
 
@@ -549,6 +560,24 @@ def format_tier3_summary(
 
     if truncated and pages_scanned:
         text = text.rstrip("。") + f"（仅扫描前 {pages_scanned} 页）。"
+    profile = entry.get("content_profile")
+    if profile:
+        source = entry.get("profile_source") or "AUTO"
+        text += f" 画像：{profile}（{source}）。"
+    editability = entry.get("output_editability")
+    if editability:
+        try:
+            import sys as _sys
+
+            _sys.path.insert(0, "/home/dev/qyunslation/scripts")
+            from _content_profile_ui import editability_hint
+
+            text += f" {editability_hint(editability)}。"
+        except Exception:
+            text += f" 可编辑性：{editability}。"
+    tier3_error = entry.get("tier3_error")
+    if tier3_error and not err:
+        text += f" ⚠ Tier-3：{tier3_error}。"
     return text
 
 

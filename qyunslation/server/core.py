@@ -289,6 +289,9 @@ def prepare_translation_input(
             is_structured_input=False,
         )
 
+    from qyunslation.structure.runtime_probe import assert_environment_for_filename
+
+    assert_environment_for_filename(original_filename)
     prepared = prepare_document(
         original_filename,
         file_contents,
