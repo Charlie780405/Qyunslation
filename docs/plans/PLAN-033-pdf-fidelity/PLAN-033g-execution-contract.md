@@ -1,6 +1,6 @@
 # PLAN-033g：执行契约与模型溯源
 
-> 状态：**已实现，门禁待总验收**
+> 状态：**已完成**（033n / WT-033n 已关）
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033g.sh`
 > 前置：无

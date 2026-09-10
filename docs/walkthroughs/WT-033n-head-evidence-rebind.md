@@ -33,8 +33,8 @@
 ## 遗留与下阶段输入
 
 - **033 关闭**：当前 HEAD 证据已绑定，不再「文档已关、总门 BLOCKED」。
-- **030 未关**：下一门 [PLAN-030j](../plans/PLAN-030-semantic-layout-translation/PLAN-030j-layout-debt.md)（D1–D5，待批后编码），其后 030i。
-- **034**：暂停。
-- 弱项仍降级：`cap_body_gap`、续页金样、Figure 像素残影探针（见 WT-033m）。
+- **030 已收口**（2026-09-10）：030j / 030i / 030-table 已完成。
+- **034**：不空开；并入 [PLAN-038](../plans/PLAN-038-gap-closure/PLAN-038-gap-closure.md) 的 038d/038e。
+- 弱项移交 038f：`cap_body_gap`（G-CAP-003）→ **wontfix**（不 fork BabelDOC）；Figure 像素残影探针（G-CAP-004）→ [WT-038f](./WT-038f-layout-weak-items.md) 已交付 WARN 探针。续页金样已由 PLAN-036c 覆盖。
 
 保护：未改、未提交 `glossaries/auto-proper-nouns.csv`。

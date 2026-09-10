@@ -6,8 +6,8 @@
 
 ## 部署
 
-- feat: 
-- merge main: 
+- feat: （历史未填 commit hash；G-DOC-014 INFO 已登记，不回填臆造 hash）
+- merge main: （同上）
 
 ```bash
 bash scripts/verify-plan-017.sh

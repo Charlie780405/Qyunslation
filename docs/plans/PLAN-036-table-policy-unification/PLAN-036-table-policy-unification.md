@@ -36,8 +36,19 @@ PLAN-035 已在 **PDF 表格 scan + 执行** 路径交付 `table_cell_policy.py`
 | [036b](./PLAN-036b-docx-manifest-policy.md) | DOCX manifest | `scan_docx` 删 `_numeric_preserve`，写 `translation_policy` | 2 |
 | [036c](./PLAN-036c-continued-table-gold.md) | 续表金样 | reference PDF + scan 金样断言 | 3 |
 | [036d](./PLAN-036d-verify-docs-closure.md) | verify + WT | `verify-plan-036.sh`、WT-036、WT-030-table 补丁 | 4 |
+| 036e（无独立文件） | 见下节 | 续表题注解析；DOCX 执行 policy；PPT 扫描 policy | 5 |
 
 **建议实施顺序**：036a → 036b → 036c → 036d（a/b 可同 PR，c 依赖样本到位）。
+
+### 036e 补充（已交付，记于 WT-036）
+
+| 项 | 交付 |
+| --- | --- |
+| 续表题注 | `continued_table_caption_num`；Tailoring `Table continued` 可解析 |
+| DOCX 执行 | `docx_table_exec.partition_docx_segments`；跳过 PRESERVE / PROTECT_TOKENS |
+| PPT 扫描 | `scan_pptx` 表格块 `translation_policy` + `BlockRole.TABLE_CELL` |
+
+表格可观测与 PPT 执行 policy 见 [PLAN-037](../PLAN-037-table-observability/PLAN-037-table-observability.md)（038b 补档）。
 
 ## 四、验证清单（编码后）
 
@@ -52,8 +63,8 @@ PLAN-035 已在 **PDF 表格 scan + 执行** 路径交付 `table_cell_policy.py`
 ## 五、非目标
 
 - PDF 跨页续表 scan/exec 逻辑重写（035 已交付）
-- 纯图片表 cell 网格、PPT picture OCR（另立后续纲领）
-- DOCX/PPTX **跨页**续表 scan
+- 纯图片表 cell 网格、PPT picture OCR → [PLAN-038](../PLAN-038-gap-closure/PLAN-038-gap-closure.md) 038d/038e（不空开 034）
+- DOCX/PPTX **跨页**续表 scan → G-CAP-009（038g）
 - PLAN-034 复活
 - 提交 `glossaries/auto-proper-nouns.csv`
 - UI 展示 `TABLE_DIGIT_DRIFT`（可随 030ib 另开小改，本计划不强制）

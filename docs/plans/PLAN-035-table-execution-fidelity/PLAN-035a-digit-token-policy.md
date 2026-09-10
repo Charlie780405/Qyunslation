@@ -1,6 +1,6 @@
 # PLAN-035a：数字 token policy SSOT
 
-> 状态：**实施中**
+> 状态：**已完成**（PLAN-035 / WT-035）
 
 ## 交付
 

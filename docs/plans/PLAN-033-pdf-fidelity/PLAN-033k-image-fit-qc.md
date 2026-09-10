@@ -1,6 +1,6 @@
 # PLAN-033k：图片排版和对象级 QC
 
-> 状态：**已接到生产后处理（object_qc + DPI 重绘），真实样本终态待验收**
+> 状态：**已完成**（033n / WT-033n 已关）
 > 父计划：[PLAN-033](./PLAN-033-pdf-fidelity.md)
 > 验收门：`bash scripts/verify-plan-033k.sh`
 > 前置：033g

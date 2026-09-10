@@ -1,5 +1,8 @@
 # PLAN-013 翻译产物落库与导出增强
 
+> 状态：**已完成**
+> 验收：WT-013 / `bash scripts/verify-plan-013.sh`
+
 ## 一句话目标
 
 修复已停摆的 Hermes Vault 落库链路，扩展为「原文 + 译稿 + Markdown/DOCX」全量入库，并精简 Gradio 下载区为「仅译稿 / 原文+译稿」两档加格式选择。

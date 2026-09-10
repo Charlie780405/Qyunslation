@@ -11,7 +11,11 @@ import docx
 from collections import Counter
 
 from qyunslation.extensions.docx_image_overlay import enumerate_drawing_occurrences
-from qyunslation.structure.captions import figure_caption_num, table_caption_num
+from qyunslation.structure.captions import (
+    continued_table_caption_num,
+    figure_caption_num,
+    table_caption_num,
+)
 from qyunslation.structure.docx_walk import DocxWalkSegment, walk_docx
 from qyunslation.structure.ingest import prepare_document
 from qyunslation.structure.models import (
@@ -90,6 +94,9 @@ class DocxStructureScanner:
         caption_ids_by_num: dict[tuple[str, int], list[str]] = {}
         caption_occurrence: Counter[tuple[str, int]] = Counter()
         table_cells: dict[int, list[tuple[int, int, int, DocxWalkSegment, str]]] = {}
+        # PLAN-038g: pending caption consumed by the next physical table
+        pending_table_caption: tuple[int, int, str] | None = None  # num, occ, cap_id
+        table_caption_meta: dict[int, tuple[int, int, str]] = {}  # tbl_idx -> meta
         textbox_segments: list[tuple[int, DocxWalkSegment]] = []
 
         for segment in segments:
@@ -98,7 +105,8 @@ class DocxStructureScanner:
                 continue
 
             fig_num = figure_caption_num(segment.text)
-            tab_num = table_caption_num(segment.text)
+            cont_tab_num = continued_table_caption_num(segment.text)
+            tab_num = cont_tab_num if cont_tab_num is not None else table_caption_num(segment.text)
             if fig_num is not None:
                 cap_id = self._append_caption(
                     objects,
@@ -116,6 +124,7 @@ class DocxStructureScanner:
                     caption_by_num[("figure", fig_num)] = cap_id
                 continue
             if tab_num is not None:
+                occ = caption_occurrence[("table", tab_num)] + 1
                 cap_id = self._append_caption(
                     objects,
                     prepared,
@@ -123,12 +132,14 @@ class DocxStructureScanner:
                     kind="table",
                     number=tab_num,
                     segment=segment,
-                    occurrence_index=caption_occurrence[("table", tab_num)] + 1,
+                    occurrence_index=occ,
                 )
                 reading_by_canvas[canvas_id].append(cap_id)
-                caption_occurrence[("table", tab_num)] += 1
+                caption_occurrence[("table", tab_num)] = occ
+                caption_ids_by_num.setdefault(("table", tab_num), []).append(cap_id)
                 if ("table", tab_num) not in caption_by_num:
                     caption_by_num[("table", tab_num)] = cap_id
+                pending_table_caption = (tab_num, occ, cap_id)
                 continue
 
             if segment.is_textbox:
@@ -137,6 +148,9 @@ class DocxStructureScanner:
 
             if segment.table_path is not None:
                 tbl_idx, row_idx, col_idx = segment.table_path
+                if pending_table_caption is not None and tbl_idx not in table_caption_meta:
+                    table_caption_meta[tbl_idx] = pending_table_caption
+                    pending_table_caption = None
                 table_cells.setdefault(tbl_idx, []).append(
                     (row_idx, col_idx, tbl_idx, segment, canvas_id)
                 )
@@ -146,9 +160,11 @@ class DocxStructureScanner:
             body_ids.append(body_id)
             reading_by_canvas[canvas_id].append(body_id)
 
+        row_offset_by_num: dict[int, int] = {}
         for tbl_idx in sorted(table_cells):
             cells = table_cells[tbl_idx]
             canvas_id = cells[0][4]
+            meta = table_caption_meta.get(tbl_idx)
             self._append_table(
                 objects,
                 prepared,
@@ -157,6 +173,8 @@ class DocxStructureScanner:
                 [(row, col, idx, segment) for row, col, idx, segment, _ in cells],
                 caption_by_num,
                 reading_by_canvas,
+                caption_meta=meta,
+                row_offset_by_num=row_offset_by_num,
             )
 
         for index, (section_index, segment) in enumerate(textbox_segments, start=1):
@@ -465,21 +483,32 @@ class DocxStructureScanner:
         cells: list[tuple[int, int, int, DocxWalkSegment]],
         caption_by_num: dict[tuple[str, int], str],
         reading_by_canvas: dict[str, list[str]],
+        *,
+        caption_meta: tuple[int, int, str] | None = None,
+        row_offset_by_num: dict[int, int] | None = None,
     ) -> None:
         rows = max(row for row, _, _, _ in cells) + 1
         cols = max(col for _, col, _, _ in cells) + 1
+        if caption_meta is not None:
+            tab_num, occurrence_index, cap_id = caption_meta
+        else:
+            tab_num = tbl_idx + 1
+            occurrence_index = 1
+            cap_id = caption_by_num.get(("table", tab_num))
+        base_row = 0
+        if row_offset_by_num is not None:
+            base_row = int(row_offset_by_num.get(tab_num, 0))
         blocks: list[TranslatableBlock] = []
         for row_idx, col_idx, _, segment in sorted(cells):
             block = self._block(segment)
             block.block_id = f"cell:{tbl_idx}:{row_idx}:{col_idx}"
             block.role = BlockRole.TABLE_CELL
             block.translation_policy = classify_cell_policy(segment.text)
-            block.row_index = row_idx
+            block.row_index = base_row + row_idx
             block.column_index = col_idx
             blocks.append(block)
 
-        tab_num = tbl_idx + 1
-        key = f"table:{tab_num}"
+        key = f"table:{tab_num}:occ:{occurrence_index}"
         refs = [{"kind": SourceRefKind.DOCX_PART.value, "ref": f"table:{tbl_idx}"}]
         object_id = build_object_id(
             prepared.source_sha256,
@@ -488,7 +517,6 @@ class DocxStructureScanner:
             key,
             refs,
         )
-        cap_id = caption_by_num.get(("table", tab_num))
         caption_ids = [cap_id] if cap_id else []
         objects.append(
             TableObject(
@@ -503,8 +531,9 @@ class DocxStructureScanner:
                 translatable_blocks=blocks,
                 execution_status=ExecutionStatus.PENDING,
                 planned_action="translate_cells",
-                semantic_id=key,
+                semantic_id=f"table:{tab_num}",
                 semantic_scope="main",
+                semantic_occurrence_index=occurrence_index,
                 row_count=rows,
                 column_count=cols,
                 caption_ids=caption_ids,
@@ -513,6 +542,8 @@ class DocxStructureScanner:
         if cap_id:
             self._link_caption(objects, cap_id, object_id)
         reading_by_canvas[canvas_id].append(object_id)
+        if row_offset_by_num is not None:
+            row_offset_by_num[tab_num] = base_row + rows
 
     def _append_textbox(
         self,

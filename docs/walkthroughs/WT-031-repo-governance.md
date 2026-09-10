@@ -7,7 +7,8 @@
 ## 做了什么
 
 - GitHub `Charlie780405/Qyunslation` 改为 **Private**；About：`荃信内部文档翻译。派生自 xunbu/docutranslate（MPL-2.0）。`；Wiki / Projects 关闭。
-- 删除相对 `main` 为 **0 ahead** 的 13 个过期 `feat/plan-*` / `feat/PLAN-*`。保留 `main` 与 `codex/recovery-030e-030f-20260908`（1 ahead）。
+- 删除相对 `main` 为 **0 ahead** 的 13 个过期 `feat/plan-*` / `feat/PLAN-*`。当时保留 `codex/recovery-030e-030f-20260908`（1 ahead）。
+- **2026-09-10 PLAN-038c**：该恢复分支已相对 `main` **0 ahead / 90 behind**，本地与 `origin` 已删除（G-OPS-006 closed）。
 - Remote：`origin` → 本仓；原 `origin`（xunbu/docutranslate）改名为 `upstream`；保留 `qyunslation` 与 `mirror`。
 - 新增 [NOTICE.md](../../NOTICE.md)；LICENSE 未改。
 - README / i18n / 贡献弹窗 / CLI / 页脚 / Dockerfile 等用户可见品牌收口为 Qyunslation。

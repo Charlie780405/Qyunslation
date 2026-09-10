@@ -49,13 +49,11 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 
 ## 037 P1-A/P1-B（表格可观测 + PPT 执行 policy）
 
-| 项 | 交付 |
-| --- | --- |
-| P1-A | `table_execution_observability`；预扫摘要 + manifest API + tbltr 后进度展示 |
-| P1-B | `pptx_table_exec` + `PPTXTranslator` 按 policy 分流 |
+详见 [WT-037](./WT-037-table-observability.md) / [PLAN-037](../plans/PLAN-037-table-observability/PLAN-037-table-observability.md)（038b 补档；行为未改）。
 
 验收：`bash scripts/verify-plan-037-table-observability.sh`
 
 ## 遗留
 
-- （035/036 表格 policy 主线已收口；纯图片表 / PPT OCR 仍 out of scope）
+- 纯图片表：已由 [PLAN-038d](../plans/PLAN-038-gap-closure/PLAN-038d-picture-tables.md) 关闭（G-CAP-001）
+- PPT OCR：已由 [PLAN-038e](../plans/PLAN-038-gap-closure/PLAN-038e-ppt-picture-ocr.md) / [WT-038e](./WT-038e-ppt-picture-ocr.md) 关闭（G-CAP-002）

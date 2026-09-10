@@ -30,5 +30,5 @@ bash scripts/verify-plan-030i.sh
 ## 遗留
 
 - 跨页续表：已由 [PLAN-035](../plans/PLAN-035-table-execution-fidelity/PLAN-035-table-execution-fidelity.md) + [PLAN-036](../plans/PLAN-036-table-policy-unification/PLAN-036-table-policy-unification.md)（Wiley reference 金样）承接
-- 纯图片表：仍 out of scope
+- 纯图片表：已由 [PLAN-038d](../plans/PLAN-038-gap-closure/PLAN-038d-picture-tables.md) / [WT-038d](./WT-038d-picture-tables.md) 关闭（G-CAP-001）
 - `glossaries/auto-proper-nouns.csv`：运行时 harvest，不提交
