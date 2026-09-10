@@ -332,6 +332,17 @@
       "future_owner": "PLAN-033d"
     },
     {
+      "id": "cai-2025-table1-continued",
+      "origin": "REFERENCE",
+      "source_format": "PDF",
+      "content_profile": "RESEARCH_ARTICLE",
+      "relative_path": "reference/cai-2025-table1-continued.pdf",
+      "sha256": "b5ec069391306f5a1dd3155ae60ba5c25e3205d8b74ac4a617d3214158ebb0a8",
+      "truth_file": "tests/fixtures/structure/cai-2025-table1-continued.truth.json",
+      "fixture_state": "MATERIALIZED",
+      "future_owner": "PLAN-036"
+    },
+    {
       "id": "synthetic-continued-table",
       "origin": "GENERATED",
       "source_format": "PDF",

@@ -61,5 +61,6 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 | P0 | 真实续表金样 | 从知识库/生产找 `Table N Continued` PDF，补 `tests/fixtures/structure/reference/`，把 035 continuation 从合成件升级为硬金样 |
 | P1 | `table_cell_policy` 跨格式 | 让 `scan_docx`、`md_tables`、`doc_image_policy` 引用同一 SSOT，消除三处 numeric 规则漂移 |
 | P1 | UI 可观测 | manifest/执行失败展示 `TABLE_DIGIT_DRIFT`、`digits_preserved`、`TABLE_CONTINUATION_UNLINKED` |
-| P2 | PLAN-036 立项 | 纯图片表 cell 网格，或 PPT picture shape OCR——按业务选一条，勿空开 PLAN-034 |
+| P2 | ~~PLAN-036 立项~~ | 已开 [PLAN-036](../plans/PLAN-036-table-policy-unification/PLAN-036-table-policy-unification.md)（policy 统一 + 续表金样） |
+| P3 | 纯图片表 / PPT OCR | 036 后再立项，勿空开 PLAN-034 |
 | P2 | 发布纪律 | CI/部署前固定跑 `verify-release.sh`；样本机设 `QYUNSLATION_RELEASE_STRICT_SAMPLE=1` 使 033l 也 hard-fail |

@@ -20,6 +20,12 @@ _PRESERVE_CELL = re.compile(
     re.I,
 )
 
+_UNIT_ONLY = re.compile(
+    r"^(?:mg|mL|ml|kg|g|µg|ug|ng|μg|mm|cm|m|w|h|d|wk|weeks?|days?|hrs?|"
+    r"IU|U|%|ppm|nM|µM|uM|mM|M|pg|ng/mL|mg/kg)$",
+    re.I,
+)
+
 _DIGIT_TOKEN = re.compile(
     r"(?:"
     r"n\s*=\s*\d+"
@@ -29,6 +35,22 @@ _DIGIT_TOKEN = re.compile(
     r")",
     re.I,
 )
+
+
+def is_numeric_or_unit(text: str) -> bool:
+    """图内 OCR / 文档块：纯数字、单位或 preserve 单元格，不送翻译。"""
+    if is_preserve_cell(text):
+        return True
+    s = (text or "").strip()
+    if _UNIT_ONLY.fullmatch(s):
+        return True
+    return bool(
+        re.match(
+            r"^[\d\.\,\s]+(?:mg|mL|ml|kg|g|µg|ug|ng|mm|cm|%|w|h|d)$",
+            s,
+            re.I,
+        )
+    )
 
 
 def is_preserve_cell(text: str) -> bool:

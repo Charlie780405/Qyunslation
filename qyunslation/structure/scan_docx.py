@@ -16,6 +16,7 @@ from qyunslation.structure.docx_walk import DocxWalkSegment, walk_docx
 from qyunslation.structure.ingest import prepare_document
 from qyunslation.structure.models import (
     AssetRole,
+    BlockRole,
     BodyObject,
     BoundingBox,
     CaptionObject,
@@ -40,23 +41,14 @@ from qyunslation.structure.models import (
     SourceRefKind,
     TableObject,
     TextBoxObject,
+    TranslationPolicy,
     TranslatableBlock,
     build_manifest_id,
     build_object_id,
     CURRENT_SCHEMA_VERSION,
 )
 from qyunslation.structure.profiles import resolve_profile
-
-_NUMERIC_CELL = re.compile(r"^[\d\s.,%+\-±×/°℃℉μmgkKMLlNnHhPpAaVvWwΩ]+$")
-
-
-def _numeric_preserve(text: str) -> bool:
-    stripped = (text or "").strip()
-    if not stripped:
-        return True
-    if stripped.isdigit():
-        return True
-    return bool(_NUMERIC_CELL.fullmatch(stripped))
+from qyunslation.structure.table_cell_policy import classify_cell_policy
 
 
 class DocxStructureScanner:
@@ -480,12 +472,10 @@ class DocxStructureScanner:
         for row_idx, col_idx, _, segment in sorted(cells):
             block = self._block(segment)
             block.block_id = f"cell:{tbl_idx}:{row_idx}:{col_idx}"
-            if _numeric_preserve(segment.text):
-                block = TranslatableBlock(
-                    block_id=block.block_id,
-                    source_text=segment.text,
-                    source_language=None,
-                )
+            block.role = BlockRole.TABLE_CELL
+            block.translation_policy = classify_cell_policy(segment.text)
+            block.row_index = row_idx
+            block.column_index = col_idx
             blocks.append(block)
 
         tab_num = tbl_idx + 1

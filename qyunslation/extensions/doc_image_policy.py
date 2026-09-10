@@ -26,14 +26,6 @@ MIN_AREA_PX = int(os.environ.get("QYUNSLATION_DOC_IMAGE_MIN_AREA_PX", "40000"))
 # 按显示尺寸回嵌目标 DPI（仅上采样，不缩小高清源）
 TARGET_DPI = int(os.environ.get("QYUNSLATION_IMAGE_TARGET_DPI", "300"))
 
-_NUM_ONLY_RE = re.compile(
-    r"^[\d\s\.\,\+\-\*\/\=\%\:\;\(\)\[\]\{\}℃°\<\>\±×÷~～]+$"
-)
-_UNIT_RE = re.compile(
-    r"^(?:mg|mL|ml|kg|g|µg|ug|ng|μg|mm|cm|m|w|h|d|wk|weeks?|days?|hrs?|"
-    r"IU|U|%|ppm|nM|µM|uM|mM|M|pg|ng/mL|mg/kg)$",
-    re.I,
-)
 _HAS_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _HAS_LATIN_RE = re.compile(r"[A-Za-z]{2,}")
 
@@ -123,18 +115,10 @@ def _target_is_english(target_lang: str) -> bool:
 
 
 def is_numeric_or_unit(text: str) -> bool:
-    """纯数字/标点/单位，不送翻译。"""
-    s = (text or "").strip()
-    if not s:
-        return True
-    if _NUM_ONLY_RE.match(s):
-        return True
-    if _UNIT_RE.match(s):
-        return True
-    # 数字+单位：16w / 100mg / Week 16（弱形式仍可能有语义，留给语种门控）
-    if re.match(r"^[\d\.\,\s]+(?:mg|mL|ml|kg|g|µg|ug|ng|mm|cm|%|w|h|d)$", s, re.I):
-        return True
-    return False
+    """纯数字/标点/单位，不送翻译（PLAN-036：delegate table_cell_policy SSOT）。"""
+    from qyunslation.structure.table_cell_policy import is_numeric_or_unit as _ssot
+
+    return _ssot(text)
 
 
 def detect_lang_of_texts(texts: Sequence[str]) -> str:

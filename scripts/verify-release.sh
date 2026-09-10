@@ -60,6 +60,7 @@ info "release gate root=$ROOT py=$PY strict_sample=$STRICT_SAMPLE"
 
 run_gate "030i delivery" "scripts/verify-plan-030i.sh" "$STAGE_DIR/030i.log" required
 run_gate "035 table execution" "scripts/verify-plan-035.sh" "$STAGE_DIR/035.log" required
+run_gate "036 table policy" "scripts/verify-plan-036.sh" "$STAGE_DIR/036.log" required
 run_gate "030-table geometry" "scripts/verify-plan-030-table.sh" "$STAGE_DIR/030-table.log" required
 run_gate "033l pdf final" "scripts/verify-plan-033l.sh" "$STAGE_DIR/033l.log" sample
 
