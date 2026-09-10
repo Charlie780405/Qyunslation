@@ -1,6 +1,6 @@
 # PLAN-041b：无题注临床表单识别
 
-> 状态：**待执行**
+> 状态：**执行中**
 > 父计划：[PLAN-041](./PLAN-041-pdf-regulatory-form-fidelity.md)
 
 ## 实施
