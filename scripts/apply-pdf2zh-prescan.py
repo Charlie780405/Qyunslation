@@ -357,6 +357,23 @@ def apply(text: str) -> str:
                             )
 '''
         text = text.replace(anchor, insert, 1)
+    elif "qy_manifest_download = gr.File" not in text:
+        prescan_bar = """                            qy_prescan_status = gr.Markdown(
+                                value="",
+                                visible=False,
+                                elem_classes=["qy-prescan-bar"],
+                            )
+"""
+        manifest_block = prescan_bar + """
+                            # _qy_prescan_manifest
+                            qy_manifest_download = gr.File(
+                                label="结构清单 (manifest JSON)",
+                                visible=False,
+                                interactive=False,
+                            )
+"""
+        if prescan_bar in text:
+            text = text.replace(prescan_bar, manifest_block, 1)
 
     # Helpers — 先摘掉旧块再重插，脚本才能作为 SSOT 持续演进。
     # 空白一律规范化，否则每次重插都会多留空行，破坏幂等。
@@ -410,7 +427,7 @@ def apply(text: str) -> str:
         if old_then not in text:
             raise RuntimeError("找不到 _qy_upload_evt.then dual_payload 锚点")
         text = text.replace(old_then, new_then, 1)
-    elif "qy_manifest_download" not in text and "_qy_prescan_tier1," in text:
+    elif "qy_manifest_download = gr.File" not in text and "_qy_prescan_tier1," in text:
         text = text.replace(
             "outputs=[qy_prescan_status, state]",
             "outputs=[qy_prescan_status, state, qy_manifest_download]",
