@@ -38,7 +38,7 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-for gate in 033a 033b 033c 033d 033e 033g 033h 033i 033j 033k 033l 033m; do
+for gate in 033a 033b 033c 033d 033e 033g 033h 033i 033j 033k 033l 033m 033n; do
   run_pass "PLAN-$gate" "$STAGE_DIR/$gate.log" bash "$ROOT/scripts/verify-plan-$gate.sh"
 done
 
