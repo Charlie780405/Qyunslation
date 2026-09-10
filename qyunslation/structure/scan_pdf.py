@@ -638,13 +638,16 @@ class PdfStructureScanner:
 
         fig_n = len(figure_seen)
         tab_n = len(table_seen)
+        from .profiles import suggest_content_profile
+
+        suggested, confidence, evidence = suggest_content_profile(
+            figure_caption_count=fig_n,
+            table_caption_count=tab_n,
+        )
         decision = resolve_profile(
-            auto_suggestion=ContentProfile.RESEARCH_ARTICLE,
-            confidence=0.92 if fig_n or tab_n else 0.4,
-            evidence=[
-                f"figure_captions:{fig_n}",
-                f"table_captions:{tab_n}",
-            ],
+            auto_suggestion=suggested,
+            confidence=confidence,
+            evidence=evidence,
             user_override=content_profile,
         )
         ordered_modes = [page_modes[k] for k in sorted(page_modes)]

@@ -42,6 +42,11 @@ run_pass "030j layout gold regression" "$STAGE_DIR/gold.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
   "$PY" -m pytest -q --no-cov tests/structure/test_layout_gold_samples.py
 
+run_pass "030j D5 profile parity" "$STAGE_DIR/parity.log" \
+  timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
+  "$PY" -m pytest -q --no-cov \
+    tests/structure/test_cross_format_parity.py::test_content_profile_follows_semantics_not_container
+
 if [[ "$FAILURES" -eq 0 ]]; then
   printf 'SUMMARY: PASS fail=0\n'
   exit 0

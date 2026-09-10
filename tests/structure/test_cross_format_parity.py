@@ -134,19 +134,11 @@ def test_editable_carriers_declare_editable_output(manifests):
         ), key
 
 
-def test_content_profile_is_bound_to_the_container_not_the_content(manifests):
-    """已知债：同一份内容换个容器就换 profile。
-
-    scan_pdf 恒给 RESEARCH_ARTICLE，scan_docx 恒给 REVIEW_ARTICLE，与内容
-    无关——`content_profile` 名义上描述「内容是什么」，实际只反映「文件是
-    什么格式」。改判定会牵动 profiles.py 的版式策略，须另立子计划；在那之前
-    锁住现状，防止再多一种格式各判各的。见 WT-030h「跨格式语义对账」。
-    """
+def test_content_profile_follows_semantics_not_container(manifests):
+    """030j D5：parity 夹具含 Figure/Table 题注，PDF 与 DOCX 须同 profile。"""
     assert manifests["pdf"].document.content_profile is ContentProfile.RESEARCH_ARTICLE
-    assert manifests["docx"].document.content_profile is ContentProfile.REVIEW_ARTICLE
-    assert manifests["png"].document.content_profile is ContentProfile.GENERIC
-    # 同一内容、两种容器、两个 profile：这就是债本身
+    assert manifests["docx"].document.content_profile is ContentProfile.RESEARCH_ARTICLE
     assert (
         manifests["pdf"].document.content_profile
-        is not manifests["docx"].document.content_profile
+        is manifests["docx"].document.content_profile
     )

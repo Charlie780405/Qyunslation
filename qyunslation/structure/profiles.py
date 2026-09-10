@@ -155,6 +155,23 @@ def profile_for(content_profile: ContentProfile) -> ProfileSpec:
     return _BY_PROFILE[content_profile]
 
 
+def suggest_content_profile(
+    *,
+    figure_caption_count: int = 0,
+    table_caption_count: int = 0,
+) -> tuple[ContentProfile, float, list[str]]:
+    """030j D5：按语义对象推断 profile，与容器格式解耦。"""
+    evidence: list[str] = []
+    if figure_caption_count:
+        evidence.append(f"figure_captions:{figure_caption_count}")
+    if table_caption_count:
+        evidence.append(f"table_captions:{table_caption_count}")
+    if figure_caption_count or table_caption_count:
+        confidence = 0.92 if figure_caption_count and table_caption_count else 0.75
+        return ContentProfile.RESEARCH_ARTICLE, confidence, evidence
+    return ContentProfile.GENERIC, 0.4, evidence or ["no_numbered_semantics"]
+
+
 def resolve_profile(
     *,
     auto_suggestion: ContentProfile,

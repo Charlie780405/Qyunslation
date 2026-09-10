@@ -1,6 +1,6 @@
 # PLAN-030j：栏式判定债 D1–D5
 
-> 状态：**已批准，D4 已完成**（030ja @ feat/PLAN-030j-d4-poster；D1–D3/D5 待后续子计划）
+> 状态：**已完成**（030ja–030jd；D1–D5 已清，可开 030i）
 > 父计划：[PLAN-030](./PLAN-030-semantic-layout-translation.md)
 > 前置：030h 已完成并登记五处债
 > 阻塞：030i（UI/可观测/Checkpoint D）不得在本计划未清 D1–D5 前实施
@@ -16,9 +16,9 @@
 | 阶段 | 编号 | 交付 | 关键文件 |
 | --- | --- | --- | --- |
 | 1 | [D4](./PLAN-030ja-poster-freeform.md) | A0 海报识别为 FREEFORM，九分区不串成双栏正文 | `layout.py`（**已完成**） |
-| 2 | D1/D2 | 三/四栏产出 MULTI；中栏不吞进左栏 | 同上 + `scan_pdf.py` 阅读顺序 |
-| 3 | D3 | 少块双栏不短路 SINGLE | `layout.py` |
-| 4 | D5 | `content_profile` 与容器解耦（可用户覆盖） | `scan_*.py`、`profiles.py` |
+| 2 | [D1/D2](./PLAN-030jb-multi-column.md) | 三/四栏 MULTI；中栏 `middle` | `layout.py`（**已完成**） |
+| 3 | [D3](./PLAN-030jc-few-block-double.md) | 少块双栏判 DOUBLE | `layout.py`（**已完成**） |
+| 4 | [D5](./PLAN-030jd-profile-decouple.md) | 画像按语义推断 | `profiles.py`、`scan_pdf/docx`（**已完成**） |
 
 ## Out of Scope
 
