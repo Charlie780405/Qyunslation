@@ -30,6 +30,6 @@ bash scripts/verify-plan-038.sh
 
 | 项 | 值 |
 | --- | --- |
-| merge | `5d8f6dc`（038a–g → origin/main） |
+| merge | `6c31ab3`（038a–g → origin/main） |
 | 服务 | `pdf2zh.service`、`qyunslation-office.service` |
 | verify-plan-038 | PASS（含 nested 038d–g） |
