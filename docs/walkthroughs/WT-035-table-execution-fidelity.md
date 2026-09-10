@@ -9,7 +9,8 @@
 - `table_translate.py`：纯数值不进 LLM；译后 `TABLE_DIGIT_DRIFT` 硬失败
 - `scan_pdf.py`：`continued_table_anchors` 接线；`semantic_occurrence_index` 多页续表
 - `pdf_table_translate.py`：按 occurrence 排序；`digits_preserved` 回写
-- 合成夹具 `continued-table.pdf`（`generate_synthetic.py`）
+- 合成夹具 `continued-table.pdf`（`generate_synthetic.py` + `catalog.v1.json`）
+- `scripts/verify-release.sh` 发布总门（串 030i / 035 / 030-table / 033l）
 
 ## 验收
 
@@ -22,16 +23,24 @@ QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify
 
 ## 部署
 
-1. merge `main` 后于生产 checkout（`/home/dev/qyunslation-plan-028d`）`git pull`
-2. 工作树开发路径（`/home/dev/qyunslation`）与 main 对齐后重启：
-   ```bash
-   systemctl --user restart pdf2zh.service qyunslation-office.service
-   ```
-3. 部署后复验：
-   ```bash
-   QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify-release.sh
-   ```
-4. 扫描器升至 **1.7.0**：旧 manifest 缓存失效，用户需对同一 PDF **重新预扫** 才能看到跨页续表 occurrence 与 cell policy。
+**记录（2026-09-10）**
+
+| 项 | 值 |
+| --- | --- |
+| merge | `6162f3e`（main，含 catalog 热修） |
+| 前置 | `4300938` PLAN-035 功能 merge |
+| 服务 | `pdf2zh.service`、`qyunslation-office.service` → active |
+| PYTHONPATH | `/home/dev/qyunslation`（与开发树同步） |
+
+部署后复验：
+
+```bash
+QYUNSLATION_VERIFY_PY=/home/dev/qyunslation/.venv/bin/python bash scripts/verify-release.sh
+```
+
+**结果（2026-09-10）**：030i / 035 / 030-table **PASS**；033l **BLOCKED**（本机缺 final mono/dual PDF，符合 `verify-release.sh` 设计）。样本机应设 `QYUNSLATION_RELEASE_STRICT_SAMPLE=1` 使 033l 也 hard-fail。
+
+扫描器升至 **1.7.0**：旧 manifest 缓存失效，用户需对同一 PDF **重新预扫** 才能看到跨页续表 occurrence 与 cell policy。
 
 ## 回滚
 
