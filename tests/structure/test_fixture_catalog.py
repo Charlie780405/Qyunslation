@@ -64,6 +64,7 @@ def test_catalog_covers_core_formats_and_priority_content_profiles():
     assert all(
         item["future_owner"].startswith("PLAN-030")
         or item["future_owner"].startswith("PLAN-033")
+        or item["future_owner"].startswith("PLAN-035")
         for item in fixtures
     )
 
