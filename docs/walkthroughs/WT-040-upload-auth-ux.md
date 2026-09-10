@@ -32,3 +32,12 @@ bash scripts/verify-plan-040.sh
 
 - PLAN-020：登录墙后需 040 处理 401/会话
 - WT-038g：auth_file 副作用由 040 承接
+
+## 部署
+
+| 项 | 值 |
+| --- | --- |
+| merge | `6582850`（040a–d → origin/main） |
+| 服务 | `pdf2zh.service`（ExecStartPre 含 040a/b/d） |
+| verify-plan-040 | PASS |
+
