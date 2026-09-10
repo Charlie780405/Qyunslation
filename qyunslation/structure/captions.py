@@ -131,6 +131,27 @@ def block_plain_text(block: dict) -> str:
     return join_span_texts(lines).strip()
 
 
+def continued_table_anchors(page) -> list[tuple[int, float, tuple]]:
+    """跨页续表题注 [(table_num, y0, bbox)]，不含主表题注。"""
+    rows: list[tuple[int, float, tuple]] = []
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+    except Exception:
+        return []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        text = block_plain_text(b)
+        if not text or is_toc_line(text) or not is_continued_caption(text):
+            continue
+        num = table_caption_num(text)
+        if not num:
+            continue
+        bb = tuple(b.get("bbox") or (0, 0, 0, 0))
+        rows.append((num, float(bb[1]), bb))
+    return sorted(rows, key=lambda x: (x[1], x[2][0]))
+
+
 def caption_anchors(page) -> list[tuple[str, int, float, tuple]]:
     """同页 Table/Figure 题注 [(kind, num, y0, bbox)]，按 y 再 x 排。"""
     rows: list[tuple[str, int, float, tuple]] = []

@@ -29,7 +29,7 @@ from tests.structure.test_manifest_contract import SOURCE_SHA256, _minimal_manif
 
 def test_schema_and_scanner_versions_for_033g():
     assert CURRENT_SCHEMA_VERSION == "1.2.0"
-    assert PDF_STRUCTURE_SCANNER_VERSION == "1.6.0"
+    assert PDF_STRUCTURE_SCANNER_VERSION == "1.7.0"
 
 
 def test_v1_1_manifest_still_validates_without_new_block_fields():

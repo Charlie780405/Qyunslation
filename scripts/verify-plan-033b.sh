@@ -33,7 +33,7 @@ run_pass "PLAN-033b modules compile" "$STAGE_DIR/compile.log" \
   "$PY" -m compileall -q qyunslation/structure/tables.py qyunslation/structure/scan_pdf.py
 
 run_pass "scanner version is 1.6.0" "$STAGE_DIR/version.log" \
-  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.6.0'"
+  "$PY" -c "from qyunslation.structure.scan_pdf import PDF_STRUCTURE_SCANNER_VERSION; assert PDF_STRUCTURE_SCANNER_VERSION == '1.7.0'"
 
 run_pass "table geometry and catalog" "$STAGE_DIR/tables.log" \
   timeout --signal=INT --kill-after=10s "${TEST_TIMEOUT_SECONDS}s" \
