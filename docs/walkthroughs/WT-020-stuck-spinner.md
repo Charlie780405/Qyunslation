@@ -45,6 +45,10 @@ curl -sI https://translate.qyunsgen.com/ | grep -i cache-control   # no-store
 生产部署：`1fcae7e`（重启后 017 18/18、017b 13/13、018 9/9、019 22/22、020 PASS，
 `cache-control: no-store, no-cache, must-revalidate` 已生效）。
 
+## 后续
+
+PLAN-038g 启用 `auth_file` 后，重启会清空内存 token、刷新易白屏；上传 POST 成功但 queue 401 会导致 File 假转圈。已由 [PLAN-040](../plans/PLAN-040-upload-auth-ux/PLAN-040-upload-auth-ux.md) 承接（稳定 cookie_id、token 落盘、401 横幅、upload settle）。
+
 ## 注意
 
 - `apply-pdf2zh-brand.py` 每次运行都重写 `gui.py`，会冲掉后续 CSS/JS 块，
