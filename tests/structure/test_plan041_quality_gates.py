@@ -234,7 +234,7 @@ def test_clean_writeback_emits_cell_ledger(tmp_path):
     assert dest != src and dest.is_file()
     text = pymupdf.open(dest)[0].get_text()
     assert "主要终点" not in text
-    assert "Primary endpoint" in text.replace("\xa0", " ")
+    assert "Primary Endpoint".casefold() in text.replace("\xa0", " ").casefold()
 
 
 @pytest.mark.skipif(

@@ -32,6 +32,7 @@
 | 26 | `apply-pdf2zh-viewer.py` | 021 查看器 |
 | 27 | `apply-pdf2zh-preview-dpi.py` | 预览 DPI |
 | 28 | `apply-pdf2zh-fidelity-033h.py` | 033h 保真 |
+| 29 | `apply-pdf2zh-042b-short-label.py` | **042b** 短标签/固定字段译前直替 |
 
 部署前自检：
 

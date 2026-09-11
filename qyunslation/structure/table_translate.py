@@ -51,10 +51,30 @@ def translate_table_blocks(
     payloads = []
     maps: dict[str, dict[str, str]] = {}
     preserved: dict[str, str] = {}
+    controlled: dict[str, str] = {}
+    try:
+        from .regulatory_entities import lookup_controlled, normalize_phase_label
+
+        for block in blocks:
+            policy = _policy_value(block)
+            if policy is TranslationPolicy.PRESERVE:
+                continue
+            src = block.source_text or ""
+            phase = normalize_phase_label(src)
+            if phase != src and phase.startswith("Phase"):
+                controlled[block.block_id] = phase
+                continue
+            hit = lookup_controlled(src)
+            if hit is not None:
+                controlled[block.block_id] = hit
+    except Exception:
+        controlled = {}
     for block in blocks:
         policy = _policy_value(block)
         if policy is TranslationPolicy.PRESERVE:
             preserved[block.block_id] = block.source_text
+            continue
+        if block.block_id in controlled:
             continue
         protected, mapping = protect_tokens(block.source_text)
         maps[block.block_id] = mapping
@@ -67,17 +87,22 @@ def translate_table_blocks(
     missing = [
         block.block_id
         for block in blocks
-        if block.block_id not in preserved and block.block_id not in raw
+        if block.block_id not in preserved
+        and block.block_id not in controlled
+        and block.block_id not in raw
     ]
     if missing:
         raise TableTranslateError(f"TABLE_LLM_INCOMPLETE: missing {missing}")
     footnotes = [b.block_id for b in blocks if str(b.role) in {"table_footnote", "TABLE_FOOTNOTE"}]
-    if any(fid not in raw and fid not in preserved for fid in footnotes):
+    if any(fid not in raw and fid not in preserved and fid not in controlled for fid in footnotes):
         raise TableTranslateError("TABLE_FOOTNOTE_MISSING")
     out = dict(preserved)
+    out.update(controlled)
     for block in blocks:
         if block.block_id in preserved:
             text = preserved[block.block_id]
+        elif block.block_id in controlled:
+            text = controlled[block.block_id]
         else:
             text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
         if not text.strip():

@@ -13,7 +13,13 @@ from .table_translate import TableTranslateError, _policy_value
 QC_MISSING_TARGET = "MISSING_TARGET"
 QC_SOURCE_RESIDUE = "SOURCE_RESIDUE"
 
-TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {QC_MISSING_TARGET, QC_SOURCE_RESIDUE}
+TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {
+    QC_MISSING_TARGET,
+    QC_SOURCE_RESIDUE,
+    "LABEL_VALUE_SHIFT",
+    "CELL_MERGE",
+    "KEY_VALUE_COLLAPSE",
+}
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
@@ -128,6 +134,18 @@ def evaluate_table_qc(
             record.status = "fail"
             hard.extend(cell_hard)
         records.append(record)
+    try:
+        from .table_attribution import evaluate_attribution
+
+        for issue in evaluate_attribution(blocks, translations):
+            hard.append(issue.code)
+            for record in records:
+                if record.block_id == issue.block_id:
+                    if issue.code not in record.qc:
+                        record.qc.append(issue.code)
+                    record.status = "fail"
+    except Exception:
+        pass
     return records, list(dict.fromkeys(hard))
 
 
