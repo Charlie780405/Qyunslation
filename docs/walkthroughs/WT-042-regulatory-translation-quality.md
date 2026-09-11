@@ -46,8 +46,19 @@
 | 补丁序 | 29 = `apply-pdf2zh-042b-short-label.py` |
 | HEAD | `f93f1ad`（WT 部署记录） |
 
+
+## 实样金标（611-2期 / CTR20231233）
+
+| 项 | 结果 |
+| --- | --- |
+| 路径 | `/home/dev/pdf2zh/plan042-samples/611-2期.pdf`（不入库；`docs/Resources/` 已 gitignore） |
+| 结构扫描 | 5 页、`REGULATORY`、**12 表**、逐页 `4/1/2/1/4`、0.37s |
+| 判定 | **检出后硬失败**（非未检出）。生产 EN mono 无 `.tbltr.pdf`，CJK 残留 620、字号偏低跨度 1349 |
+| 根因补丁 | `normalize_phase_label` 不再吞长标题；`3SBio` 受控命中跳过 DIGIT_DRIFT；CELL_MERGE 收紧 |
+| verify-plan-042 | 有实样 **PASS** |
+
 ## 遗留 / 下阶段输入
 
-- [ ] 补 CTR20231233 原件后设 `QYUNSLATION_PLAN042_SAMPLE` 跑全文金标，确认表格链是未检出还是硬失败（→ 若未检出则加强 042d 扫描）
+- [x] 实样金标：检出 12 表后硬失败回退（见上表）；仍待生产 GUI 手测告警文案
 - [ ] 生产 GUI 手测：故意失败一表时进度文案须含「N 个表格未保真」
 - [ ] 断词补丁依赖 BabelDOC 内部 API，升级 BabelDOC 后须重跑 `apply-pdf2zh-docprofile` + 042c 断言

@@ -41,3 +41,6 @@ glossaries/merged.csv
 # 本地 PLAN 验收产物（verify-008/009/010 金样；体积大，不入库）
 deliverables/
 
+
+# PLAN 实样暂存（不入库）
+docs/Resources/

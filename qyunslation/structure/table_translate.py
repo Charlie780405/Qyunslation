@@ -102,9 +102,17 @@ def translate_table_blocks(
         if block.block_id in preserved:
             text = preserved[block.block_id]
         elif block.block_id in controlled:
-            text = controlled[block.block_id]
+            # 受控词表命中：允许目标侧引入品牌数字（如 3SBio），跳过 DIGIT_DRIFT
+            out[block.block_id] = controlled[block.block_id]
+            continue
         else:
             text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
+            try:
+                from .regulatory_entities import rewrite_embedded_phase
+
+                text = rewrite_embedded_phase(text)
+            except Exception:
+                pass
         if not text.strip():
             if _policy_value(block) is TranslationPolicy.PRESERVE:
                 out[block.block_id] = text

@@ -7,10 +7,15 @@ import re
 from qyunslation.glossary.governance import build_merged_dict, normalize_source
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
-_ROMAN_PHASE = re.compile(
-    r"(?P<roman>[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVXivx]+)\s*期"
+# 仅整格期次标签（避免长标题被整段替换成 Phase II）
+_ROMAN_PHASE_FULL = re.compile(
+    r"^(?P<roman>[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVXivx]+)\s*期$"
 )
-_ARABIC_MISREAD = re.compile(r"(?<!\d)(?P<digits>11|111)\s*期")
+_ARABIC_MISREAD_FULL = re.compile(r"^(?:11|111)\s*期$")
+# 长文内嵌期次：就地改写，不吞整句
+_ROMAN_PHASE_EMBED = re.compile(
+    r"(?P<roman>[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|(?<![A-Za-z])II(?![A-Za-z])|(?<![A-Za-z])III?(?![A-Za-z])|(?<![A-Za-z])IV(?![A-Za-z]))\s*期"
+)
 
 _ROMAN_TO_PHASE = {
     "i": "Phase I",
@@ -55,37 +60,49 @@ def _looks_entity(text: str) -> bool:
         return False
     if any(tok in t for tok in ("医院", "大学", "学院", "药业", "生物", "有限公司", "股份")):
         return True
-    # 2–4 汉字且无标点：疑似人名
     if _CJK.fullmatch(t) and 2 <= len(t) <= 4:
         return True
     return False
 
 
+def _roman_to_phase(roman: str) -> str | None:
+    ascii_roman = (
+        roman.casefold()
+        .replace("ⅰ", "i")
+        .replace("ⅱ", "ii")
+        .replace("ⅲ", "iii")
+        .replace("ⅳ", "iv")
+    )
+    return _ROMAN_TO_PHASE.get(ascii_roman)
+
+
 def normalize_phase_label(text: str) -> str:
-    """纠正 II 期被抽成 11 期等；罗马数字期次 → Phase N。"""
+    """仅整格期次：II 期 / 11 期 → Phase N。长标题原样返回。"""
     raw = (text or "").strip()
     if not raw:
         return raw
-    m = _ROMAN_PHASE.search(raw)
+    m = _ROMAN_PHASE_FULL.match(raw)
     if m:
-        roman = m.group("roman").casefold()
-        # 全角罗马
-        for k, v in _ROMAN_TO_PHASE.items():
-            if roman == k or roman.replace("ⅰ", "i").replace("ⅱ", "ii").replace("ⅲ", "iii") == k:
-                return v
-        ascii_roman = (
-            roman.replace("ⅰ", "i")
-            .replace("ⅱ", "ii")
-            .replace("ⅲ", "iii")
-            .replace("ⅳ", "iv")
-        )
-        if ascii_roman in _ROMAN_TO_PHASE:
-            return _ROMAN_TO_PHASE[ascii_roman]
-    # 常见误读：II → 11（两个竖线被识别为十一）
-    if _ARABIC_MISREAD.fullmatch(raw) or re.fullmatch(r"11\s*期", raw):
+        phase = _roman_to_phase(m.group("roman"))
+        if phase:
+            return phase
+    if _ARABIC_MISREAD_FULL.match(raw):
         return "Phase II"
     hit = lookup_controlled(raw)
-    return hit if hit is not None else raw
+    if hit is not None and hit.startswith("Phase "):
+        return hit
+    return raw
+
+
+def rewrite_embedded_phase(text: str) -> str:
+    """长文内把 II 期 / Ⅱ 期 就地换成 Phase II，保留其余内容。"""
+    raw = text or ""
+
+    def repl(match: re.Match[str]) -> str:
+        phase = _roman_to_phase(match.group("roman"))
+        return phase or match.group(0)
+
+    return _ROMAN_PHASE_EMBED.sub(repl, raw)
 
 
 def map_section_heading(text: str, *, mapping: dict[str, str] | None = None) -> str | None:

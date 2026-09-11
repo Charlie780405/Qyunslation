@@ -42,10 +42,14 @@ def _is_label(text: str) -> bool:
         return False
     if any(h in t for h in _LABEL_HINTS):
         return True
-    # 短中文标签常见 2–8 字且无邮箱/数字串
     if "@" in t or any(ch.isdigit() for ch in t):
         return False
-    return 1 <= len(t) <= 12
+    # 仅当像表单字段标签：含顿号章节或显式后缀，避免把人名当标签
+    if t.endswith(("号", "名", "址", "箱", "话", "期", "态", "类", "围", "型")):
+        return 2 <= len(t) <= 16
+    if "、" in t[:3]:
+        return True
+    return False
 
 
 def detect_label_value_shift(blocks: list[TranslatableBlock]) -> list[AttributionIssue]:
@@ -124,8 +128,12 @@ def detect_translated_cell_merge(
             rs = (right.source_text or "").strip()
             if not rs or not lt:
                 continue
-            # 右列源为人名短串，却出现在左列译文中
-            if 2 <= len(rs) <= 4 and rs in lt:
+            # 右列源为人名短串（2–4 汉字），却出现在左列译文中
+            if (
+                2 <= len(rs) <= 4
+                and all("\u4e00" <= ch <= "\u9fff" for ch in rs)
+                and rs in lt
+            ):
                 issues.append(
                     AttributionIssue(
                         QC_CELL_MERGE,
@@ -133,9 +141,20 @@ def detect_translated_cell_merge(
                         f"person {rs!r} merged into institution translation",
                     )
                 )
-            # 英文人名 token 并入
-            if rt and " " in lt and rt.split()[0] in lt and rt != lt:
-                if any(tok in (left.source_text or "") for tok in ("医院", "大学", "学院")):
+            # 英文人名：右列译文须像专名（首词大写且≥5 字母），并出现在左列
+            if (
+                rt
+                and " " in lt
+                and rt != lt
+                and rt[:1].isupper()
+                and rt.split()[0].isalpha()
+                and len(rt.split()[0]) >= 5
+                and rt.split()[0] in lt
+            ):
+                if any(
+                    tok in (left.source_text or "")
+                    for tok in ("医院", "大学", "学院")
+                ):
                     issues.append(
                         AttributionIssue(
                             QC_CELL_MERGE,

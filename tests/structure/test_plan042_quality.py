@@ -164,7 +164,7 @@ def test_cell_merge_and_key_value_collapse_detected():
         ),
     ]
     translations = {
-        "inst": "Beijing Hospital Yang Yi",
+        "inst": "Beijing Hospital 杨弋",
         "person": "Yang Yi",
         "mail": "a@b.com Mailing Address",
     }

@@ -89,8 +89,10 @@ else fail "merged form+org lookup"
 fi
 
 if [[ -n "${QYUNSLATION_PLAN042_SAMPLE:-}" && -f "$QYUNSLATION_PLAN042_SAMPLE" ]]; then
-  run_pass "042 sample present" "$STAGE_DIR/sample.log" \
-    "$PY" -c "from pathlib import Path; p=Path('$QYUNSLATION_PLAN042_SAMPLE'); assert p.is_file() and p.stat().st_size>1000"
+  run_pass "042 real sample gold" "$STAGE_DIR/sample.log" \
+    timeout --signal=INT --kill-after=10s 180s env \
+    QYUNSLATION_PLAN042_SAMPLE="$QYUNSLATION_PLAN042_SAMPLE" \
+    "$PY" -m pytest -q -o addopts= -k "plan042_real_sample"
 else
   blocked "QYUNSLATION_PLAN042_SAMPLE missing"
 fi
