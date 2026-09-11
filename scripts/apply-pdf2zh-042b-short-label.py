@@ -28,6 +28,13 @@ OLD_LOOKUP_RE = re.compile(
     r"    return None\n",
     re.MULTILINE,
 )
+OLD_INJECT_NO_PENDING_RE = re.compile(
+    r"            _qy_suffix = None\n"
+    r"(?:            .*\n)*?"
+    r"                    continue\n\n"
+    r"(?=            if len\(paragraph\.unicode\) < self\.translation_config\.min_text_length:)",
+    re.MULTILINE,
+)
 
 
 def _helper_block() -> str:
@@ -108,6 +115,7 @@ def _inject_block() -> str:
                 if 0 < len(_qy_nxt_u.strip()) <= 2:
                     _qy_suffix = _qy_nxt_u.strip()
             _qy_direct = {MARKER}_lookup(paragraph.unicode, _qy_suffix)
+            _qy_direct_pending = False
             if _qy_direct is not None:
                 _qy_applied = False
                 if tracker is not None:
@@ -134,6 +142,7 @@ def _inject_block() -> str:
                         if (getattr(_qy_nxt2, "unicode", None) or "").strip() == _qy_suffix:
                             translated_ids.add(id(_qy_nxt2))
                     continue
+                _qy_direct_pending = True
 
 """
 
@@ -199,6 +208,19 @@ def patch_il(text: str) -> tuple[str, bool]:
 
     inject = _inject_block()
     min_anchor = "            if len(paragraph.unicode) < self.translation_config.min_text_length:"
+    min_anchor_pending = (
+        "            if (\n"
+        "                not _qy_direct_pending\n"
+        "                and len(paragraph.unicode) < self.translation_config.min_text_length\n"
+        "            ):"
+    )
+
+    if "_qy_direct_pending" not in text and OLD_INJECT_NO_PENDING_RE.search(text):
+        text = OLD_INJECT_NO_PENDING_RE.sub(inject, text, count=1)
+        changed = True
+    if min_anchor_pending not in text and min_anchor in text and "_qy_direct_pending" in text:
+        text = text.replace(min_anchor, min_anchor_pending, 1)
+        changed = True
 
     # Undo mistaken enumerate in find_title_paragraph (must stay plain loop)
     broken_title = (

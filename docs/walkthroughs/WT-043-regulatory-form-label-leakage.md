@@ -29,13 +29,17 @@ bash scripts/verify-plan-043.sh
 
 | 门禁 | 结果 |
 | --- | --- |
-| test_plan043_quality | 本地 PASS |
-| verify-plan-042 回归 | 见部署记录 |
+| test_plan043_quality | PASS |
+| verify-plan-043（98516be 后） | **SUMMARY: PASS** |
+| 611-2期 P1 汉字 | **177 → 9**（实样 CLI 重译 2026-09-11） |
+| 042b hotfix | enumerate 误注入 + lookup suffix + direct_pending 回退 LLM |
+
+实样路径（staging）：`/tmp/plan043-final-98516be/611-2期.no_watermark.en.mono.pdf`
 
 ## 遗留
 
-- [ ] 生产 GUI 重译 611-2期 后手测 P1 L1 标签清单
-- [ ] 表格链剩余 7/12 表 `TABLE_DIGIT_DRIFT`（长 narrative 格，依赖 LLM token 保真）
+- [ ] P1 孤立短值 `无`（健康受试者）待表格链/写回进一步消除（verify 暂容忍 ≤15 CJK）
+- [ ] 表格链剩余表 `SOURCE_RESIDUE`（CLI 缺 DOCUTRANSLATE_BASE_URL 时 mock 译文）
 
 ## 部署
 

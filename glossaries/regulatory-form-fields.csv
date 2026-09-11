@@ -57,7 +57,7 @@ source,target,src_lng,tgt_lng,layer,domain,sponsor,status,notes
 临床研究,Clinical Research,zh,en,form,regulatory,,curated,PLAN-042b short value
 否,No,zh,en,form,regulatory,,curated,PLAN-042b short value
 是,Yes,zh,en,form,regulatory,,curated,PLAN-042b short value
-无,None,zh,en,form,regulatory,,curated,PLAN-042b short value
+无,No,zh,en,form,regulatory,,curated,PLAN-043b healthy-subject short value
 有,Yes,zh,en,form,regulatory,,curated,PLAN-042b short value
 双盲,Double-blind,zh,en,form,regulatory,,curated,PLAN-042b short value
 单盲,Single-blind,zh,en,form,regulatory,,curated,PLAN-042b short value
