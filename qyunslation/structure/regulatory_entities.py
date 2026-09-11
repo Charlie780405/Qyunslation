@@ -45,24 +45,32 @@ def lookup_controlled(source: str, *, mapping: dict[str, str] | None = None) -> 
 
 
 def translate_or_preserve(source: str, *, mapping: dict[str, str] | None = None) -> str:
-    """受控命中则译；含机构/人名特征且未命中则保留原文（禁自由生成）。"""
+    """受控命中则译；机构未命中则保留原文；纯 CJK 人名未命中则保留（禁自由生成）。"""
     hit = lookup_controlled(source, mapping=mapping)
     if hit is not None:
         return hit
-    if _looks_entity(source):
+    if _looks_org(source):
+        return source
+    if _looks_person_name(source):
         return source
     return source
 
 
-def _looks_entity(text: str) -> bool:
+def _looks_org(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
-    if any(tok in t for tok in ("医院", "大学", "学院", "药业", "生物", "有限公司", "股份")):
-        return True
-    if _CJK.fullmatch(t) and 2 <= len(t) <= 4:
-        return True
-    return False
+    return any(tok in t for tok in ("医院", "大学", "学院", "药业", "生物", "有限公司", "股份"))
+
+
+def _looks_person_name(text: str) -> bool:
+    """2–4 字纯 CJK：先走词表（043b），未命中才保留原文。"""
+    t = (text or "").strip()
+    return bool(_CJK.fullmatch(t) and 2 <= len(t) <= 4)
+
+
+def _looks_entity(text: str) -> bool:
+    return _looks_org(text) or _looks_person_name(text)
 
 
 def _roman_to_phase(roman: str) -> str | None:
@@ -91,6 +99,12 @@ def normalize_phase_label(text: str) -> str:
     hit = lookup_controlled(raw)
     if hit is not None and hit.startswith("Phase "):
         return hit
+    # II期（无空格）等变体
+    compact = raw.replace(" ", "")
+    if compact != raw:
+        hit = lookup_controlled(compact)
+        if hit is not None and hit.startswith("Phase "):
+            return hit
     return raw
 
 

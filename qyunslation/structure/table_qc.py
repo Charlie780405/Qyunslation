@@ -21,6 +21,9 @@ TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {
     "KEY_VALUE_COLLAPSE",
 }
 
+# PLAN-043c：字号偏低告警但不阻断写回（OVERFLOW 无续页仍为硬失败）
+TABLE_QC_SOFT = frozenset({"FONT_BELOW_TARGET"})
+
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
@@ -128,6 +131,8 @@ def evaluate_table_qc(
         for code in record.qc:
             if code == QC_OVERFLOW and continued:
                 continue
+            if code in TABLE_QC_SOFT:
+                continue
             if code in TABLE_TERMINAL_FAIL or code == "TABLE_TOKEN_DRIFT":
                 cell_hard.append(code)
         if cell_hard:
@@ -175,8 +180,9 @@ def source_residue_on_page(page, blocks, translations: dict[str, str], *, x_min_
 
 
 def assert_table_qc_clean(_records: list[CellQc], hard: list[str]) -> None:
-    if hard:
-        raise TableTranslateError(f"TABLE_QC_HARD:{hard}")
+    terminal = [code for code in hard if code not in TABLE_QC_SOFT]
+    if terminal:
+        raise TableTranslateError(f"TABLE_QC_HARD:{terminal}")
 
 
 def source_qc_ledger(manifest) -> list[dict]:

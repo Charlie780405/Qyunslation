@@ -99,34 +99,32 @@ def translate_table_blocks(
     out = dict(preserved)
     out.update(controlled)
     for block in blocks:
-        if block.block_id in preserved:
-            text = preserved[block.block_id]
-        elif block.block_id in controlled:
-            # 受控词表命中：允许目标侧引入品牌数字（如 3SBio），跳过 DIGIT_DRIFT
-            out[block.block_id] = controlled[block.block_id]
+        if block.block_id in preserved or block.block_id in controlled:
             continue
-        else:
-            text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
-            try:
-                from .regulatory_entities import rewrite_embedded_phase
+        text = restore_tokens(str(raw[block.block_id]), maps[block.block_id])
+        try:
+            from .regulatory_entities import rewrite_embedded_phase
 
-                text = rewrite_embedded_phase(text)
-            except Exception:
-                pass
+            text = rewrite_embedded_phase(text)
+        except Exception:
+            pass
         if not text.strip():
-            if _policy_value(block) is TranslationPolicy.PRESERVE:
-                out[block.block_id] = text
-                continue
             raise TableTranslateError(f"TABLE_CELL_EMPTY:{block.block_id}")
         if _looks_truncated(block.source_text, text):
             raise TableTranslateError(f"TABLE_TRUNCATED:{block.block_id}")
-        try:
-            assert_digit_tokens_preserved(
-                block.source_text, text, block_id=block.block_id
-            )
-        except ValueError as exc:
-            raise TableTranslateError(str(exc)) from exc
+        policy = _policy_value(block)
+        if policy is not TranslationPolicy.PROTECT_TOKENS:
+            try:
+                assert_digit_tokens_preserved(
+                    block.source_text, text, block_id=block.block_id
+                )
+            except ValueError as exc:
+                raise TableTranslateError(str(exc)) from exc
         missing_tokens = missing_protected_tokens(block.source_text, text)
+        if missing_tokens and policy is TranslationPolicy.PROTECT_TOKENS:
+            # 043c：受保护 token 格 LLM 丢号时回退原文（CTR/电话/611 等）
+            text = block.source_text or text
+            missing_tokens = missing_protected_tokens(block.source_text, text)
         if missing_tokens:
             raise TableTranslateError(
                 f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"

@@ -151,9 +151,13 @@ def detect_translated_cell_merge(
                 and len(rt.split()[0]) >= 5
                 and rt.split()[0] in lt
             ):
+                # 043c：申办方/企业名格（非医院）允许与联系人分列，不误杀 3SBio 行
                 if any(
                     tok in (left.source_text or "")
                     for tok in ("医院", "大学", "学院")
+                ) and not any(
+                    tok in (left.source_text or "")
+                    for tok in ("药业", "生物", "有限公司", "股份", "申办", "申请人")
                 ):
                     issues.append(
                         AttributionIssue(

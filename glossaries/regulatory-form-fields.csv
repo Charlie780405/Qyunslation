@@ -89,3 +89,21 @@ III 期,Phase III,zh,en,form,regulatory,,curated,PLAN-042e roman
 成分,Composition,zh,en,form,regulatory,,curated,PLAN-042e anti-hallucination
 免疫原性,immunogenicity,zh,en,form,regulatory,,curated,PLAN-042e term
 安全性和有效性,Safety and Efficacy,zh,en,form,regulatory,,curated,PLAN-042b
+药物名称,Drug Name,zh,en,form,regulatory,,curated,PLAN-043b
+药物类型,Drug Type,zh,en,form,regulatory,,curated,PLAN-043b
+适应症,Indication,zh,en,form,regulatory,,curated,PLAN-043b
+版本日期,Version Date,zh,en,form,regulatory,,curated,PLAN-043b
+试验方案编号,Protocol Number,zh,en,form,regulatory,,curated,PLAN-043b
+临床申请受理号,Clinical Trial Application Acceptance Number,zh,en,form,regulatory,,curated,PLAN-043b
+联系人姓名,Contact Person Name,zh,en,form,regulatory,,curated,PLAN-043b
+联系人手机号,Contact Mobile,zh,en,form,regulatory,,curated,PLAN-043b
+联系人Email,Contact Email,zh,en,form,regulatory,,curated,PLAN-043b
+联系人邮编,Contact Zip Code,zh,en,form,regulatory,,curated,PLAN-043b
+方案是否为联合用药,Is the protocol for combined use?,zh,en,form,regulatory,,curated,PLAN-043b
+II期,Phase II,zh,en,form,regulatory,,curated,PLAN-043b roman no-space
+周清红,Zhou Qinghong,zh,en,form,regulatory,,curated,PLAN-043b person
+1、试验目的,1. Trial Objectives,zh,en,form,regulatory,,curated,PLAN-043c section
+2、试验设计,2. Trial Design,zh,en,form,regulatory,,curated,PLAN-043c section
+、试验目的 1,1. Trial Objectives,zh,en,form,regulatory,,curated,PLAN-043c ocr-order
+、试验设计 2,2. Trial Design,zh,en,form,regulatory,,curated,PLAN-043c ocr-order
+3、受试者信息,3. Subject Information,zh,en,form,regulatory,,curated,PLAN-043c section

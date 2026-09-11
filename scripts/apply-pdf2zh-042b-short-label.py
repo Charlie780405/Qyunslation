@@ -1,23 +1,32 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-042b：BabelDOC 译前精确直替短标签 / 登记表固定字段。
+"""PLAN-042b / PLAN-043a：BabelDOC 译前精确直替短标签 / 登记表固定字段。
 
 命中 glossaries/regulatory-form-fields.csv（及 merged 中 form/org 层）的段落
-直接写入译文并跳过 LLM，绕过 min_text_length=5 导致的短值格漏译。
+经 post_translate_paragraph 写回 composition，绕过 min_text_length=5 导致的短值格漏译。
+写回失败时不标记已译，回退 LLM。
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 SITE = Path.home() / ".local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages"
 IL = SITE / "babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"
 MARKER = "_qy_042b_short_label_direct"
+OLD_INJECT_RE = re.compile(
+    r"            _qy_direct = _qy_042b_short_label_direct_lookup\(paragraph\.unicode\)\n"
+    r"            if _qy_direct is not None:\n"
+    r"(?:.*?\n)*?"
+    r"                continue\n\n",
+    re.MULTILINE,
+)
 
 
 def _helper_block() -> str:
     return f'''
-# PLAN-042b short-label direct replace (apply-pdf2zh-042b-short-label.py)
+# PLAN-042b/043a short-label direct replace (apply-pdf2zh-042b-short-label.py)
 {MARKER}_MAP = None
 
 
@@ -31,6 +40,7 @@ def {MARKER}_load():
             GLOSSARIES_DIR,
             load_glossary_csv,
             merge_by_priority,
+            normalize_source,
         )
         entries = []
         for name, layer in (
@@ -48,20 +58,78 @@ def {MARKER}_load():
     return mapping
 
 
-def {MARKER}_lookup(text: str):
+def {MARKER}_lookup_key(text: str):
     raw = (text or "").strip()
     if not raw:
         return None
     table = {MARKER}_load()
     if raw in table:
         return table[raw]
-    key = " ".join(raw.split()).casefold()
+    try:
+        from qyunslation.glossary.governance import normalize_source
+        key = normalize_source(raw)
+    except Exception:
+        key = " ".join(raw.split()).casefold()
     for src, tgt in table.items():
-        if " ".join(src.split()).casefold() == key:
-            return tgt
+        try:
+            from qyunslation.glossary.governance import normalize_source as _ns
+            if _ns(src) == key:
+                return tgt
+        except Exception:
+            if " ".join(src.split()).casefold() == key:
+                return tgt
+    return None
+
+
+def {MARKER}_lookup(text: str, suffix: str | None = None):
+    hit = {MARKER}_lookup_key(text)
+    if hit is not None:
+        return hit
+    suf = (suffix or "").strip()
+    if suf and len(suf) <= 2:
+        joined = (text or "").strip() + suf
+        return {MARKER}_lookup_key(joined)
     return None
 
 '''
+
+
+def _inject_block() -> str:
+    return f"""            _qy_suffix = None
+            if _qy_para_idx + 1 < len(_qy_para_list):
+                _qy_nxt = _qy_para_list[_qy_para_idx + 1]
+                _qy_nxt_u = getattr(_qy_nxt, "unicode", None) or ""
+                if 0 < len(_qy_nxt_u.strip()) <= 2:
+                    _qy_suffix = _qy_nxt_u.strip()
+            _qy_direct = {MARKER}_lookup(paragraph.unicode, _qy_suffix)
+            if _qy_direct is not None:
+                _qy_applied = False
+                if tracker is not None:
+                    try:
+                        _qy_xmap = page_xobj_font_map.get(paragraph.xobj_id, page_font_map)
+                        _qy_tr = tracker.new_paragraph()
+                        _qy_inp = self.il_translator.get_translate_input(
+                            paragraph, page_font_map, disable_rich_text_translate=True
+                        )
+                        if _qy_inp is not None:
+                            _qy_tr.set_pdf_unicode(paragraph.unicode)
+                            _qy_tr.set_input(_qy_inp.unicode)
+                            _qy_applied = self.il_translator.post_translate_paragraph(
+                                paragraph, _qy_tr, _qy_inp, _qy_direct
+                            )
+                    except Exception:
+                        _qy_applied = False
+                if _qy_applied:
+                    if pbar:
+                        pbar.advance(1)
+                    translated_ids.add(id(paragraph))
+                    if _qy_suffix and _qy_para_idx + 1 < len(_qy_para_list):
+                        _qy_nxt2 = _qy_para_list[_qy_para_idx + 1]
+                        if (getattr(_qy_nxt2, "unicode", None) or "").strip() == _qy_suffix:
+                            translated_ids.add(id(_qy_nxt2))
+                    continue
+
+"""
 
 
 def patch_il(text: str) -> tuple[str, bool]:
@@ -73,29 +141,44 @@ def patch_il(text: str) -> tuple[str, bool]:
             return text, False
         text = text.replace(anchor, anchor + _helper_block(), 1)
         changed = True
+    elif "post_translate_paragraph" not in text and "_qy_applied" not in text:
+        # upgrade helper only if old lookup without suffix
+        if f"{MARKER}_lookup_key" not in text:
+            old_helper_end = f"    return None\n\n"
+            if old_helper_end in text and f"{MARKER}_lookup(text: str):" in text:
+                # replace old lookup function - simpler to re-run full helper replace
+                pass
 
-    # Inject before min_text_length skip in process_page loop
-    inject = f"""            _qy_direct = {MARKER}_lookup(paragraph.unicode)
-            if _qy_direct is not None:
-                try:
-                    self.set_paragraph_translated(paragraph, _qy_direct)
-                except Exception:
-                    try:
-                        paragraph.unicode = _qy_direct
-                    except Exception:
-                        pass
-                if pbar:
-                    pbar.advance(1)
-                translated_ids.add(id(paragraph))
-                continue
+    # Remove broken 042b inject (043a idempotent upgrade)
+    if OLD_INJECT_RE.search(text):
+        text = OLD_INJECT_RE.sub("", text, count=1)
+        changed = True
+    elif "self.set_paragraph_translated(paragraph, _qy_direct)" in text:
+        # fallback strip
+        start = text.find("            _qy_direct = _qy_042b_short_label_direct_lookup")
+        if start >= 0:
+            end = text.find("                continue\n", start)
+            if end >= 0:
+                text = text[:start] + text[end + len("                continue\n\n") :]
+                changed = True
 
-"""
-    # Prefer placement just before min_text_length check
+    inject = _inject_block()
     min_anchor = "            if len(paragraph.unicode) < self.translation_config.min_text_length:"
+
+    # Ensure enumerate wrapper for suffix join
+    enum_anchor = "        for paragraph in page.pdf_paragraph:"
+    enum_replacement = (
+        "        _qy_para_list = list(page.pdf_paragraph)\n"
+        "        for _qy_para_idx, paragraph in enumerate(_qy_para_list):"
+    )
+    if enum_replacement not in text and enum_anchor in text:
+        text = text.replace(enum_anchor, enum_replacement, 1)
+        changed = True
+
     if inject.strip() not in text and min_anchor in text:
-        # Only first occurrence inside process_page ideally — replace first
         text = text.replace(min_anchor, inject + min_anchor, 1)
         changed = True
+
     return text, changed
 
 
@@ -110,9 +193,14 @@ def main() -> int:
         print(f"patched {IL}")
     else:
         print(f"already patched or no change: {IL}")
-    # sanity
     if MARKER not in patched:
         print("ERROR: marker missing after patch", file=sys.stderr)
+        return 1
+    if "post_translate_paragraph" not in patched:
+        print("ERROR: 043a writeback not present after patch", file=sys.stderr)
+        return 1
+    if "set_paragraph_translated" in patched:
+        print("ERROR: old broken inject still present", file=sys.stderr)
         return 1
     return 0
 

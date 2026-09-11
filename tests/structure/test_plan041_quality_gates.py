@@ -188,10 +188,10 @@ def test_hard_fail_refuses_partial_product(tmp_path):
     from pdf_table_translate import translate_pdf_tables
 
     bbox = (20, 30, 70, 52)
-    src = _cell_pdf(tmp_path / "src.pdf", bbox=bbox, text="主要终点")
+    src = _cell_pdf(tmp_path / "src.pdf", bbox=bbox, text="ZZZZNOTINGLOSSARY")
     block = TranslatableBlock(
         block_id="t:r0c0",
-        source_text="主要终点",
+        source_text="ZZZZNOTINGLOSSARY",
         role=BlockRole.TABLE_CELL,
         translation_policy=TranslationPolicy.TRANSLATE,
         bbox=BoundingBox(x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3]),
@@ -199,15 +199,14 @@ def test_hard_fail_refuses_partial_product(tmp_path):
         row_index=0,
         column_index=0,
     )
+    manifest = _table_manifest(block)
     dest = translate_pdf_tables(
         src,
-        structure_manifest=_table_manifest(block),
-        translator=lambda payloads: {
-            item["id"]: "This translated phrase is far too long for a tiny regulatory cell"
-            for item in payloads
-        },
+        structure_manifest=manifest,
+        translator=lambda payloads: {item["id"]: "" for item in payloads},
     )
     assert dest == src
+    assert manifest.extensions.get("terminal_success") is False
     assert not src.with_name(src.stem + ".tbltr.pdf").is_file()
 
 

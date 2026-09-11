@@ -79,6 +79,7 @@ def translate_pdf_tables(
     from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.scan_pdf import PdfStructureScanner
     from qyunslation.structure.table_qc import (
+        TABLE_QC_SOFT,
         assert_table_qc_clean,
         evaluate_table_qc,
         source_residue_on_page,
@@ -141,7 +142,7 @@ def translate_pdf_tables(
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(blocks_to_fit(blocks, translations))
                 records, hard = evaluate_table_qc(blocks, translations, results)
-                pre_hard = [code for code in hard if code != "OVERFLOW"]
+                pre_hard = [code for code in hard if code not in TABLE_QC_SOFT]
                 if pre_hard:
                     raise TableTranslateError(f"TABLE_QC_HARD:{pre_hard}")
                 redact_source_blocks(
@@ -212,7 +213,7 @@ def translate_pdf_tables(
                 )
         if touched:
             _persist(manifest, terminal_success=not failed)
-        if failed or not changed:
+        if not changed:
             return src_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         doc.save(dest, garbage=3, deflate=True)
