@@ -44,3 +44,6 @@ deliverables/
 
 # PLAN 实样暂存（不入库）
 docs/Resources/
+
+# local editor
+.vscode/

@@ -31,7 +31,16 @@ bash scripts/verify-plan-044.sh
 # 重译后：QYUNSLATION_PLAN044_EN_OUTPUT=/path/to/*.tbltr.pdf
 ```
 
+## 部署验收
+
+| 项 | 结果 |
+| --- | --- |
+| commit | `e8cbb78`（main，已 push origin/mirror） |
+| 服务 | `systemctl --user restart pdf2zh.service` → **active**（2026-09-11） |
+| ExecStartPre | 042b 等补丁 exit 0 |
+
 ## 遗留
 
 - [ ] 生产 GUI 对 611-3期 再跑一趟真实 LLM 表格链，核对交付格数与字体归一
 - [ ] 残留率阈值 30% 是否需按页调参，待实样分布回写
+- [ ] 重译后设 `QYUNSLATION_PLAN044_EN_OUTPUT` 跑满 verify-044
