@@ -20,9 +20,11 @@ TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {
     "KEY_VALUE_COLLAPSE",
 }
 
-# PLAN-043c：字号偏低告警但不阻断写回（OVERFLOW 无续页仍为硬失败）
-# PLAN-044c：SOURCE_RESIDUE / MISSING_TARGET 降为格级；表级按残留率阈值
+# PLAN-043c：字号偏低告警但不阻断写回
+# PLAN-044c：SOURCE_RESIDUE / MISSING_TARGET 降为格级
+# PLAN-044f：REGULATORY 下 OVERFLOW / RESIDUE_RATE 只告警，避免整表回退导致字号/压线
 TABLE_QC_SOFT = frozenset({"FONT_BELOW_TARGET"})
+TABLE_QC_SOFT_REGULATORY = frozenset({"FONT_BELOW_TARGET", QC_OVERFLOW, QC_RESIDUE_RATE})
 TABLE_CELL_DEGRADED = frozenset({QC_SOURCE_RESIDUE, QC_MISSING_TARGET})
 RESIDUE_RATE_LIMIT = 0.30
 
@@ -217,25 +219,20 @@ def assert_table_qc_clean(
     """表级门禁。
 
     isolate_residue=True（REGULATORY 默认）：SOURCE_RESIDUE/MISSING_TARGET 不阻断；
-    仅当残留率超阈值或其它 TABLE_TERMINAL_FAIL 时抛错。
+    OVERFLOW / RESIDUE_RATE 只告警，保证未译中文仍统一重绘、不压格线。
     """
+    soft = TABLE_QC_SOFT_REGULATORY if isolate_residue else TABLE_QC_SOFT
     terminal = [
         code
         for code in hard
-        if code not in TABLE_QC_SOFT
+        if code.split(":", 1)[0] not in soft
         and not (isolate_residue and code.split(":", 1)[0] in TABLE_CELL_DEGRADED)
     ]
-    if isolate_residue and records:
-        rate = residue_rate(records)
-        if rate > residue_limit and not any(c.startswith(QC_RESIDUE_RATE) for c in terminal):
-            terminal.append(f"{QC_RESIDUE_RATE}:{rate:.2f}")
-    elif not isolate_residue:
-        # 非 REGULATORY：残留仍整表硬失败
-        if records:
-            for record in records:
-                for code in record.qc:
-                    if code in TABLE_CELL_DEGRADED and code not in terminal:
-                        terminal.append(code)
+    if not isolate_residue and records:
+        for record in records:
+            for code in record.qc:
+                if code in TABLE_CELL_DEGRADED and code not in terminal:
+                    terminal.append(code)
     if terminal:
         raise TableTranslateError(f"TABLE_QC_HARD:{terminal}")
 

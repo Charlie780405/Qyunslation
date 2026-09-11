@@ -2,11 +2,15 @@
 """PLAN-033j：按稳定块 ID 翻译表格，并生成单语/双语续页。"""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .models import TranslationPolicy, TranslatableBlock
 from .protect import missing_protected_tokens, protect_tokens, restore_tokens
 from .table_cell_policy import assert_digit_tokens_preserved
+
+_LIST_PREFIX = re.compile(r"^(\d+\s*[.、．)]\s*)")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 CONTINUATION_LABEL = "（续）"
 
@@ -86,17 +90,12 @@ def translate_table_blocks(
             raise TableTranslateError("TABLE_LLM_INVALID: expected id→text map")
     # PLAN-044b/c：缺索引不再整表炸。
     # 中文源 → 回填源文供统一重绘（SOURCE_RESIDUE）；非中文源保持空串（MISSING_TARGET）。
-    _cjk = __import__("re").compile(r"[\u4e00-\u9fff]")
-
-    def _has_cjk(text: str) -> bool:
-        return bool(_cjk.search(text or ""))
-
     for block in blocks:
         if block.block_id in preserved or block.block_id in controlled:
             continue
         if block.block_id not in raw or not str(raw.get(block.block_id) or "").strip():
             src = block.source_text or ""
-            raw[block.block_id] = src if _has_cjk(src) else ""
+            raw[block.block_id] = src if _CJK_RE.search(src) else ""
     footnotes = [b.block_id for b in blocks if str(b.role) in {"table_footnote", "TABLE_FOOTNOTE"}]
     if any(fid not in raw and fid not in preserved and fid not in controlled for fid in footnotes):
         raise TableTranslateError("TABLE_FOOTNOTE_MISSING")
@@ -114,13 +113,14 @@ def translate_table_blocks(
             pass
         if not text.strip():
             src = block.source_text or ""
-            if _has_cjk(src):
+            if _CJK_RE.search(src):
                 text = src
             else:
                 out[block.block_id] = ""
                 continue
         if _looks_truncated(block.source_text, text):
             raise TableTranslateError(f"TABLE_TRUNCATED:{block.block_id}")
+        text = _restore_list_prefix(block.source_text or "", text)
         policy = _policy_value(block)
         if policy is not TranslationPolicy.PROTECT_TOKENS:
             if text.strip() != (block.source_text or "").strip():
@@ -128,8 +128,12 @@ def translate_table_blocks(
                     assert_digit_tokens_preserved(
                         block.source_text, text, block_id=block.block_id
                     )
-                except ValueError as exc:
-                    raise TableTranslateError(str(exc)) from exc
+                except ValueError:
+                    # 列表序号已补回仍漂移：回退源文重绘，不拖垮整表
+                    if _CJK_RE.search(block.source_text or ""):
+                        text = block.source_text or text
+                    else:
+                        raise
         missing_tokens = missing_protected_tokens(block.source_text, text)
         if missing_tokens and policy is TranslationPolicy.PROTECT_TOKENS:
             text = block.source_text or text
@@ -140,6 +144,17 @@ def translate_table_blocks(
             )
         out[block.block_id] = text
     return out
+
+
+def _restore_list_prefix(source: str, text: str) -> str:
+    """LLM 丢掉「2.」「3、」时补回，避免 TABLE_DIGIT_DRIFT 整表失败。"""
+    match = _LIST_PREFIX.match((source or "").strip())
+    if not match:
+        return text
+    body = (text or "").lstrip()
+    if _LIST_PREFIX.match(body):
+        return body
+    return f"{match.group(1)}{body}"
 
 
 def _looks_truncated(source: str, translated: str) -> bool:

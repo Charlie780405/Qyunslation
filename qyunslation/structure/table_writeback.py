@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .models import BoundingBox, TranslatableBlock
@@ -26,6 +27,43 @@ CJK_REGULAR = Path(
 CJK_BOLD = Path(
     os.environ.get("QYUNSLATION_FONT_BOLD", "/home/dev/.fonts/NotoSansSC-Bold.otf")
 )
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_FONT_RE = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
+_PAGE_FONTS: dict[int, tuple[str, str]] = {}
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(_CJK_RE.search(text or ""))
+
+
+def _paint_font(text: str, *, bold: bool):
+    import pymupdf
+
+    if _has_cjk(text):
+        return "china-ss", pymupdf.Font("china-ss")
+    return ("hebo" if bold else "helv"), pymupdf.Font("helv")
+
+
+def _latin_name(bold: bool) -> str:
+    return "hebo" if bold else "helv"
+
+
+def _script_runs(text: str, *, bold: bool) -> list[tuple[str, str]]:
+    runs: list[tuple[str, str]] = []
+    buf: list[str] = []
+    cjk: bool | None = None
+    for ch in text:
+        now = bool(_CJK_FONT_RE.match(ch))
+        if cjk is None:
+            cjk = now
+        elif now != cjk:
+            runs.append(("china-ss" if cjk else _latin_name(bold), "".join(buf)))
+            buf = []
+            cjk = now
+        buf.append(ch)
+    if buf:
+        runs.append(("china-ss" if cjk else _latin_name(bold), "".join(buf)))
+    return runs
 
 
 def output_bbox(
@@ -44,16 +82,14 @@ def output_bbox(
 
 
 def _ensure_fonts(page) -> tuple[str, str]:
-    regular, bold = "noto-tbl-r", "noto-tbl-b"
-    if CJK_REGULAR.is_file():
-        page.insert_font(fontname=regular, fontfile=str(CJK_REGULAR))
-    else:
-        regular = "china-ss"
-    if CJK_BOLD.is_file():
-        page.insert_font(fontname=bold, fontfile=str(CJK_BOLD))
-    else:
-        bold = regular
-    return regular, bold
+    """西文用内置 Helvetica，避免 china-ss 把拉丁字母拉成全角间距。"""
+    key = id(page)
+    cached = _PAGE_FONTS.get(key)
+    if cached:
+        return cached
+    names = ("helv", "hebo")
+    _PAGE_FONTS[key] = names
+    return names
 
 
 def redact_source_blocks(
@@ -95,6 +131,40 @@ def redact_source_blocks(
     return len(seen)
 
 
+def _wrap_to_width(text: str, *, font, font_size: float, width: float) -> list[str]:
+    """西文整词换行；含汉字按字宽断行，避免窄格整句画不出。"""
+    raw = (text or "").replace("\xa0", " ").strip()
+    if not raw:
+        return [""]
+    if _has_cjk(raw):
+        lines: list[str] = []
+        current = ""
+        for ch in raw:
+            trial = current + ch
+            if current and float(font.text_length(trial, fontsize=font_size)) > width:
+                lines.append(current)
+                current = ch.strip() or ch
+            else:
+                current = trial
+        if current:
+            lines.append(current)
+        return lines or [""]
+    words = raw.split()
+    if not words:
+        return [""]
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        trial = f"{current} {word}"
+        if float(font.text_length(trial, fontsize=font_size)) <= width:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
 def paint_cell(
     page,
     bbox: BoundingBox,
@@ -109,9 +179,12 @@ def paint_cell(
     rect = pymupdf.Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
     if rect.is_empty or rect.width < 2 or rect.height < 2:
         raise TableTranslateError("TABLE_CELL_BOX_INVALID")
-    # PLAN-044d：role-aware inset，避免译文压格线
-    inset_x = 1.5
-    inset_y = 1.0 if "footnote" not in (role or "").lower() else 0.8
+    # 短格略收 inset，保证 7pt 两行（如 Healthy Subjects）不压底线
+    short = rect.height < 20
+    inset_x = 1.6
+    inset_y = 0.55 if short else 1.0
+    if "footnote" in (role or "").lower():
+        inset_y = min(inset_y, 0.7)
     inset = pymupdf.Rect(
         rect.x0 + inset_x,
         rect.y0 + inset_y,
@@ -119,30 +192,78 @@ def paint_cell(
         rect.y1 - inset_y,
     )
     if inset.is_empty or inset.width < 1 or inset.height < 1:
-        inset = pymupdf.Rect(rect.x0 + 0.6, rect.y0 + 0.6, rect.x1 - 0.6, rect.y1 - 0.6)
+        inset = pymupdf.Rect(rect.x0 + 0.8, rect.y0 + 0.5, rect.x1 - 0.8, rect.y1 - 0.5)
     if inset.is_empty:
         inset = rect
-    regular, bold_name = _ensure_fonts(page)
-    fontname = bold_name if bold else regular
-    size = max(3.0, float(font_size))
-    # 侧排窄格（页坐标宽≪高）：沿长边竖写。
+    fontname, measure_font = _paint_font(text, bold=bold)
+    size = max(6.0, float(font_size))
     if inset.width < 20 and inset.height >= inset.width * 1.4:
         return _paint_cell_sideways(page, inset, text, fontname=fontname, font_size=size)
+    page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    mixed = _has_cjk(text) and re.search(r"[A-Za-z]", text or "")
+    if mixed:
+        return _paint_mixed(page, inset, text, bold=bold, font_size=size)
     while True:
-        page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
-        # 垂直居中：先测所需高度，再下移起点
-        rc = page.insert_textbox(
-            inset,
-            text,
-            fontname=fontname,
-            fontsize=size,
-            align=0,
-        )
-        if rc >= 0:
+        lines = _wrap_to_width(text, font=measure_font, font_size=size, width=inset.width)
+        need_h = max(len(lines), 1) * size * 1.2
+        if need_h <= inset.height + 0.3 or size <= 6.0:
+            rc = page.insert_textbox(
+                inset,
+                "\n".join(lines),
+                fontname=fontname,
+                fontsize=size,
+                align=0,
+            )
+            if rc >= 0 or size <= 6.0:
+                return size
+        size = max(6.0, size - 0.5)
+
+
+def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> float:
+    import pymupdf
+
+    fonts = {
+        "helv": pymupdf.Font("helv"),
+        "hebo": pymupdf.Font("helv"),
+        "china-ss": pymupdf.Font("china-ss"),
+    }
+    size = max(6.0, float(font_size))
+    leading = 1.15
+    while True:
+        lines: list[list[tuple[str, str]]] = [[]]
+        line_w = 0.0
+        for fname, chunk in _script_runs(text, bold=bold):
+            font = fonts[fname]
+            pieces = list(chunk) if fname == "china-ss" else (chunk.split(" ") if chunk.strip() else [chunk])
+            for i, piece in enumerate(pieces):
+                if fname != "china-ss" and i and piece:
+                    piece = " " + piece
+                w = float(font.text_length(piece, fontsize=size)) if piece else 0.0
+                if lines[-1] and line_w + w > inset.width and piece.strip():
+                    lines.append([])
+                    line_w = 0.0
+                    piece = piece.lstrip()
+                    w = float(font.text_length(piece, fontsize=size)) if piece else 0.0
+                if not piece:
+                    continue
+                if lines[-1] and lines[-1][-1][0] == fname:
+                    lines[-1][-1] = (fname, lines[-1][-1][1] + piece)
+                else:
+                    lines[-1].append((fname, piece))
+                line_w += w
+        need_h = max(len(lines), 1) * size * leading
+        if need_h <= inset.height + 0.3 or size <= 6.0:
+            y = inset.y0 + size * 0.95
+            for line in lines:
+                if y > inset.y1 - 0.2:
+                    break
+                x = inset.x0
+                for fname, chunk in line:
+                    page.insert_text((x, y), chunk, fontname=fname, fontsize=size)
+                    x += float(fonts[fname].text_length(chunk, fontsize=size))
+                y += size * leading
             return size
-        if size <= 3.0:
-            raise TableTranslateError("TABLE_OVERFLOW")
-        size = max(3.0, size - 0.5)
+        size = max(6.0, size - 0.5)
 
 
 def _paint_cell_sideways(page, inset, text: str, *, fontname: str, font_size: float) -> float:
@@ -276,9 +397,9 @@ def paint_fitted_blocks(
 
 
 def _write_lines(page, lines: list[str], *, x: float = 36.0, y: float = 36.0) -> None:
-    regular, _bold = _ensure_fonts(page)
     for line in lines:
-        page.insert_text((x, y), line, fontname=regular, fontsize=10)
+        fontname, _ = _paint_font(line, bold=False)
+        page.insert_text((x, y), line, fontname=fontname, fontsize=10)
         y += 14
 
 

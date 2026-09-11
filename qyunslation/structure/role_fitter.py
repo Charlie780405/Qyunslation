@@ -56,6 +56,16 @@ TABLE_ROLE_SIZE = {
     "table_group": 7.0,
     "table_footnote": 6.0,
 }
+# PLAN-045e：文献表按源字号 p75 对齐，不用监管硬阶梯
+TABLE_SIZE_LADDER = "ladder"
+TABLE_SIZE_SOURCE_P75 = "source_p75"
+LITERATURE_ROLE_FLOOR = {
+    "table_title": 7.0,
+    "table_header": 7.0,
+    "table_cell": 7.0,
+    "table_group": 7.0,
+    "table_footnote": 5.5,
+}
 
 
 @dataclass
@@ -170,12 +180,39 @@ def measure_textbox(text: str, font_size: float, width: float, height: float) ->
     )
 
 
+def _resolve_table_size_mode(
+    *,
+    normalize_table_sizes: bool,
+    table_size_mode: str | None,
+) -> str | None:
+    if table_size_mode:
+        return table_size_mode
+    if normalize_table_sizes:
+        return TABLE_SIZE_LADDER
+    return None
+
+
+def _percentile(vals: list[float], p: float) -> float:
+    if not vals:
+        return 0.0
+    arr = sorted(float(v) for v in vals)
+    if len(arr) == 1:
+        return arr[0]
+    k = (len(arr) - 1) * p
+    f = int(k)
+    c = min(f + 1, len(arr) - 1)
+    if f == c:
+        return arr[f]
+    return arr[f] + (arr[c] - arr[f]) * (k - f)
+
+
 def fit_block(
     block: FitBlock,
     *,
     compact: CompactFn | None = None,
     measure=None,
     normalize_table_sizes: bool = False,
+    table_size_mode: str | None = None,
 ) -> FitResult:
     """换行 → 框内安全扩展 → 方向调整 → 等义精简 → 整组缩小。禁止删末行。"""
     text = block.translated_text
@@ -190,34 +227,50 @@ def fit_block(
         )
 
     role = str(block.role or "")
-    if normalize_table_sizes and role.startswith("table_"):
+    mode = _resolve_table_size_mode(
+        normalize_table_sizes=normalize_table_sizes, table_size_mode=table_size_mode
+    )
+    if mode == TABLE_SIZE_LADDER and role.startswith("table_"):
         size = float(TABLE_ROLE_SIZE.get(role, TABLE_ROLE_SIZE["table_cell"]))
+        floor = float(TABLE_ROLE_SIZE.get(role, ROLE_MIN_PT.get(role, 6.0)))
+    elif mode == TABLE_SIZE_SOURCE_P75 and role.startswith("table_"):
+        size = float(block.source_size)
+        floor = float(LITERATURE_ROLE_FLOOR.get(role, ROLE_MIN_PT.get(role, 7.0)))
     else:
         size = block.source_size
+        floor = 3.0
     box_w, box_h = block.box_w, block.box_h
     measure_fn = measure or measure_textbox
 
     def fits(candidate: str, font_size: float, width: float, height: float) -> bool:
         return measure_fn(candidate, font_size, width, height)
 
+    annotate_norm = mode is not None
+
     if fits(text, size, box_w, box_h):
         result = FitResult(
             text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
         )
-        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
+        return _annotate_target(
+            block, result, normalize_table_sizes=annotate_norm, table_size_mode=mode
+        )
 
     expanded_w, expanded_h = box_w * 1.08, box_h * 1.08
     if fits(text, size, expanded_w, expanded_h):
         result = FitResult(
             text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
         )
-        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
+        return _annotate_target(
+            block, result, normalize_table_sizes=annotate_norm, table_size_mode=mode
+        )
 
     if box_h > box_w * 1.4 and fits(text, size, box_h, box_w):
         result = FitResult(
             text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
         )
-        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
+        return _annotate_target(
+            block, result, normalize_table_sizes=annotate_norm, table_size_mode=mode
+        )
 
     if compact is not None:
         compacted, cmap = compact(text)
@@ -231,14 +284,11 @@ def fit_block(
                 dpi=choose_dpi(size),
                 mapping=mapping,
             )
-            return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
+            return _annotate_target(
+                block, result, normalize_table_sizes=annotate_norm, table_size_mode=mode
+            )
 
-    # PLAN-044d：归一化模式下不低于角色下限，避免双重 shrink 到 3pt
-    floor = (
-        float(TABLE_ROLE_SIZE.get(role, ROLE_MIN_PT.get(role, 6.0)))
-        if normalize_table_sizes and role.startswith("table_")
-        else 3.0
-    )
+    # PLAN-044d / 045e：归一化模式下不低于角色下限，避免双重 shrink 到 3pt
     while size > floor and not fits(text, size, box_w, box_h):
         size -= 0.5
     size = max(floor, size)
@@ -252,14 +302,28 @@ def fit_block(
     )
     if result.overflow:
         result.qc.append(QC_OVERFLOW)
-    return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
+    return _annotate_target(
+        block, result, normalize_table_sizes=annotate_norm, table_size_mode=mode
+    )
 
 
 def _annotate_target(
-    block: FitBlock, result: FitResult, *, normalize_table_sizes: bool = False
+    block: FitBlock,
+    result: FitResult,
+    *,
+    normalize_table_sizes: bool = False,
+    table_size_mode: str | None = None,
 ) -> FitResult:
-    if normalize_table_sizes and str(block.role or "").startswith("table_"):
-        floor = float(TABLE_ROLE_SIZE.get(str(block.role), ROLE_MIN_PT.get(str(block.role), 6.0)))
+    mode = _resolve_table_size_mode(
+        normalize_table_sizes=normalize_table_sizes, table_size_mode=table_size_mode
+    )
+    role = str(block.role or "")
+    if mode == TABLE_SIZE_LADDER and role.startswith("table_"):
+        floor = float(TABLE_ROLE_SIZE.get(role, ROLE_MIN_PT.get(role, 6.0)))
+        if result.font_size + 1e-6 < floor:
+            result.qc.append(QC_FONT_BELOW_TARGET)
+    elif mode == TABLE_SIZE_SOURCE_P75 and role.startswith("table_"):
+        floor = float(LITERATURE_ROLE_FLOOR.get(role, ROLE_MIN_PT.get(role, 7.0)))
         if result.font_size + 1e-6 < floor:
             result.qc.append(QC_FONT_BELOW_TARGET)
     else:
@@ -275,13 +339,22 @@ def fit_group(
     blocks: list[FitBlock],
     *,
     normalize_table_sizes: bool = False,
+    table_size_mode: str | None = None,
     **kwargs,
 ) -> list[FitResult]:
+    mode = _resolve_table_size_mode(
+        normalize_table_sizes=normalize_table_sizes, table_size_mode=table_size_mode
+    )
     results = [
-        fit_block(block, normalize_table_sizes=normalize_table_sizes, **kwargs)
+        fit_block(
+            block,
+            normalize_table_sizes=normalize_table_sizes,
+            table_size_mode=mode,
+            **kwargs,
+        )
         for block in blocks
     ]
-    if normalize_table_sizes:
+    if mode == TABLE_SIZE_LADDER:
         # 表级：同 role 统一到阶梯字号（不再按源字号 tier 分裂）
         by_role: dict[str, list[int]] = {}
         for index, block in enumerate(blocks):
@@ -295,6 +368,37 @@ def fit_group(
                     continue
                 results[i].font_size = target
                 results[i].dpi = choose_dpi(target)
+        return results
+
+    if mode == TABLE_SIZE_SOURCE_P75:
+        by_role: dict[str, list[int]] = {}
+        for index, block in enumerate(blocks):
+            by_role.setdefault(str(block.role or "table_cell"), []).append(index)
+        for role, idxs in by_role.items():
+            if not role.startswith("table_"):
+                continue
+            sources = [float(blocks[i].source_size) for i in idxs]
+            p75 = _percentile(sources, 0.75)
+            floor = float(LITERATURE_ROLE_FLOOR.get(role, ROLE_MIN_PT.get(role, 7.0)))
+            fitted = [
+                float(results[i].font_size)
+                for i in idxs
+                if not results[i].overflow and results[i].font_size > 0
+            ]
+            bottleneck = min(fitted) if fitted else floor
+            target = max(floor, min(p75, bottleneck))
+            sizes_after: list[float] = []
+            for i in idxs:
+                if results[i].overflow:
+                    sizes_after.append(results[i].font_size)
+                    continue
+                results[i].font_size = target
+                results[i].dpi = choose_dpi(target)
+                sizes_after.append(target)
+            if sizes_after and max(sizes_after) - min(sizes_after) > 0.6:
+                for i in idxs:
+                    if QC_ROLE_SIZE_DRIFT not in results[i].qc:
+                        results[i].qc.append(QC_ROLE_SIZE_DRIFT)
         return results
 
     by_role: dict[str, list[int]] = {}
@@ -332,7 +436,6 @@ def fit_group(
                     if QC_ROLE_SIZE_DRIFT not in results[i].qc:
                         results[i].qc.append(QC_ROLE_SIZE_DRIFT)
     return results
-
 
 def hard_fail_codes(results: list[FitResult]) -> list[str]:
     codes = []
