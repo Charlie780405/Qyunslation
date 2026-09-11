@@ -12,17 +12,19 @@ from .table_translate import TableTranslateError, _policy_value
 
 QC_MISSING_TARGET = "MISSING_TARGET"
 QC_SOURCE_RESIDUE = "SOURCE_RESIDUE"
+QC_RESIDUE_RATE = "RESIDUE_RATE"
 
 TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {
-    QC_MISSING_TARGET,
-    QC_SOURCE_RESIDUE,
     "LABEL_VALUE_SHIFT",
     "CELL_MERGE",
     "KEY_VALUE_COLLAPSE",
 }
 
 # PLAN-043c：字号偏低告警但不阻断写回（OVERFLOW 无续页仍为硬失败）
+# PLAN-044c：SOURCE_RESIDUE / MISSING_TARGET 降为格级；表级按残留率阈值
 TABLE_QC_SOFT = frozenset({"FONT_BELOW_TARGET"})
+TABLE_CELL_DEGRADED = frozenset({QC_SOURCE_RESIDUE, QC_MISSING_TARGET})
+RESIDUE_RATE_LIMIT = 0.30
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
@@ -38,6 +40,23 @@ def infer_lang(text: str | None) -> str:
     if stripped and re.search(r"[A-Za-z]", stripped):
         return "en"
     return "und"
+
+
+def residue_rate(records: list[CellQc]) -> float:
+    """TRANSLATE 格中带 SOURCE_RESIDUE/MISSING_TARGET 的比例。"""
+    scored = [
+        r
+        for r in records
+        if "PRESERVE" not in str(r.policy).upper()
+    ]
+    if not scored:
+        return 0.0
+    bad = sum(
+        1
+        for r in scored
+        if QC_SOURCE_RESIDUE in r.qc or QC_MISSING_TARGET in r.qc
+    )
+    return bad / len(scored)
 
 
 @dataclass
@@ -131,7 +150,10 @@ def evaluate_table_qc(
         for code in record.qc:
             if code == QC_OVERFLOW and continued:
                 continue
-            if code in TABLE_QC_SOFT:
+            if code in TABLE_QC_SOFT or code in TABLE_CELL_DEGRADED:
+                # 格级降级：记入 qc，不进表级 hard（044c）
+                if code in TABLE_CELL_DEGRADED and record.status == "pass":
+                    record.status = "degraded"
                 continue
             if code in TABLE_TERMINAL_FAIL or code == "TABLE_TOKEN_DRIFT":
                 cell_hard.append(code)
@@ -151,6 +173,9 @@ def evaluate_table_qc(
                     record.status = "fail"
     except Exception:
         pass
+    rate = residue_rate(records)
+    if rate > RESIDUE_RATE_LIMIT:
+        hard.append(f"{QC_RESIDUE_RATE}:{rate:.2f}")
     return records, list(dict.fromkeys(hard))
 
 
@@ -168,6 +193,9 @@ def source_residue_on_page(page, blocks, translations: dict[str, str], *, x_min_
         if not source or not has_cjk(source) or not block.bbox:
             continue
         target = (translations.get(block.block_id) or "").strip()
+        # PLAN-044c：故意保留中文并已重绘的格，不再因页内仍可见源文而硬失败
+        if has_cjk(target):
+            continue
         bbox = output_bbox(block.bbox, width, x_min_frac=x_min_frac)
         extracted = page.get_text("text", clip=pymupdf.Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1)) or ""
         extracted = extracted.replace("\xa0", " ")
@@ -179,8 +207,35 @@ def source_residue_on_page(page, blocks, translations: dict[str, str], *, x_min_
     return list(dict.fromkeys(codes))
 
 
-def assert_table_qc_clean(_records: list[CellQc], hard: list[str]) -> None:
-    terminal = [code for code in hard if code not in TABLE_QC_SOFT]
+def assert_table_qc_clean(
+    records: list[CellQc] | None,
+    hard: list[str],
+    *,
+    isolate_residue: bool = True,
+    residue_limit: float = RESIDUE_RATE_LIMIT,
+) -> None:
+    """表级门禁。
+
+    isolate_residue=True（REGULATORY 默认）：SOURCE_RESIDUE/MISSING_TARGET 不阻断；
+    仅当残留率超阈值或其它 TABLE_TERMINAL_FAIL 时抛错。
+    """
+    terminal = [
+        code
+        for code in hard
+        if code not in TABLE_QC_SOFT
+        and not (isolate_residue and code.split(":", 1)[0] in TABLE_CELL_DEGRADED)
+    ]
+    if isolate_residue and records:
+        rate = residue_rate(records)
+        if rate > residue_limit and not any(c.startswith(QC_RESIDUE_RATE) for c in terminal):
+            terminal.append(f"{QC_RESIDUE_RATE}:{rate:.2f}")
+    elif not isolate_residue:
+        # 非 REGULATORY：残留仍整表硬失败
+        if records:
+            for record in records:
+                for code in record.qc:
+                    if code in TABLE_CELL_DEGRADED and code not in terminal:
+                        terminal.append(code)
     if terminal:
         raise TableTranslateError(f"TABLE_QC_HARD:{terminal}")
 

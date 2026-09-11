@@ -95,13 +95,31 @@ def redact_source_blocks(
     return len(seen)
 
 
-def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: float) -> float:
+def paint_cell(
+    page,
+    bbox: BoundingBox,
+    text: str,
+    *,
+    bold: bool,
+    font_size: float,
+    role: str = "table_cell",
+) -> float:
     import pymupdf
 
     rect = pymupdf.Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1)
     if rect.is_empty or rect.width < 2 or rect.height < 2:
         raise TableTranslateError("TABLE_CELL_BOX_INVALID")
-    inset = pymupdf.Rect(rect.x0 + 0.6, rect.y0 + 0.6, rect.x1 - 0.6, rect.y1 - 0.6)
+    # PLAN-044d：role-aware inset，避免译文压格线
+    inset_x = 1.5
+    inset_y = 1.0 if "footnote" not in (role or "").lower() else 0.8
+    inset = pymupdf.Rect(
+        rect.x0 + inset_x,
+        rect.y0 + inset_y,
+        rect.x1 - inset_x,
+        rect.y1 - inset_y,
+    )
+    if inset.is_empty or inset.width < 1 or inset.height < 1:
+        inset = pymupdf.Rect(rect.x0 + 0.6, rect.y0 + 0.6, rect.x1 - 0.6, rect.y1 - 0.6)
     if inset.is_empty:
         inset = rect
     regular, bold_name = _ensure_fonts(page)
@@ -112,6 +130,7 @@ def paint_cell(page, bbox: BoundingBox, text: str, *, bold: bool, font_size: flo
         return _paint_cell_sideways(page, inset, text, fontname=fontname, font_size=size)
     while True:
         page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        # 垂直居中：先测所需高度，再下移起点
         rc = page.insert_textbox(
             inset,
             text,
@@ -229,6 +248,7 @@ def paint_fitted_blocks(
                 result.text,
                 bold=result.bold,
                 font_size=result.font_size,
+                role=role,
             )
             if used + 1e-6 < result.font_size and QC_FONT_BELOW_TARGET not in result.qc:
                 result.qc.append(QC_FONT_BELOW_TARGET)

@@ -43,12 +43,31 @@ def _llm_translator(to_lang: str):
                 out[item["id"]] = str(hit["zh"]).strip()
             else:
                 missing.append(item)
+
+        def _call_batch(items):
+            if not items:
+                return {}
+            mapped = translate_texts([str(item["text"]) for item in items], to_lang=to_lang)
+            got = {}
+            for index, item in enumerate(items, start=1):
+                zh = str(mapped.get(index) or "").strip()
+                if zh:
+                    got[item["id"]] = zh
+            return got
+
         if missing:
-            mapped = translate_texts([str(item["text"]) for item in missing], to_lang=to_lang)
-            for index, item in enumerate(missing, start=1):
-                zh = str(mapped.get(index) or "").strip() or str(item["text"]).strip() or "·"
-                cache[item["id"]] = {"src": str(item["text"]), "zh": zh}
-                out[item["id"]] = zh
+            # PLAN-044b：禁止把源文静默当成译文；缺索引先整批再单条补译。
+            got = _call_batch(missing)
+            still = [item for item in missing if item["id"] not in got]
+            for item in still:
+                one = _call_batch([item])
+                got.update(one)
+            for item in missing:
+                zh = got.get(item["id"], "")
+                if zh:
+                    cache[item["id"]] = {"src": str(item["text"]), "zh": zh}
+                    out[item["id"]] = zh
+                # 仍缺：不写入 out，由 translate_table_blocks / QC 记 MISSING_TARGET
             try:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_text(
@@ -79,7 +98,6 @@ def translate_pdf_tables(
     from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.scan_pdf import PdfStructureScanner
     from qyunslation.structure.table_qc import (
-        TABLE_QC_SOFT,
         assert_table_qc_clean,
         evaluate_table_qc,
         source_residue_on_page,
@@ -110,6 +128,10 @@ def translate_pdf_tables(
     )
     if not tables:
         return src_path
+    from qyunslation.structure.models import ContentProfile
+
+    profile = getattr(getattr(manifest, "document", None), "content_profile", None)
+    isolate_residue = profile is ContentProfile.REGULATORY or str(profile) == "REGULATORY"
     dest = src_path.with_name(src_path.stem + ".tbltr.pdf")
     doc = pymupdf.open(src_path)
     origin_doc = pymupdf.open(origin_path) if origin_path.is_file() else None
@@ -140,11 +162,12 @@ def translate_pdf_tables(
                 continue
             try:
                 translations = translate_table_blocks(blocks, worker)
-                results = fit_group(blocks_to_fit(blocks, translations))
+                results = fit_group(
+                    blocks_to_fit(blocks, translations),
+                    normalize_table_sizes=isolate_residue,
+                )
                 records, hard = evaluate_table_qc(blocks, translations, results)
-                pre_hard = [code for code in hard if code not in TABLE_QC_SOFT]
-                if pre_hard:
-                    raise TableTranslateError(f"TABLE_QC_HARD:{pre_hard}")
+                assert_table_qc_clean(records, hard, isolate_residue=isolate_residue)
                 redact_source_blocks(
                     doc[page_index],
                     blocks,
@@ -165,7 +188,7 @@ def translate_pdf_tables(
                     )
                 )
                 hard = list(dict.fromkeys(hard))
-                assert_table_qc_clean(records, hard)
+                assert_table_qc_clean(records, hard, isolate_residue=isolate_residue)
                 if leftover:
                     if x_min_frac and origin_doc is not None:
                         append_dual_continuation(

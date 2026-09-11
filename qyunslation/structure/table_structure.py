@@ -15,8 +15,102 @@ from .tables import TableRegion, _horizontal_lines, _vertical_lines
 
 _TITLE_RE = re.compile(r"^\s*table\s+\d+\b", re.IGNORECASE)
 _FOOTNOTE_RE = re.compile(r"^\s*(?:\*|†|‡|§|¶|[a-z]\)|[a-z]\s|note:|abbreviation)", re.I)
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CJK_OR_PUNCT = re.compile(
+    r"[\u4e00-\u9fff"
+    r"\u3000-\u303f"  # CJK symbols/punct
+    r"\uff00-\uffef"  # fullwidth forms
+    r"、。；：？！「」『』（）【】《》]"
+)
+_TERMINAL_PUNCT = frozenset("。！？；.!?;")
+_NUMBERED_START = re.compile(r"^[（(]?\d+[）).、．]|^\d+、")
 TABLE_OCR_MIN_DPI = 300
+# Baseline cluster tolerance (pt) for same visual line across fonts.
+_LINE_Y_TOL = 3.0
 TextUnit = tuple[float, float, float, float, str]
+
+
+def _is_cjk_char(ch: str) -> bool:
+    return bool(ch and _CJK_OR_PUNCT.match(ch))
+
+
+def _span_needs_space(left: str, right: str) -> bool:
+    """PLAN-044a：CJK/数字邻接零空格；Latin 词间保留单空格。"""
+    if not left or not right:
+        return False
+    a, b = left[-1], right[0]
+    if a.isspace() or b.isspace():
+        return False
+    if _is_cjk_char(a) or _is_cjk_char(b):
+        return False
+    if a.isdigit() and (b.isdigit() or b in ".,%/-"):
+        return False
+    if b.isdigit() and a in ".,%/-":
+        return False
+    return True
+
+
+def join_span_texts(parts: list[str]) -> str:
+    """Join OCR/PDF spans without inserting spaces inside CJK compounds."""
+    out = ""
+    for piece in parts:
+        piece = str(piece or "").strip()
+        if not piece:
+            continue
+        if not out:
+            out = piece
+            continue
+        if _span_needs_space(out, piece):
+            out = f"{out} {piece}"
+        else:
+            out = f"{out}{piece}"
+    return out.strip()
+
+
+def _line_buckets(items: list[TextUnit], *, tol: float = _LINE_Y_TOL) -> list[list[TextUnit]]:
+    """Cluster spans into visual lines by mid-y, then sort each line by x0."""
+    if not items:
+        return []
+    ordered = sorted(items, key=lambda it: ((float(it[1]) + float(it[3])) / 2.0, float(it[0])))
+    lines: list[list[TextUnit]] = []
+    centers: list[float] = []
+    for item in ordered:
+        cy = (float(item[1]) + float(item[3])) / 2.0
+        if lines and abs(cy - centers[-1]) <= tol:
+            lines[-1].append(item)
+            n = len(lines[-1])
+            centers[-1] = (centers[-1] * (n - 1) + cy) / n
+        else:
+            lines.append([item])
+            centers.append(cy)
+    for line in lines:
+        line.sort(key=lambda it: float(it[0]))
+    return lines
+
+
+def _soft_merge_lines(line_texts: list[str]) -> str:
+    """Merge soft-wrapped lines; keep a break before numbered starters."""
+    cleaned = [t.strip() for t in line_texts if t and t.strip()]
+    if not cleaned:
+        return ""
+    merged = cleaned[0]
+    for nxt in cleaned[1:]:
+        if (merged and merged[-1] in _TERMINAL_PUNCT) or _NUMBERED_START.match(nxt):
+            merged = f"{merged} {nxt}"
+            continue
+        merged = join_span_texts([merged, nxt])
+    return merged.strip()
+
+
+def compose_cell_text(items: list[TextUnit], *, tol: float = _LINE_Y_TOL) -> str:
+    """PLAN-044a：行分桶 + CJK 零空格 + 软换行合并。"""
+    lines = _line_buckets(items, tol=tol)
+    line_texts = [join_span_texts([str(it[4]) for it in line]) for line in lines]
+    text = _soft_merge_lines(line_texts)
+    # 源 PDF 偶发「2 周」类数字-CJK 内嵌空格，收掉
+    text = re.sub(r"(?<=\d)\s+(?=[\u4e00-\u9fff])", "", text)
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=\d)", "", text)
+    return text.strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,8 +535,7 @@ def _vector_grid_cells(
     n_rows = len(rows) - 1
     n_cols = len(columns) - 1
     for (row0, row1, col0, col1), items in sorted(buckets.items()):
-        ordered = sorted(items, key=lambda item: (item[1], item[0]))
-        text = " ".join(item[4] for item in ordered).strip()
+        text = compose_cell_text(items)
         if not text:
             continue
         role = _assign_role(
@@ -567,14 +660,7 @@ def structure_table(
     col_bands = _band_edges(col_centers, frame.width)
     reading_reverse = frame.rotation == 90
     for (row, col), items in sorted(buckets.items()):
-        ordered = sorted(
-            items,
-            key=lambda item: frame.to_local(
-                (item[0] + item[2]) / 2.0, (item[1] + item[3]) / 2.0
-            )[0],
-            reverse=reading_reverse,
-        )
-        text = " ".join(item[4] for item in ordered).strip()
+        text = compose_cell_text(items)
         if not text:
             continue
         u0, u1 = col_bands[col]

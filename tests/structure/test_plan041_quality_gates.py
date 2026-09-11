@@ -83,13 +83,15 @@ def test_translate_cjk_residue_and_missing_target_are_hard():
         FitResult(text="主要终点", font_size=10, bold=False, dpi=300),
         FitResult(text="", font_size=10, bold=False, dpi=300, qc=["UNTRANSLATED"]),
     ]
-    _records, hard = evaluate_table_qc(
+    records, hard = evaluate_table_qc(
         [leftover, missing],
         {"t:zh": "主要终点", "t:miss": ""},
         results,
     )
-    assert QC_SOURCE_RESIDUE in hard
-    assert QC_MISSING_TARGET in hard
+    # PLAN-044c：格级记残留；表级仅当残留率超阈值才进 hard
+    assert any(QC_SOURCE_RESIDUE in r.qc for r in records)
+    assert any(QC_MISSING_TARGET in r.qc for r in records)
+    assert any(str(c).startswith("RESIDUE_RATE") for c in hard)
 
 
 def test_font_below_is_table_hard_not_image_hard():

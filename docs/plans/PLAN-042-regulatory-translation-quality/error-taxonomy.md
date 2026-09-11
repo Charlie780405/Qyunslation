@@ -31,3 +31,13 @@
 | F2 | 语义 | 重复赘译 | 模型 | 042f | `REDUNDANT_TRANSLATION` |
 | F3 | 语义 | 句段孤立漂移 | typesetting | 042c/d | `SENTENCE_DRIFT` |
 | G1 | 交付 | 表格链硬失败静默回退 | gui | 042f | `SILENT_TABLE_FALLBACK` |
+| H1 | 源抽取 | 跨字体基线乱序（`、受试者信息 3`） | tbl `_vector_grid_cells` y0 排序 | 044a | `SPAN_ORDER_DRIFT` |
+| H2 | 源抽取 | span 连接插空格（`序 号`） | tbl 无条件 `" ".join` | 044a | `SPAN_SPACE_INSERT` |
+| H3 | 源抽取 | 软换行碎片未合并（`联合用 药`） | tbl 无行分桶 | 044a | `SOFT_WRAP_SPLIT` |
+| A5 | 漏译 | 批内索引丢失静默透传源文 | gui `_llm_translator` | 044b | `BATCH_INDEX_DROP` |
+| A6 | 漏译 | 噪声输入使 LLM 只规范化不翻译 | tbl←H | 044a/b | `NOISE_NORMALIZE_ONLY` |
+| B7 | 版式 | 三套字体共存（Noto/SimSun/Calibri） | 整表回退 | 044c/d | `FONT_MIX` |
+| B8 | 版式 | 字号档位爆炸（源 tier） | `fit_group` | 044d | `SIZE_TIER_EXPLODE` |
+| B9 | 版式 | 微字（\<7pt 占比过高） | 双重 shrink | 044d | `FONT_BELOW_TARGET` |
+| B10 | 版式 | 译文压格线（inset 过小） | `paint_cell` | 044d | `GRID_OVERLAP` |
+| G2 | 交付 | 单格漏译拖垮整表 | `SOURCE_RESIDUE`∈TERMINAL | 044c | `CELL_SINKS_TABLE` |

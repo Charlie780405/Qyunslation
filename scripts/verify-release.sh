@@ -67,6 +67,7 @@ run_gate "039 glossary governance" "scripts/verify-plan-039.sh" "$STAGE_DIR/039.
 run_gate "040 upload auth ux" "scripts/verify-plan-040.sh" "$STAGE_DIR/040.log" required
 run_gate "041 regulatory form fidelity" "scripts/verify-plan-041.sh" "$STAGE_DIR/041.log" sample
 run_gate "042 regulatory translation quality" "scripts/verify-plan-042.sh" "$STAGE_DIR/042.log" sample
+run_gate "044 regulatory layout normalize" "scripts/verify-plan-044.sh" "$STAGE_DIR/044.log" sample
 run_gate "030-table geometry" "scripts/verify-plan-030-table.sh" "$STAGE_DIR/030-table.log" required
 run_gate "033l pdf final" "scripts/verify-plan-033l.sh" "$STAGE_DIR/033l.log" sample
 

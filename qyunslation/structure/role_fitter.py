@@ -48,6 +48,14 @@ ROLE_MIN_PT = {
     "figure_footnote": 5.0,
     "table_footnote": 5.5,
 }
+# PLAN-044d：监管表单表级统一字号阶梯（覆盖源字号 tier 爆炸）
+TABLE_ROLE_SIZE = {
+    "table_title": 8.0,
+    "table_header": 8.0,
+    "table_cell": 7.0,
+    "table_group": 7.0,
+    "table_footnote": 6.0,
+}
 
 
 @dataclass
@@ -92,13 +100,19 @@ def choose_dpi(font_size: float) -> int:
 
 
 def wrap_lines(text: str, width_chars: int) -> list[str]:
-    words = (text or "").split()
-    if not words:
+    """按空格换行；整词保留（含连字符术语），禁止词内擅自断行。"""
+    raw = (text or "").strip()
+    if not raw:
         return [""]
-    lines, current = [], words[0]
-    for word in words[1:]:
+    parts = raw.split()
+    if not parts:
+        return [""]
+    lines: list[str] = []
+    current = parts[0]
+    limit = max(4, int(width_chars))
+    for word in parts[1:]:
         trial = f"{current} {word}"
-        if len(trial) <= width_chars:
+        if len(trial) <= limit:
             current = trial
         else:
             lines.append(current)
@@ -107,54 +121,127 @@ def wrap_lines(text: str, width_chars: int) -> list[str]:
     return lines
 
 
+def _font_text_length(text: str, font_size: float) -> float:
+    """真实字宽；失败时回退 0.5em 估算。"""
+    try:
+        import os
+        from pathlib import Path
+
+        import pymupdf
+
+        font_path = Path(
+            os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC-Regular.otf")
+        )
+        if font_path.is_file():
+            font = pymupdf.Font(fontfile=str(font_path))
+            return float(font.text_length(text, fontsize=font_size))
+    except Exception:
+        pass
+    return len(text) * font_size * 0.5
+
+
+def measure_textbox(text: str, font_size: float, width: float, height: float) -> bool:
+    """用真实字宽估算能否装入框（按词换行）。"""
+    if width <= 0 or height <= 0 or font_size <= 0:
+        return False
+    approx_chars = max(4, int(width / max(font_size * 0.45, 1.0)))
+    lines = wrap_lines(text, approx_chars)
+    fitted: list[str] = []
+    for line in lines:
+        if _font_text_length(line, font_size) <= width * 1.02:
+            fitted.append(line)
+            continue
+        words = line.split()
+        if not words:
+            fitted.append(line)
+            continue
+        cur = words[0]
+        for word in words[1:]:
+            trial = f"{cur} {word}"
+            if _font_text_length(trial, font_size) <= width:
+                cur = trial
+            else:
+                fitted.append(cur)
+                cur = word
+        fitted.append(cur)
+    line_h = font_size * 1.25
+    return len(fitted) * line_h <= height + 0.5 and all(
+        _font_text_length(line, font_size) <= width * 1.05 for line in fitted
+    )
+
+
 def fit_block(
     block: FitBlock,
     *,
     compact: CompactFn | None = None,
     measure=None,
+    normalize_table_sizes: bool = False,
 ) -> FitResult:
     """换行 → 框内安全扩展 → 方向调整 → 等义精简 → 整组缩小。禁止删末行。"""
     text = block.translated_text
     mapping: dict[str, str] = {block.source_text: text}
-    qc: list[str] = []
     if not text.strip():
-        return FitResult(text=text, font_size=block.source_size, bold=block.source_bold, dpi=300, qc=[QC_UNTRANSLATED])
+        return FitResult(
+            text=text,
+            font_size=block.source_size,
+            bold=block.source_bold,
+            dpi=300,
+            qc=[QC_UNTRANSLATED],
+        )
 
-    size = block.source_size
+    role = str(block.role or "")
+    if normalize_table_sizes and role.startswith("table_"):
+        size = float(TABLE_ROLE_SIZE.get(role, TABLE_ROLE_SIZE["table_cell"]))
+    else:
+        size = block.source_size
     box_w, box_h = block.box_w, block.box_h
-    width_chars = max(4, int(box_w / max(size * 0.5, 1.0)))
+    measure_fn = measure or measure_textbox
 
     def fits(candidate: str, font_size: float, width: float, height: float) -> bool:
-        if measure is not None:
-            return measure(candidate, font_size, width, height)
-        lines = wrap_lines(candidate, max(4, int(width / max(font_size * 0.5, 1.0))))
-        return len(lines) * font_size * 1.2 <= height and max(len(line) for line in lines) * font_size * 0.5 <= width
+        return measure_fn(candidate, font_size, width, height)
 
     if fits(text, size, box_w, box_h):
-        result = FitResult(text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping)
-        return _annotate_target(block, result)
+        result = FitResult(
+            text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
+        )
+        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
 
-    # 框内安全扩展 8%
     expanded_w, expanded_h = box_w * 1.08, box_h * 1.08
     if fits(text, size, expanded_w, expanded_h):
-        result = FitResult(text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping)
-        return _annotate_target(block, result)
+        result = FitResult(
+            text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
+        )
+        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
 
-    # 方向：竖排窄框
     if box_h > box_w * 1.4 and fits(text, size, box_h, box_w):
-        result = FitResult(text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping)
-        return _annotate_target(block, result)
+        result = FitResult(
+            text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping
+        )
+        return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
 
     if compact is not None:
         compacted, cmap = compact(text)
         mapping.update(cmap)
         text = compacted
         if fits(text, size, box_w, box_h):
-            result = FitResult(text=text, font_size=size, bold=block.source_bold, dpi=choose_dpi(size), mapping=mapping)
-            return _annotate_target(block, result)
+            result = FitResult(
+                text=text,
+                font_size=size,
+                bold=block.source_bold,
+                dpi=choose_dpi(size),
+                mapping=mapping,
+            )
+            return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
 
-    while size > 3.0 and not fits(text, size, box_w, box_h):
+    # PLAN-044d：归一化模式下不低于角色下限，避免双重 shrink 到 3pt
+    floor = (
+        float(TABLE_ROLE_SIZE.get(role, ROLE_MIN_PT.get(role, 6.0)))
+        if normalize_table_sizes and role.startswith("table_")
+        else 3.0
+    )
+    while size > floor and not fits(text, size, box_w, box_h):
         size -= 0.5
+    size = max(floor, size)
     result = FitResult(
         text=text,
         font_size=size,
@@ -165,23 +252,51 @@ def fit_block(
     )
     if result.overflow:
         result.qc.append(QC_OVERFLOW)
-    if text.endswith("...") or text != block.translated_text and compact is None:
-        # 仅当未走精简却丢了结尾时算截断；本 fitter 从不切片
-        pass
-    return _annotate_target(block, result)
+    return _annotate_target(block, result, normalize_table_sizes=normalize_table_sizes)
 
 
-def _annotate_target(block: FitBlock, result: FitResult) -> FitResult:
-    target = target_min_size(block.role, block.source_size)
-    if result.font_size + 1e-6 < target:
-        result.qc.append(QC_FONT_BELOW_TARGET)
+def _annotate_target(
+    block: FitBlock, result: FitResult, *, normalize_table_sizes: bool = False
+) -> FitResult:
+    if normalize_table_sizes and str(block.role or "").startswith("table_"):
+        floor = float(TABLE_ROLE_SIZE.get(str(block.role), ROLE_MIN_PT.get(str(block.role), 6.0)))
+        if result.font_size + 1e-6 < floor:
+            result.qc.append(QC_FONT_BELOW_TARGET)
+    else:
+        target = target_min_size(block.role, block.source_size)
+        if result.font_size + 1e-6 < target:
+            result.qc.append(QC_FONT_BELOW_TARGET)
     if result.bold != block.source_bold:
         result.qc.append(QC_WEIGHT_MISMATCH)
     return result
 
 
-def fit_group(blocks: list[FitBlock], **kwargs) -> list[FitResult]:
-    results = [fit_block(block, **kwargs) for block in blocks]
+def fit_group(
+    blocks: list[FitBlock],
+    *,
+    normalize_table_sizes: bool = False,
+    **kwargs,
+) -> list[FitResult]:
+    results = [
+        fit_block(block, normalize_table_sizes=normalize_table_sizes, **kwargs)
+        for block in blocks
+    ]
+    if normalize_table_sizes:
+        # 表级：同 role 统一到阶梯字号（不再按源字号 tier 分裂）
+        by_role: dict[str, list[int]] = {}
+        for index, block in enumerate(blocks):
+            by_role.setdefault(str(block.role or "table_cell"), []).append(index)
+        for role, idxs in by_role.items():
+            if not role.startswith("table_"):
+                continue
+            target = float(TABLE_ROLE_SIZE.get(role, TABLE_ROLE_SIZE["table_cell"]))
+            for i in idxs:
+                if results[i].overflow:
+                    continue
+                results[i].font_size = target
+                results[i].dpi = choose_dpi(target)
+        return results
+
     by_role: dict[str, list[int]] = {}
     for index, block in enumerate(blocks):
         by_role.setdefault(block.role, []).append(index)

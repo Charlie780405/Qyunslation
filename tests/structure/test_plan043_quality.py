@@ -62,9 +62,11 @@ def test_042b_patcher_requires_post_translate():
 def test_table_qc_soft_excludes_font_below():
     assert "FONT_BELOW_TARGET" in TABLE_QC_SOFT
     assert_table_qc_clean([], ["FONT_BELOW_TARGET"])
+    # PLAN-044c：isolate 下单格 SOURCE_RESIDUE 不阻断；非 isolate 仍硬失败
+    assert_table_qc_clean([], ["SOURCE_RESIDUE"], isolate_residue=True)
     try:
-        assert_table_qc_clean([], ["SOURCE_RESIDUE"])
-        assert False, "SOURCE_RESIDUE must remain hard"
+        assert_table_qc_clean([], ["SOURCE_RESIDUE"], isolate_residue=False)
+        assert False, "non-isolate SOURCE_RESIDUE must remain hard"
     except Exception as exc:
         assert "SOURCE_RESIDUE" in str(exc)
 
