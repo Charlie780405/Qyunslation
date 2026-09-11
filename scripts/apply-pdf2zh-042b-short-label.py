@@ -165,9 +165,27 @@ def patch_il(text: str) -> tuple[str, bool]:
     inject = _inject_block()
     min_anchor = "            if len(paragraph.unicode) < self.translation_config.min_text_length:"
 
-    # Ensure enumerate wrapper for suffix join
-    enum_anchor = "        for paragraph in page.pdf_paragraph:"
+    # Undo mistaken enumerate in find_title_paragraph (must stay plain loop)
+    broken_title = (
+        "        for page in docs.page:\n"
+        "            _qy_para_list = list(page.pdf_paragraph)\n"
+        "        for _qy_para_idx, paragraph in enumerate(_qy_para_list):"
+    )
+    fixed_title = (
+        "        for page in docs.page:\n"
+        "            for paragraph in page.pdf_paragraph:"
+    )
+    if broken_title in text:
+        text = text.replace(broken_title, fixed_title, 1)
+        changed = True
+
+    # Enumerate only in process_page (suffix join needs para index)
+    enum_anchor = (
+        "        total_token_count = 0\n"
+        "        for paragraph in page.pdf_paragraph:"
+    )
     enum_replacement = (
+        "        total_token_count = 0\n"
         "        _qy_para_list = list(page.pdf_paragraph)\n"
         "        for _qy_para_idx, paragraph in enumerate(_qy_para_list):"
     )
