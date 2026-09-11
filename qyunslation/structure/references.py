@@ -16,7 +16,14 @@ SECTION_BREAK_RE = re.compile(
     r"^\s*(appendix|supplementary|acknowledg(?:e)?ments|致谢|附录)\b",
     re.IGNORECASE,
 )
-ENTRY_RE = re.compile(r"^\s*(?:\[\d+\]|\d+\.)\s+\S+")
+ENTRY_RE = re.compile(
+    r"^\s*(?:"
+    r"\[\d+\]\s*\S+"  # [12] Author / [12]Author
+    r"|\d+\.\s+\S+"  # 12. Author
+    r"|\d{1,3}\s+[A-ZÀ-ÖØ-Þ]"  # 12 Author
+    r"|\d{1,3}(?=[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\-']{1,})"  # 1Langanan 粘连
+    r")"
+)
 
 
 def first_line(text: str) -> str:
@@ -34,8 +41,16 @@ def is_section_break(text: str) -> bool:
 
 
 def is_reference_entry(text: str) -> bool:
-    """条目以 [12] / 12. 开头。正文 see [12] for details 不会命中。"""
-    return bool(ENTRY_RE.match((text or "").lstrip()))
+    """条目以 [12] / 12. / 12 Author / 1Langanan 开头。正文 see [12] 不会命中。"""
+    blob = (text or "").lstrip()
+    if not blob:
+        return False
+    # 正文内联引用：字母… see [12] …
+    if re.match(r"^[A-Za-z\u4e00-\u9fff]", blob) and re.search(
+        r"\b(?:see|as shown in|cf\.?)\s*\[\d+\]", blob, re.I
+    ):
+        return False
+    return bool(ENTRY_RE.match(blob))
 
 
 def heading_y_from_blocks(raw_blocks: list) -> float | None:

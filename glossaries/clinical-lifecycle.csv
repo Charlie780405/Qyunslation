@@ -188,3 +188,26 @@ SC,皮下注射,en,zh,clinical,clinpharm,,curated,
 PBO-adjusted,安慰剂校正,en,zh,clinical,stats,,curated,
 BL,基线,en,zh,clinical,clinical,,curated,
 Wk24,第24周,en,zh,clinical,clinical,,curated,
+clear or almost clear,皮损完全清除或几乎清除,en,zh,clinical,clinical,,curated,PLAN-045a IGA endpoint
+clear/almost clear,皮损完全清除或几乎清除,en,zh,clinical,clinical,,curated,PLAN-045a
+cleared or almost cleared,皮损完全清除或几乎清除,en,zh,clinical,clinical,,curated,PLAN-045a
+skin clear,皮损完全清除,en,zh,clinical,clinical,,curated,PLAN-045a
+skin almost clear,皮损几乎清除,en,zh,clinical,clinical,,curated,PLAN-045a
+IGA 0/1,IGA 0/1（皮损完全清除或几乎清除）,en,zh,clinical,clinical,,curated,PLAN-045a
+IGA 0 or 1,IGA 0/1（皮损完全清除或几乎清除）,en,zh,clinical,clinical,,curated,PLAN-045a
+IGA score of 0/1,IGA 0/1（皮损完全清除或几乎清除）,en,zh,clinical,clinical,,curated,PLAN-045a
+EASI-75,EASI-75（湿疮面积和严重程度指数改善 ≥75%）,en,zh,clinical,clinical,,curated,PLAN-045a
+EASI 75,EASI-75（湿疮面积和严重程度指数改善 ≥75%）,en,zh,clinical,clinical,,curated,PLAN-045a
+EASI75,EASI-75（湿疮面积和严重程度指数改善 ≥75%）,en,zh,clinical,clinical,,curated,PLAN-045a
+every 2 weeks (Q2W),每 2 周一次（Q2W）,en,zh,clinical,clinpharm,,curated,PLAN-045a phrase-first
+every 4 weeks (Q4W),每 4 周一次（Q4W）,en,zh,clinical,clinpharm,,curated,PLAN-045a phrase-first
+Q2W,每 2 周一次（Q2W）,en,zh,clinical,clinpharm,,curated,PLAN-045a
+Q4W,每 4 周一次（Q4W）,en,zh,clinical,clinpharm,,curated,PLAN-045a
+tralokinumab,曲罗芦单抗,en,zh,clinical,clinical,,curated,PLAN-045a
+open-label extension,开放标签扩展,en,zh,clinical,clinical,,curated,PLAN-045a
+Objectives,目的,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD
+Background,背景,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD
+Methods,方法,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD
+Results,结果,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD
+Conclusions,结论,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD
+Aim,目的,en,zh,clinical,clinical,,curated,PLAN-045a IMRaD

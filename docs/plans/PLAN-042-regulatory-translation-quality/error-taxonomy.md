@@ -41,3 +41,9 @@
 | B9 | 版式 | 微字（\<7pt 占比过高） | 双重 shrink | 044d | `FONT_BELOW_TARGET` |
 | B10 | 版式 | 译文压格线（inset 过小） | `paint_cell` | 044d | `GRID_OVERLAP` |
 | G2 | 交付 | 单格漏译拖垮整表 | `SOURCE_RESIDUE`∈TERMINAL | 044c | `CELL_SINKS_TABLE` |
+| L1 | 文献 | IL `span style=id` 漏进译文 | composition 未消毒 | 045c | `IL_MARKUP_LEAK` |
+| L2 | 文献 | 中英叠印 / 源文残影 | redact 不全 | 045c | `SOURCE_OVERLAY` |
+| L3 | 文献 | 插图擦除后源墨仍在 | wipe 不足 | 045d | `SOURCE_INK_LEFT` |
+| L4 | 文献 | 参考文献粘连序号被译 | `ENTRY_RE` | 045b | `REF_GLUED_LEAK` |
+| L5 | 文献 | 图内 A/B/C 字号分裂 | tier 分桶 | 045d | `PANEL_SIZE_DRIFT` |
+| L6 | 文献 | 表内同 role 字号分裂 | 未开 source_p75 | 045e | `ROLE_SIZE_DRIFT` |

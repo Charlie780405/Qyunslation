@@ -32,6 +32,10 @@ MODEL = (
     or "qwen3.6:35b-a3b"
 )
 GLOSSARY_CSV = os.environ.get("QYUNSLATION_GLOSSARY_CSV") or ""
+_DEFAULT_GLOSSARY_CANDIDATES = (
+    Path(__file__).resolve().parents[2] / "glossaries" / "merged.csv",
+    Path("/home/dev/pdf2zh/glossaries/merged.csv"),
+)
 
 OCR_MIN_SCORE = float(os.environ.get("QYUNSLATION_OCR_MIN_SCORE", "0.5"))
 TRANSLATE_BATCH = int(os.environ.get("QYUNSLATION_TRANSLATE_BATCH", "25"))
@@ -54,6 +58,9 @@ QC_INK_MIN_PX = int(os.environ.get("QYUNSLATION_QC_INK_MIN_PX", "32"))
 TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
 TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
 TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
+TIER_K_FLOOR = float(os.environ.get("QYUNSLATION_TIER_K_FLOOR", "0.85"))
+PANEL_TIER = "panel_letter"
+PANEL_LETTER_RE = re.compile(r"^\s*[A-F][.)]?\s*$", re.IGNORECASE)
 ALIGN_TOL_PX = float(os.environ.get("QYUNSLATION_ALIGN_TOL_PX", "12"))
 # 线状行判据：宽高比超此值且高度不足最高行此比例，视为括号线/色带而非文字
 RULE_ROW_RATIO = float(os.environ.get("QYUNSLATION_RULE_ROW_RATIO", "8.0"))
@@ -405,11 +412,20 @@ def ocr_image(img_path: str | Path) -> list[tuple[int, int, int, int, str, float
     return boxes
 
 
+def _resolve_glossary_path() -> Path | None:
+    """PLAN-045a：显式 env 优先；否则默认读 merged.csv（仓内 → pdf2zh 运行时）。"""
+    if GLOSSARY_CSV:
+        path = Path(GLOSSARY_CSV)
+        return path if path.is_file() else None
+    for path in _DEFAULT_GLOSSARY_CANDIDATES:
+        if path.is_file():
+            return path
+    return None
+
+
 def _load_glossary() -> dict[str, str]:
-    if not GLOSSARY_CSV:
-        return {}
-    path = Path(GLOSSARY_CSV)
-    if not path.is_file():
+    path = _resolve_glossary_path()
+    if path is None:
         return {}
     d: dict[str, str] = {}
     with path.open(encoding="utf-8", newline="") as f:
@@ -986,6 +1002,39 @@ def _wipe_remaining_source_ink(
     return wiped
 
 
+def _source_ink_still_present(
+    img_cv: np.ndarray,
+    orig: np.ndarray,
+    boxes: list,
+    styles: list[dict],
+    redraw: list[bool],
+    texts: list[str],
+) -> bool:
+    """PLAN-045d：两轮擦除后若源文墨迹仍在，触发单图熔断。"""
+    for i, b in enumerate(boxes):
+        if not redraw[i]:
+            continue
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        roi_o = orig[y1:y2, x1:x2]
+        roi = img_cv[y1:y2, x1:x2]
+        if roi.size == 0 or roi_o.size == 0:
+            continue
+        bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
+        tm = _text_mask_u8(roi_o, heavy=True)
+        if not tm.size or int(tm.max()) == 0:
+            continue
+        g = _line_guard_mask(roi_o, bg, _text_mask_u8(roi_o, heavy=False))
+        still = (tm > 0) & (
+            np.abs(roi.astype(np.int16) - np.array(bg, dtype=np.int16)).max(axis=2) > 40
+        )
+        if g.size and int(g.max()) > 0:
+            still = still & (g == 0)
+        # 允许少量抗锯齿残点；大块残墨才算未洗净
+        if int(still.sum()) >= 40:
+            return True
+    return False
+
+
 def _erase_text_local(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, tm: np.ndarray) -> None:
     """非纯色：文字像素用邻域非文字中位数替换，保留色带/括号线。"""
     if tm.size == 0 or not (tm > 0).any():
@@ -1294,14 +1343,22 @@ def _assign_left_groups(
     return out
 
 
+def _is_panel_letter(text: str) -> bool:
+    """PLAN-045d：图内 A/B/C 面板字母（可带点）。"""
+    return bool(PANEL_LETTER_RE.match(text or ""))
+
+
 def _assign_tiers(
-    boxes: list, styles: list[dict]
+    boxes: list, styles: list[dict], texts: list[str] | None = None
 ) -> list[str]:
-    """背景色桶 + 白底 y 行带 → 每框 tier key。"""
+    """背景色桶 + 白底 y 行带 → 每框 tier key；面板字母强制同组。"""
     n = len(boxes)
     keys: list[str] = [""] * n
     white_idx: list[int] = []
     for i, (b, st) in enumerate(zip(boxes, styles)):
+        if texts is not None and i < len(texts) and _is_panel_letter(texts[i]):
+            keys[i] = PANEL_TIER
+            continue
         q = _quantize_bgr(st["bg_bgr"])
         if _is_near_white(q):
             white_idx.append(i)
@@ -1353,7 +1410,7 @@ def _assign_tier_sizes(
     font_bold: str | None,
 ) -> dict:
     """层级归一：原图 75 分位字号 + 全局比例 k + outlier 降级。"""
-    tiers = _assign_tiers(boxes, styles)
+    tiers = _assign_tiers(boxes, styles, texts=texts)
     n = len(boxes)
     est_sizes = [0] * n
     fit_sizes = [0] * n
@@ -1394,16 +1451,18 @@ def _assign_tier_sizes(
         _, _, fit, _ = _fit_font_and_lines(finals[i], box_w, box_h, use, max_size)
         fit_sizes[i] = fit
 
-    # 比值与 outlier
-    ratios: dict[str, list[float]] = {t: [] for t in by_tier}
+    # 比值与 outlier（面板字母不参与正文 k / outlier）
+    ratios: dict[str, list[float]] = {t: [] for t in by_tier if t != PANEL_TIER}
     for i in range(n):
-        if not redraw[i]:
+        if not redraw[i] or tiers[i] == PANEL_TIER:
             continue
         em = max(1, orig_em[tiers[i]])
         ratios[tiers[i]].append(fit_sizes[i] / em)
 
     outliers: set[int] = set()
     for t, idxs in by_tier.items():
+        if t == PANEL_TIER:
+            continue
         rs = ratios.get(t) or []
         if not rs:
             continue
@@ -1414,25 +1473,36 @@ def _assign_tier_sizes(
             if med > 0 and r < TIER_OUTLIER_RATIO * med:
                 outliers.add(i)
 
-    # 全局 k
+    # 全局 k：剔除 outlier 与 panel_letter；下限避免挤框拖垮全图
     k_vals = []
     for i in range(n):
-        if not redraw[i] or i in outliers:
+        if not redraw[i] or i in outliers or tiers[i] == PANEL_TIER:
             continue
         em = max(1, orig_em[tiers[i]])
         k_vals.append(fit_sizes[i] / em)
     k = min(k_vals) if k_vals else 1.0
-    k = max(0.15, min(1.0, k))
+    k = max(TIER_K_FLOOR, min(1.0, k))
 
     assigned = [0] * n
     tier_size: dict[str, int] = {}
     for t, em in orig_em.items():
+        if t == PANEL_TIER:
+            continue
         tier_size[t] = max(10, int(round(k * em)))
+
+    # PLAN-045d：面板字母取墨迹估计中位数，不乘正文 k
+    if PANEL_TIER in by_tier:
+        pest = [est_sizes[i] for i in by_tier[PANEL_TIER] if est_sizes[i] > 0]
+        panel_size = max(10, int(round(_percentile(pest, 0.5)))) if pest else 24
+        orig_em[PANEL_TIER] = panel_size
+        tier_size[PANEL_TIER] = panel_size
 
     for i in range(n):
         if not redraw[i]:
             continue
-        if i in outliers:
+        if tiers[i] == PANEL_TIER:
+            assigned[i] = tier_size[PANEL_TIER]
+        elif i in outliers:
             assigned[i] = fit_sizes[i]
         else:
             assigned[i] = tier_size[tiers[i]]
@@ -1643,10 +1713,10 @@ def _qc_report(
         if inconsistent:
             issues.append({"code": "C7a", "msg": f"tier size mismatch={inconsistent}"})
 
-        # C7b 组间比例
+        # C7b 组间比例（面板字母不跟正文 k）
         ratio_bad = []
         for t, em in orig_em.items():
-            if em <= 0 or t not in tier_size:
+            if em <= 0 or t not in tier_size or t == PANEL_TIER:
                 continue
             r = tier_size[t] / em
             if abs(r - k) > TIER_RATIO_TOL * max(k, 1e-6) + 1e-6:
@@ -2214,17 +2284,29 @@ def translate_image_with_qc(
             else:
                 img_cv[band, x1:x2] = orig[band, x1:x2]
 
-    # PLAN-027g：擦除后二次扫描残留；仍检出则只擦文字像素（上限 1）
-    leftover_cleared = _clear_ocr_leftovers(
-        img_cv, boxes, styles, redraw, orig_texts=texts
-    )
-    wiped = _wipe_remaining_source_ink(img_cv, orig, boxes, styles, redraw)
+    # PLAN-027g / 045d：擦除后二次扫描残留；最多两轮，仍残留则熔断留原图
+    leftover_cleared = 0
+    wiped = 0
+    for _erase_pass in range(2):
+        c = _clear_ocr_leftovers(img_cv, boxes, styles, redraw, orig_texts=texts)
+        w = _wipe_remaining_source_ink(img_cv, orig, boxes, styles, redraw)
+        leftover_cleared += c
+        wiped += w
+        if c == 0 and w == 0:
+            break
     if leftover_cleared or wiped:
         logger.info(
             "cleared leftover OCR ink in %d boxes, wiped source ink in %d",
             leftover_cleared,
             wiped,
         )
+    if _source_ink_still_present(img_cv, orig, boxes, styles, redraw, texts):
+        logger.warning("SOURCE_INK_LEFT after erase passes; keep original image")
+        return 0, {
+            "ok": False,
+            "issues": [{"code": "SOURCE_INK_LEFT", "msg": "source ink remains after erase"}],
+            "object_qc": ["SOURCE_INK_LEFT"],
+        }
 
     for (x1, y1, x2, y2), roi in kept_rois:
         img_cv[y1:y2, x1:x2] = roi

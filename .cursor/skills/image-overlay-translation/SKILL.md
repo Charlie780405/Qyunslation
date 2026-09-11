@@ -43,13 +43,14 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 6. **纯色判据 = 通道内点 std + 贴近中位数占比**——边框内缩 2px 采样抗蹭线。
 7. **纯色只填文字带 `_fill_band`**——禁止整 OCR 框 `rectangle`；线状行落在带外。贯穿线用 `_line_guard_mask`；擦后回贴文字带外原图，挡住邻框越界。
 8. **非纯色累加 mask，`inpaint` 全图一次**——并扣掉 guard。缺译不擦不画；未译框擦前备份、擦后回贴。
+8b. **擦除上限 2 轮**（PLAN-045d）——`_clear_ocr_leftovers` + `_wipe_remaining_source_ink`；仍残留源文墨迹 → `SOURCE_INK_LEFT` 单图熔断留原图，禁止半擦交付。
 
 ### C. 字号（原则 3）
 
 9. **行高用 `font.getmetrics()`**——禁 `getbbox` 墨迹高判能否放下。
-10. **层级按「背景色桶 + 白底 y 行带」**——禁按墨迹高度分档。
-11. **组内字号统一、组间保持原图比例**——`k = min(fit/orig_em)`，`orig_em` 取 75 分位；outlier 不得拖垮 k。
-12. **粗细组内多数决**。
+10. **层级按「背景色桶 + 白底 y 行带」**——禁按墨迹高度分档。**PLAN-045d**：文本 `^[A-F][.)]?$` 强制 `tier=panel_letter`，跨背景同组。
+11. **组内字号统一、组间保持原图比例**——`k = min(fit/orig_em)`，`orig_em` 取 75 分位；outlier **与 panel_letter** 不得拖垮 k；`k` 下限 `TIER_K_FLOOR`（默认 0.85）。面板字母字号取墨迹估计中位数，不乘正文 k。
+12. **粗细组内多数决**（033k 起块级继承优先于层投票）。
 
 ### D. 对齐（原则 1、3、4）
 
@@ -78,6 +79,7 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 | C8 | 成品 vs 计划锚点（读 `vertical_mode`） |
 | C9 | 左对齐组 `x1` 参差 |
 | C10 | 文字带外图元损伤（原非背景→成背景） |
+| SOURCE_INK_LEFT | 两轮擦除后源文墨迹仍在 → 熔断留原图（045d） |
 
 ## 新图接入自检清单
 

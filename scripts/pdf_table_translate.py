@@ -131,7 +131,19 @@ def translate_pdf_tables(
     from qyunslation.structure.models import ContentProfile
 
     profile = getattr(getattr(manifest, "document", None), "content_profile", None)
-    isolate_residue = profile is ContentProfile.REGULATORY or str(profile) == "REGULATORY"
+    profile_s = str(profile) if profile is not None else ""
+    isolate_residue = profile is ContentProfile.REGULATORY or profile_s == "REGULATORY"
+    literature = profile in {
+        ContentProfile.RESEARCH_ARTICLE,
+        ContentProfile.REVIEW_ARTICLE,
+    } or profile_s in {"RESEARCH_ARTICLE", "REVIEW_ARTICLE"}
+    if isolate_residue:
+        table_size_mode = "ladder"
+    elif literature:
+        table_size_mode = "source_p75"
+    else:
+        table_size_mode = None
+    normalize_table_sizes = table_size_mode is not None
     dest = src_path.with_name(src_path.stem + ".tbltr.pdf")
     doc = pymupdf.open(src_path)
     origin_doc = pymupdf.open(origin_path) if origin_path.is_file() else None
@@ -164,7 +176,8 @@ def translate_pdf_tables(
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(
                     blocks_to_fit(blocks, translations),
-                    normalize_table_sizes=isolate_residue,
+                    normalize_table_sizes=normalize_table_sizes,
+                    table_size_mode=table_size_mode,
                 )
                 records, hard = evaluate_table_qc(blocks, translations, results)
                 assert_table_qc_clean(records, hard, isolate_residue=isolate_residue)

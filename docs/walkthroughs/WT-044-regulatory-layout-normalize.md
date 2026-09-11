@@ -39,8 +39,13 @@ bash scripts/verify-plan-044.sh
 | 服务 | `systemctl --user restart pdf2zh.service` → **active**（2026-09-11） |
 | ExecStartPre | 042b 等补丁 exit 0 |
 
+## 044f 热修（字号 / 漏译 / 压线）
+
+- REGULATORY：`OVERFLOW`/`RESIDUE_RATE` 只告警，不再整表回退
+- `paint_cell` 按字宽整词换行并裁入 inset（覆盖 Healthy Subjects 77×16 格）
+- 列表序号 `2.` 丢失不再 `DIGIT_DRIFT` 炸表；词表补 `有效性`→Efficacy
+
 ## 遗留
 
 - [ ] 生产 GUI 对 611-3期 再跑一趟真实 LLM 表格链，核对交付格数与字体归一
-- [ ] 残留率阈值 30% 是否需按页调参，待实样分布回写
 - [ ] 重译后设 `QYUNSLATION_PLAN044_EN_OUTPUT` 跑满 verify-044

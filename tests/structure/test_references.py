@@ -24,9 +24,13 @@ def test_heading_and_intext_citation_are_distinct():
     assert is_reference_heading("参考文献")
     assert not is_reference_heading("as shown in References above")
     assert is_reference_entry("[12] Smith J. Dupilumab trial. 2024.")
+    assert is_reference_entry("1. Author SM, et al. Trial. 2024.")
+    assert is_reference_entry("1 Author SM, et al. Trial. 2024.")
+    assert is_reference_entry("1Langanan SM, Irvine AD, Weidinger S.")
     assert not is_reference_entry(
         "Patients were enrolled, see [12] for details. MedImmune staff attended."
     )
+    assert not is_reference_entry("2024 was a pivotal year for biologics.")
 
 
 def test_synthetic_references_scope(generated_structure_fixtures: Path):
