@@ -42,8 +42,9 @@
 | 项 | 值 |
 | --- | --- |
 | merge | `1ce27c8` |
-| 服务 | `pdf2zh.service` 含 042b ExecStartPre |
+| 服务 | `pdf2zh.service` 已重启（含 042b ExecStartPre，status=0） |
 | 补丁序 | 29 = `apply-pdf2zh-042b-short-label.py` |
+| HEAD | `f93f1ad`（WT 部署记录） |
 
 ## 遗留 / 下阶段输入
 
