@@ -56,4 +56,4 @@ CTR20231233 登记表对照截图上的缺陷**绝大多数不是 041 单元格�
 - [x] `scripts/verify-plan-042.sh` PASS（缺实样可 BLOCKED）
 - [x] WT-042 写明证据
 - [x] SK-Q003 扩写
-- [ ] no-ff 合入 `main` 并部署
+- [x] no-ff 合入 `main` 并部署

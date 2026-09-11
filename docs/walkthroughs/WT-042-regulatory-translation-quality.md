@@ -41,7 +41,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| merge | （待填） |
+| merge | `1ce27c8` |
 | 服务 | `pdf2zh.service` 含 042b ExecStartPre |
 | 补丁序 | 29 = `apply-pdf2zh-042b-short-label.py` |
 
