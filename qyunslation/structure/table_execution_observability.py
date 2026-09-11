@@ -35,10 +35,25 @@ def scan_table_fidelity_hint(manifest: DocumentStructureManifest | None) -> str:
 
 
 def execution_table_fidelity_hint(manifest: DocumentStructureManifest | None) -> str:
+    """PLAN-042f：告警交付 — 汇总失败表数量与逐表 reason。"""
     rows = _execution_rows(manifest)
     if not rows:
+        # 仍可能有 terminal_success=false 而无逐表行
+        if manifest is not None and manifest.extensions.get("terminal_success") is False:
+            return "⚠ 表格保真未完成（terminal_success=false）"
         return ""
-    return " ".join(row["message"] for row in rows)
+    fails = [r for r in rows if str(r.get("message", "")).startswith("✗")]
+    oks = [r for r in rows if str(r.get("message", "")).startswith("✓")]
+    if not fails:
+        return " ".join(row["message"] for row in rows)
+    parts = [f"⚠ {len(fails)} 个表格未保真"]
+    for row in fails[:8]:
+        parts.append(row["message"])
+    if len(fails) > 8:
+        parts.append(f"…另有 {len(fails) - 8} 项")
+    if oks:
+        parts.append(f"（{len(oks)} 表 digits_preserved）")
+    return " ".join(parts)
 
 
 def append_table_fidelity_hint(base: str, manifest: DocumentStructureManifest | None) -> str:

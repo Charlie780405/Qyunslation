@@ -1,0 +1,91 @@
+source,target,src_lng,tgt_lng,layer,domain,sponsor,status,notes
+登记号,Registration No.,zh,en,form,regulatory,,curated,PLAN-042b
+相关登记号,Related Registration No.,zh,en,form,regulatory,,curated,PLAN-042b
+申请人,Applicant,zh,en,form,regulatory,,curated,PLAN-042b
+申请人联系人,Applicant Contact Person,zh,en,form,regulatory,,curated,PLAN-042b
+首次公示信息日期,Date of First Public Disclosure,zh,en,form,regulatory,,curated,PLAN-042b
+试验状态,Trial Status,zh,en,form,regulatory,,curated,PLAN-042b
+试验分类,Trial Classification,zh,en,form,regulatory,,curated,PLAN-042b
+试验专业题目,Professional Trial Title,zh,en,form,regulatory,,curated,PLAN-042b
+试验通俗题目,Public Trial Title,zh,en,form,regulatory,,curated,PLAN-042b
+方案最新版本号,Latest Protocol Version,zh,en,form,regulatory,,curated,PLAN-042b
+方案最新版本日期,Latest Protocol Version Date,zh,en,form,regulatory,,curated,PLAN-042b
+是否为联合用药,Is the protocol for combined use?,zh,en,form,regulatory,,curated,PLAN-042b
+申请人名称,Applicant Name,zh,en,form,regulatory,,curated,PLAN-042b
+联系人座机,Contact Landline,zh,en,form,regulatory,,curated,PLAN-042b
+联系人手机,Contact Mobile,zh,en,form,regulatory,,curated,PLAN-042b
+联系人邮箱,Contact Email,zh,en,form,regulatory,,curated,PLAN-042b
+联系人邮政地址,Contact Postal Address,zh,en,form,regulatory,,curated,PLAN-042b
+试验目的,Trial Objectives,zh,en,form,regulatory,,curated,PLAN-042b
+试验设计,Trial Design,zh,en,form,regulatory,,curated,PLAN-042b
+试验分期,Trial Phase,zh,en,form,regulatory,,curated,PLAN-042b
+设计类型,Design Type,zh,en,form,regulatory,,curated,PLAN-042b
+随机化,Randomization,zh,en,form,regulatory,,curated,PLAN-042b
+盲法,Blinding,zh,en,form,regulatory,,curated,PLAN-042b
+试验范围,Trial Scope,zh,en,form,regulatory,,curated,PLAN-042b
+受试者信息,Subject Information,zh,en,form,regulatory,,curated,PLAN-042b
+年龄,Age,zh,en,form,regulatory,,curated,PLAN-042b
+性别,Gender,zh,en,form,regulatory,,curated,PLAN-042b
+健康受试者,Healthy Subjects,zh,en,form,regulatory,,curated,PLAN-042b
+入选标准,Inclusion Criteria,zh,en,form,regulatory,,curated,PLAN-042b
+排除标准,Exclusion Criteria,zh,en,form,regulatory,,curated,PLAN-042b
+试验药,Test Drug,zh,en,form,regulatory,,curated,PLAN-042b
+对照药,Control Drug,zh,en,form,regulatory,,curated,PLAN-042b
+辅料,Excipients,zh,en,form,regulatory,,curated,PLAN-042b
+用法用量,Administration and Dosage,zh,en,form,regulatory,,curated,PLAN-042b
+终点指标,Endpoints,zh,en,form,regulatory,,curated,PLAN-042b
+主要终点,Primary Endpoint,zh,en,form,regulatory,,curated,PLAN-042b
+次要终点,Secondary Endpoint,zh,en,form,regulatory,,curated,PLAN-042b
+评价时间,Evaluation Time,zh,en,form,regulatory,,curated,PLAN-042b
+序号,No.,zh,en,form,regulatory,,curated,PLAN-042b
+名称,Name,zh,en,form,regulatory,,curated,PLAN-042b
+指标,Indicator,zh,en,form,regulatory,,curated,PLAN-042b
+主要研究者信息,Principal Investigator Information,zh,en,form,regulatory,,curated,PLAN-042b
+姓名,Name,zh,en,form,regulatory,,curated,PLAN-042b
+学位,Degree,zh,en,form,regulatory,,curated,PLAN-042b
+职称,Title,zh,en,form,regulatory,,curated,PLAN-042b
+单位名称,Institution Name,zh,en,form,regulatory,,curated,PLAN-042b
+邮政地址,Mailing Address,zh,en,form,regulatory,,curated,PLAN-042b
+邮箱,Email,zh,en,form,regulatory,,curated,PLAN-042b
+伦理委员会信息,Ethics Committee Information,zh,en,form,regulatory,,curated,PLAN-042b
+审查结论,Review Conclusion,zh,en,form,regulatory,,curated,PLAN-042b
+批准日期,Approval Date,zh,en,form,regulatory,,curated,PLAN-042b
+目标入组人数,Target Enrollment,zh,en,form,regulatory,,curated,PLAN-042b
+已入组人数,Number of Enrolled Participants,zh,en,form,regulatory,,curated,PLAN-042b
+进行中,Ongoing,zh,en,form,regulatory,,curated,PLAN-042b short value
+生物制品,Biological Product,zh,en,form,regulatory,,curated,PLAN-042b short value
+临床研究,Clinical Research,zh,en,form,regulatory,,curated,PLAN-042b short value
+否,No,zh,en,form,regulatory,,curated,PLAN-042b short value
+是,Yes,zh,en,form,regulatory,,curated,PLAN-042b short value
+无,None,zh,en,form,regulatory,,curated,PLAN-042b short value
+有,Yes,zh,en,form,regulatory,,curated,PLAN-042b short value
+双盲,Double-blind,zh,en,form,regulatory,,curated,PLAN-042b short value
+单盲,Single-blind,zh,en,form,regulatory,,curated,PLAN-042b short value
+开放,Open-label,zh,en,form,regulatory,,curated,PLAN-042b short value
+平行分组,Parallel Group,zh,en,form,regulatory,,curated,PLAN-042b short value
+国内试验,Domestic Trial,zh,en,form,regulatory,,curated,PLAN-042b short value
+国际多中心,International Multicenter,zh,en,form,regulatory,,curated,PLAN-042b short value
+男+女,Male+Female,zh,en,form,regulatory,,curated,PLAN-042b short value
+同意,Approved,zh,en,form,regulatory,,curated,PLAN-042b short value
+中国,China,zh,en,form,regulatory,,curated,PLAN-042b short value
+医学博士,M.D.,zh,en,form,regulatory,,curated,PLAN-042b short value
+主任医师,Chief Physician,zh,en,form,regulatory,,curated,PLAN-042b short value
+一、题目和背景信息,I. Title and Background Information,zh,en,form,regulatory,,curated,PLAN-042e section
+二、申请人信息,II. Applicant Information,zh,en,form,regulatory,,curated,PLAN-042e section
+三、临床试验信息,III. Clinical Trial Information,zh,en,form,regulatory,,curated,PLAN-042e section
+四、研究者信息,IV. Investigator Information,zh,en,form,regulatory,,curated,PLAN-042e section
+五、伦理委员会信息,V. Ethics Committee Information,zh,en,form,regulatory,,curated,PLAN-042e section
+六、试验状态,VI. Trial Status,zh,en,form,regulatory,,curated,PLAN-042e section
+七、临床试验结果摘要,VII. Summary of Clinical Trial Results,zh,en,form,regulatory,,curated,PLAN-042e section
+日,day(s),zh,en,form,regulatory,,curated,PLAN-042e measure
+周,week(s),zh,en,form,regulatory,,curated,PLAN-042e measure
+分,score,zh,en,form,regulatory,,curated,PLAN-042e measure
+例,subject(s),zh,en,form,regulatory,,curated,PLAN-042e measure
+II 期,Phase II,zh,en,form,regulatory,,curated,PLAN-042e roman
+Ⅱ 期,Phase II,zh,en,form,regulatory,,curated,PLAN-042e roman
+I 期,Phase I,zh,en,form,regulatory,,curated,PLAN-042e roman
+Ⅲ 期,Phase III,zh,en,form,regulatory,,curated,PLAN-042e roman
+III 期,Phase III,zh,en,form,regulatory,,curated,PLAN-042e roman
+成分,Composition,zh,en,form,regulatory,,curated,PLAN-042e anti-hallucination
+免疫原性,immunogenicity,zh,en,form,regulatory,,curated,PLAN-042e term
+安全性和有效性,Safety and Efficacy,zh,en,form,regulatory,,curated,PLAN-042b

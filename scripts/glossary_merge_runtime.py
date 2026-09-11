@@ -44,7 +44,12 @@ def sync_merged(
     shutil.copy2(REPO_MERGED, runtime_path)
     if also_copy_org:
         # keep legacy filenames in sync for any leftover config
-        for name in ("org-proper-nouns.csv", "clinical-lifecycle.csv", "project-overlay.csv"):
+        for name in (
+            "org-proper-nouns.csv",
+            "regulatory-form-fields.csv",
+            "clinical-lifecycle.csv",
+            "project-overlay.csv",
+        ):
             src = GLOSSARIES_DIR / name
             if src.is_file():
                 shutil.copy2(src, runtime_path.parent / name)

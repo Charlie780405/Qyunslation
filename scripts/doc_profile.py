@@ -24,7 +24,8 @@ _LIT_RE = re.compile(
     re.I,
 )
 _REG_RE = re.compile(
-    r"\b(21\s*cfr|ind\b|module\s*[1-5]|ctd|ich\s*m4)\b|申报资料|共线|药学",
+    r"\b(21\s*cfr|ind\b|module\s*[1-5]|ctd|ich\s*m4|ctr\d{5,})\b|"
+    r"申报资料|共线|药学|临床试验登记|入选标准|排除标准|试验分期",
     re.I,
 )
 
@@ -371,6 +372,68 @@ def patch_letter_typesetting(profile: dict[str, Any] | None = None) -> bool:
     _render_paragraph._qy_letter_patched = True  # type: ignore[attr-defined]
     cls.render_paragraph = _render_paragraph
     logger.info("已注入 letter 角色排版 patch")
+    return True
+
+
+def patch_regulatory_typesetting(profile: dict[str, Any] | None = None) -> bool:
+    """PLAN-042c：regulatory 画像禁止英文词内断行，并去掉 CJK/Latin 边界半空格。"""
+    prof = profile or get("regulatory")
+    name = str(prof.get("name") or "")
+    if name not in {"regulatory", "ind", "clinical"} and "min_font_size" not in prof:
+        # 允许显式传入带 min_font_size 的 regulatory 配置
+        if prof.get("label") != "IND递交资料":
+            return False
+    try:
+        from babeldoc.format.pdf.document_il.midend import typesetting
+    except Exception as exc:
+        logger.warning("patch_regulatory_typesetting 无法 import: %s", exc)
+        return False
+
+    cls = getattr(typesetting, "Typesetting", None)
+    if cls is None:
+        return False
+    if getattr(cls, "_qy_042c_word_break_patched", False):
+        return True
+
+    # Prefer TypesettingUnit.can_break_line if present
+    unit_cls = getattr(typesetting, "TypesettingUnit", None)
+    if unit_cls is not None and hasattr(unit_cls, "can_break_line"):
+        raw_cbl = unit_cls.can_break_line
+        raw_fn = raw_cbl.__func__ if isinstance(raw_cbl, types.MethodType) else raw_cbl
+
+        def _can_break_line(self, *args, **kwargs):
+            # 禁止在拉丁字母中间断行：仅空白/标点可断
+            try:
+                ch = getattr(self, "char_unicode", None) or getattr(self, "unicode", None) or ""
+                if isinstance(ch, str) and len(ch) == 1 and ch.isalpha() and ch.isascii():
+                    return False
+            except Exception:
+                pass
+            return raw_fn(self, *args, **kwargs)
+
+        unit_cls.can_break_line = _can_break_line
+
+    layout = getattr(cls, "_layout_typesetting_units", None)
+    if layout is not None and not getattr(layout, "_qy_042c_layout_patched", False):
+        raw_layout = layout.__func__ if isinstance(layout, types.MethodType) else layout
+
+        def _layout_no_cjk_gap(self, *args, **kwargs):
+            # 临时关闭边界半空格插入（若实现依赖 is_cjk / 宽度探测，尽量保守）
+            old = getattr(self, "is_cjk", None)
+            try:
+                # 英文目标排版时避免按 CJK 路径插缝
+                if hasattr(self, "is_cjk"):
+                    self.is_cjk = False
+                return raw_layout(self, *args, **kwargs)
+            finally:
+                if old is not None and hasattr(self, "is_cjk"):
+                    self.is_cjk = old
+
+        _layout_no_cjk_gap._qy_042c_layout_patched = True  # type: ignore[attr-defined]
+        cls._layout_typesetting_units = _layout_no_cjk_gap
+
+    cls._qy_042c_word_break_patched = True  # type: ignore[attr-defined]
+    logger.info("已注入 regulatory 英文断词约束 patch")
     return True
 
 

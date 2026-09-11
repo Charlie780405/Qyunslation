@@ -22,6 +22,7 @@ FIELDNAMES = (
 
 LAYER_PRIORITY = {
     "org": 100,
+    "form": 90,  # PLAN-042b：登记表固定字段 / 短值格，介于 org 与 clinical
     "clinical": 80,
     "project": 60,
     "session": 40,
@@ -223,14 +224,15 @@ def default_curated_paths(root: Path | None = None) -> list[Path]:
     base = root or GLOSSARIES_DIR
     return [
         base / "org-proper-nouns.csv",
+        base / "regulatory-form-fields.csv",
         base / "clinical-lifecycle.csv",
         base / "project-overlay.csv",
     ]
 
 
 def load_curated_entries(root: Path | None = None) -> list[GlossaryEntry]:
-    """按优先级顺序加载 curated 表（org → clinical → project）。"""
-    layer_defaults = ("org", "clinical", "project")
+    """按优先级顺序加载 curated 表（org → form → clinical → project）。"""
+    layer_defaults = ("org", "form", "clinical", "project")
     entries: list[GlossaryEntry] = []
     for path, layer in zip(default_curated_paths(root), layer_defaults):
         entries.extend(

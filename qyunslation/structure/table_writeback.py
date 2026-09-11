@@ -61,8 +61,12 @@ def redact_source_blocks(
     blocks: list[TranslatableBlock],
     *,
     x_min_frac: float | None,
+    pad: float = 1.2,
 ) -> int:
-    """Permanently remove source text while preserving table graphics."""
+    """Permanently remove source text while preserving table graphics.
+
+    PLAN-042d：对单元格 bbox 做小幅膨胀，覆盖多行源 span / 描边残留。
+    """
     import pymupdf
 
     width = float(page.rect.width)
@@ -71,11 +75,18 @@ def redact_source_blocks(
         if not block.bbox or not (block.source_text or "").strip():
             continue
         bbox = output_bbox(block.bbox, width, x_min_frac=x_min_frac)
-        key = tuple(round(value, 3) for value in (bbox.x0, bbox.y0, bbox.x1, bbox.y1))
+        key = (
+            round(bbox.x0 - pad, 3),
+            round(bbox.y0 - pad, 3),
+            round(bbox.x1 + pad, 3),
+            round(bbox.y1 + pad, 3),
+        )
         if key in seen:
             continue
         seen.add(key)
         rect = pymupdf.Rect(*key)
+        # clamp to page
+        rect = rect & page.rect
         if rect.is_empty or rect.width < 1 or rect.height < 1:
             raise TableTranslateError(f"TABLE_CELL_BOX_INVALID:{block.block_id}")
         page.add_redact_annot(rect, fill=False, cross_out=False)
