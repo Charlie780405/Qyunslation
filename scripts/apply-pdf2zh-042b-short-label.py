@@ -22,6 +22,12 @@ OLD_INJECT_RE = re.compile(
     r"                continue\n\n",
     re.MULTILINE,
 )
+OLD_LOOKUP_RE = re.compile(
+    r"def _qy_042b_short_label_direct_lookup\(text: str\):\n"
+    r"(?:    .*\n)*?"
+    r"    return None\n",
+    re.MULTILINE,
+)
 
 
 def _helper_block() -> str:
@@ -141,13 +147,42 @@ def patch_il(text: str) -> tuple[str, bool]:
             return text, False
         text = text.replace(anchor, anchor + _helper_block(), 1)
         changed = True
-    elif "post_translate_paragraph" not in text and "_qy_applied" not in text:
-        # upgrade helper only if old lookup without suffix
-        if f"{MARKER}_lookup_key" not in text:
-            old_helper_end = f"    return None\n\n"
-            if old_helper_end in text and f"{MARKER}_lookup(text: str):" in text:
-                # replace old lookup function - simpler to re-run full helper replace
-                pass
+    if f"{MARKER}_lookup_key" not in text:
+        new_lookup = (
+            f"def {MARKER}_lookup_key(text: str):\n"
+            f"    raw = (text or \"\").strip()\n"
+            f"    if not raw:\n"
+            f"        return None\n"
+            f"    table = {MARKER}_load()\n"
+            f"    if raw in table:\n"
+            f"        return table[raw]\n"
+            f"    try:\n"
+            f"        from qyunslation.glossary.governance import normalize_source\n"
+            f"        key = normalize_source(raw)\n"
+            f"    except Exception:\n"
+            f"        key = \" \".join(raw.split()).casefold()\n"
+            f"    for src, tgt in table.items():\n"
+            f"        try:\n"
+            f"            from qyunslation.glossary.governance import normalize_source as _ns\n"
+            f"            if _ns(src) == key:\n"
+            f"                return tgt\n"
+            f"        except Exception:\n"
+            f"            if \" \".join(src.split()).casefold() == key:\n"
+            f"                return tgt\n"
+            f"    return None\n\n\n"
+            f"def {MARKER}_lookup(text: str, suffix: str | None = None):\n"
+            f"    hit = {MARKER}_lookup_key(text)\n"
+            f"    if hit is not None:\n"
+            f"        return hit\n"
+            f"    suf = (suffix or \"\").strip()\n"
+            f"    if suf and len(suf) <= 2:\n"
+            f"        joined = (text or \"\").strip() + suf\n"
+            f"        return {MARKER}_lookup_key(joined)\n"
+            f"    return None\n"
+        )
+        if OLD_LOOKUP_RE.search(text):
+            text = OLD_LOOKUP_RE.sub(new_lookup, text, count=1)
+            changed = True
 
     # Remove broken 042b inject (043a idempotent upgrade)
     if OLD_INJECT_RE.search(text):
@@ -219,6 +254,9 @@ def main() -> int:
         return 1
     if "set_paragraph_translated" in patched:
         print("ERROR: old broken inject still present", file=sys.stderr)
+        return 1
+    if f"{MARKER}_lookup_key" not in patched:
+        print("ERROR: suffix lookup helper missing after patch", file=sys.stderr)
         return 1
     return 0
 
