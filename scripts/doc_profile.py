@@ -437,6 +437,72 @@ def patch_regulatory_typesetting(profile: dict[str, Any] | None = None) -> bool:
     return True
 
 
+def patch_literature_typesetting(profile: dict[str, Any] | None = None) -> bool:
+    """文献密排摘要：只记溢出 QC，不删 unit（PLAN-046a：停止静默丢字）。"""
+    del profile
+    try:
+        from babeldoc.format.pdf.document_il.midend import typesetting
+    except Exception as exc:
+        logger.warning("patch_literature_typesetting 无法 import: %s", exc)
+        return False
+    cls = getattr(typesetting, "Typesetting", None)
+    layout = getattr(cls, "_layout_typesetting_units", None) if cls else None
+    if layout is None:
+        return False
+    if getattr(layout, "_qy_lit_no_drop", False):
+        return True
+
+    # 优先用首次保存的原方法；否则从旧裁切闭包剥 raw；否则取当前方法
+    raw = getattr(cls, "_qy_lit_orig_layout", None)
+    if raw is None:
+        cur = layout.__func__ if isinstance(layout, types.MethodType) else layout
+        if getattr(cur, "_qy_lit_clip", False) and getattr(cur, "__closure__", None):
+            for cell in cur.__closure__ or ():
+                cand = cell.cell_contents
+                if callable(cand) and not getattr(cand, "_qy_lit_clip", False):
+                    raw = cand
+                    break
+        if raw is None:
+            raw = cur
+        cls._qy_lit_orig_layout = raw  # type: ignore[attr-defined]
+
+    def _layout_clip(self, typesetting_units, box, scale, line_skip, paragraph, *args, **kwargs):
+        units, fit = raw(
+            self, typesetting_units, box, scale, line_skip, paragraph, *args, **kwargs
+        )
+        floor = float(getattr(box, "y", 0) or 0)
+        # PLAN-047c：容差 = max(0.5×字号, 1.0)，单行基线落在框底不算溢出
+        font_size = 8.0
+        try:
+            style = getattr(paragraph, "pdf_style", None)
+            if style is not None and getattr(style, "font_size", None):
+                font_size = float(style.font_size)
+        except Exception:
+            pass
+        tol = max(0.5 * font_size, 1.0)
+        overflow_n = 0
+        for unit in units:
+            ubox = getattr(unit, "box", None)
+            uy = float(getattr(ubox, "y", floor) or floor) if ubox is not None else floor
+            if uy < floor - tol:
+                overflow_n += 1
+        if overflow_n:
+            logger.warning(
+                "literature typeset overflow units=%d box.y=%.2f tol=%.2f (not dropped)",
+                overflow_n,
+                floor,
+                tol,
+            )
+        # PLAN-047c：overflow 只记 QC，绝不折进 fit——fit=False 会静默删段
+        return units, fit
+
+    _layout_clip._qy_lit_clip = True  # type: ignore[attr-defined]
+    _layout_clip._qy_lit_no_drop = True  # type: ignore[attr-defined]
+    cls._layout_typesetting_units = _layout_clip
+    logger.info("已注入 literature 段落框溢出告警（不裁字、不折 fit）")
+    return True
+
+
 def patch_line_skip(value: float) -> bool:
     """运行时改 Typesetting 内硬编码 1.50/1.3；函数不存在则降级。"""
     try:
@@ -486,4 +552,31 @@ def patch_line_skip(value: float) -> bool:
     _wrapped._qy_line_skip_wrapped = True  # type: ignore[attr-defined]
     cls._find_optimal_scale_and_layout = _wrapped
     logger.info("已注入 line_skip=%s", value)
+    return True
+
+
+def patch_min_scale(value: float) -> bool:
+    """PLAN-046b/047c：设置文献 min_scale；作业结束可 reset_min_scale 恢复默认。"""
+    try:
+        from babeldoc.format.pdf.document_il.midend import typesetting
+    except Exception as exc:
+        logger.warning("patch_min_scale 无法 import: %s", exc)
+        return False
+    if not hasattr(typesetting, "_QY_MIN_SCALE_DEFAULT"):
+        typesetting._QY_MIN_SCALE_DEFAULT = 0.1
+    typesetting._QY_MIN_SCALE = float(value)
+    logger.info("已设置 min_scale=%s", value)
+    return True
+
+
+def reset_min_scale() -> bool:
+    """PLAN-047c：作业结束恢复默认，消除跨文档污染。"""
+    try:
+        from babeldoc.format.pdf.document_il.midend import typesetting
+    except Exception as exc:
+        logger.warning("reset_min_scale 无法 import: %s", exc)
+        return False
+    default = float(getattr(typesetting, "_QY_MIN_SCALE_DEFAULT", 0.1) or 0.1)
+    typesetting._QY_MIN_SCALE = default
+    logger.info("已重置 min_scale=%s", default)
     return True

@@ -131,6 +131,60 @@ def redact_source_blocks(
     return len(seen)
 
 
+def union_paint_bbox(bbox, blocks):
+    """题注常高出 table region；擦除须覆盖全部将落笔的块，否则双标题。"""
+    xs: list[float] = []
+    ys: list[float] = []
+    if bbox is not None:
+        if hasattr(bbox, "x0"):
+            xs.extend([float(bbox.x0), float(bbox.x1)])
+            ys.extend([float(bbox.y0), float(bbox.y1)])
+        else:
+            xs.extend([float(bbox[0]), float(bbox[2])])
+            ys.extend([float(bbox[1]), float(bbox[3])])
+    for block in blocks or []:
+        box = getattr(block, "bbox", None)
+        if box is None:
+            continue
+        xs.extend([float(box.x0), float(box.x1)])
+        ys.extend([float(box.y0), float(box.y1)])
+    if not xs:
+        return bbox
+    return BoundingBox(x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys))
+
+
+def redact_table_region(
+    page,
+    bbox,
+    *,
+    x_min_frac: float | None,
+    pad: float = 2.0,
+) -> bool:
+    """PLAN-048：整区擦除译文页上 BabelDOC 已重排的表文，保留框线。
+
+    按原文墨迹格擦会漏掉重排段落，再落笔就是双渲染器乱套。
+    """
+    import pymupdf
+
+    if bbox is None:
+        return False
+    width = float(page.rect.width)
+    if hasattr(bbox, "x0"):
+        box = output_bbox(bbox, width, x_min_frac=x_min_frac)
+        x0, y0, x1, y1 = box.x0, box.y0, box.x1, box.y1
+    else:
+        x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+        if x_min_frac:
+            dx = width * float(x_min_frac)
+            x0, x1 = x0 + dx, x1 + dx
+    rect = pymupdf.Rect(x0 - pad, y0 - pad, x1 + pad, y1 + pad) & page.rect
+    if rect.is_empty or rect.width < 4 or rect.height < 4:
+        return False
+    page.add_redact_annot(rect, fill=False, cross_out=False)
+    page.apply_redactions(images=0, graphics=0, text=0)
+    return True
+
+
 def _wrap_to_width(text: str, *, font, font_size: float, width: float) -> list[str]:
     """西文整词换行；含汉字按字宽断行，避免窄格整句画不出。"""
     raw = (text or "").replace("\xa0", " ").strip()
@@ -181,8 +235,8 @@ def paint_cell(
         raise TableTranslateError("TABLE_CELL_BOX_INVALID")
     # 短格略收 inset，保证 7pt 两行（如 Healthy Subjects）不压底线
     short = rect.height < 20
-    inset_x = 1.6
-    inset_y = 0.55 if short else 1.0
+    inset_x = 0.6 if short else 1.6
+    inset_y = 0.25 if short else 1.0
     if "footnote" in (role or "").lower():
         inset_y = min(inset_y, 0.7)
     inset = pymupdf.Rect(
@@ -197,9 +251,15 @@ def paint_cell(
         inset = rect
     fontname, measure_font = _paint_font(text, bold=bold)
     size = max(6.0, float(font_size))
-    if inset.width < 20 and inset.height >= inset.width * 1.4:
+    # 仅真竖排轴标签旋转；数字窄格（IGA=1）旋转会把整表拧碎
+    if inset.width < 8.0 and inset.height >= 40.0:
         return _paint_cell_sideways(page, inset, text, fontname=fontname, font_size=size)
     page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    # 期刊表体行高常 <11pt：textbox 在 6pt 仍 rc<0 会“成功”却不落字
+    if short:
+        return _paint_short_line(
+            page, inset, text, bold=bold, font_size=size, fontname=fontname, measure_font=measure_font
+        )
     mixed = _has_cjk(text) and re.search(r"[A-Za-z]", text or "")
     if mixed:
         return _paint_mixed(page, inset, text, bold=bold, font_size=size)
@@ -217,6 +277,27 @@ def paint_cell(
             if rc >= 0 or size <= 6.0:
                 return size
         size = max(6.0, size - 0.5)
+
+
+def _paint_short_line(
+    page,
+    inset,
+    text: str,
+    *,
+    bold: bool,
+    font_size: float,
+    fontname: str,
+    measure_font,
+) -> float:
+    """单行落字：矮格用 insert_text，避免 textbox rc<0 却当成功。"""
+    if _has_cjk(text) and re.search(r"[A-Za-z]", text or ""):
+        return _paint_mixed(page, inset, text, bold=bold, font_size=min(font_size, inset.height))
+    size = min(float(font_size), max(4.5, float(inset.height) * 0.92))
+    while size > 4.5 and float(measure_font.text_length(text, fontsize=size)) > inset.width:
+        size -= 0.25
+    y = min(inset.y0 + size * 0.88, inset.y1 - 0.15)
+    page.insert_text((inset.x0, y), text, fontname=fontname, fontsize=size)
+    return size
 
 
 def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> float:
@@ -297,7 +378,7 @@ def blocks_to_fit(blocks: list[TranslatableBlock], translations: dict[str, str])
         box = block.bbox
         box_w = float(box.x1 - box.x0) if box else 80.0
         box_h = float(box.y1 - box.y0) if box else 16.0
-        if box_h >= box_w * 1.4:
+        if box_w < 8.0 and box_h >= 40.0:
             box_w, box_h = box_h, box_w
         fitted.append(
             FitBlock(
@@ -325,6 +406,7 @@ def paint_fitted_blocks(
     results: list[FitResult],
     *,
     x_min_frac: float | None,
+    allow_leftover: bool = True,
 ) -> tuple[list[str], str, list[str], list[list[str]]]:
     codes: list[str] = []
     width = float(page.rect.width)
@@ -352,7 +434,7 @@ def paint_fitted_blocks(
             title = result.text
         elif "header" in role.lower():
             header.append(result.text)
-        if overflowing and _is_body_role(role):
+        if allow_leftover and overflowing and _is_body_role(role):
             row = block.row_index if block.row_index is not None else 0
             if current_row != row:
                 flush_row()
@@ -375,13 +457,15 @@ def paint_fitted_blocks(
                 result.qc.append(QC_FONT_BELOW_TARGET)
                 result.font_size = used
         except TableTranslateError as exc:
-            if "OVERFLOW" in str(exc) and _is_body_role(role):
+            if allow_leftover and "OVERFLOW" in str(exc) and _is_body_role(role):
                 overflowing = True
                 row = block.row_index if block.row_index is not None else 0
                 if current_row != row:
                     flush_row()
                     current_row = row
                 row_cells.append(result.text)
+                continue
+            if not allow_leftover:
                 continue
             raise
     if overflowing:

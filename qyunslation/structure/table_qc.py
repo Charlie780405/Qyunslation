@@ -13,26 +13,227 @@ from .table_translate import TableTranslateError, _policy_value
 QC_MISSING_TARGET = "MISSING_TARGET"
 QC_SOURCE_RESIDUE = "SOURCE_RESIDUE"
 QC_RESIDUE_RATE = "RESIDUE_RATE"
+# PLAN-046a：caption_rules 无边框表列簇过度切分（碎片格 / 列数膨胀）
+QC_COLUMN_CLUSTER_DRIFT = "COLUMN_CLUSTER_DRIFT"
+# PLAN-048c：HPD 网格对齐失败 / 非表假阳性 / 不安全几何
+QC_HPD_GRID_MISMATCH = "HPD_GRID_MISMATCH"
+QC_NOT_A_TABLE = "NOT_A_TABLE"
+QC_GEOMETRY_CENTER_UNSAFE = "GEOMETRY_CENTER_UNSAFE"
+QC_HPD_COLLAPSED = "HPD_COLLAPSED"
+QC_HPD_COVERAGE = "HPD_COVERAGE"
+QC_HPD_CROSS_CHECK = "HPD_CROSS_CHECK"
 
 TABLE_TERMINAL_FAIL = TABLE_HARD_FAIL | {
     "LABEL_VALUE_SHIFT",
     "CELL_MERGE",
     "KEY_VALUE_COLLAPSE",
+    QC_COLUMN_CLUSTER_DRIFT,
+    "SPAN_ORDER_DRIFT",
+    QC_HPD_GRID_MISMATCH,
+    QC_NOT_A_TABLE,
+    QC_GEOMETRY_CENTER_UNSAFE,
+    QC_HPD_COLLAPSED,
+    QC_HPD_COVERAGE,
+    QC_HPD_CROSS_CHECK,
 }
+
+# 碎片格：纯标点/孤立 N/= ，长度 ≤3 且非数值
+_FRAGMENT_CELL_RE = re.compile(
+    r"^(?:=\s*|\(\s*N\s*|\)\s*|N\s*|=|\(|\))$",
+    re.IGNORECASE,
+)
+_PURE_NUM_RE = re.compile(r"^[-+]?\d+(?:\.\d+)?%?$")
+_NUM_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?")
 
 # PLAN-043c：字号偏低告警但不阻断写回
 # PLAN-044c：SOURCE_RESIDUE / MISSING_TARGET 降为格级
 # PLAN-044f：REGULATORY 下 OVERFLOW / RESIDUE_RATE 只告警，避免整表回退导致字号/压线
 TABLE_QC_SOFT = frozenset({"FONT_BELOW_TARGET"})
 TABLE_QC_SOFT_REGULATORY = frozenset({"FONT_BELOW_TARGET", QC_OVERFLOW, QC_RESIDUE_RATE})
+# PLAN-047e/048c：literature 下 OVERFLOW 单格降级；geometry_center 仍硬拦
+TABLE_QC_SOFT_LITERATURE = frozenset({"FONT_BELOW_TARGET", QC_OVERFLOW})
 TABLE_CELL_DEGRADED = frozenset({QC_SOURCE_RESIDUE, QC_MISSING_TARGET})
 RESIDUE_RATE_LIMIT = 0.30
+# PLAN-048c：geometry_center 一律不落笔（047e 放宽曾让坏结构过闸）
+UNSAFE_GRID_SOURCES = frozenset({"geometry_center", "empty"})
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
+def numbers_in(s: str) -> set[str]:
+    """≥2 位数字 token（移植 Hermes cross_check）。"""
+    return {m.group(0) for m in _NUM_TOKEN_RE.finditer(s or "") if len(m.group(0)) >= 2}
+
+
+def looks_collapsed(rows: list[list[str]]) -> bool:
+    """整行挤进首格或空格率 >60%（Hermes looks_collapsed）。"""
+    if len(rows) < 3:
+        return False
+    multi = sum(1 for r in rows if sum(1 for c in r if str(c).strip()) >= 2)
+    if multi < len(rows) * 0.6:
+        return True
+    cells = [c for r in rows for c in r]
+    return sum(1 for c in cells if not str(c).strip()) > len(cells) * 0.6
+
+
+def coverage_ok(rows: list[list[str]], page_text: str, *, floor: float = 0.28) -> bool:
+    """抽到字符量占区域文本比例（Hermes coverage_ok）。"""
+    page = len(re.sub(r"\s+", "", page_text or ""))
+    if page < 200:
+        return True
+    got = len(re.sub(r"\s+", "", "".join(c for r in rows for c in r)))
+    return got / page >= floor
+
+
+def cross_check(rows: list[list[str]], raw_text: str) -> bool:
+    """网格数字须有 ≥80% 出现在文字层——HPD OCR 错字护栏。"""
+    if not rows:
+        return False
+    cells = {n for row in rows for c in row for n in numbers_in(c)}
+    if len(cells) < 4:
+        return True
+    found = numbers_in(raw_text)
+    hit = sum(1 for n in cells if n in found)
+    return hit / max(len(cells), 1) >= 0.8
+
+
+def evaluate_hpd_gates(
+    rows: list[list[str]],
+    region_text: str,
+    *,
+    relax: bool = True,
+) -> list[str]:
+    """PLAN-048c：返回未过的硬码列表（空=通过）。"""
+    codes: list[str] = []
+    if len(rows) < 2:
+        return [QC_NOT_A_TABLE]
+    if looks_collapsed(rows):
+        codes.append(QC_HPD_COLLAPSED)
+    ok = cross_check(rows, region_text)
+    cov = coverage_ok(rows, region_text, floor=0.28 if relax else 0.35)
+    if not ok and not cov:
+        if not ok:
+            codes.append(QC_HPD_CROSS_CHECK)
+        if not cov:
+            codes.append(QC_HPD_COVERAGE)
+    elif not ok and not relax:
+        codes.append(QC_HPD_CROSS_CHECK)
+    elif not cov and not relax:
+        codes.append(QC_HPD_COVERAGE)
+    return codes
+
+
+def grid_source_of(obj) -> str | None:
+    """从 TableObject.detector_evidence.details 读 grid_source。"""
+    for ev in getattr(obj, "detector_evidence", None) or []:
+        details = getattr(ev, "details", None) or {}
+        if isinstance(details, dict) and details.get("grid_source"):
+            return str(details["grid_source"])
+    return None
+
+
+def assert_grid_source_safe(obj) -> None:
+    """PLAN-048c：geometry_center / not_a_table 不落笔。"""
+    from .table_translate import TableTranslateError
+
+    src = grid_source_of(obj)
+    if src in UNSAFE_GRID_SOURCES:
+        raise TableTranslateError(f"TABLE_QC_HARD:[{QC_GEOMETRY_CENTER_UNSAFE!r}]")
+    if src == "not_a_table":
+        raise TableTranslateError(f"TABLE_QC_HARD:[{QC_NOT_A_TABLE!r}]")
+    for ev in getattr(obj, "detector_evidence", None) or []:
+        details = getattr(ev, "details", None) or {}
+        codes = details.get("qc_codes") if isinstance(details, dict) else None
+        if not codes:
+            continue
+        hard = [
+            c
+            for c in codes
+            if c
+            in {
+                QC_NOT_A_TABLE,
+                QC_HPD_GRID_MISMATCH,
+                QC_GEOMETRY_CENTER_UNSAFE,
+                QC_HPD_COLLAPSED,
+            }
+        ]
+        if hard:
+            raise TableTranslateError(f"TABLE_QC_HARD:{hard}")
+
+
+_BROKEN_N_EQ = re.compile(
+    r"\(\s*n\s*=\s*$|^n\s*=\s*$|n\s*=\s*\d+\)\s*\(\s*n\s*=|=\s*\d+\s+n\s*=",
+    re.I,
+)
+
+
+def literature_paint_safe(blocks) -> bool:
+    """PLAN-048：文献表落笔前检查。切碎的 N=/表头或格框重叠 → 不画。"""
+    boxes: list[tuple[float, float, float, float]] = []
+    for block in blocks:
+        role = str(getattr(block, "role", "") or "")
+        if "title" in role.lower():
+            continue
+        text = (getattr(block, "source_text", None) or "").strip()
+        low = text.lower()
+        if _BROKEN_N_EQ.search(text) or text.endswith("(") or text.endswith("（"):
+            return False
+        if low.count("n =") + low.count("n=") >= 2:
+            return False
+        bbox = getattr(block, "bbox", None)
+        if bbox is None:
+            continue
+        boxes.append((float(bbox.x0), float(bbox.y0), float(bbox.x1), float(bbox.y1)))
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1 :]:
+            ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+            ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+            if ix1 - ix0 > 6.0 and iy1 - iy0 > 4.0:
+                return False
+    return True
+
+
 def has_cjk(text: str | None) -> bool:
     return bool(_CJK_RE.search(text or ""))
+
+
+def detect_column_cluster_drift(blocks) -> str | None:
+    """PLAN-046a/047e：列簇过度切分前置门禁；命中则整表跳过翻译/落笔。
+
+    PLAN-047e：须同时满足「碎片格 ≥ 2」且「列跨度 > 中位非空格数 × 2.0」。
+    PLAN-048c：HPD/gutter 正路径由 assert_grid_source_safe 把关；本函数仍拦坏几何。
+    """
+    texts = [(getattr(b, "source_text", None) or "").strip() for b in blocks]
+    fragments = 0
+    for text in texts:
+        if not text or len(text) > 3:
+            continue
+        if _PURE_NUM_RE.match(text):
+            continue
+        if _FRAGMENT_CELL_RE.match(text) or text in {"=", "N", ")", "(", "(N", "( N"}:
+            fragments += 1
+
+    by_row: dict[int, set[int]] = {}
+    max_col = -1
+    for block in blocks:
+        row = getattr(block, "row_index", None)
+        col = getattr(block, "column_index", None)
+        text = (getattr(block, "source_text", None) or "").strip()
+        if row is None or col is None or not text:
+            continue
+        by_row.setdefault(int(row), set()).add(int(col))
+        max_col = max(max_col, int(col))
+    if max_col < 0 or not by_row:
+        return None
+    filled = sorted(len(cols) for cols in by_row.values() if len(cols) >= 2)
+    if not filled:
+        return None
+    mid = filled[len(filled) // 2]
+    n_cols = max_col + 1
+    sparse = mid > 0 and n_cols > mid * 2.0
+    if fragments >= 2 and sparse:
+        return QC_COLUMN_CLUSTER_DRIFT
+    return None
 
 
 def infer_lang(text: str | None) -> str:
@@ -127,7 +328,8 @@ def evaluate_table_qc(
         elif policy is TranslationPolicy.TRANSLATE:
             if not (target or "").strip() and source.strip():
                 qc.append(QC_MISSING_TARGET)
-            if has_cjk(target):
+            # 中文源未译走（监管回填）；英源中文译文不是残留
+            if has_cjk(source) and has_cjk(target):
                 qc.append(QC_SOURCE_RESIDUE)
         record = CellQc(
             block_id=block.block_id,
@@ -214,21 +416,28 @@ def assert_table_qc_clean(
     hard: list[str],
     *,
     isolate_residue: bool = True,
+    literature: bool = False,
     residue_limit: float = RESIDUE_RATE_LIMIT,
 ) -> None:
     """表级门禁。
 
     isolate_residue=True（REGULATORY 默认）：SOURCE_RESIDUE/MISSING_TARGET 不阻断；
     OVERFLOW / RESIDUE_RATE 只告警，保证未译中文仍统一重绘、不压格线。
+    literature=True：OVERFLOW 只告警（PLAN-047e）。
     """
-    soft = TABLE_QC_SOFT_REGULATORY if isolate_residue else TABLE_QC_SOFT
+    if isolate_residue:
+        soft = TABLE_QC_SOFT_REGULATORY
+    elif literature:
+        soft = TABLE_QC_SOFT_LITERATURE
+    else:
+        soft = TABLE_QC_SOFT
     terminal = [
         code
         for code in hard
         if code.split(":", 1)[0] not in soft
         and not (isolate_residue and code.split(":", 1)[0] in TABLE_CELL_DEGRADED)
     ]
-    if not isolate_residue and records:
+    if not isolate_residue and not literature and records:
         for record in records:
             for code in record.qc:
                 if code in TABLE_CELL_DEGRADED and code not in terminal:

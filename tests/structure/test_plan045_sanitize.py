@@ -32,6 +32,37 @@ def test_sanitize_idempotent_clean_text():
     assert codes == []
 
 
+def test_sanitize_forces_endpoint_calque():
+    out, codes = sanitize_translated_text("患者达到皮肤清晰或几乎清晰")
+    assert "皮损完全清除或几乎清除" in out
+    assert "皮肤清晰" not in out
+    assert codes == []
+
+
+def test_sanitize_forces_leftover_english_phrase():
+    out, _codes = sanitize_translated_text(
+        "Patients achieved clear or almost clear skin."
+    )
+    assert "皮损完全清除或几乎清除" in out
+    assert "皮肤清晰" not in out
+
+
+def test_sanitize_does_not_expand_q2w_abbreviation():
+    text = "每2周一次（Q2W）与每4周一次（Q4W）维持给药"
+    out, codes = sanitize_translated_text(text)
+    assert out == text
+    assert codes == []
+
+
+def test_sanitize_collapses_nested_q2w():
+    out, _codes = sanitize_translated_text(
+        "包括每2周一次（每 2 周一次（Q2W））和每4周一次（每 4 周一次（Q4W））"
+    )
+    assert "每2周一次（每" not in out
+    assert "每2周一次（Q2W）" in out
+    assert "每4周一次（Q4W）" in out
+
+
 def test_sanitize_marks_uncleared_leak():
     # 畸形残留无法完全剥掉时记 IL_MARKUP_LEAK
     leftover = "患者<span"

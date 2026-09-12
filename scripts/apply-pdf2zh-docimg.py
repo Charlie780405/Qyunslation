@@ -63,11 +63,11 @@ POST_SNIPPET = '''
                         _qy_to = settings.translate.lang_out
                 except Exception:
                     pass
+                _qy_origin = _qy_Pimg(
+                    state.get("_pre_imgtr_origin_path") or file_path
+                )
                 _qy_manifest = None
                 try:
-                    _qy_origin = _qy_Pimg(
-                        state.get("_pre_imgtr_origin_path") or file_path
-                    )
                     from qyunslation.structure import ManifestStore as _QyStore
                     from qyunslation.structure.scan_pdf import (
                         PDF_STRUCTURE_SCANNER_NAME as _QyScanName,
@@ -110,6 +110,7 @@ POST_SNIPPET = '''
                                 to_lang=str(_qy_to or "简体中文"),
                                 progress_cb=_qy_img_progress,
                                 structure_manifest=_qy_manifest,
+                                origin=_qy_origin,  # imgtr_origin_crop
                             )
                         )
                     if _dual and _dual != _mono:
@@ -121,6 +122,7 @@ POST_SNIPPET = '''
                                 structure_manifest=None,
                                 x_min_frac=None if _qy_alt else 0.5,
                                 page_parity="even" if _qy_alt else None,
+                                origin=_qy_origin,  # imgtr_origin_crop
                             )
                         )
                     from pdf_table_translate import translate_pdf_tables as _qy_tbltr
@@ -273,6 +275,7 @@ def upgrade_post_if_stale(text: str) -> tuple[str, bool]:
         "表格写出跳过" in text
         or "译文插图翻译跳过" in text
         or "bind_task_model_trace" not in text
+        or "imgtr_origin_crop" not in text
     )
     if not stale:
         return text, False
@@ -359,6 +362,7 @@ def verify(text: str) -> int:
     need("bind_task_model_trace" in text, "GUI model_trace bind missing")
     need(SWAP_LINE not in text, "BabelDOC input still swapped to imgtr")
     need("x_min_frac" in text, "dual right-half filter missing")
+    need("imgtr_origin_crop" in text, "imgtr origin crop missing")
     need("format_from_manifest" in text, "semantic progress missing")
     need(
         "do_translate_async_stream(settings, file_path)" in text,

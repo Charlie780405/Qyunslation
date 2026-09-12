@@ -20,6 +20,8 @@ _PRESERVE_CELL = re.compile(
     re.I,
 )
 
+_DOSE_ABBR = re.compile(r"^Q\d+W$", re.I)
+
 _UNIT_ONLY = re.compile(
     r"^(?:mg|mL|ml|kg|g|µg|ug|ng|μg|mm|cm|m|w|h|d|wk|weeks?|days?|hrs?|"
     r"IU|U|%|ppm|nM|µM|uM|mM|M|pg|ng/mL|mg/kg)$",
@@ -63,7 +65,7 @@ def is_preserve_cell(text: str) -> bool:
 
 def classify_cell_policy(text: str) -> TranslationPolicy:
     t = (text or "").strip()
-    if not t or is_preserve_cell(t):
+    if not t or is_preserve_cell(t) or _DOSE_ABBR.fullmatch(t):
         return TranslationPolicy.PRESERVE
     _protected, mapping = protect_tokens(t)
     if mapping:

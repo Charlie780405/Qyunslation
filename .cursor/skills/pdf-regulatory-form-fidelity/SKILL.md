@@ -19,7 +19,7 @@ description: >-
 4. **单元格政策**——空格与纯数值 `PRESERVE`；注册号/方案号/电话/邮箱/日期占位保护，丢失即 `TABLE_TOKEN_DRIFT`。
 5. **真清除原文**——redaction 后再绘译文；单元格 bbox 可小幅膨胀覆盖多行源 span（042d）。
 6. **字号下限只告警**——正文 `max(7pt, 源×70%)`，脚注 5.5pt。`FONT_BELOW_TARGET` 属 `TABLE_QC_SOFT`（043c），**不**阻断 `.tbltr.pdf` 写出；**不**进图片 `HARD_FAIL`。REGULATORY 另用表级阶梯 `TABLE_ROLE_SIZE`（044d：header 8 / cell 7 / footnote 6）。
-7. **表格链部分交付（043c/044c）**——任一表写回成功即可产出 `.tbltr.pdf`；`terminal_success=false` 当有表硬失败。**REGULATORY**：`SOURCE_RESIDUE`/`MISSING_TARGET` 为**格级降级**（保留中文并统一字体重绘）；仅残留率 >30%（`RESIDUE_RATE`）或 `CELL_MERGE` 等仍表级硬失败。非 REGULATORY 行为不变。
+7. **表格链部分交付（043c/044c）**——任一表写回成功即可产出 `.tbltr.pdf`；`terminal_success=false` 当有表硬失败。**REGULATORY**：`SOURCE_RESIDUE`/`MISSING_TARGET` 为**格级降级**（保留中文并统一字体重绘）；仅残留率 >30%（`RESIDUE_RATE`）或 `CELL_MERGE` 等仍表级硬失败。**文献 RESEARCH/REVIEW** 同样 isolate（否则 OVERFLOW 在 paint 前整表回退，字号归一不落笔）；英源中文译文不算 `SOURCE_RESIDUE`。
 8. **告警交付（042f）**——表格链失败时 GUI 进度须含「N 个表格未保真」+ 逐表 reason；禁止静默伪成功。
 9. **受控实体（042e）**——申办方/医院/院校/人名命中 org/form 词表或保留原文；禁止模型自由猜译。章节序号与 II 期罗马数字走确定性映射。
 10. **断词（042c/044d）**——regulatory 画像启用英文整词换行，禁止词内断裂；`paint_cell` inset 横向 ≥1.5pt、纵向 ≥1.0pt，避免压格线。
@@ -42,3 +42,5 @@ description: >-
 | 同页三套字体 | 是否几乎无 `.tbltr` 实绘 | 先抬交付率，再 044d 归一 |
 | 微字/压线 | `fit_group` tier + inset | `normalize_table_sizes` + role-aware inset |
 | 批内大量「译文=原文」 | `_llm_translator` 缓存 | 044b；清 `/tmp/plan033m-table-zh-cache.json` 后重译 |
+| 文献表字号 9 种/漏译 | 有无 `.tbltr` / 门禁 reason | 047e `pdf_table_normalize`；literature OVERFLOW 软化 |
+| 期刊三线表串格/列并 | `grid_source` / HPD | **SK-Q009** PLAN-048 HPD 网格；禁止 geometry_center 落笔 |

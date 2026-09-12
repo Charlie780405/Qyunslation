@@ -1,6 +1,6 @@
 # PLAN-045：学术文献 PDF 译文保真
 
-> 状态：**已实现**（代码/门禁；实样重译待验收）
+> 状态：**已实现**（含译后强制术语 / 文献表 isolate 热修；须重译验收）
 > 日期：2026-09-11
 > 前置：[PLAN-033h](../PLAN-033-pdf-fidelity/PLAN-033h-references-body-style.md)、[PLAN-033k](../PLAN-033-pdf-fidelity/PLAN-033k-image-fit-qc.md)、[PLAN-039](../PLAN-039-glossary-governance/)、[PLAN-044](../PLAN-044-regulatory-layout-normalize/)
 > Skill：[SK-Q002](../../../.cursor/skills/image-overlay-translation/SKILL.md)

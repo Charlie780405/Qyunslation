@@ -387,15 +387,15 @@ def fit_group(
             ]
             bottleneck = min(fitted) if fitted else floor
             target = max(floor, min(p75, bottleneck))
-            sizes_after: list[float] = []
+            comparable: list[float] = []
             for i in idxs:
                 if results[i].overflow:
-                    sizes_after.append(results[i].font_size)
                     continue
                 results[i].font_size = target
                 results[i].dpi = choose_dpi(target)
-                sizes_after.append(target)
-            if sizes_after and max(sizes_after) - min(sizes_after) > 0.6:
+                comparable.append(target)
+            # 溢出格已有 OVERFLOW，不把它们的源字号差记成 ROLE_SIZE_DRIFT
+            if comparable and max(comparable) - min(comparable) > 0.6:
                 for i in idxs:
                     if QC_ROLE_SIZE_DRIFT not in results[i].qc:
                         results[i].qc.append(QC_ROLE_SIZE_DRIFT)

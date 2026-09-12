@@ -1,0 +1,101 @@
+# PLAN-047g：错误签名 → SK-ID 路由表
+# 字段：id, skill, pattern, symptom, first_check, fix, verify
+
+[[signature]]
+id = "SIG-UNABLE-EXPORT"
+skill = "SK-Q005"
+pattern = "Unable to export paragraphs that have not yet been formatted"
+symptom = "译文整段消失/摘要丢了"
+first_check = "journalctl Unable to export；optimal_scale vs min_scale"
+fix = "不折 fit；min_scale=0.12；047c no-drop"
+verify = "Unable to export == 0 且输出含摘要/目的"
+
+[[signature]]
+id = "SIG-NO-LOCAL-OCR"
+skill = "SK-Q004"
+pattern = "no local rapidocr, routing image translate to sidecar"
+symptom = "改了嵌字没效果"
+first_check = "sidecar ActiveEnterTimestamp vs image_translate.py mtime"
+fix = "deploy-translate-stack.sh"
+verify = "双侧指纹一致"
+
+[[signature]]
+id = "SIG-QC-EMPTY"
+skill = "SK-Q004"
+pattern = "object_qc.: .[].*|QC_CHANNEL_BLIND"
+symptom = "QC 没告警/缺陷没被发现"
+first_check = "imgtr.json qc_channel 与 object_qc"
+fix = "X-Image-QC 响应头"
+verify = "qc_channel=sidecar 且 object_qc 非空率>0"
+
+[[signature]]
+id = "SIG-TABLE-QC-HARD"
+skill = "SK-Q003"
+pattern = "TABLE_QC_HARD"
+symptom = "表格乱套/字体不统一"
+first_check = "有无 .tbltr.pdf；门禁 reason"
+fix = "pdf_table_normalize；literature OVERFLOW 软化"
+verify = "表区字号种类≤3"
+
+[[signature]]
+id = "SIG-COLUMN-CLUSTER"
+skill = "SK-Q003"
+pattern = "COLUMN_CLUSTER_DRIFT"
+symptom = "表格括号缺失/列错位"
+first_check = "碎片格与列跨度是否同时命中"
+fix = "047e 须 fragments≥2 且 sparse×2.0"
+verify = "三线表不再误杀"
+
+[[signature]]
+id = "SIG-FALLBACK-TRANSLATION"
+skill = "SK-Q007"
+pattern = "Fallback to simple translation"
+symptom = "漏翻译/译文里有英文/药名不对"
+first_check = "Successful/Fallback 计数"
+fix = "sanitize 强制口径 + Fallback 重译"
+verify = "每周两次/特罗金/发现gs 计数=0"
+
+[[signature]]
+id = "SIG-LIT-OVERFLOW"
+skill = "SK-Q005"
+pattern = "literature typeset overflow"
+symptom = "摘要排版告警暴增"
+first_check = "overflow 容差是否 0.5×字号"
+fix = "doc_profile _layout_clip 容差"
+verify = "overflow 警告个位数"
+
+[[signature]]
+id = "SIG-SIZE-CHANGED-OVERLAY"
+skill = "SK-Q002"
+pattern = "size changed .* use overlay"
+symptom = "图内文字小/背景清理不干净"
+first_check = "sidecar 是否加载新代码；竖排是否聚合"
+fix = "047f 竖排聚合+字号下限+擦除覆盖率"
+verify = "竖排旋转数≥1；无 QC_GRAPHICS_DAMAGE"
+
+[[signature]]
+id = "SIG-TABLE-SCRAMBLE"
+skill = "SK-Q009"
+pattern = "GEOMETRY_CENTER_UNSAFE|table writeback failed.*COLUMN_CLUSTER"
+symptom = "表格崩了/串格/列并了"
+first_check = "grid_source；是否 geometry_center 仍落笔"
+fix = "HPD 网格+assert_grid_source_safe；删 _merge_column_clusters"
+verify = "grid_source=hpd|gutter；nAb 与浓度分列"
+
+[[signature]]
+id = "SIG-NOT-A-TABLE"
+skill = "SK-Q009"
+pattern = "NOT_A_TABLE|not_a_table"
+symptom = "图被当成表/图注被涂改"
+first_check = "HPD 是否吐 <table>；区域单元是否图注"
+fix = "跳结构链交图片链"
+verify = "该区无 .tbltr 涂改"
+
+[[signature]]
+id = "SIG-HPD-UNREACHABLE"
+skill = "SK-Q009"
+pattern = "hpd grid.*unreachable|error.: .unreachable"
+symptom = "表格结构退化/全走 normalize"
+first_check = "curl HPD /health；QYUNSLATION_HPD_BASE_URL"
+fix = "恢复泰州 HPD 或 QYUNSLATION_HPD_GRID=gutter"
+verify = "health ok 且缓存命中"

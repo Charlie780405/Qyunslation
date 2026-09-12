@@ -7,6 +7,12 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | SK-Q001 | scanned-doc-layout-fidelity | active | 本仓 | pitfalls.md |
 | SK-Q002 | image-overlay-translation | active | 本仓 | pitfalls.md |
 | SK-Q003 | pdf-regulatory-form-fidelity | active | 本仓 | pitfalls.md |
+| SK-Q004 | translate-stack-process-boundary | active | 本仓 | pitfalls.md |
+| SK-Q005 | babeldoc-patch-safety | active | 本仓 | pitfalls.md |
+| SK-Q006 | literature-paragraph-layout | active | 本仓 | pitfalls.md |
+| SK-Q007 | translation-content-integrity | active | 本仓 | pitfalls.md |
+| SK-Q008 | translation-pitfall-capture | active | 本仓 | pitfalls.md |
+| SK-Q009 | table-translation-fidelity | active | 本仓 | pitfalls.md |
 
 ## 审计
 
@@ -25,4 +31,8 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-09 | SK-Q002 C3 改 draw_bbox 小窗，避免流程图短标签假空白（PLAN-033k） |
 | 2026-09-09 | SK-Q002 C6 短边参照并映射 FONT_BELOW，触发高分率重绘（PLAN-033l） |
 | 2026-09-09 | SK-Q002 线保护不覆盖竖排字，避免擦后残影回贴（PLAN-033） |
+| 2026-09-11 | SK-Q002 双语原文不可变（横跨框裁右半）+ 禁止译后展开 Q2W（PLAN-033c/045a） |
 | 2026-09-11 | 登记 SK-Q003（PLAN-041 监管表单保真） |
+| 2026-09-12 | 登记 SK-Q004–SK-Q008；增补 SK-Q002/SK-Q003（PLAN-047） |
+| 2026-09-12 | SK-Q004 进程边界指纹门禁；SK-Q005 never-drop；SK-Q008 capture+hooks |
+| 2026-09-12 | 登记 SK-Q009 table-translation-fidelity（PLAN-048 HPD 网格） |

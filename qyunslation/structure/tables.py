@@ -462,6 +462,72 @@ def picture_table_region(page, caption_bbox, number: int) -> TableRegion | None:
     )
 
 
+def _expand_region_left(page, region: TableRegion) -> TableRegion:
+    """PLAN-048d：向左扩边界，纳入同行带内被横线群切掉的墨迹（如 Dose/Q2W 列）。
+
+    条件：span 的 mid-y 落在 [y0,y1]，span.x1 贴近当前 x0（间距 < 3× 列间距中位），
+    且不越过页左边距。
+    """
+    try:
+        raw = page.get_text("dict", clip=None) or {}
+    except Exception:
+        return region
+    y0, y1 = float(region.y0), float(region.y1)
+    x0, x1 = float(region.x0), float(region.x1)
+    # 估计列间距：区域内 span 中心 x 的相邻差中位
+    centers: list[float] = []
+    candidates: list[float] = []
+    for block in raw.get("blocks", []) or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []) or []:
+            for span in line.get("spans", []) or []:
+                bbox = span.get("bbox")
+                text = (span.get("text") or "").strip()
+                if not bbox or not text:
+                    continue
+                sx0, sy0, sx1, sy1 = (float(v) for v in bbox[:4])
+                cy = (sy0 + sy1) / 2.0
+                if cy < y0 - 2.0 or cy > y1 + 2.0:
+                    continue
+                cx = (sx0 + sx1) / 2.0
+                if sx0 >= x0 - 1.0:
+                    centers.append(cx)
+                elif sx1 <= x0 + 2.0:
+                    # 在左边界左侧的候选
+                    candidates.append(sx0)
+    if not candidates:
+        return region
+    gaps: list[float] = []
+    ordered = sorted(set(round(c, 1) for c in centers))
+    for a, b in zip(ordered, ordered[1:]):
+        if b - a > 1.0:
+            gaps.append(b - a)
+    med_gap = sorted(gaps)[len(gaps) // 2] if gaps else 40.0
+    limit = max(24.0, med_gap * 3.0)
+    left_hits = [c for c in candidates if x0 - c <= limit]
+    if not left_hits:
+        return region
+    new_x0 = max(0.0, min(left_hits))
+    if new_x0 >= x0 - 0.5:
+        return region
+    return TableRegion(
+        number=region.number,
+        x0=new_x0,
+        y0=region.y0,
+        x1=region.x1,
+        y1=region.y1,
+        line_count=region.line_count,
+        row_count=region.row_count,
+        column_count=region.column_count,
+        detector=region.detector,
+        row_edges=region.row_edges,
+        column_edges=region.column_edges,
+        horizontal_segments=region.horizontal_segments,
+        vertical_segments=region.vertical_segments,
+    )
+
+
 def table_regions(
     page, anchors=None, *, drawings: list | None = None
 ) -> list[TableRegion]:
@@ -470,6 +536,7 @@ def table_regions(
     无表题注的页返回空列表——这是不产生假阳性的关键：图表页的线框再多也不会
     被当成表格。PLAN-033b：题注下方横线群失败时，再用封闭框线回退。
     PLAN-038d：无线条时回退题注下方最大位图（纯图片表）。
+    PLAN-048d：横线群圈定后向左扩边界纳入被切掉的左列。
     """
     from .captions import caption_anchors
 
@@ -512,32 +579,30 @@ def table_regions(
                 group.append((x0, x1, y))
                 consumed.add(index)
             if len(group) >= 2:
-                regions.append(
-                    TableRegion(
-                        number=number,
-                        x0=min(g[0] for g in group),
-                        y0=group[0][2],
-                        x1=max(g[1] for g in group),
-                        y1=group[-1][2],
-                        line_count=len(group),
-                    )
+                region = TableRegion(
+                    number=number,
+                    x0=min(g[0] for g in group),
+                    y0=group[0][2],
+                    x1=max(g[1] for g in group),
+                    y1=group[-1][2],
+                    line_count=len(group),
                 )
+                regions.append(_expand_region_left(page, region))
                 taken.add(number)
                 continue
             frame = _frame_near_caption(lines, v_lines, bbox, caption_gap)
             if frame is None or number in taken:
                 continue
             fx0, fy0, fx1, fy1, nlines = frame
-            regions.append(
-                TableRegion(
-                    number=number,
-                    x0=fx0,
-                    y0=fy0,
-                    x1=fx1,
-                    y1=fy1,
-                    line_count=nlines,
-                )
+            region = TableRegion(
+                number=number,
+                x0=fx0,
+                y0=fy0,
+                x1=fx1,
+                y1=fy1,
+                line_count=nlines,
             )
+            regions.append(_expand_region_left(page, region))
             taken.add(number)
 
     for _, number, _, bbox in captions:

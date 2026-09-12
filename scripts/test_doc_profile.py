@@ -22,6 +22,7 @@ class TestDocProfile(unittest.TestCase):
         self.assertTrue(data["letter"]["merge_aggressive"])
         self.assertFalse(data["regulatory"]["merge_aggressive"])
         self.assertEqual(data["literature"]["primary_font_family"], "serif")
+        self.assertAlmostEqual(float(data["literature"]["line_skip"]), 1.25)
 
     def test_detect_letter_from_filename(self):
         self.assertEqual(doc_profile.name_from_choice("自动"), "auto")

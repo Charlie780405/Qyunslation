@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-bare-pdf2zh-restart.sh",
+        "matcher": "systemctl"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/remind-pitfall-capture.sh"
+      }
+    ]
+  }
+}

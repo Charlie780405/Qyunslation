@@ -8,11 +8,11 @@
 
 | 子计划 | 状态 | 交付 |
 | --- | --- | --- |
-| 045a | 已完成 | L1 终点短语；图片默认 `merged.csv`；`glossary_merge_runtime` 已跑 |
+| 045a | 已完成 | L1 终点短语；图片默认 `merged.csv`；**译后强制**校正「皮肤清晰」 |
 | 045b | 已完成 | `1Langanan` 等粘连 ENTRY_RE；033h 补丁仍在现场 |
 | 045c | 已完成 | `text_sanitize` + `apply-pdf2zh-045c-sanitize.py`；service ExecStartPre |
 | 045d | 已完成 | `panel_letter`；`TIER_K_FLOOR`；擦除 2 轮；`SOURCE_INK_LEFT` 熔断 |
-| 045e | 已完成 | 文献 `source_p75`；与 REGULATORY `ladder` / `isolate_residue` 拆开 |
+| 045e | 已完成 | 文献 `source_p75`；文献也开 isolate，避免整表回退 |
 | 045f | 已完成 | PLAN 目录、`verify-plan-045.sh`、SK-Q002、错误台账 L 族 |
 
 ## 验证

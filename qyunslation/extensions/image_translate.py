@@ -18,6 +18,14 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
+
+def code_fingerprint() -> str:
+    """PLAN-047a：本文件 sha256 前 12 位，供 sidecar 健康探针与部署核对。"""
+    import hashlib
+
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+
+
 OLLAMA = (
     os.environ.get("QYUNSLATION_BASE_URL")
     or os.environ.get("DOCUTRANSLATE_BASE_URL")
@@ -58,9 +66,33 @@ QC_INK_MIN_PX = int(os.environ.get("QYUNSLATION_QC_INK_MIN_PX", "32"))
 TIER_BG_STEP = int(os.environ.get("QYUNSLATION_TIER_BG_STEP", "24"))
 TIER_OUTLIER_RATIO = float(os.environ.get("QYUNSLATION_TIER_OUTLIER_RATIO", "0.6"))
 TIER_RATIO_TOL = float(os.environ.get("QYUNSLATION_TIER_RATIO_TOL", "0.02"))
-TIER_K_FLOOR = float(os.environ.get("QYUNSLATION_TIER_K_FLOOR", "0.85"))
+# PLAN-047f：字号下限抬高，避免图内译文偏小
+TIER_K_FLOOR = float(os.environ.get("QYUNSLATION_TIER_K_FLOOR", "0.95"))
+FIGURE_TIER_MIN_PX = int(os.environ.get("QYUNSLATION_FIGURE_TIER_MIN_PX", "22"))
+FIGURE_TIER_MAX_PX = int(os.environ.get("QYUNSLATION_FIGURE_TIER_MAX_PX", "72"))
+ERASE_COVER_MIN = float(os.environ.get("QYUNSLATION_ERASE_COVER_MIN", "0.70"))
 PANEL_TIER = "panel_letter"
-PANEL_LETTER_RE = re.compile(r"^\s*[A-F][.)]?\s*$", re.IGNORECASE)
+ROTATED_TIER = "rotated_axis"
+
+
+def capability_probe() -> dict:
+    """PLAN-047a：能力探针，部署后用于确认新代码已加载。"""
+    return {
+        "has_rotated_tier": True,
+        "figure_tier_max_px": FIGURE_TIER_MAX_PX,
+        "figure_tier_min_px": FIGURE_TIER_MIN_PX,
+        "has_ocr_garbage_filter": True,
+        "tier_k_floor": TIER_K_FLOOR,
+        "has_vertical_run_group": True,
+        "erase_cover_min": ERASE_COVER_MIN,
+    }
+
+
+# PLAN-046d：含 (a)/(A)/a. 与 OCR 易混字符
+PANEL_LETTER_RE = re.compile(
+    r"^\s*(?:\([A-Fa-f]\)|[A-Fa-f][.)]?|[8]|[0O]|[6G])\s*$"
+)
+PANEL_CONFUSION = {"8": "B", "0": "O", "O": "O", "6": "G", "G": "G"}
 ALIGN_TOL_PX = float(os.environ.get("QYUNSLATION_ALIGN_TOL_PX", "12"))
 # 线状行判据：宽高比超此值且高度不足最高行此比例，视为括号线/色带而非文字
 RULE_ROW_RATIO = float(os.environ.get("QYUNSLATION_RULE_ROW_RATIO", "8.0"))
@@ -526,6 +558,12 @@ def translate_texts(
                 if zh:
                     retried += 1
             if zh:
+                try:
+                    from qyunslation.structure.text_sanitize import sanitize_translated_text
+
+                    zh, _codes = sanitize_translated_text(zh)
+                except Exception:
+                    pass
                 result[global_idx] = zh
 
     logger.info(
@@ -1332,32 +1370,243 @@ def _assign_left_groups(
             used[b_i] = True
         if len(group) < 2:
             continue
-        # 等宽条目（刻度标签之类）左/中/右无从区分，居中更稳；
-        # 只有右端明显参差才构成「左对齐」的证据
-        x2s = [g["x2"] for g in group]
-        if max(x2s) - min(x2s) < LEFT_GROUP_TOL_PX * 3:
-            continue
+        # PLAN-047f：同一 panel/列表内墨迹左缘成组即强制左对齐，
+        # 不再要求右缘参差（两行块等宽也会左齐）
         anchor = float(np.median([g["x1"] for g in group]))
         for g in group:
             out[g["i"]] = anchor
     return out
 
 
+def _group_vertical_runs(
+    boxes: list,
+    texts: list[str],
+) -> tuple[list, list[str], list[list[int]]]:
+    """PLAN-047f：把竖排轴标签被 OCR 切成的近方形多框聚成单个高窄 run。
+
+    同 x 带（中心差 ≤ 框宽 0.8）、y 相邻间隙 ≤ 框高 1.2、成员 ≥ 3、
+    合并后 oh >= 2*ow → 合成单框；返回 (new_boxes, new_texts, member_index_lists)。
+    """
+    n = len(boxes)
+    if n < 3:
+        return boxes, texts, [[i] for i in range(n)]
+
+    items = []
+    for i, b in enumerate(boxes):
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        items.append(
+            {
+                "i": i,
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "cx": (x1 + x2) / 2.0,
+                "w": max(1, x2 - x1),
+                "h": max(1, y2 - y1),
+                "text": texts[i] if i < len(texts) else "",
+                "score": float(b[5]) if len(b) > 5 else 1.0,
+            }
+        )
+    items.sort(key=lambda t: (t["cx"], t["y1"]))
+    used = [False] * len(items)
+    runs: list[list[dict]] = []
+    singles: list[dict] = []
+    for a in range(len(items)):
+        if used[a]:
+            continue
+        seed = items[a]
+        # 已是高窄框则不必聚合
+        if seed["h"] >= 2 * seed["w"] and len(seed["text"]) >= 2:
+            used[a] = True
+            singles.append(seed)
+            continue
+        group = [seed]
+        used[a] = True
+        for b_i in range(a + 1, len(items)):
+            if used[b_i]:
+                continue
+            cur = items[b_i]
+            prev = group[-1]
+            if abs(cur["cx"] - prev["cx"]) > max(prev["w"], cur["w"]) * 0.8:
+                continue
+            if cur["y1"] - prev["y2"] > prev["h"] * 1.2:
+                continue
+            # 只聚合短片段
+            if len(cur["text"]) > 6:
+                continue
+            group.append(cur)
+            used[b_i] = True
+        if len(group) >= 3:
+            x1 = min(g["x1"] for g in group)
+            y1 = min(g["y1"] for g in group)
+            x2 = max(g["x2"] for g in group)
+            y2 = max(g["y2"] for g in group)
+            ow, oh = max(1, x2 - x1), max(1, y2 - y1)
+            if oh >= 2 * ow:
+                runs.append(group)
+                continue
+            singles.extend(group)
+        else:
+            singles.extend(group)
+
+    new_boxes: list = []
+    new_texts: list[str] = []
+    members: list[list[int]] = []
+    # rebuild from runs + remaining unused
+    consumed = set()
+    for group in runs:
+        group = sorted(group, key=lambda g: g["y1"])
+        x1 = min(g["x1"] for g in group)
+        y1 = min(g["y1"] for g in group)
+        x2 = max(g["x2"] for g in group)
+        y2 = max(g["y2"] for g in group)
+        score = float(np.median([g["score"] for g in group]))
+        text = "".join(g["text"] for g in group)
+        new_boxes.append([x1, y1, x2, y2, text, score])
+        new_texts.append(text)
+        members.append([g["i"] for g in group])
+        consumed.update(g["i"] for g in group)
+    for i, b in enumerate(boxes):
+        if i in consumed:
+            continue
+        new_boxes.append(b)
+        new_texts.append(texts[i] if i < len(texts) else "")
+        members.append([i])
+    return new_boxes, new_texts, members
+
+
 def _is_panel_letter(text: str) -> bool:
-    """PLAN-045d：图内 A/B/C 面板字母（可带点）。"""
-    return bool(PANEL_LETTER_RE.match(text or ""))
+    """PLAN-045d/046d：图内 A/B/C 面板字母（可带点/括号；OCR 易混）。"""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if PANEL_LETTER_RE.match(raw):
+        return True
+    # 单字符混淆：8→B 等
+    if len(raw) == 1 and raw in PANEL_CONFUSION:
+        return True
+    return False
+
+
+def _is_rotated_axis_box(box, text: str) -> bool:
+    """高窄 OCR 框 + 拉丁短语 → 竖排轴标签。"""
+    ow = max(1, int(box[2]) - int(box[0]))
+    oh = max(1, int(box[3]) - int(box[1]))
+    if oh < 2 * ow:
+        return False
+    t = (text or "").strip()
+    if not t or len(t) < 2:
+        return False
+    if not re.search(r"[A-Za-z]", t):
+        return False
+    if _is_panel_letter(t):
+        return False
+    return True
+
+
+def _is_ocr_garbage(text: str, score: float | None = None) -> bool:
+    """PLAN-046d/047f：短混合字母数字垃圾串（如 F08）不翻译不擦。
+
+    047f：高置信误读（score≥0.8）的 F08 类仍视为垃圾——字母数字短串本身不可靠。
+    """
+    t = (text or "").strip()
+    if not t or len(t) > 4:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", t):
+        return False
+    # 常见剂量/终点缩写不是垃圾
+    if re.fullmatch(r"Q\dW|n\s*/\s*N|IGA|EASI|NRS|BSA|ADA|nAb", t, re.I):
+        return False
+    has_letter = bool(re.search(r"[A-Za-z]", t))
+    has_digit = bool(re.search(r"\d", t))
+    if not (has_letter and has_digit):
+        return False
+    # 形如 F08 / A1b 的短串一律垃圾（与 score 无关）
+    if re.fullmatch(r"[A-Za-z]\d{1,3}|[A-Za-z]{1,2}\d{1,2}", t):
+        return True
+    sc = 1.0 if score is None else float(score)
+    if sc >= 0.8:
+        return False
+    try:
+        from qyunslation.extensions.doc_image_policy import is_numeric_or_unit
+
+        if is_numeric_or_unit(t):
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _mark_unfittable_redraw(
+    *,
+    boxes: list,
+    finals: list[str],
+    redraw: list[bool],
+    avails: list[tuple[int, int, int, int]],
+    assigned: list[int],
+    styles: list[dict],
+    font_regular: str | None,
+    font_bold: str | None,
+    outliers: list[int] | None = None,
+) -> list[int]:
+    """PLAN-046a：擦除前试排。放不下且非 outlier → 不擦不画，保留英文原字。
+
+    返回被跳过的 1-based box 索引（记 C5_SKIPPED）。
+    """
+    outlier_set = {int(x) for x in (outliers or [])}
+    skipped: list[int] = []
+    for i in range(len(boxes)):
+        if not redraw[i]:
+            continue
+        # outlier / 竖排轴标签绘制阶段有专门路径，此处不跳过
+        if (i + 1) in outlier_set:
+            continue
+        if styles[i].get("rotated"):
+            continue
+        ax1, ay1, ax2, ay2 = avails[i]
+        box_w = max(8, ax2 - ax1)
+        box_h = max(8, ay2 - ay1)
+        size = max(10, int(assigned[i] or 0))
+        use_bold = bool(styles[i].get("bold"))
+        use_path = font_bold if use_bold and font_bold else font_regular
+        if use_path:
+            font = ImageFont.truetype(use_path, size)
+        else:
+            font = ImageFont.load_default()
+        lh = _line_height(font, size)
+        lines = _wrap_text(finals[i], font, max(8, box_w))
+        if not lines:
+            continue
+        gap = max(1, size // 8)
+        total_h = lh * len(lines) + gap * max(0, len(lines) - 1)
+        max_tw = max((_text_size(font, ln)[0] for ln in lines), default=0)
+        if max_tw <= box_w * 1.05 and total_h <= box_h:
+            # PLAN-047f：译文墨迹预估覆盖率 < 70% → 不擦不画（避免脏背景）
+            cover = min(1.0, (max_tw * total_h) / float(max(1, box_w * box_h)))
+            if cover >= ERASE_COVER_MIN:
+                continue
+        redraw[i] = False
+        skipped.append(i + 1)
+    return skipped
 
 
 def _assign_tiers(
     boxes: list, styles: list[dict], texts: list[str] | None = None
 ) -> list[str]:
-    """背景色桶 + 白底 y 行带 → 每框 tier key；面板字母强制同组。"""
+    """背景色桶 + 白底 y 行带 → 每框 tier key；面板字母/竖排轴标签强制同组。"""
     n = len(boxes)
     keys: list[str] = [""] * n
     white_idx: list[int] = []
     for i, (b, st) in enumerate(zip(boxes, styles)):
         if texts is not None and i < len(texts) and _is_panel_letter(texts[i]):
             keys[i] = PANEL_TIER
+            continue
+        if texts is not None and i < len(texts) and (
+            st.get("rotated") or _is_rotated_axis_box(b, texts[i])
+        ):
+            keys[i] = ROTATED_TIER
+            st["rotated"] = True
             continue
         q = _quantize_bgr(st["bg_bgr"])
         if _is_near_white(q):
@@ -1421,9 +1670,29 @@ def _assign_tier_sizes(
             continue
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         roi = orig[max(0, y1):y2, max(0, x1):x2]
-        ink = _ink_height(roi)
         use = font_bold if bold_flags[i] and font_bold else font_regular
-        est_sizes[i] = _estimate_orig_size(texts[i], ink, use, bold_flags[i])
+        # PLAN-046d：竖排轴标签用短边估字号，避免框高反推 140px
+        if styles[i].get("rotated") or (
+            texts and i < len(texts) and _is_rotated_axis_box(b, texts[i])
+        ):
+            styles[i]["rotated"] = True
+            ow = max(1, int(x2) - int(x1))
+            oh = max(1, int(y2) - int(y1))
+            ink = min(ow, oh)
+            if not use:
+                # load_default 无视字号，直接用短边
+                est_sizes[i] = max(FIGURE_TIER_MIN_PX, min(FIGURE_TIER_MAX_PX, ink))
+            else:
+                est_sizes[i] = max(
+                    FIGURE_TIER_MIN_PX,
+                    min(
+                        FIGURE_TIER_MAX_PX,
+                        _estimate_orig_size(texts[i], ink, use, bold_flags[i]),
+                    ),
+                )
+        else:
+            ink = _ink_height(roi)
+            est_sizes[i] = _estimate_orig_size(texts[i], ink, use, bold_flags[i])
 
     # 组 orig_em（75 分位）+ 粗细多数决
     by_tier: dict[str, list[int]] = {}
@@ -1451,17 +1720,19 @@ def _assign_tier_sizes(
         _, _, fit, _ = _fit_font_and_lines(finals[i], box_w, box_h, use, max_size)
         fit_sizes[i] = fit
 
-    # 比值与 outlier（面板字母不参与正文 k / outlier）
-    ratios: dict[str, list[float]] = {t: [] for t in by_tier if t != PANEL_TIER}
+    # 比值与 outlier（面板字母/竖排轴不参与正文 k / outlier）
+    ratios: dict[str, list[float]] = {
+        t: [] for t in by_tier if t not in {PANEL_TIER, ROTATED_TIER}
+    }
     for i in range(n):
-        if not redraw[i] or tiers[i] == PANEL_TIER:
+        if not redraw[i] or tiers[i] in {PANEL_TIER, ROTATED_TIER}:
             continue
         em = max(1, orig_em[tiers[i]])
         ratios[tiers[i]].append(fit_sizes[i] / em)
 
     outliers: set[int] = set()
     for t, idxs in by_tier.items():
-        if t == PANEL_TIER:
+        if t in {PANEL_TIER, ROTATED_TIER}:
             continue
         rs = ratios.get(t) or []
         if not rs:
@@ -1473,10 +1744,10 @@ def _assign_tier_sizes(
             if med > 0 and r < TIER_OUTLIER_RATIO * med:
                 outliers.add(i)
 
-    # 全局 k：剔除 outlier 与 panel_letter；下限避免挤框拖垮全图
+    # 全局 k：剔除 outlier / panel / rotated
     k_vals = []
     for i in range(n):
-        if not redraw[i] or i in outliers or tiers[i] == PANEL_TIER:
+        if not redraw[i] or i in outliers or tiers[i] in {PANEL_TIER, ROTATED_TIER}:
             continue
         em = max(1, orig_em[tiers[i]])
         k_vals.append(fit_sizes[i] / em)
@@ -1485,25 +1756,48 @@ def _assign_tier_sizes(
 
     assigned = [0] * n
     tier_size: dict[str, int] = {}
+    body_ems = [
+        em for t, em in orig_em.items() if t not in {PANEL_TIER, ROTATED_TIER}
+    ]
+    ref_em = max(body_ems) if body_ems else FIGURE_TIER_MIN_PX
     for t, em in orig_em.items():
-        if t == PANEL_TIER:
+        if t in {PANEL_TIER, ROTATED_TIER}:
             continue
-        tier_size[t] = max(10, int(round(k * em)))
+        # 小字号档（B/C 轴标、脚注）不再被全局 k 二次缩小
+        use_k = 1.0 if em < ref_em * 0.85 else k
+        tier_size[t] = max(
+            FIGURE_TIER_MIN_PX,
+            min(FIGURE_TIER_MAX_PX, int(round(use_k * em))),
+        )
 
     # PLAN-045d：面板字母取墨迹估计中位数，不乘正文 k
     if PANEL_TIER in by_tier:
         pest = [est_sizes[i] for i in by_tier[PANEL_TIER] if est_sizes[i] > 0]
         panel_size = max(10, int(round(_percentile(pest, 0.5)))) if pest else 24
+        panel_size = max(FIGURE_TIER_MIN_PX, min(FIGURE_TIER_MAX_PX, panel_size))
         orig_em[PANEL_TIER] = panel_size
         tier_size[PANEL_TIER] = panel_size
+
+    # PLAN-046d：竖排轴标签独立档，短边估计后封顶
+    if ROTATED_TIER in by_tier:
+        rest = [est_sizes[i] for i in by_tier[ROTATED_TIER] if est_sizes[i] > 0]
+        rot_size = max(10, int(round(_percentile(rest, 0.5)))) if rest else 18
+        rot_size = max(FIGURE_TIER_MIN_PX, min(FIGURE_TIER_MAX_PX, rot_size))
+        orig_em[ROTATED_TIER] = rot_size
+        tier_size[ROTATED_TIER] = rot_size
 
     for i in range(n):
         if not redraw[i]:
             continue
         if tiers[i] == PANEL_TIER:
             assigned[i] = tier_size[PANEL_TIER]
+        elif tiers[i] == ROTATED_TIER:
+            assigned[i] = tier_size[ROTATED_TIER]
         elif i in outliers:
-            assigned[i] = fit_sizes[i]
+            assigned[i] = max(
+                FIGURE_TIER_MIN_PX,
+                min(FIGURE_TIER_MAX_PX, fit_sizes[i]),
+            )
         else:
             assigned[i] = tier_size[tiers[i]]
 
@@ -1673,6 +1967,13 @@ def _qc_report(
             overflows.append(i + 1)
     if overflows:
         issues.append({"code": "C5", "msg": f"overflow boxes={overflows}"})
+    # PLAN-046a：试排失败整框跳过（不擦不画）——有意保留英文，记 WARN
+    c5_skipped = list((tier_meta or {}).get("c5_skipped") or [])
+    if c5_skipped:
+        warnings.append({"code": "C5_SKIPPED", "msg": f"skipped boxes={c5_skipped}"})
+    c7_garbage = list((tier_meta or {}).get("c7_garbage") or [])
+    if c7_garbage:
+        warnings.append({"code": "C7_GARBAGE", "msg": f"garbage boxes={c7_garbage}"})
 
     # C6 可读性（WARN）：参照短边/行高，不拿竖排阶段条的 OCR 框高当字号目标
     for i, b in enumerate(boxes):
@@ -1928,6 +2229,11 @@ def _qc_report(
         }.get(code)
         if mapped:
             object_qc.append(mapped)
+        # PLAN-046d：warnings 中的 C6 也进 object_qc，避免质检全空
+    for warn in warnings:
+        code = str(warn.get("code") or "")
+        if code == "C6" and QC_FONT_BELOW_TARGET not in object_qc:
+            object_qc.append(QC_FONT_BELOW_TARGET)
     if graphics_damage and QC_GRAPHICS_DAMAGE not in object_qc:
         object_qc.append(QC_GRAPHICS_DAMAGE)
     if _font_below_warned(warnings):
@@ -2128,6 +2434,13 @@ def translate_image_with_qc(
         return 0, {}
 
     texts = [b[4] for b in boxes]
+    # PLAN-047f：竖排 OCR 多框聚合后再翻译/擦除/绘制
+    boxes, texts, _members = _group_vertical_runs(boxes, texts)
+    for i, b in enumerate(boxes):
+        if i < len(texts) and _is_rotated_axis_box(b, texts[i]):
+            # ensure text field on box tuple/list stays in sync
+            if isinstance(b, list) and len(b) > 4:
+                b[4] = texts[i]
     # PLAN-027a：跳过纯数字/已是目标语种块（不送 LLM，保留原文）
     try:
         from qyunslation.extensions.doc_image_policy import (
@@ -2149,7 +2462,14 @@ def translate_image_with_qc(
 
     finals: list[str] = []
     redraw: list[bool] = []
+    garbage_skipped: list[int] = []
     for i, src in enumerate(texts):
+        score = float(boxes[i][5]) if len(boxes[i]) > 5 else 1.0
+        if _is_ocr_garbage(src, score):
+            finals.append(src)
+            redraw.append(False)
+            garbage_skipped.append(i + 1)
+            continue
         try:
             from qyunslation.extensions.doc_image_policy import is_numeric_or_unit
 
@@ -2168,10 +2488,13 @@ def translate_image_with_qc(
             redraw.append(False)
 
     styles: list[dict] = []
-    for b in boxes:
+    for i, b in enumerate(boxes):
         x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
         roi = orig[max(0, y1):y2, max(0, x1):x2]
-        styles.append(_analyze_box_style(roi))
+        st = _analyze_box_style(roi)
+        if _is_rotated_axis_box(b, texts[i] if i < len(texts) else ""):
+            st["rotated"] = True
+        styles.append(st)
 
     ocr_rects = [(b[0], b[1], b[2], b[3]) for b in boxes]
     avails: list[tuple[int, int, int, int]] = []
@@ -2186,6 +2509,44 @@ def translate_image_with_qc(
         )
 
     left_groups = _assign_left_groups(boxes, styles, redraw, orig)
+
+    # PLAN-046a：先试排再擦——字号已定且放不下则整框放弃（保留英文）
+    font_regular = _font()
+    font_regular = font_regular if Path(font_regular).is_file() else None
+    font_bold = _font_bold()
+    if font_bold and not Path(font_bold).is_file():
+        font_bold = None
+    tier_meta = _assign_tier_sizes(
+        boxes=boxes,
+        texts=texts,
+        finals=finals,
+        redraw=redraw,
+        styles=styles,
+        avails=avails,
+        orig=orig,
+        font_regular=font_regular,
+        font_bold=font_bold,
+    )
+    assigned = tier_meta["assigned"]
+    tier_bold = tier_meta["tier_bold"]
+    tiers = tier_meta["tiers"]
+    c5_skipped = _mark_unfittable_redraw(
+        boxes=boxes,
+        finals=finals,
+        redraw=redraw,
+        avails=avails,
+        assigned=assigned,
+        styles=styles,
+        font_regular=font_regular,
+        font_bold=font_bold,
+        outliers=tier_meta.get("outliers"),
+    )
+    if c5_skipped:
+        logger.info("C5_SKIPPED boxes (no erase/draw): %s", c5_skipped)
+        tier_meta["c5_skipped"] = c5_skipped
+    if garbage_skipped:
+        logger.info("C7_GARBAGE boxes kept: %s", garbage_skipped)
+        tier_meta["c7_garbage"] = garbage_skipped
 
     # 备份未翻译框像素，防邻框擦除误伤
     kept_rois: list[tuple[tuple[int, int, int, int], np.ndarray]] = []
@@ -2315,26 +2676,6 @@ def translate_image_with_qc(
 
     result = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(result)
-    font_regular = _font()
-    font_regular = font_regular if Path(font_regular).is_file() else None
-    font_bold = _font_bold()
-    if font_bold and not Path(font_bold).is_file():
-        font_bold = None
-
-    tier_meta = _assign_tier_sizes(
-        boxes=boxes,
-        texts=texts,
-        finals=finals,
-        redraw=redraw,
-        styles=styles,
-        avails=avails,
-        orig=orig,
-        font_regular=font_regular,
-        font_bold=font_bold,
-    )
-    assigned = tier_meta["assigned"]
-    tier_bold = tier_meta["tier_bold"]
-    tiers = tier_meta["tiers"]
 
     drawn = 0
     min_contrast = 999.0
@@ -2378,6 +2719,47 @@ def translate_image_with_qc(
             font = ImageFont.truetype(use_path, size)
         else:
             font = ImageFont.load_default()
+
+        # PLAN-046d：竖排轴标签 — 水平绘制后旋转 90° 贴回原位
+        if st.get("rotated"):
+            fill = _bgr_to_rgb(st.get("fg_bgr", (0, 0, 0)))
+            # 用框短边约束字号，长边作文本行宽
+            short = max(8, min(ox2 - ox1, oy2 - oy1))
+            size = max(10, min(size, int(short * 0.9), FIGURE_TIER_MAX_PX))
+            if use_path:
+                font = ImageFont.truetype(use_path, size)
+            else:
+                font = ImageFont.load_default()
+            tw, th = _text_size(font, text)
+            pad = 2
+            canvas = Image.new("RGBA", (max(tw + pad * 2, 1), max(th + pad * 2, 1)), (0, 0, 0, 0))
+            cd = ImageDraw.Draw(canvas)
+            bear_x = font.getbbox(text)[0] if hasattr(font, "getbbox") else 0
+            bear_y = font.getbbox(text)[1] if hasattr(font, "getbbox") else 0
+            cd.text((pad - bear_x, pad - bear_y), text, fill=fill + (255,), font=font)
+            rotated = canvas.rotate(90, expand=True)
+            rw, rh = rotated.size
+            # 贴到 OCR 框中心
+            px = int(round((ox1 + ox2) / 2.0 - rw / 2.0))
+            py = int(round((oy1 + oy2) / 2.0 - rh / 2.0))
+            result.paste(rotated, (px, py), rotated)
+            sizes[i] = size
+            line_heights[i] = th
+            line_lists[i] = [text]
+            fonts[i] = font
+            anchors[i] = {
+                "align": "center",
+                "solid": bool(st.get("solid")),
+                "solid_colored": bool(st.get("solid_colored")),
+                "vertical_mode": "rotated90",
+                "left_group_x": None,
+                "ink_src": {"x1": ox1, "y1": oy1, "x2": ox2, "y2": oy2},
+                "draw_bbox": {"x1": px, "y1": py, "x2": px + rw, "y2": py + rh},
+                "shift": {"x": 0, "y": 0},
+            }
+            drawn += 1
+            continue
+
         lh = _line_height(font, size)
         lines = _wrap_text(text, font, max(8, box_w))
         outlier_set = set(tier_meta.get("outliers") or [])

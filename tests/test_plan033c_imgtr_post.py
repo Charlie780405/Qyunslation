@@ -15,7 +15,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import pdf_image_translate  # noqa: E402
 from pdf_image_translate import (  # noqa: E402
+    _clip_rect_to_allowed,
     _collect_xref_occurrences,
+    _origin_crop_rect,
     _region_allowed,
     translate_pdf_images,
 )
@@ -36,8 +38,17 @@ def test_region_allowed_right_half_only():
     try:
         assert _region_allowed((10, 10, 40, 40), page, page_no=0, x_min_frac=0.5, page_parity=None) is False
         assert _region_allowed((120, 10, 180, 40), page, page_no=0, x_min_frac=0.5, page_parity=None) is True
+        assert _region_allowed((10, 10, 190, 80), page, page_no=0, x_min_frac=0.5, page_parity=None) is True
         assert _region_allowed((10, 10, 40, 40), page, page_no=1, x_min_frac=None, page_parity="even") is False
         assert _region_allowed((10, 10, 40, 40), page, page_no=2, x_min_frac=None, page_parity="even") is True
+        clipped = _clip_rect_to_allowed((10, 10, 190, 80), page, x_min_frac=0.5)
+        assert clipped is not None
+        assert clipped[0] >= 100
+        assert clipped[2] <= 200
+        mapped = _origin_crop_rect(clipped, page, page, x_min_frac=0.5)
+        assert mapped is not None
+        assert mapped[0] < 100
+        assert mapped[2] <= 200
     finally:
         doc.close()
 
@@ -151,3 +162,48 @@ def test_dual_left_render_hash_unchanged(tmp_path, monkeypatch):
     out = translate_pdf_images(src, to_lang="简体中文", x_min_frac=0.5)
     assert _half_hash(out, left=True) == before_left
     assert _half_hash(out, left=False) != before_right
+
+
+def test_spanning_vector_does_not_paint_left(tmp_path, monkeypatch):
+    src = tmp_path / "span.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=200)
+    page.draw_rect(pymupdf.Rect(0, 0, 200, 200), color=(1, 0, 0), fill=(0.9, 0.2, 0.2))
+    page.draw_rect(pymupdf.Rect(200, 0, 400, 200), color=(0, 1, 0), fill=(0.2, 0.9, 0.2))
+    doc.save(src)
+    doc.close()
+
+    def fake_regions(page, exclude_rects=None):
+        return [pymupdf.Rect(10, 10, 390, 190)]
+
+    def fake_translate(png, to_lang):
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        painted = Image.new("RGB", im.size, (20, 40, 220))
+        buf = io.BytesIO()
+        painted.save(buf, format="PNG")
+        return buf.getvalue(), 1, {}
+
+    class _Always:
+        def evaluate_image_candidate(self, *a, **k):
+            class Decision:
+                should_translate = True
+                reason = "stub"
+
+            return Decision()
+
+        def evaluate_geometry(self, *a, **k):
+            return True, "stub"
+
+        def ensure_display_dpi(self, png, *a, **k):
+            return png
+
+    import pdf_figure_crop
+
+    monkeypatch.setattr(pdf_figure_crop, "translatable_regions", fake_regions)
+    monkeypatch.setattr(pdf_image_translate, "_translate_via_local", fake_translate)
+    monkeypatch.setattr(pdf_image_translate, "_load_policy", lambda: _Always())
+    monkeypatch.setattr(pdf_image_translate, "PDF_IMAGE_OVERLAY", True)
+
+    before_left = _half_hash(src, left=True)
+    out = translate_pdf_images(src, to_lang="简体中文", x_min_frac=0.5)
+    assert _half_hash(out, left=True) == before_left

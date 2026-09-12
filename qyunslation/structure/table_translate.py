@@ -68,6 +68,9 @@ def translate_table_blocks(
             if phase != src and phase.startswith("Phase"):
                 controlled[block.block_id] = phase
                 continue
+            # 格内剂量缩写禁止展成「每2周一次（Q2W）」，会撑爆窄列
+            if re.fullmatch(r"Q\d+W", src.strip(), re.I):
+                continue
             hit = lookup_controlled(src)
             if hit is not None:
                 controlled[block.block_id] = hit
@@ -121,6 +124,12 @@ def translate_table_blocks(
         if _looks_truncated(block.source_text, text):
             raise TableTranslateError(f"TABLE_TRUNCATED:{block.block_id}")
         text = _restore_list_prefix(block.source_text or "", text)
+        try:
+            from .text_sanitize import sanitize_translated_text
+
+            text, _codes = sanitize_translated_text(text)
+        except Exception:
+            pass
         policy = _policy_value(block)
         if policy is not TranslationPolicy.PROTECT_TOKENS:
             if text.strip() != (block.source_text or "").strip():

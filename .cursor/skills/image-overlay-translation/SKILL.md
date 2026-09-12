@@ -5,7 +5,7 @@ description: >-
   文档内嵌图：DOCX DrawingML 实例解耦、PDF 共享 XObject 隔离、矢量安全覆盖、上传预扫描代际防线。
   触发：图片翻译、嵌字、流程图翻译、译文丢字、OCR 没检出、文字看不见、遮盖、图层、
   image_translate、RapidOCR、ImageOverlayWorkflow、对比度、蓝框白字、涂抹痕迹、黑框、对齐、错位、
-  文档内嵌图、docx 图片、pdf 插图、imgtr。
+  文档内嵌图、docx 图片、pdf 插图、imgtr、原文不要修改、双语左侧、摘要叠字、Q2W 展开。
 ---
 
 # 图片嵌字翻译（SK-Q002）
@@ -35,6 +35,8 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 1. **流程图必须 RapidOCR**——HPD 把整图标成 `<BLOCK>image`；HPD 仅作扫描件回退。
 2. **关思考用 API 参数**——`think: false`；`/no_think` 对 qwen3.6 无效。
 3. **`to_lang` 必须透传**——docx/custom_api 漏传会永远输出简体中文。
+3b. **译后强制术语**（PLAN-045a）——`sanitize_translated_text` 校正「皮肤清晰」及 `clear or almost clear` / `tralokinumab` 等短语。**禁止**把已有「每2周一次（Q2W）」再展成「每2周一次（每 2 周一次（Q2W））」；`Q2W`/`Q4W`/`IGA 0/1`/`EASI-75` 只进 prompt，不进译后强制。嵌套剂量式须塌回短写。
+3c. **文献摘要不得越框**——`doc_profiles.toml` literature `line_skip=1.25`；`patch_literature_typesetting` 裁掉画出段落框底的字。禁止为塞进术语而加长缩写，否则「目的」压进「背景」。
 
 ### B. 取色与擦除（原则 1、2）
 
@@ -49,7 +51,7 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 
 9. **行高用 `font.getmetrics()`**——禁 `getbbox` 墨迹高判能否放下。
 10. **层级按「背景色桶 + 白底 y 行带」**——禁按墨迹高度分档。**PLAN-045d**：文本 `^[A-F][.)]?$` 强制 `tier=panel_letter`，跨背景同组。
-11. **组内字号统一、组间保持原图比例**——`k = min(fit/orig_em)`，`orig_em` 取 75 分位；outlier **与 panel_letter** 不得拖垮 k；`k` 下限 `TIER_K_FLOOR`（默认 0.85）。面板字母字号取墨迹估计中位数，不乘正文 k。
+11. **组内字号统一、组间保持原图比例**——`k = min(fit/orig_em)`，`orig_em` 取 75 分位；outlier **与 panel_letter** 不得拖垮 k；`k` 下限 `TIER_K_FLOOR`（默认 0.85）。面板字母字号取墨迹估计中位数，不乘正文 k。**B/C 等小字号档禁止再乘 k 缩小**，且不低于 `FIGURE_TIER_MIN_PX`（默认 18）。
 12. **粗细组内多数决**（033k 起块级继承优先于层投票）。
 
 ### D. 对齐（原则 1、3、4）
@@ -117,6 +119,7 @@ for i,b in enumerate(ocr_image(path),1):
 26. **几何用显示尺寸**——DOCX 读 `<wp:extent>`（EMU→pt）；PDF 用页面 bbox；禁止只看源像素。
 27. **语种与数字门控**——`doc_image_policy.filter_translatable_texts`：纯数字/单位跳过；已是目标语种跳过。
 28. **矢量覆盖 Fail-Closed**——`find_safe_vector_figures`：面积 >80% 页或与长正文重叠 >10% 或撞表格 → 放弃，**绝不退回整页**。
+28b. **双语原文不可变**（PLAN-033c）——上传原稿与并排页左侧禁止嵌字/写表。横跨整页的矢量框须 `_clip_rect_to_allowed` 裁到右半再 crop/overlay；禁止只按中心点 `>= 0.5` 整框盖住原文。左侧渲染 hash 必须与处理前一致。**矢量 OCR 必须裁自 origin 原稿**（`origin=` / `_origin_crop_rect`），禁止从 BabelDOC 已改页裁图，否则原文发糊、叠字。
 29. **预扫描代际锁**——`_prescan_generation` + per-file hash；过期 Tier-2 回调丢弃。
 30. **HPD 回退用原稿**——PDF 插图前置后若报 Scanned PDF，HPD 必须吃 `_pre_imgtr_origin_path`。
 31. **单图熔断**——超时/QC 失败保留原图；交付 `<stem>.imgtr.json`。
@@ -153,5 +156,16 @@ for i,b in enumerate(ocr_image(path),1):
 | 同级字号不一 | `_assign_tiers` / C7a |
 | 蓝框涂抹 | solid 通道 std + frac |
 | 全屏裁底 | 嵌套 `.qy-viewer-inner` |
+| 双语左侧原文变中文 | 矢量框是否横跨整页；`_clip_rect_to_allowed` |
+| 摘要叠字 / Q2W 套娃 | `apply_forced_terms` 是否展开了缩写；literature 框裁切 |
 
 详表见 [reference.md](reference.md)；踩坑见 [pitfalls.md](pitfalls.md)。
+
+
+### PLAN-047f 增补
+
+- 竖排 OCR 多框必须先 `_group_vertical_runs` 再走旋转通道。
+- `PANEL_TIER` 全图统一中位字号；`TIER_K_FLOOR=0.95`，`FIGURE_TIER_MIN_PX=22`。
+- 擦除区译文覆盖率 ≥ `ERASE_COVER_MIN`（默认 0.70）才擦。
+- 左对齐：同 panel 墨迹左缘成组，不再要求右缘参差。
+- 进程边界见 SK-Q004——改本文件必须重启 sidecar。

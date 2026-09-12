@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from qyunslation.extensions.image_translate import (
+    FIGURE_TIER_MIN_PX,
     PANEL_TIER,
     TIER_K_FLOOR,
     _assign_tier_sizes,
@@ -77,3 +78,33 @@ def test_panel_sizes_equal_and_k_floor(monkeypatch):
     assert meta["tiers"][1] == PANEL_TIER
     assert meta["assigned"][0] == meta["assigned"][1]
     assert meta["k"] >= TIER_K_FLOOR
+
+
+def test_small_tier_not_shrunk_below_floor(monkeypatch):
+    boxes = [
+        [0, 0, 80, 40, "title", 0.9],
+        [0, 50, 40, 62, "tiny", 0.9],
+    ]
+    styles = [
+        {"bg_bgr": (255, 255, 255), "bold": False},
+        {"bg_bgr": (230, 245, 230), "bold": False},
+    ]
+    texts = ["Study design title", "n"]
+    finals = texts[:]
+    redraw = [True, True]
+    avails = [(0, 0, 80, 40), (0, 50, 40, 62)]
+    orig = np.full((80, 90, 3), 255, dtype=np.uint8)
+    orig[4:36, 4:76] = 0
+    orig[52:60, 4:20] = 0
+    meta = _assign_tier_sizes(
+        boxes=boxes,
+        texts=texts,
+        finals=finals,
+        redraw=redraw,
+        styles=styles,
+        avails=avails,
+        orig=orig,
+        font_regular=None,
+        font_bold=None,
+    )
+    assert meta["assigned"][1] >= FIGURE_TIER_MIN_PX

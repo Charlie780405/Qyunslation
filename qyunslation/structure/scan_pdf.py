@@ -24,7 +24,11 @@ from .representation import (
     page_representation,
 )
 from .references import classify_body, heading_y_from_blocks, is_section_break
-from .table_structure import table_blocks_for_manifest, table_grid_dimensions
+from .table_structure import (
+    last_structure_meta,
+    table_blocks_for_manifest,
+    table_grid_dimensions,
+)
 from .tables import captionless_table_regions, table_regions
 from .models import (
     AssetRole,
@@ -728,6 +732,24 @@ class PdfStructureScanner:
                                 source_refs=[
                                     SourceRef(kind=SourceRefKind.PDF_TEXT_BLOCK, ref=tab_key)
                                 ],
+                                translatable_blocks=(
+                                    table_blocks_for_manifest(
+                                        page,
+                                        region,
+                                        caption_text=tab_cap_text,
+                                        number=num,
+                                    )
+                                    if region is not None
+                                    else [
+                                        TranslatableBlock(
+                                            block_id=f"table:{num}:title",
+                                            source_text=tab_cap_text,
+                                            bbox=cap_bbox,
+                                            role="table_title",
+                                            translation_policy=TranslationPolicy.TRANSLATE,
+                                        )
+                                    ]
+                                ),
                                 detector_evidence=[
                                     DetectorEvidence(
                                         detector=(
@@ -742,27 +764,27 @@ class PdfStructureScanner:
                                             "picture_table": bool(
                                                 region is not None and region.line_count == 0
                                             ),
+                                            **(
+                                                {
+                                                    k: v
+                                                    for k, v in last_structure_meta().items()
+                                                    if k
+                                                    in {
+                                                        "grid_source",
+                                                        "qc_codes",
+                                                        "mismatch_rate",
+                                                        "n_cols",
+                                                        "n_rows",
+                                                    }
+                                                }
+                                                if region is not None
+                                                else {}
+                                            ),
                                         },
                                     ),
                                     *self._table_region_evidence(
                                         regions_by_number, num, canvas, i
                                     ),
-                                ],
-                                translatable_blocks=table_blocks_for_manifest(
-                                    page,
-                                    region,
-                                    caption_text=tab_cap_text,
-                                    number=num,
-                                )
-                                if region is not None
-                                else [
-                                    TranslatableBlock(
-                                        block_id=f"table:{num}:title",
-                                        source_text=tab_cap_text,
-                                        bbox=cap_bbox,
-                                        role="table_title",
-                                        translation_policy=TranslationPolicy.TRANSLATE,
-                                    )
                                 ],
                                 execution_status=ExecutionStatus.PENDING,
                                 planned_action="translate_cells",

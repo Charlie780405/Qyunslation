@@ -9,6 +9,7 @@ from .models import TranslatableBlock
 QC_LABEL_VALUE_SHIFT = "LABEL_VALUE_SHIFT"
 QC_CELL_MERGE = "CELL_MERGE"
 QC_KEY_VALUE_COLLAPSE = "KEY_VALUE_COLLAPSE"
+QC_SPAN_ORDER_DRIFT = "SPAN_ORDER_DRIFT"
 
 _LABEL_HINTS = (
     "登记号",
@@ -191,6 +192,30 @@ def detect_key_value_collapse(
     return issues
 
 
+def detect_span_order_drift(blocks: list[TranslatableBlock]) -> list[AttributionIssue]:
+    """PLAN-046c：同行内 bbox.x0 序与 column_index 序不一致。"""
+    issues: list[AttributionIssue] = []
+    by_row: dict[int, list[TranslatableBlock]] = {}
+    for block in blocks:
+        if block.row_index is None or block.column_index is None or not block.bbox:
+            continue
+        by_row.setdefault(int(block.row_index), []).append(block)
+    for _row, items in by_row.items():
+        if len(items) < 2:
+            continue
+        by_col = sorted(items, key=lambda b: int(b.column_index or 0))
+        by_x = sorted(items, key=lambda b: float(b.bbox.x0))
+        if [b.block_id for b in by_col] != [b.block_id for b in by_x]:
+            issues.append(
+                AttributionIssue(
+                    QC_SPAN_ORDER_DRIFT,
+                    by_col[0].block_id,
+                    "column_index order diverges from bbox.x0 order",
+                )
+            )
+    return issues
+
+
 def evaluate_attribution(
     blocks: list[TranslatableBlock], translations: dict[str, str] | None = None
 ) -> list[AttributionIssue]:
@@ -199,6 +224,7 @@ def evaluate_attribution(
     issues.extend(detect_label_value_shift(blocks))
     issues.extend(detect_translated_cell_merge(blocks, translations))
     issues.extend(detect_key_value_collapse(blocks, translations))
+    issues.extend(detect_span_order_drift(blocks))
     # 去重
     seen: set[tuple[str, str]] = set()
     unique: list[AttributionIssue] = []

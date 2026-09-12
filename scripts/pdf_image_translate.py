@@ -43,13 +43,29 @@ class PdfImgManifest:
         return asdict(self)
 
 
-def detail_with_qc(detail: dict, qc: dict | None) -> dict:
+def detail_with_qc(detail: dict, qc: dict | None, *, qc_channel: str | None = None) -> dict:
     payload = dict(detail)
+    channel = qc_channel
+    if channel is None and isinstance(qc, dict):
+        channel = qc.get("_qc_channel")
+    if channel:
+        payload["qc_channel"] = channel
     if not isinstance(qc, dict):
         return payload
     payload["object_qc"] = list(qc.get("object_qc") or [])
     if qc.get("dpi"):
         payload["dpi"] = qc["dpi"]
+    # PLAN-047b：blocks>0 且 object_qc 空且非 local → 质检通道可疑
+    blocks = int(payload.get("blocks") or 0)
+    ch = payload.get("qc_channel") or ""
+    if blocks > 0 and not payload.get("object_qc") and ch not in ("local",):
+        payload["object_qc"] = list(payload.get("object_qc") or []) + ["QC_CHANNEL_BLIND"]
+        logger.warning(
+            "QC_CHANNEL_BLIND xref/page=%s blocks=%s channel=%s",
+            payload.get("xref") or payload.get("page"),
+            blocks,
+            ch or "unset",
+        )
     return payload
 
 
@@ -135,17 +151,91 @@ def has_local_ocr() -> bool:
         return False
 
 
+_SIDECAR_FP_CHECKED = False
+
+
+def _local_image_fingerprint() -> str:
+    import hashlib
+
+    path = _ROOT / "qyunslation" / "extensions" / "image_translate.py"
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+
+def assert_sidecar_in_sync() -> None:
+    """PLAN-047a：路由 sidecar 前核对代码指纹；不一致则硬失败提示重启。"""
+    global _SIDECAR_FP_CHECKED
+    if _SIDECAR_FP_CHECKED:
+        return
+    require = os.environ.get("QYUNSLATION_REQUIRE_SIDECAR_SYNC", "1").lower() not in (
+        "0",
+        "false",
+        "off",
+    )
+    try:
+        import requests
+
+        r = requests.get(f"{SIDECAR_URL}/service/image-translate-health", timeout=5)
+        if r.status_code != 200:
+            raise RuntimeError(f"health HTTP {r.status_code}")
+        remote = (r.json() or {}).get("code_fingerprint") or ""
+    except Exception as exc:
+        msg = (
+            f"sidecar health unreachable ({exc}). "
+            "Run: bash scripts/deploy-translate-stack.sh"
+        )
+        if require:
+            raise RuntimeError(msg) from exc
+        logger.warning(msg)
+        _SIDECAR_FP_CHECKED = True
+        return
+    local = _local_image_fingerprint()
+    if local != remote:
+        msg = (
+            f"sidecar fingerprint mismatch local={local} remote={remote}. "
+            "Image code not loaded. Run: bash scripts/deploy-translate-stack.sh"
+        )
+        if require:
+            raise RuntimeError(msg)
+        logger.warning(msg)
+    else:
+        logger.info("sidecar fingerprint ok %s", local)
+    _SIDECAR_FP_CHECKED = True
+
+
+def _parse_sidecar_qc(headers) -> tuple[dict, str]:
+    """PLAN-047b：解析 X-Image-QC；失败返回 ({}, 'missing')。"""
+    import base64
+
+    raw = headers.get("X-Image-QC") if headers is not None else None
+    if not raw:
+        return {}, "missing"
+    try:
+        payload = json.loads(base64.b64decode(raw).decode("utf-8"))
+        if isinstance(payload, dict):
+            return payload, "sidecar"
+    except Exception as exc:
+        logger.warning("X-Image-QC parse failed: %s", exc)
+    return {}, "missing"
+
+
 def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, dict]:
-    """有本地 OCR 能力时就地翻译；否则（或失败时）走 sidecar HTTP。"""
+    """有本地 OCR 能力时就地翻译；否则（或失败时）走 sidecar HTTP。
+
+    返回的 qc 字典含 `_qc_channel`：local / sidecar / missing。
+    """
     if has_local_ocr():
         try:
             from qyunslation.extensions.image_translate import translate_image_bytes
 
-            return translate_image_bytes(png_bytes, suffix=".png", to_lang=to_lang)
+            data, n, qc = translate_image_bytes(png_bytes, suffix=".png", to_lang=to_lang)
+            qc = dict(qc or {})
+            qc["_qc_channel"] = "local"
+            return data, n, qc
         except Exception as exc:
             logger.warning("local translate failed, try sidecar: %s", exc)
     else:
         logger.info("no local rapidocr, routing image translate to sidecar")
+    assert_sidecar_in_sync()
     try:
         import requests
 
@@ -157,10 +247,13 @@ def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, di
         )
         if r.status_code == 200 and r.content:
             n = int(r.headers.get("X-Translated-Blocks") or "0")
-            return r.content, n, {}
+            qc, channel = _parse_sidecar_qc(r.headers)
+            qc = dict(qc or {})
+            qc["_qc_channel"] = channel
+            return r.content, n, qc
     except Exception as exc:
         logger.warning("sidecar translate failed: %s", exc)
-    return png_bytes, 0, {}
+    return png_bytes, 0, {"_qc_channel": "missing"}
 
 
 def _upsample_if_below_target(policy, png, width_pt, height_pt, to_lang, new_png, n, qc):
@@ -284,6 +377,25 @@ def _mark(obj, status: str, reason: str | None = None, *, checks: dict | None = 
     )
 
 
+def _clip_rect_to_allowed(
+    bbox: tuple[float, float, float, float],
+    page,
+    *,
+    x_min_frac: float | None,
+) -> tuple[float, float, float, float] | None:
+    """并排双语：区域裁到右侧。横跨整页的矢量框不得盖住原文。"""
+    x0, y0, x1, y1 = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+    if x_min_frac is None:
+        return (x0, y0, x1, y1)
+    width = float(page.rect.width) or 1.0
+    cut = width * float(x_min_frac)
+    left = max(x0, cut)
+    right = min(x1, width)
+    if right - left < 4:
+        return None
+    return (left, y0, right, y1)
+
+
 def _region_allowed(
     bbox: tuple[float, float, float, float],
     page,
@@ -297,10 +409,30 @@ def _region_allowed(
         return False
     if page_parity == "odd" and page_no % 2 != 1:
         return False
-    if x_min_frac is None:
-        return True
-    width = float(page.rect.width) or 1.0
-    return ((bbox[0] + bbox[2]) / 2.0) / width >= x_min_frac
+    return _clip_rect_to_allowed(bbox, page, x_min_frac=x_min_frac) is not None
+
+
+def _origin_crop_rect(
+    dest_bbox: tuple[float, float, float, float],
+    dest_page,
+    origin_page,
+    *,
+    x_min_frac: float | None,
+) -> tuple[float, float, float, float] | None:
+    """把译文页上的 overlay 框映回原稿页，避免 OCR 吃到 BabelDOC 已改的字。"""
+    x0, y0, x1, y1 = (float(dest_bbox[0]), float(dest_bbox[1]), float(dest_bbox[2]), float(dest_bbox[3]))
+    if x_min_frac is not None:
+        dx = float(dest_page.rect.width) * float(x_min_frac)
+        x0, x1 = x0 - dx, x1 - dx
+    ow = float(origin_page.rect.width)
+    oh = float(origin_page.rect.height)
+    x0 = max(0.0, min(x0, ow))
+    x1 = max(0.0, min(x1, ow))
+    y0 = max(0.0, min(y0, oh))
+    y1 = max(0.0, min(y1, oh))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return None
+    return (x0, y0, x1, y1)
 
 
 def translate_pdf_images(
@@ -312,6 +444,7 @@ def translate_pdf_images(
     structure_manifest=None,
     x_min_frac: float | None = None,
     page_parity: str | None = None,
+    origin: Path | str | None = None,
 ) -> Path:
     """位图 replace_image（单引用）+ 矢量 crop/insert_image；无可译图则原样返回 src。
 
@@ -331,6 +464,13 @@ def translate_pdf_images(
 
     dest_path = Path(dest) if dest else src.with_name(src.stem + ".imgtr.pdf")
     manifest = PdfImgManifest(source=str(src))
+    origin_path = Path(origin) if origin else None
+    origin_doc = None
+    if origin_path is not None and origin_path.is_file() and origin_path.resolve() != src.resolve():
+        try:
+            origin_doc = pymupdf.open(origin_path)
+        except Exception:
+            origin_doc = None
     doc = pymupdf.open(src)
     try:
         if getattr(doc, "is_encrypted", False) and not doc.authenticate(""):
@@ -441,7 +581,12 @@ def translate_pdf_images(
                     nh,
                 )
 
-            if len(occurrences) == 1 and all_ok and nw == ow and nh == oh:
+            occ0 = occurrences[0]
+            clipped0 = _clip_rect_to_allowed(
+                occ0["bbox"], doc[occ0["page"]], x_min_frac=x_min_frac
+            )
+            crosses_cut = clipped0 is not None and abs(clipped0[0] - occ0["bbox"][0]) > 0.5
+            if len(occurrences) == 1 and all_ok and nw == ow and nh == oh and not crosses_cut:
                 try:
                     # replace on the page that owns it
                     page = doc[occurrences[0]["page"]]
@@ -483,7 +628,12 @@ def translate_pdf_images(
                         page = doc[o["page"]]
                         import pymupdf as fitz
 
-                        rect = fitz.Rect(*o["bbox"])
+                        clipped = _clip_rect_to_allowed(
+                            o["bbox"], page, x_min_frac=x_min_frac
+                        )
+                        if clipped is None:
+                            continue
+                        rect = fitz.Rect(*clipped)
                         page.insert_image(
                             rect,
                             stream=new_png,
@@ -543,16 +693,28 @@ def translate_pdf_images(
                     logger.warning("vector detect page %s: %s", pno, exc)
                     continue
             for fi, (obj, rect) in enumerate(planned):
-                if x_min_frac is not None and not _region_allowed(
+                clipped = _clip_rect_to_allowed(
                     (rect.x0, rect.y0, rect.x1, rect.y1),
                     page,
-                    page_no=pno,
                     x_min_frac=x_min_frac,
-                    page_parity=None,
-                ):
+                )
+                if clipped is None:
                     continue
+                rect = pymupdf.Rect(*clipped)
+                crop_page = page
+                crop_rect = rect
+                if origin_doc is not None and pno < origin_doc.page_count:
+                    mapped = _origin_crop_rect(
+                        (rect.x0, rect.y0, rect.x1, rect.y1),
+                        page,
+                        origin_doc[pno],
+                        x_min_frac=x_min_frac,
+                    )
+                    if mapped is not None:
+                        crop_page = origin_doc[pno]
+                        crop_rect = pymupdf.Rect(*mapped)
                 try:
-                    png = crop_png(page, rect)
+                    png = crop_png(crop_page, crop_rect)
                 except Exception as exc:
                     manifest.vector_skipped += 1
                     if obj is not None:
@@ -627,6 +789,12 @@ def translate_pdf_images(
             and manifest.vector_translated == 0
         ):
             doc.close()
+            if origin_doc is not None:
+                try:
+                    origin_doc.close()
+                except Exception:
+                    pass
+                origin_doc = None
             _persist_structure_manifest(structure_manifest)
             return src
 
@@ -636,6 +804,11 @@ def translate_pdf_images(
     finally:
         try:
             doc.close()
+        except Exception:
+            pass
+        try:
+            if origin_doc is not None:
+                origin_doc.close()
         except Exception:
             pass
 

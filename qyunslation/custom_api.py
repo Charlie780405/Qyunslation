@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 """自定义扩展 API：图片嵌字 + 探针 + 术语表管理。"""
+import base64
+import json
 import tempfile
 from pathlib import Path
 
@@ -8,7 +10,12 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from qyunslation.extensions.glossary_db import load_glossary, merge_glossary, save_glossary
-from qyunslation.extensions.image_translate import probe_image, translate_image
+from qyunslation.extensions.image_translate import (
+    capability_probe,
+    code_fingerprint,
+    probe_image,
+    translate_image_with_qc,
+)
 from qyunslation.server.uploads import read_upload_limited
 from qyunslation.structure.capabilities import gui_image_extensions
 from qyunslation.structure.ingest import InputPreparationError
@@ -20,6 +27,15 @@ from qyunslation.structure.scan_pdf import (
 )
 
 router = APIRouter(tags=["Custom Extensions"])
+
+
+@router.get("/image-translate-health", summary="PLAN-047a：嵌字代码指纹与能力探针")
+async def image_translate_health():
+    return {
+        "ok": True,
+        "code_fingerprint": code_fingerprint(),
+        "capabilities": capability_probe(),
+    }
 
 
 @router.get("/runtime-probe", summary="PLAN-030ic：运行环境探针")
@@ -70,13 +86,14 @@ async def image_translate_endpoint(
     tmp_in = None
     tmp_out = None
     n = 0
+    qc: dict = {}
     try:
         data = await read_upload_limited(file)
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
             f.write(data)
             tmp_in = f.name
         tmp_out = tmp_in.replace(suffix, f"_zh{suffix}")
-        n = translate_image(tmp_in, tmp_out, to_lang=to_lang)
+        n, qc = translate_image_with_qc(tmp_in, tmp_out, to_lang=to_lang)
         data = Path(tmp_out).read_bytes()
     except InputPreparationError as e:
         raise HTTPException(e.http_status, str(e)) from e
@@ -87,7 +104,16 @@ async def image_translate_endpoint(
             Path(tmp_in).unlink(missing_ok=True)
         if tmp_out:
             Path(tmp_out).unlink(missing_ok=True)
-    return Response(content=data, media_type="image/png", headers={"X-Translated-Blocks": str(n)})
+    # PLAN-047b：跨进程回传完整 QC，避免 object_qc 被硬编码成 []
+    qc_payload = qc if isinstance(qc, dict) else {}
+    headers = {
+        "X-Translated-Blocks": str(n),
+        "X-Image-QC": base64.b64encode(
+            json.dumps(qc_payload, ensure_ascii=False).encode("utf-8")
+        ).decode("ascii"),
+        "X-Code-Fingerprint": code_fingerprint(),
+    }
+    return Response(content=data, media_type="image/png", headers=headers)
 
 
 @router.post("/image-probe", summary="文档内嵌图片轻量探针（仅OCR不调LLM）")

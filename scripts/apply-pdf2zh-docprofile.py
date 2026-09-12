@@ -137,7 +137,7 @@ APPLY_ANCHOR = """        if not state.get("_hpd_retried"):
 APPLY_NEW = """        import sys as _qy_sys
         from pathlib import Path as _qy_P
         _qy_sys.path.insert(0, "/home/dev/qyunslation/scripts")
-        from doc_profile import apply as _qy_apply, patch_line_skip as _qy_patch_ls, patch_letter_typesetting as _qy_patch_letter, patch_regulatory_typesetting as _qy_patch_reg, resolve as _qy_resolve
+        from doc_profile import apply as _qy_apply, patch_line_skip as _qy_patch_ls, patch_letter_typesetting as _qy_patch_letter, patch_literature_typesetting as _qy_patch_lit, patch_min_scale as _qy_patch_ms, reset_min_scale as _qy_reset_ms, patch_regulatory_typesetting as _qy_patch_reg, resolve as _qy_resolve
         from _content_profile_ui import choice_to_content_profile, legacy_template_name
         _qy_choice = (state or {}).get("_doc_profile_ui") or "自动"
         _qy_cp = choice_to_content_profile(_qy_choice)
@@ -150,6 +150,12 @@ APPLY_NEW = """        import sys as _qy_sys
         _qy_patch_ls(float(_qy_prof.get("line_skip") or 1.5))
         if _qy_name == "letter":
             _qy_patch_letter(_qy_prof)
+        if _qy_name == "literature":
+            _qy_patch_lit(_qy_prof)
+            if _qy_prof.get("min_scale") is not None:
+                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))
+        else:
+            _qy_reset_ms()
         if _qy_name == "regulatory":
             _qy_patch_reg(_qy_prof)
         _qy_merge_agg = bool(_qy_prof.get("merge_aggressive", True))
@@ -466,6 +472,42 @@ def apply_fixed(text: str) -> str:
             changed = True
     elif "_qy_patch_letter" not in text and APPLY_OLD_008 in text:
         text = text.replace(APPLY_OLD_008, APPLY_NEW, 1)
+        changed = True
+    elif "_qy_patch_lit" not in text and "_qy_patch_letter" in text:
+        text = text.replace(
+            "patch_letter_typesetting as _qy_patch_letter, patch_regulatory_typesetting as _qy_patch_reg",
+            "patch_letter_typesetting as _qy_patch_letter, patch_literature_typesetting as _qy_patch_lit, patch_regulatory_typesetting as _qy_patch_reg",
+            1,
+        )
+        text = text.replace(
+            '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        if _qy_name == "regulatory":\n',
+            '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n        if _qy_name == "regulatory":\n',
+            1,
+        )
+        # 更旧：只有 letter、无 regulatory
+        if "_qy_patch_lit" not in text:
+            text = text.replace(
+                "patch_letter_typesetting as _qy_patch_letter, resolve as _qy_resolve",
+                "patch_letter_typesetting as _qy_patch_letter, patch_literature_typesetting as _qy_patch_lit, patch_min_scale as _qy_patch_ms, reset_min_scale as _qy_reset_ms, patch_regulatory_typesetting as _qy_patch_reg, resolve as _qy_resolve",
+                1,
+            )
+            text = text.replace(
+                '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        _qy_merge_agg',
+                '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))\n        if _qy_name == "regulatory":\n            _qy_patch_reg(_qy_prof)\n        _qy_merge_agg',
+                1,
+            )
+        changed = True
+    if "_qy_patch_ms" not in text and "_qy_patch_lit" in text:
+        text = text.replace(
+            "patch_literature_typesetting as _qy_patch_lit, patch_regulatory_typesetting as _qy_patch_reg",
+            "patch_literature_typesetting as _qy_patch_lit, patch_min_scale as _qy_patch_ms, reset_min_scale as _qy_reset_ms, patch_regulatory_typesetting as _qy_patch_reg",
+            1,
+        )
+        text = text.replace(
+            '        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n        if _qy_name == "regulatory":\n',
+            '        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))\n        if _qy_name == "regulatory":\n',
+            1,
+        )
         changed = True
     if "aggressive=_qy_merge_agg" not in text:
         if HPD_CALL_OLD in text:

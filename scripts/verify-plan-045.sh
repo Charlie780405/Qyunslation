@@ -48,6 +48,11 @@ grep -q '1Langanan\|(?=[A-Z]' "$ROOT/qyunslation/structure/references.py" \
   && pass "045b glued ENTRY_RE" || fail "045b ENTRY_RE"
 grep -q 'strip_il_markup\|IL_MARKUP_LEAK' "$ROOT/qyunslation/structure/text_sanitize.py" \
   && pass "045c sanitize helper" || fail "045c helper"
+grep -q 'apply_forced_terms\|皮肤清晰' "$ROOT/qyunslation/structure/text_sanitize.py" \
+  && pass "045a post-glossary" || fail "045a missing forced terms"
+grep -q 'isolate_residue' "$ROOT/scripts/pdf_table_translate.py" \
+  && grep -q 'literature' "$ROOT/scripts/pdf_table_translate.py" \
+  && pass "045e literature isolate" || fail "045e isolate not wired"
 [[ -f "$ROOT/scripts/apply-pdf2zh-045c-sanitize.py" ]] \
   && pass "045c patcher" || fail "missing 045c patcher"
 grep -q 'apply-pdf2zh-045c-sanitize.py' "$ROOT/scripts/pdf2zh.service" \
@@ -62,6 +67,11 @@ grep -q 'table_size_mode' "$ROOT/scripts/pdf_table_translate.py" \
 grep -q 'panel_letter\|TIER_K_FLOOR\|擦除上限 2\|SOURCE_INK_LEFT' \
   "$ROOT/.cursor/skills/image-overlay-translation/SKILL.md" \
   && pass "SK-Q002 045d notes" || fail "SK-Q002 missing 045d"
+grep -q 'Q2W\|禁止.*展开' "$ROOT/.cursor/skills/image-overlay-translation/SKILL.md" \
+  && pass "SK-Q002 no Q2W expand" || fail "SK-Q002 missing Q2W rule"
+grep -q '_clip_rect_to_allowed\|双语原文不可变' \
+  "$ROOT/.cursor/skills/image-overlay-translation/SKILL.md" \
+  && pass "SK-Q002 original immutable" || fail "SK-Q002 missing 033c clip"
 grep -q 'IL_MARKUP_LEAK\|SOURCE_OVERLAY\|SOURCE_INK_LEFT' \
   "$ROOT/docs/plans/PLAN-042-regulatory-translation-quality/error-taxonomy.md" \
   && pass "taxonomy 045 codes" || fail "taxonomy missing 045 codes"

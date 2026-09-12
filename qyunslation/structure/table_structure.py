@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Literal
 
 from .font_style import infer_font_weight
@@ -172,6 +173,18 @@ class StructuredTableCell:
         )
 
 
+@dataclass
+class StructureResult:
+    """PLAN-048b：结构重建结果 + 网格来源元数据。"""
+
+    cells: list[StructuredTableCell] = field(default_factory=list)
+    grid_source: str = "geometry_center"  # hpd|gutter|geometry_center|not_a_table|vector_grid
+    qc_codes: list[str] = field(default_factory=list)
+    mismatch_rate: float = 0.0
+    n_cols: int = 0
+    n_rows: int = 0
+
+
 def _majority_line_dir(page, region: TableRegion) -> tuple[float, float] | None:
     """多数文字行方向；侧放表常见 (0, ±1)，正放为 (±1, 0)。"""
     try:
@@ -264,13 +277,833 @@ def _adaptive_cluster(
 
 def _cluster_axes(frame: TableLocalFrame, local_xs: list[float], local_ys: list[float]) -> tuple[list[float], list[float]]:
     if frame.rotation in (90, 270):
-        return (
-            _adaptive_cluster(local_xs, floor=6.0, cap=14.0),
-            _adaptive_cluster(local_ys, floor=3.0, cap=6.0),
+        cols = _adaptive_cluster(local_xs, floor=6.0, cap=14.0)
+        rows = _adaptive_cluster(local_ys, floor=3.0, cap=6.0)
+    else:
+        cols = _adaptive_cluster(local_xs, floor=6.0, cap=16.0)
+        rows = _adaptive_cluster(local_ys, floor=3.0, cap=8.0)
+    # PLAN-048b：删除 _merge_column_clusters（会把 nAb 并进浓度列）；
+    # caption_rules 路径改走 HPD / 空隙投影，此函数仅作最后兜底。
+    return cols, rows
+
+
+def _merge_intervals(ivs: list[tuple[float, float]], *, gap: float = 0.5) -> list[tuple[float, float]]:
+    if not ivs:
+        return []
+    ordered = sorted(ivs)
+    merged: list[tuple[float, float]] = [ordered[0]]
+    for a, b in ordered[1:]:
+        la, lb = merged[-1]
+        if a <= lb + gap:
+            merged[-1] = (la, max(lb, b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def data_row_gutters(
+    lines: list[list[TextUnit]],
+    frame: TableLocalFrame,
+    *,
+    min_gutter: float = 4.0,
+) -> list[tuple[float, float]]:
+    """PLAN-048b：数据行文字 x 区间投影的空隙 → 列分隔。
+
+    跳过表头/脚注稀疏行；只用「单元数 ≥ max(3, 中位数)」的数据行，
+    避免宽表头桥接整表空隙（表3 实证）。
+    """
+    if not lines:
+        return []
+    ns = sorted(len(ln) for ln in lines)
+    med = ns[len(ns) // 2] if ns else 0
+    data = [ln for ln in lines[1:] if len(ln) >= max(3, med)]
+    if not data:
+        data = [ln for ln in lines if len(ln) >= 2]
+    ivs: list[tuple[float, float]] = []
+    for ln in data:
+        for item in ln:
+            x0, y0, x1, y1 = item[:4]
+            u0, _ = frame.to_local(float(x0), (float(y0) + float(y1)) / 2.0)
+            u1, _ = frame.to_local(float(x1), (float(y0) + float(y1)) / 2.0)
+            ivs.append((min(u0, u1), max(u0, u1)))
+    merged = _merge_intervals(ivs)
+    gutters: list[tuple[float, float]] = []
+    for (a1, b1), (a2, b2) in zip(merged, merged[1:]):
+        if a2 - b1 >= min_gutter:
+            gutters.append((b1, a2))
+    return gutters
+
+
+def gutter_column_centers(
+    lines: list[list[TextUnit]],
+    frame: TableLocalFrame,
+    *,
+    min_gutter: float = 4.0,
+) -> list[float]:
+    """空隙投影 → 列中心（各墨迹簇中点）。"""
+    if not lines:
+        return []
+    ns = sorted(len(ln) for ln in lines)
+    med = ns[len(ns) // 2] if ns else 0
+    data = [ln for ln in lines[1:] if len(ln) >= max(3, med)] or [ln for ln in lines if len(ln) >= 2]
+    ivs: list[tuple[float, float]] = []
+    for ln in data:
+        for item in ln:
+            x0, y0, x1, y1 = item[:4]
+            u0, _ = frame.to_local(float(x0), (float(y0) + float(y1)) / 2.0)
+            u1, _ = frame.to_local(float(x1), (float(y0) + float(y1)) / 2.0)
+            ivs.append((min(u0, u1), max(u0, u1)))
+    merged = _merge_intervals(ivs)
+    if not merged:
+        return []
+    gutters = data_row_gutters(lines, frame, min_gutter=min_gutter)
+    if not gutters and len(merged) == 1:
+        return [(merged[0][0] + merged[0][1]) / 2.0]
+    return [(a + b) / 2.0 for a, b in merged]
+
+
+def _line_norm_blob(items: list[TextUnit]) -> str:
+    from .table_grid_hpd import normalize_for_align
+
+    return "".join(normalize_for_align(it[4]) for it in items)
+
+
+def _is_n_eq_wrap_line(units: list[TextUnit]) -> bool:
+    """几何行几乎全是 (N=130) 碎片 → 应并进上一行。"""
+    from .table_grid_hpd import normalize_for_align
+
+    toks = [normalize_for_align(u[4]) for u in units if str(u[4]).strip()]
+    if len(toks) < 2:
+        return False
+    n_like = 0
+    for tok in toks:
+        if (
+            tok.startswith("n=")
+            or tok in {"n", "=", ",", "a", "(", ")"}
+            or tok.isdigit()
+            or (tok.endswith(")") and tok[:-1].isdigit())
+        ):
+            n_like += 1
+    return n_like >= max(1, len(toks) - 1)
+
+
+def _prev_ends_comma(units: list[TextUnit]) -> bool:
+    texts = [str(u[4]).strip() for u in units if str(u[4]).strip()]
+    data = texts[1:] if len(texts) > 1 else texts
+    if not data:
+        return False
+    return sum(1 for t in data if t.endswith(",") or t.endswith("，")) >= max(1, len(data) // 2)
+
+
+_HEADER_START = re.compile(r"^(?:dose|visit)\b", re.I)
+
+
+def _looks_data_line(units: list[TextUnit]) -> bool:
+    """Q2W/多个数值 → 数据行，禁止并进表头。"""
+    texts = [str(u[4]).strip() for u in units if str(u[4]).strip()]
+    n_data = 0
+    for text in texts:
+        if re.fullmatch(r"Q\d+W", text, re.I):
+            n_data += 1
+        elif re.search(r"\d", text) and not re.search(
+            r"(?:mL|mg|µg|ug|week\s*\d)", text, re.I
+        ):
+            n_data += 1
+    return n_data >= 2
+
+
+def _looks_header_banner(units: list[TextUnit]) -> bool:
+    """表头上行：少量短语、无两位数据数字。"""
+    texts = [str(u[4]).strip() for u in units if str(u[4]).strip()]
+    if not texts or len(texts) > 5 or _looks_data_line(units):
+        return False
+    blob = " ".join(texts)
+    return not re.search(r"\d{2,}", blob)
+
+
+def _looks_header_continuation(units: list[TextUnit]) -> bool:
+    texts = [str(u[4]).strip() for u in units if str(u[4]).strip()]
+    if not texts or _looks_data_line(units):
+        return False
+    return bool(_HEADER_START.match(texts[0]))
+
+
+def _merge_geo_wrap_lines(
+    lines: list[list[TextUnit]],
+    hpd_rows: list[list[str]],
+) -> list[list[TextUnit]]:
+    """HPD 已并折行时，几何层也并：N= 续行、逗号折行、表头上下两行。"""
+    if len(lines) < 2:
+        return lines
+    hpd_blobs = [_hpd_row_blob(row) for row in hpd_rows if any(str(c).strip() for c in row)]
+
+    def best(blob: str) -> float:
+        return max((_row_similarity(blob, hb) for hb in hpd_blobs), default=0.0)
+
+    out: list[list[TextUnit]] = [list(lines[0])]
+    for nxt in lines[1:]:
+        prev = out[-1]
+        blob_a = _line_norm_blob(prev)
+        blob_b = _line_norm_blob(nxt)
+        combo = blob_a + blob_b
+        merge = (
+            _is_n_eq_wrap_line(nxt)
+            or _prev_ends_comma(prev)
+            or (_looks_header_banner(prev) and _looks_header_continuation(nxt))
         )
-    return (
-        _adaptive_cluster(local_xs, floor=6.0, cap=16.0),
-        _adaptive_cluster(local_ys, floor=3.0, cap=8.0),
+        if not merge:
+            score_c = best(combo)
+            if score_c >= 0.45 and score_c > max(best(blob_a), best(blob_b)) + 0.05:
+                merge = True
+        if merge:
+            merged = list(prev) + list(nxt)
+            merged.sort(key=lambda u: (float(u[0]), float(u[1])))
+            out[-1] = merged
+        else:
+            out.append(list(nxt))
+    return out
+
+
+def _hpd_row_blob(cells: list[str]) -> str:
+    from .table_grid_hpd import normalize_for_align
+
+    return "".join(normalize_for_align(c) for c in cells if c and str(c).strip())
+
+
+def _near_token(a: str, b: str) -> bool:
+    """短 token 允许 1 编辑距离（HPD OCR：O2W↔Q2W）。"""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if max(len(a), len(b)) > 6:
+        return False
+    # 简易 Levenshtein 上限 1
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    # 插入/删除 1
+    if len(a) < len(b):
+        a, b = b, a
+    # a longer by 1
+    j = 0
+    skip = 0
+    for ch in a:
+        if j < len(b) and ch == b[j]:
+            j += 1
+        else:
+            skip += 1
+            if skip > 1:
+                return False
+    return True
+
+
+def _unit_fits_cell(piece: str, norm_t: str, acc: str) -> bool:
+    if not piece or not norm_t:
+        return False
+    trial = acc + piece
+    if norm_t.startswith(trial) or trial.startswith(norm_t) or piece in norm_t:
+        return True
+    if acc and norm_t.startswith(acc) and piece in norm_t[len(acc) :]:
+        return True
+    if not acc and _near_token(piece, norm_t):
+        return True
+    if not acc and len(piece) <= 4 and any(
+        _near_token(piece, norm_t[i : i + len(piece)])
+        for i in range(max(0, len(norm_t) - len(piece) + 1))
+    ):
+        return True
+    return False
+
+
+def _row_similarity(geo_blob: str, hpd_blob: str) -> float:
+    if not geo_blob or not hpd_blob:
+        return 0.0
+
+    def fold(s: str) -> str:
+        return (
+            s.replace("o2w", "q2w")
+            .replace("o4w", "q4w")
+            .replace("02w", "q2w")
+            .replace("04w", "q4w")
+        )
+
+    geo_blob, hpd_blob = fold(geo_blob), fold(hpd_blob)
+    a, b = geo_blob, hpd_blob
+    if len(a) > len(b):
+        a, b = b, a
+    if a in b:
+        return 1.0
+    import re
+
+    nums_a = set(re.findall(r"\d+(?:\.\d+)?", a))
+    nums_b = set(re.findall(r"\d+(?:\.\d+)?", b))
+    shared = nums_a & nums_b
+    # 表头 µg mL-1 的孤立 "1" 不能当整行命中，否则折行无法合并
+    distinctive = {n for n in shared if "." in n or len(n) >= 2}
+    if distinctive:
+        inter = len(shared) / max(len(nums_a | nums_b), 1)
+    elif len(shared) >= 2:
+        inter = len(shared) / max(len(nums_a | nums_b), 1)
+    else:
+        inter = 0.0
+    pref = 0.0
+    for n in range(min(12, len(a)), 3, -1):
+        if a[:n] in b:
+            pref = n / max(len(a), 1)
+            break
+    seq = SequenceMatcher(None, a, b).ratio()
+    return max(inter, pref, seq)
+
+
+def align_hpd_grid(
+    lines: list[list[TextUnit]],
+    hpd_rows: list[list[str]],
+    *,
+    mismatch_limit: float = 0.15,
+) -> tuple[list[list[list[TextUnit]]], float, list[str]]:
+    """PLAN-048b：按内容对齐几何行与 HPD 行，再行内左到右消耗 unit。
+
+    HPD 常把 ``(N=130)`` 并进表头，导致行索引错位；故先做行相似度匹配。
+    """
+    from .table_grid_hpd import normalize_for_align
+
+    qc: list[str] = []
+    if not lines or not hpd_rows:
+        return [], 1.0, ["HPD_GRID_MISMATCH"]
+
+    n_cols = max((len(r) for r in hpd_rows), default=0)
+    if n_cols < 1:
+        return [], 1.0, ["NOT_A_TABLE"]
+
+    hpd = [r for r in hpd_rows if any(str(c).strip() for c in r)]
+    lines = _merge_geo_wrap_lines(lines, hpd)
+    geo_blobs = [_line_norm_blob(ln) for ln in lines]
+    hpd_blobs = [_hpd_row_blob(r) for r in hpd]
+
+    # 为每个 HPD 行找最佳未用几何行
+    used_geo: set[int] = set()
+    pairs: list[tuple[int, int]] = []  # (hpd_i, geo_i)
+    for hi, hb in enumerate(hpd_blobs):
+        best_gi, best_score = -1, 0.15
+        for gi, gb in enumerate(geo_blobs):
+            if gi in used_geo:
+                continue
+            score = _row_similarity(gb, hb)
+            if score > best_score:
+                best_score, best_gi = score, gi
+        if best_gi >= 0:
+            used_geo.add(best_gi)
+            pairs.append((hi, best_gi))
+
+    # 也尝试把未匹配的几何行接到「部分包含」的 HPD（折行残留）
+    cell_items: list[list[list[TextUnit]]] = [None] * len(hpd)  # type: ignore
+    unused_units = 0
+    total_units = sum(len(ln) for ln in lines)
+
+    for hi, gi in pairs:
+        units = list(lines[gi])
+        targets = [(normalize_for_align(c), c) for c in (hpd[hi] + [""] * n_cols)[:n_cols]]
+        row_buckets: list[list[TextUnit]] = [[] for _ in range(n_cols)]
+        ui = 0
+        for ci, (norm_t, _raw) in enumerate(targets):
+            if not norm_t:
+                continue
+            acc = ""
+            matched: list[TextUnit] = []
+            while ui < len(units):
+                piece = normalize_for_align(units[ui][4])
+                if not piece:
+                    ui += 1
+                    continue
+                if _unit_fits_cell(piece, norm_t, acc):
+                    matched.append(units[ui])
+                    if not acc and _near_token(piece, norm_t):
+                        acc = norm_t  # 整格模糊命中
+                    else:
+                        trial = acc + piece
+                        acc = trial if norm_t.startswith(trial) else (acc + piece)
+                    ui += 1
+                    if len(acc) >= len(norm_t) or acc == norm_t or piece == norm_t:
+                        break
+                    continue
+                if matched:
+                    break
+                later = False
+                for nj, (nt2, _) in enumerate(targets[ci + 1 :], start=ci + 1):
+                    if nt2 and (
+                        piece in nt2 or nt2.startswith(piece) or _near_token(piece, nt2)
+                    ):
+                        later = True
+                        break
+                if later:
+                    break
+                unused_units += 1
+                ui += 1
+            row_buckets[ci] = matched
+        while ui < len(units):
+            unused_units += 1
+            ui += 1
+        cell_items[hi] = row_buckets
+
+    # 未配对的 HPD 行 → 空桶
+    for hi in range(len(hpd)):
+        if cell_items[hi] is None:
+            cell_items[hi] = [[] for _ in range(n_cols)]
+
+    # 未用几何行：若能并入某已有 HPD 行（折行 N=），追加到对应列
+    for gi, ln in enumerate(lines):
+        if gi in used_geo:
+            continue
+        gb = geo_blobs[gi]
+        # 典型 N= 折行：并进上一数据行各列
+        if all(
+            normalize_for_align(u[4]).startswith("n=")
+            or normalize_for_align(u[4]) in {"n", "=", ",", "a"}
+            or not normalize_for_align(u[4])
+            for u in ln
+        ) or "n=" in gb:
+            # 找最近已配对且 y 更靠上的行
+            if pairs:
+                # 挂到最后一个 pair 的对应列（按 x 最近）
+                _hi, _ = pairs[-1]
+                buckets = cell_items[_hi]
+                for u in ln:
+                    ux = (float(u[0]) + float(u[2])) / 2.0
+                    # 选已有墨迹中心最近的列
+                    best_c, best_d = 0, 1e9
+                    for ci, items in enumerate(buckets):
+                        if not items:
+                            continue
+                        cx = sum((float(it[0]) + float(it[2])) / 2.0 for it in items) / len(items)
+                        d = abs(cx - ux)
+                        if d < best_d:
+                            best_d, best_c = d, ci
+                    buckets[best_c].append(u)
+                used_geo.add(gi)
+                continue
+        unused_units += len(ln)
+
+    matched_units = total_units - unused_units
+    rate = (unused_units / total_units) if total_units else 1.0
+    # 若多数 unit 已归入，放宽 mismatch；行配对成功即视为结构可用
+    if len(pairs) >= max(2, len(hpd) // 2) and rate <= 0.45:
+        qc = []
+    elif rate > mismatch_limit:
+        qc.append("HPD_GRID_MISMATCH")
+    return cell_items, rate, qc
+
+
+def _cells_from_buckets(
+    buckets: dict[tuple[int, int], list[TextUnit]],
+    *,
+    table_no: int,
+    row_offset: int,
+    n_cols: int,
+    n_rows: int,
+    caption_text: str,
+    grid_has_title: bool,
+    region: TableRegion,
+) -> list[StructuredTableCell]:
+    filled_by_row: dict[int, int] = {}
+    for (row, _col), items in buckets.items():
+        if items:
+            filled_by_row[row] = filled_by_row.get(row, 0) + 1
+    cells: list[StructuredTableCell] = []
+    header_row = 1 if (not caption_text and grid_has_title) else 0
+    for (row, col), items in sorted(buckets.items()):
+        text = compose_cell_text(items)
+        if not text:
+            continue
+        ink_x0 = min(float(it[0]) for it in items)
+        ink_y0 = min(float(it[1]) for it in items)
+        ink_x1 = max(float(it[2]) for it in items)
+        ink_y1 = max(float(it[3]) for it in items)
+        is_title = bool(_TITLE_RE.match(text))
+        role = _assign_role(
+            text,
+            row,
+            n_cols,
+            n_rows,
+            is_title=is_title,
+            header_row=header_row,
+            filled_in_row=filled_by_row.get(row, 0),
+        )
+        if caption_text and role == BlockRole.TABLE_TITLE.value:
+            continue
+        cells.append(
+            StructuredTableCell(
+                block_id=f"table:{table_no}:r{row + row_offset}c{col}",
+                role=role,
+                text=text,
+                row_index=row + row_offset,
+                column_index=col,
+                bbox=(ink_x0, ink_y0, ink_x1, ink_y1),
+                font_weight=_cell_font_weight(items),
+                font_size=_cell_font_size(items),
+            )
+        )
+    return expand_cell_bboxes(cells, region)
+
+
+def expand_cell_bboxes(
+    cells: list[StructuredTableCell], region: TableRegion
+) -> list[StructuredTableCell]:
+    """PLAN-048：墨迹框扩到同行/同列邻格中线，避免窄格竖排旋转与OVERFLOW碎片。"""
+    if len(cells) < 2:
+        return cells
+    titles = [c for c in cells if "title" in (c.role or "")]
+    body = [c for c in cells if "title" not in (c.role or "")]
+    if len(body) < 2:
+        return cells
+    by_row: dict[int, list[int]] = {}
+    by_col: dict[int, list[int]] = {}
+    boxes = [list(c.bbox) for c in body]
+    for i, cell in enumerate(body):
+        by_row.setdefault(int(cell.row_index), []).append(i)
+        by_col.setdefault(int(cell.column_index), []).append(i)
+    rx0, ry0, rx1, ry1 = (
+        float(region.x0),
+        float(region.y0),
+        float(region.x1),
+        float(region.y1),
+    )
+    for idxs in by_row.values():
+        idxs = sorted(idxs, key=lambda i: body[i].column_index)
+        for k, i in enumerate(idxs):
+            # 只填邻格空隙，不拉到区域边——单格误扩会盖住整行
+            left = boxes[i][0] if k == 0 else (boxes[idxs[k - 1]][2] + boxes[i][0]) / 2.0
+            right = boxes[i][2] if k == len(idxs) - 1 else (boxes[i][2] + boxes[idxs[k + 1]][0]) / 2.0
+            boxes[i][0] = min(boxes[i][0], left)
+            boxes[i][2] = max(boxes[i][2], right)
+    for idxs in by_col.values():
+        idxs = sorted(idxs, key=lambda i: body[i].row_index)
+        for k, i in enumerate(idxs):
+            # 只填相邻行号的空隙；隔行（折行缺失）不往下拉，避免盖住错列
+            prev_i = idxs[k - 1] if k else None
+            next_i = idxs[k + 1] if k + 1 < len(idxs) else None
+            adj_up = (
+                prev_i is not None
+                and int(body[i].row_index) - int(body[prev_i].row_index) == 1
+            )
+            adj_dn = (
+                next_i is not None
+                and int(body[next_i].row_index) - int(body[i].row_index) == 1
+            )
+            top = (boxes[prev_i][3] + boxes[i][1]) / 2.0 if adj_up else boxes[i][1]
+            bot = (boxes[i][3] + boxes[next_i][1]) / 2.0 if adj_dn else boxes[i][3]
+            boxes[i][1] = min(boxes[i][1], top)
+            boxes[i][3] = max(boxes[i][3], bot)
+    for idxs in by_row.values():
+        ordered = sorted(idxs, key=lambda i: boxes[i][0])
+        for a, b in zip(ordered, ordered[1:]):
+            if boxes[a][2] > boxes[b][0] + 0.5:
+                mid = (boxes[a][2] + boxes[b][0]) / 2.0
+                boxes[a][2] = mid
+                boxes[b][0] = mid
+    for idxs in by_col.values():
+        ordered = sorted(idxs, key=lambda i: boxes[i][1])
+        for a, b in zip(ordered, ordered[1:]):
+            if boxes[a][3] > boxes[b][1] + 0.5:
+                mid = (boxes[a][3] + boxes[b][1]) / 2.0
+                boxes[a][3] = mid
+                boxes[b][1] = mid
+    out = list(titles)
+    for cell, box in zip(body, boxes):
+        x0 = max(rx0, min(box[0], box[2] - 2.0))
+        y0 = max(ry0, min(box[1], box[3] - 2.0))
+        x1 = min(rx1, max(box[2], x0 + 2.0))
+        y1 = min(ry1, max(box[3], y0 + 2.0))
+        out.append(
+            StructuredTableCell(
+                block_id=cell.block_id,
+                role=cell.role,
+                text=cell.text,
+                row_index=cell.row_index,
+                column_index=cell.column_index,
+                row_span=cell.row_span,
+                column_span=cell.column_span,
+                bbox=(x0, y0, x1, y1),
+                font_weight=cell.font_weight,
+                font_size=cell.font_size,
+            )
+        )
+    return out
+
+
+def _geometry_center_structure(
+    page,
+    region: TableRegion,
+    frame: TableLocalFrame,
+    units: list[TextUnit],
+    *,
+    table_no: int,
+    caption_text: str,
+    base_row_offset: int,
+) -> StructureResult:
+    """旧中心聚类路径（仅兜底；grid_source=geometry_center → 不落笔）。"""
+    h_lines = _horizontal_lines(page)
+    v_lines = _vertical_lines(page)
+    local_ys = [
+        frame.to_local((item[0] + item[2]) / 2.0, (item[1] + item[3]) / 2.0)[1]
+        for item in units
+    ]
+    local_xs = [
+        frame.to_local((item[0] + item[2]) / 2.0, (item[1] + item[3]) / 2.0)[0]
+        for item in units
+    ]
+    for x0, x1, y in h_lines:
+        if region.y0 - 4 <= y <= region.y1 + 4:
+            _seed_line_axes(
+                frame, x0=x0, y0=y, x1=x1, y1=y, local_xs=local_xs, local_ys=local_ys
+            )
+    for y0, y1, x in v_lines:
+        if region.x0 - 4 <= x <= region.x1 + 4:
+            _seed_line_axes(
+                frame, x0=x, y0=y0, x1=x, y1=y1, local_xs=local_xs, local_ys=local_ys
+            )
+    col_centers, row_centers = _cluster_axes(frame, local_xs, local_ys)
+    if not row_centers:
+        row_centers = [frame.height / 2.0]
+    if not col_centers:
+        col_centers = [frame.width / 2.0]
+    buckets: dict[tuple[int, int], list[TextUnit]] = {}
+    for item in units:
+        x0, y0, x1, y1, text = item[:5]
+        u, v = frame.to_local((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - v))
+        col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - u))
+        buckets.setdefault((row, col), []).append(item)
+    grid_has_title = any(
+        _TITLE_RE.match(item[4] or "") for items in buckets.values() for item in items
+    )
+    if caption_text:
+        cells = [
+            StructuredTableCell(
+                block_id=f"table:{table_no}:title",
+                role=BlockRole.TABLE_TITLE.value,
+                text=caption_text.strip(),
+                row_index=base_row_offset,
+                column_index=0,
+                column_span=len(col_centers),
+                bbox=(region.x0, max(region.y0 - 18.0, 0.0), region.x1, region.y0 + 2.0),
+            )
+        ]
+        row_offset = base_row_offset + 1
+    else:
+        cells = []
+        row_offset = base_row_offset
+    cells.extend(
+        _cells_from_buckets(
+            buckets,
+            table_no=table_no,
+            row_offset=row_offset,
+            n_cols=len(col_centers),
+            n_rows=len(row_centers),
+            caption_text=caption_text,
+            grid_has_title=grid_has_title,
+            region=region,
+        )
+    )
+    return StructureResult(
+        cells=cells,
+        grid_source="geometry_center",
+        qc_codes=["GEOMETRY_CENTER_UNSAFE"],
+        n_cols=len(col_centers),
+        n_rows=len(row_centers),
+    )
+
+
+def _gutter_structure(
+    page,
+    region: TableRegion,
+    frame: TableLocalFrame,
+    units: list[TextUnit],
+    *,
+    table_no: int,
+    caption_text: str,
+    base_row_offset: int,
+) -> StructureResult:
+    """数据行空隙投影定列。"""
+    lines = _line_buckets([(u[0], u[1], u[2], u[3], u[4]) for u in units])
+    col_centers = gutter_column_centers(lines, frame)
+    if len(col_centers) < 2:
+        return StructureResult(
+            cells=[],
+            grid_source="gutter",
+            qc_codes=["NOT_A_TABLE"],
+            n_cols=len(col_centers),
+        )
+    # 行中心：各线 mid-y 的 local v
+    row_centers: list[float] = []
+    for ln in lines:
+        ys = [(float(it[1]) + float(it[3])) / 2.0 for it in ln]
+        xs = [(float(it[0]) + float(it[2])) / 2.0 for it in ln]
+        if not ys:
+            continue
+        _u, v = frame.to_local(xs[0], sum(ys) / len(ys))
+        row_centers.append(v)
+    buckets: dict[tuple[int, int], list[TextUnit]] = {}
+    for item in units:
+        x0, y0, x1, y1, _text = item[:5]
+        u, v = frame.to_local((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - v))
+        col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - u))
+        buckets.setdefault((row, col), []).append(item)
+    grid_has_title = any(
+        _TITLE_RE.match(item[4] or "") for items in buckets.values() for item in items
+    )
+    if caption_text:
+        cells = [
+            StructuredTableCell(
+                block_id=f"table:{table_no}:title",
+                role=BlockRole.TABLE_TITLE.value,
+                text=caption_text.strip(),
+                row_index=base_row_offset,
+                column_index=0,
+                column_span=len(col_centers),
+                bbox=(region.x0, max(region.y0 - 18.0, 0.0), region.x1, region.y0 + 2.0),
+            )
+        ]
+        row_offset = base_row_offset + 1
+    else:
+        cells = []
+        row_offset = base_row_offset
+    cells.extend(
+        _cells_from_buckets(
+            buckets,
+            table_no=table_no,
+            row_offset=row_offset,
+            n_cols=len(col_centers),
+            n_rows=len(row_centers),
+            caption_text=caption_text,
+            grid_has_title=grid_has_title,
+            region=region,
+        )
+    )
+    return StructureResult(
+        cells=cells,
+        grid_source="gutter",
+        qc_codes=[],
+        n_cols=len(col_centers),
+        n_rows=len(row_centers),
+    )
+
+
+def _hpd_structure(
+    page,
+    region: TableRegion,
+    frame: TableLocalFrame,
+    units: list[TextUnit],
+    *,
+    table_no: int,
+    caption_text: str,
+    base_row_offset: int,
+) -> StructureResult | None:
+    """HPD 网格 + 行几何对齐。失败返回 None（调用方降级）。"""
+    from .table_grid_hpd import hpd_grid, hpd_mode
+
+    mode = hpd_mode()
+    if mode == "off":
+        return None
+    if mode == "gutter":
+        return None
+
+    grid = hpd_grid(page, region)
+    if grid.error:
+        return None
+    if grid.not_a_table or grid.n_rows < 2 or grid.n_cols < 2:
+        return StructureResult(
+            cells=[],
+            grid_source="not_a_table",
+            qc_codes=["NOT_A_TABLE"],
+            n_cols=grid.n_cols,
+            n_rows=grid.n_rows,
+        )
+
+    lines = _line_buckets([(u[0], u[1], u[2], u[3], u[4]) for u in units])
+    cell_items, rate, qc = align_hpd_grid(lines, grid.rows)
+    if "HPD_GRID_MISMATCH" in qc and rate > 0.55:
+        # 对齐严重失败 → 仍可用 HPD 列数校准空隙投影
+        gutter = _gutter_structure(
+            page,
+            region,
+            frame,
+            units,
+            table_no=table_no,
+            caption_text=caption_text,
+            base_row_offset=base_row_offset,
+        )
+        if gutter.n_cols == grid.n_cols and gutter.cells:
+            gutter.grid_source = "hpd"  # 列数经 HPD 确认
+            gutter.qc_codes = ["HPD_COLS_GUTTER_GEOM"]
+            return gutter
+        return None
+
+    buckets: dict[tuple[int, int], list[TextUnit]] = {}
+    for ri, row_buckets in enumerate(cell_items):
+        for ci, items in enumerate(row_buckets):
+            if items:
+                buckets[(ri, ci)] = items
+
+    # 若对齐后有效格过少，降级
+    filled = sum(1 for items in buckets.values() if items)
+    if filled < max(4, grid.n_rows):
+        gutter = _gutter_structure(
+            page,
+            region,
+            frame,
+            units,
+            table_no=table_no,
+            caption_text=caption_text,
+            base_row_offset=base_row_offset,
+        )
+        if gutter.n_cols == grid.n_cols and gutter.cells:
+            gutter.grid_source = "hpd"
+            gutter.qc_codes = ["HPD_COLS_GUTTER_GEOM"]
+            return gutter
+        if "HPD_GRID_MISMATCH" in qc:
+            return None
+
+    grid_has_title = any(
+        _TITLE_RE.match(item[4] or "") for items in buckets.values() for item in items
+    )
+    if caption_text:
+        cells = [
+            StructuredTableCell(
+                block_id=f"table:{table_no}:title",
+                role=BlockRole.TABLE_TITLE.value,
+                text=caption_text.strip(),
+                row_index=base_row_offset,
+                column_index=0,
+                column_span=grid.n_cols,
+                bbox=(region.x0, max(region.y0 - 18.0, 0.0), region.x1, region.y0 + 2.0),
+            )
+        ]
+        row_offset = base_row_offset + 1
+    else:
+        cells = []
+        row_offset = base_row_offset
+    cells.extend(
+        _cells_from_buckets(
+            buckets,
+            table_no=table_no,
+            row_offset=row_offset,
+            n_cols=grid.n_cols,
+            n_rows=len(cell_items),
+            caption_text=caption_text,
+            grid_has_title=grid_has_title,
+            region=region,
+        )
+    )
+    return StructureResult(
+        cells=cells,
+        grid_source="hpd",
+        qc_codes=qc,
+        mismatch_rate=rate,
+        n_cols=grid.n_cols,
+        n_rows=len(cell_items),
     )
 
 
@@ -572,135 +1405,86 @@ def structure_table(
     number: int | None = None,
     base_row_offset: int = 0,
 ) -> list[StructuredTableCell]:
+    return structure_table_ex(
+        page,
+        region,
+        caption_text=caption_text,
+        number=number,
+        base_row_offset=base_row_offset,
+    ).cells
+
+
+def structure_table_ex(
+    page,
+    region: TableRegion,
+    *,
+    caption_text: str = "",
+    number: int | None = None,
+    base_row_offset: int = 0,
+) -> StructureResult:
+    """PLAN-048b：HPD 网格优先 → 空隙投影 → geometry_center（不落笔）。"""
     table_no = int(number if number is not None else region.number)
     if region.detector == "vector_grid" and region.row_edges and region.column_edges:
-        return _vector_grid_cells(
+        cells = _vector_grid_cells(
             page,
             region,
             table_no=table_no,
             base_row_offset=base_row_offset,
         )
+        return StructureResult(
+            cells=cells,
+            grid_source="vector_grid",
+            n_cols=max((c.column_index for c in cells), default=-1) + 1,
+            n_rows=max((c.row_index for c in cells), default=-1) + 1,
+        )
+
     frame = local_frame_for(page, region)
     units = _text_units_in_region(page, region, frame)
-    h_lines = _horizontal_lines(page)
-    v_lines = _vertical_lines(page)
+    if not units:
+        return StructureResult(cells=[], grid_source="empty", qc_codes=["NOT_A_TABLE"])
 
-    local_ys = [
-        frame.to_local((item[0] + item[2]) / 2.0, (item[1] + item[3]) / 2.0)[1]
-        for item in units
-    ]
-    local_xs = [
-        frame.to_local((item[0] + item[2]) / 2.0, (item[1] + item[3]) / 2.0)[0]
-        for item in units
-    ]
-    for x0, x1, y in h_lines:
-        if region.y0 - 4 <= y <= region.y1 + 4:
-            _seed_line_axes(
-                frame,
-                x0=x0,
-                y0=y,
-                x1=x1,
-                y1=y,
-                local_xs=local_xs,
-                local_ys=local_ys,
-            )
-    for y0, y1, x in v_lines:
-        if region.x0 - 4 <= x <= region.x1 + 4:
-            _seed_line_axes(
-                frame,
-                x0=x,
-                y0=y0,
-                x1=x,
-                y1=y1,
-                local_xs=local_xs,
-                local_ys=local_ys,
-            )
-
-    col_centers, row_centers = _cluster_axes(frame, local_xs, local_ys)
-    if not row_centers:
-        row_centers = [frame.height / 2.0]
-    if not col_centers:
-        col_centers = [frame.width / 2.0]
-
-    buckets: dict[tuple[int, int], list[TextUnit]] = {}
-    for item in units:
-        x0, y0, x1, y1, text = item[:5]
-        u, v = frame.to_local((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-        row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - v))
-        col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - u))
-        buckets.setdefault((row, col), []).append(item)
-
-    grid_has_title = any(
-        _TITLE_RE.match(item[4] or "") for items in buckets.values() for item in items
+    # 1) HPD
+    hpd_result = _hpd_structure(
+        page,
+        region,
+        frame,
+        units,
+        table_no=table_no,
+        caption_text=caption_text,
+        base_row_offset=base_row_offset,
     )
-    if caption_text:
-        cells = [
-            StructuredTableCell(
-                block_id=f"table:{table_no}:title",
-                role=BlockRole.TABLE_TITLE.value,
-                text=caption_text.strip(),
-                row_index=base_row_offset,
-                column_index=0,
-                column_span=len(col_centers),
-                bbox=(region.x0, max(region.y0 - 18.0, 0.0), region.x1, region.y0 + 2.0),
-            )
-        ]
-        row_offset = base_row_offset + 1
-    else:
-        cells = []
-        row_offset = base_row_offset
+    if hpd_result is not None:
+        return hpd_result
 
-    filled_by_row: dict[int, int] = {}
-    for (row, col), items in buckets.items():
-        filled_by_row[row] = filled_by_row.get(row, 0) + 1
+    # 2) 空隙投影
+    gutter = _gutter_structure(
+        page,
+        region,
+        frame,
+        units,
+        table_no=table_no,
+        caption_text=caption_text,
+        base_row_offset=base_row_offset,
+    )
+    if gutter.cells and "NOT_A_TABLE" not in gutter.qc_codes and gutter.n_cols >= 2:
+        return gutter
 
-    n_rows = len(row_centers)
-    n_cols = len(col_centers)
-    row_bands = _band_edges(row_centers, frame.height)
-    col_bands = _band_edges(col_centers, frame.width)
-    reading_reverse = frame.rotation == 90
-    for (row, col), items in sorted(buckets.items()):
-        text = compose_cell_text(items)
-        if not text:
-            continue
-        u0, u1 = col_bands[col]
-        v0, v1 = row_bands[row]
-        corners = [
-            frame.to_page(u0, v0),
-            frame.to_page(u1, v0),
-            frame.to_page(u0, v1),
-            frame.to_page(u1, v1),
-        ]
-        xs0 = min(p[0] for p in corners)
-        ys0 = min(p[1] for p in corners)
-        xs1 = max(p[0] for p in corners)
-        ys1 = max(p[1] for p in corners)
-        is_title = bool(_TITLE_RE.match(text))
-        header_row = 1 if (not caption_text and grid_has_title) else 0
-        role = _assign_role(
-            text,
-            row,
-            n_cols,
-            n_rows,
-            is_title=is_title,
-            header_row=header_row,
-            filled_in_row=filled_by_row.get(row, 0),
-        )
-        if caption_text and role == BlockRole.TABLE_TITLE.value:
-            continue
-        cells.append(
-            StructuredTableCell(
-                block_id=f"table:{table_no}:r{row + row_offset}c{col}",
-                role=role,
-                text=text,
-                row_index=row + row_offset,
-                column_index=col,
-                bbox=(xs0, ys0, xs1, ys1),
-                font_weight=_cell_font_weight(items),
-                font_size=_cell_font_size(items),
-            )
-        )
-    return cells
+    # 3) 旧中心聚类（标记 unsafe，翻译链不得落笔）
+    return _geometry_center_structure(
+        page,
+        region,
+        frame,
+        units,
+        table_no=table_no,
+        caption_text=caption_text,
+        base_row_offset=base_row_offset,
+    )
+
+
+# 兼容：旧名保留但标 deprecated；测试若仍 import 会得到恒等
+def _merge_column_clusters(centers: list[float]) -> list[float]:
+    """PLAN-048b：已废弃。保留空操作供旧测试导入，不再合并。"""
+    return sorted(centers)
 
 
 def _band_edges(centers: list[float], span: float) -> list[tuple[float, float]]:
@@ -724,18 +1508,29 @@ def table_grid_dimensions(
 ) -> tuple[int, int]:
     """Return (row_count, column_count) for manifest TableObject fields."""
 
-    cells = structure_table(
+    result = structure_table_ex(
         page,
         region,
         caption_text=caption_text,
         number=number,
         base_row_offset=base_row_offset,
     )
+    if result.n_rows or result.n_cols:
+        return result.n_rows, result.n_cols
+    cells = result.cells
     if not cells:
         return 0, 0
     max_row = max(cell.row_index + cell.row_span - 1 for cell in cells)
     max_col = max(cell.column_index + cell.column_span - 1 for cell in cells)
     return max_row + 1, max_col + 1
+
+
+# scan/translate 读取最近一次 structure 元数据（单线程扫描安全）
+_LAST_STRUCTURE_META: dict = {}
+
+
+def last_structure_meta() -> dict:
+    return dict(_LAST_STRUCTURE_META)
 
 
 def table_blocks_for_manifest(
@@ -746,13 +1541,20 @@ def table_blocks_for_manifest(
     number: int | None = None,
     base_row_offset: int = 0,
 ) -> list[TranslatableBlock]:
-    return [
-        cell.as_block()
-        for cell in structure_table(
-            page,
-            region,
-            caption_text=caption_text,
-            number=number,
-            base_row_offset=base_row_offset,
-        )
-    ]
+    global _LAST_STRUCTURE_META
+    result = structure_table_ex(
+        page,
+        region,
+        caption_text=caption_text,
+        number=number,
+        base_row_offset=base_row_offset,
+    )
+    _LAST_STRUCTURE_META = {
+        "grid_source": result.grid_source,
+        "qc_codes": list(result.qc_codes),
+        "mismatch_rate": result.mismatch_rate,
+        "n_cols": result.n_cols,
+        "n_rows": result.n_rows,
+        "table_number": int(number if number is not None else region.number),
+    }
+    return [cell.as_block() for cell in result.cells]

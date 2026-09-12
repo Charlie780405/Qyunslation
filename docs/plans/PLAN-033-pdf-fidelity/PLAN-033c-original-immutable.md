@@ -20,6 +20,7 @@ if _qy_new and _qy_Pimg(_qy_new).is_file():
 
 1. **停止替换输入**：BabelDOC 始终吃原始 `file_path`。`_pre_imgtr_origin_path` 继续保留。
 2. **译文后处理**：`do_translate_async_stream` 结束后，对**单语 PDF** 和**双语右侧页**跑 `translate_pdf_images`。禁止写回作为下次 BabelDOC 输入的那份文件。
+3. **横跨框须裁切**：并排双语页上 `translatable_regions` 常给出盖住左右两栏的矢量框；只按中心点 `>= 0.5` 会把译文图盖到原文。`_clip_rect_to_allowed` 把 crop/overlay 裁到右半页。
 
 只做第 1 刀会让图回到未译，算回归，禁止单独上线。
 

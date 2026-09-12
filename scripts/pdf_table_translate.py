@@ -98,9 +98,14 @@ def translate_pdf_tables(
     from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.scan_pdf import PdfStructureScanner
     from qyunslation.structure.table_qc import (
+        assert_grid_source_safe,
         assert_table_qc_clean,
+        detect_column_cluster_drift,
         evaluate_table_qc,
+        grid_source_of,
+        literature_paint_safe,
         source_residue_on_page,
+        QC_NOT_A_TABLE,
     )
     from qyunslation.structure.table_translate import TableTranslateError, translate_table_blocks
     from qyunslation.structure.table_writeback import (
@@ -109,6 +114,8 @@ def translate_pdf_tables(
         blocks_to_fit,
         paint_fitted_blocks,
         redact_source_blocks,
+        redact_table_region,
+        union_paint_bbox,
     )
 
     src_path = Path(src)
@@ -132,15 +139,18 @@ def translate_pdf_tables(
 
     profile = getattr(getattr(manifest, "document", None), "content_profile", None)
     profile_s = str(profile) if profile is not None else ""
-    isolate_residue = profile is ContentProfile.REGULATORY or profile_s == "REGULATORY"
     literature = profile in {
         ContentProfile.RESEARCH_ARTICLE,
         ContentProfile.REVIEW_ARTICLE,
     } or profile_s in {"RESEARCH_ARTICLE", "REVIEW_ARTICLE"}
-    if isolate_residue:
-        table_size_mode = "ladder"
-    elif literature:
+    # PLAN-046a：isolate 仅 REGULATORY；literature 走 source_p75，OVERFLOW 硬失败整表保留英文
+    isolate_residue = (
+        profile is ContentProfile.REGULATORY or profile_s == "REGULATORY"
+    )
+    if literature:
         table_size_mode = "source_p75"
+    elif isolate_residue:
+        table_size_mode = "ladder"
     else:
         table_size_mode = None
     normalize_table_sizes = table_size_mode is not None
@@ -173,6 +183,38 @@ def translate_pdf_tables(
                 )
                 continue
             try:
+                # PLAN-048c/d：grid_source 门禁；not_a_table 交图片链
+                src = grid_source_of(obj)
+                if src == "not_a_table":
+                    write_output_evidence(
+                        obj,
+                        status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                        reason_code="not_a_table",
+                        checks={"grid_source": src, "qc": [QC_NOT_A_TABLE]},
+                    )
+                    logger.info(
+                        "table %s NOT_A_TABLE — skip structure, leave for image chain",
+                        obj.semantic_id,
+                    )
+                    continue
+                assert_grid_source_safe(obj)
+                if literature and src in {"hpd", "gutter"} and not literature_paint_safe(blocks):
+                    write_output_evidence(
+                        obj,
+                        status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                        reason_code="literature_grid_unreliable",
+                        checks={"grid_source": src, "qc": ["HPD_GRID_UNRELIABLE"]},
+                    )
+                    logger.warning(
+                        "table %s skip paint: overlapping/fragment cells — leave BabelDOC",
+                        obj.semantic_id,
+                    )
+                    continue
+                # HPD/gutter 正路径跳过列簇漂移（碎片已由网格合并）
+                if src not in {"hpd", "gutter", "vector_grid"}:
+                    drift = detect_column_cluster_drift(blocks)
+                    if drift:
+                        raise TableTranslateError(f"TABLE_QC_HARD:[{drift!r}]")
                 translations = translate_table_blocks(blocks, worker)
                 results = fit_group(
                     blocks_to_fit(blocks, translations),
@@ -180,17 +222,33 @@ def translate_pdf_tables(
                     table_size_mode=table_size_mode,
                 )
                 records, hard = evaluate_table_qc(blocks, translations, results)
-                assert_table_qc_clean(records, hard, isolate_residue=isolate_residue)
-                redact_source_blocks(
-                    doc[page_index],
-                    blocks,
-                    x_min_frac=x_min_frac,
+                assert_table_qc_clean(
+                    records, hard, isolate_residue=isolate_residue, literature=literature
                 )
+                if literature and src in {"hpd", "gutter"}:
+                    wiped = redact_table_region(
+                        doc[page_index],
+                        union_paint_bbox(obj.bbox, blocks),
+                        x_min_frac=x_min_frac,
+                    )
+                    if not wiped:
+                        redact_source_blocks(
+                            doc[page_index],
+                            blocks,
+                            x_min_frac=x_min_frac,
+                        )
+                else:
+                    redact_source_blocks(
+                        doc[page_index],
+                        blocks,
+                        x_min_frac=x_min_frac,
+                    )
                 _codes, title, header, leftover = paint_fitted_blocks(
                     doc[page_index],
                     blocks,
                     results,
                     x_min_frac=x_min_frac,
+                    allow_leftover=not literature,
                 )
                 records, hard = evaluate_table_qc(
                     blocks, translations, results, leftover=leftover
@@ -201,7 +259,9 @@ def translate_pdf_tables(
                     )
                 )
                 hard = list(dict.fromkeys(hard))
-                assert_table_qc_clean(records, hard, isolate_residue=isolate_residue)
+                assert_table_qc_clean(
+                    records, hard, isolate_residue=isolate_residue, literature=literature
+                )
                 if leftover:
                     if x_min_frac and origin_doc is not None:
                         append_dual_continuation(
@@ -228,6 +288,7 @@ def translate_pdf_tables(
                         "continuation_rows": len(leftover),
                         "blocks": block_checks,
                         "cells": [record.as_dict() for record in records],
+                        "grid_source": src,
                     },
                 )
                 changed = True
@@ -237,6 +298,10 @@ def translate_pdf_tables(
                 message = str(exc)
                 if "TABLE_DIGIT_DRIFT" in message:
                     reason_code = "table_digit_drift"
+                elif "NOT_A_TABLE" in message:
+                    reason_code = "not_a_table"
+                elif "GEOMETRY_CENTER_UNSAFE" in message:
+                    reason_code = "geometry_center_unsafe"
                 elif "TABLE_" in message:
                     reason_code = "table_translate_failed"
                 else:
@@ -245,11 +310,73 @@ def translate_pdf_tables(
                     obj,
                     status=ExecutionStatus.FAILED_HARD,
                     reason_code=reason_code,
-                    checks={"error": message, "digits_preserved": False},
+                    checks={
+                        "error": message,
+                        "digits_preserved": False,
+                        "grid_source": grid_source_of(obj),
+                    },
                 )
         if touched:
             _persist(manifest, terminal_success=not failed)
+        # PLAN-048d：结构链失败的表走字号归一 + 漏译补翻（即使部分表已落笔）
+        if failed or not changed:
+            try:
+                from pdf_table_normalize import normalize_table_page
+                from qyunslation.structure.models import ExecutionStatus, ObjectType
+
+                for obj in tables:
+                    status = getattr(obj, "execution_status", None)
+                    if status is ExecutionStatus.TRANSLATED:
+                        continue
+                    if status is ExecutionStatus.EXPLICITLY_SKIPPED:
+                        checks = getattr(getattr(obj, "output_evidence", None), "checks", None) or {}
+                        if checks.get("grid_source") == "not_a_table" or (
+                            isinstance(checks.get("qc"), list) and "NOT_A_TABLE" in checks["qc"]
+                        ):
+                            continue  # 假阳性交图片链，不在此涂改
+                    try:
+                        page_no = int(str(obj.canvas_id).split(":")[-1])
+                    except Exception:
+                        continue
+                    page_index = page_no - 1
+                    if page_index < 0 or page_index >= len(doc):
+                        continue
+                    box = obj.bbox
+                    if box is None:
+                        continue
+                    x0, y0, x1, y1 = float(box.x0), float(box.y0), float(box.x1), float(box.y1)
+                    page = doc[page_index]
+                    width = float(page.rect.width)
+                    if x_min_frac:
+                        x0 = max(x0, width * float(x_min_frac))
+                    stats = normalize_table_page(
+                        page, (x0, y0, x1, y1), translator=worker
+                    )
+                    if stats.get("resized") or stats.get("translated"):
+                        changed = True
+                        logger.info(
+                            "table normalize fallback %s resized=%s translated=%s",
+                            obj.semantic_id,
+                            stats.get("resized"),
+                            stats.get("translated"),
+                        )
+            except Exception as exc:
+                logger.warning("table normalize skipped: %s", exc)
         if not changed:
+            try:
+                from pdf_table_normalize import normalize_failed_tables
+
+                norm = normalize_failed_tables(
+                    src_path,
+                    manifest,
+                    translator=worker,
+                    x_min_frac=x_min_frac,
+                )
+                if norm is not None and Path(norm).is_file():
+                    logger.info("table normalize wrote %s", norm)
+                    return Path(norm)
+            except Exception as exc:
+                logger.warning("table normalize skipped: %s", exc)
             return src_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         doc.save(dest, garbage=3, deflate=True)
