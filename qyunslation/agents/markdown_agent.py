@@ -72,7 +72,9 @@ You are a professional machine translation engine.
                                                     prompt))
 
     def update_glossary_dict(self, update_dict: dict | None):
-        if self.glossary_dict is None:
-            self.glossary_dict = {}
-        if update_dict is not None:
-            self.glossary_dict = self.glossary_dict | update_dict
+        # PLAN-034d0：经 Glossary.update 规范化，禁止裸 | 合并
+        from qyunslation.glossary.glossary import Glossary
+
+        gloss = Glossary(self.glossary_dict or {})
+        gloss.update(update_dict or {})
+        self.glossary_dict = gloss.glossary_dict

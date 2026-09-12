@@ -20,10 +20,18 @@ from qyunslation.glossary.governance import (
 DEFAULT_RUNTIME = Path("/home/dev/pdf2zh/glossaries/merged.csv")
 REPO_MERGED = GLOSSARIES_DIR / "merged.csv"
 HARVEST = GLOSSARIES_DIR / "auto-proper-nouns.csv"
+UI_INCREMENT = GLOSSARIES_DIR / "staging" / "ui-increment.csv"
 
 
 def build_merged_entries(*, include_harvest: bool = True) -> list[GlossaryEntry]:
     entries = list(load_curated_entries())
+    # PLAN-034d0：UI glossary_db.json 导出的 session 层（优先于 harvest）
+    if UI_INCREMENT.is_file():
+        entries.extend(
+            load_glossary_csv(
+                UI_INCREMENT, default_layer="session", curated_only=True, skip_junk=True
+            )
+        )
     if include_harvest and HARVEST.is_file():
         entries.extend(
             load_glossary_csv(HARVEST, default_layer="harvest", curated_only=False, skip_junk=True)
@@ -65,7 +73,17 @@ def main() -> int:
     path = sync_merged(
         runtime_path=args.runtime, include_harvest=not args.no_harvest
     )
-    d = build_merged_dict(harvest_path=None if args.no_harvest else HARVEST)
+    session_entries = (
+        load_glossary_csv(
+            UI_INCREMENT, default_layer="session", curated_only=True, skip_junk=True
+        )
+        if UI_INCREMENT.is_file()
+        else None
+    )
+    d = build_merged_dict(
+        harvest_path=None if args.no_harvest else HARVEST,
+        session_entries=session_entries,
+    )
     print(f"merged entries={len(d)} → {path}")
     if args.print_count:
         print(len(d))

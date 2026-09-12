@@ -614,6 +614,14 @@ class TranslationService:
         print(f"[{task_id}] {initial_log_msg}")
         log_history.append({"seq": 1, "message": initial_log_msg})
 
+        # PLAN-034d0：全工作流挂 SSOT glossary_dict；不写全表 custom_prompt
+        try:
+            from qyunslation.glossary.ssot import apply_ssot_to_payload
+
+            apply_ssot_to_payload(payload)
+        except Exception as exc:
+            print(f"[{task_id}] glossary_ssot apply failed (non-fatal): {exc}")
+
         try:
             loop = asyncio.get_running_loop()
             task = loop.create_task(
@@ -1151,10 +1159,11 @@ class TranslationService:
             )
             translator_args["glossary_generate_enable"] = payload.glossary_generate_enable
             translator_args["glossary_agent_config"] = build_glossary_agent_config()
+            # PLAN-034d0：SSOT 已在 start_translation 写入 payload.glossary_dict
             if not translator_args.get("glossary_dict"):
-                from qyunslation.glossary.static_csv import load_static_glossary
+                from qyunslation.extensions.glossary_db import load_glossary
 
-                translator_args["glossary_dict"] = load_static_glossary() or None
+                translator_args["glossary_dict"] = load_glossary() or None
             translator_config = DocxTranslatorConfig(**translator_args)
             translator_config.progress_tracker = progress_tracker
 
