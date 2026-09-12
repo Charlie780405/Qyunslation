@@ -30,6 +30,13 @@
 | V7 | 049g 后处理 `6ab18daa` mono | PASS | 表1/3 `cols_source=hpd`；表3 七列 x≈77/135/203/272/351/430/496；底线 74.8–514.8；font=`NotoSansSCStatic-Regular` |
 | V8 | 049h 表头按格 + DLQI 字号 | PASS | 表3 表头 剂量/访视/ADA/nAb/浓度/IGA/EASI 各列；Visit 仅一列；DLQI 8pt 两行 |
 | V9 | 049i N= 回写 / 禁拆行 / 表2 / EASI | PASS | 回放 raw/049h：表1 `(N=130)` y≈104；DLQI 不压瘙痒；表2 行 y=624/640/651/658；表3 访视 x≈135、浓度/IGA/EASI 分列 |
+| V10 | 合 main + 生产部署 | PASS | `main` `b5e1dc6`（049 merge `46baf41`）；`pdf2zh`/`qyunslation-office` active；`:7860` 200；sidecar 指纹一致 |
+
+## 生产
+
+- 远程：https://github.com/Charlie780405/Qyunslation/commit/b5e1dc6
+- 部署：`bash scripts/deploy-translate-stack.sh`（2026-09-12）
+- 服务：`pdf2zh.service` + `qyunslation-office.service` active
 
 ## 回归确认
 
