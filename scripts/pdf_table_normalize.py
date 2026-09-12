@@ -63,6 +63,7 @@ def normalize_table_page(
     *,
     translator=None,
     min_ratio: float = 0.75,
+    allow_translate: bool = True,
 ) -> dict:
     """对 page 上 rect 区域内的文字做字号归一，并补翻残留拉丁。
 
@@ -133,8 +134,13 @@ def normalize_table_page(
             new_size = target
             if abs(size - target) > 0.05:
                 resized += 1
-        # 漏译：纯拉丁且不在白名单
-        if not _CJK_RE.search(text) and _LATIN_WORD_RE.search(text) and not _is_whitelisted(text):
+        # 漏译：纯拉丁且不在白名单。PLAN-049c 文献窄表只调字号。
+        if (
+            allow_translate
+            and not _CJK_RE.search(text)
+            and _LATIN_WORD_RE.search(text)
+            and not _is_whitelisted(text)
+        ):
             if translator is not None:
                 try:
                     zh = translator(text)

@@ -197,6 +197,19 @@ def translate_pdf_tables(
                         obj.semantic_id,
                     )
                     continue
+                # PLAN-049a：文献三线表交还 BabelDOC，禁止整区擦除重画
+                if literature:
+                    write_output_evidence(
+                        obj,
+                        status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                        reason_code="literature_leave_babeldoc",
+                        checks={"grid_source": src, "qc": ["LITERATURE_LEAVE_BABELDOC"]},
+                    )
+                    logger.info(
+                        "table %s literature — skip paint, leave BabelDOC",
+                        obj.semantic_id,
+                    )
+                    continue
                 assert_grid_source_safe(obj)
                 if literature and src in {"hpd", "gutter"} and not literature_paint_safe(blocks):
                     write_output_evidence(
@@ -345,12 +358,18 @@ def translate_pdf_tables(
                     if box is None:
                         continue
                     x0, y0, x1, y1 = float(box.x0), float(box.y0), float(box.x1), float(box.y1)
+                    # PLAN-049c：文献只对窄矮表（表2量级）做字号归一，不补翻
+                    if literature and ((x1 - x0) >= 320.0 or (y1 - y0) >= 200.0):
+                        continue
                     page = doc[page_index]
                     width = float(page.rect.width)
                     if x_min_frac:
                         x0 = max(x0, width * float(x_min_frac))
                     stats = normalize_table_page(
-                        page, (x0, y0, x1, y1), translator=worker
+                        page,
+                        (x0, y0, x1, y1),
+                        translator=None if literature else worker,
+                        allow_translate=not literature,
                     )
                     if stats.get("resized") or stats.get("translated"):
                         changed = True
@@ -362,7 +381,60 @@ def translate_pdf_tables(
                         )
             except Exception as exc:
                 logger.warning("table normalize skipped: %s", exc)
+        # PLAN-049e：列居中必须在字号归一之后，避免 insert 回 x0
+        if literature and origin_doc is not None:
+            try:
+                from pdf_table_column_center import (
+                    center_table_region,
+                    should_center_literature_table,
+                )
+
+                for obj in tables:
+                    ev = getattr(obj, "output_evidence", None)
+                    checks = getattr(ev, "checks", None) or {}
+                    box = obj.bbox
+                    if box is None:
+                        continue
+                    if not should_center_literature_table(checks, box):
+                        continue
+                    try:
+                        page_no = int(str(obj.canvas_id).split(":")[-1])
+                    except Exception:
+                        continue
+                    page_index = page_no - 1
+                    if page_index < 0 or page_index >= len(doc) or page_index >= len(origin_doc):
+                        continue
+                    width = float(doc[page_index].rect.width)
+                    x_shift = width * float(x_min_frac) if x_min_frac else 0.0
+                    stats = center_table_region(
+                        doc[page_index],
+                        origin_doc[page_index],
+                        (float(box.x0), float(box.y0), float(box.x1), float(box.y1)),
+                        x_shift=x_shift,
+                    )
+                    if stats.get("moved"):
+                        changed = True
+                        merged = dict(checks)
+                        merged["column_center"] = stats
+                        write_output_evidence(
+                            obj,
+                            status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                            reason_code=getattr(obj, "reason_code", None) or "literature_leave_babeldoc",
+                            checks=merged,
+                        )
+                        logger.info(
+                            "table %s column-center moved=%s rows=%s",
+                            obj.semantic_id,
+                            stats.get("moved"),
+                            stats.get("rows"),
+                        )
+            except Exception as exc:
+                logger.warning("table column center skipped: %s", exc)
+            if changed and touched:
+                _persist(manifest, terminal_success=not failed)
         if not changed:
+            if literature:
+                return src_path
             try:
                 from pdf_table_normalize import normalize_failed_tables
 
