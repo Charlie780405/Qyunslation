@@ -37,3 +37,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-12 | SK-Q004 进程边界指纹门禁；SK-Q005 never-drop；SK-Q008 capture+hooks |
 | 2026-09-12 | 登记 SK-Q009 table-translation-fidelity（PLAN-048 HPD 网格） |
 | 2026-09-12 | promote SIG-INBOX-UNMATCHED → SK-Q008（PLAN-047g） |
+| 2026-09-13 | 复活 PLAN-034 医药 MVP 纲领落盘（文档阶段；Skill 待 034d0 实现后沉淀） |
