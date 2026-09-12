@@ -30,6 +30,10 @@ METHOD_047D = f'''
                     return float(getattr(chars[0], "font_size", 0) or 0)
             return 0.0
 
+        def _numeric_cell(text):
+            t = (text or "").strip()
+            return bool(t) and any(ch.isdigit() for ch in t) and len(t) <= 20
+
         def _merge(a, b):
             a_text = (a.unicode or "").rstrip()
             b_text = (b.unicode or "").strip()
@@ -83,6 +87,12 @@ METHOD_047D = f'''
             if not (a_near_right or b_near_left or b_is_orphan):
                 i += 1
                 continue
+            # PLAN-049b：同行短数字是表单元格，不是行尾 of
+            if float(b.box.x) >= float(a.box.x2) - 2.0 and (
+                _numeric_cell(a_text) or _numeric_cell(b_text)
+            ):
+                i += 1
+                continue
             _merge(a, b)
             del paragraphs[i + 1]
 
@@ -120,6 +130,9 @@ METHOD_047D = f'''
                     j += 1
                     continue
                 if bw >= 40.0 or len(b_text) > 8:
+                    j += 1
+                    continue
+                if _numeric_cell(b_text) or _numeric_cell(a_text):
                     j += 1
                     continue
                 if b_text and b_text[-1] in _END and len(b_text) > 3:

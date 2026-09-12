@@ -4,7 +4,10 @@ description: >-
   文献/期刊 PDF 表格译文保真全链：区域识别→HPD 逻辑网格→文字层对齐→翻译→字号→QC→落笔。
   触发：表格崩了、串格、列并了、漏译、字号不统一、与原文格式不对应、无线表、三线表、
   期刊表、COLUMN_CLUSTER_DRIFT、HPD 网格、图被当成表、NOT_A_TABLE、GEOMETRY_CENTER_UNSAFE、
-  HPD_GRID_MISMATCH、table normalize、.tbltr、.tblnorm、PLAN-048、SK-Q009。
+  HPD_GRID_MISMATCH、table normalize、.tbltr、.tblnorm、PLAN-048、PLAN-049、PLAN-049e、PLAN-049f、
+  LITERATURE_LEAVE_BABELDOC、交还 BabelDOC、列内居中、居中对齐、数值贴左、全角括号、
+  字母被拉开、遮盖、串行、NRS 拆行、缺底线、字体不统一、字体缺失、HPD 补全、
+  PLAN-049g、PLAN-049h、PLAN-049i、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、SK-Q009。
 ---
 
 # 表格类翻译保真（SK-Q009）
@@ -81,17 +84,55 @@ description: >-
 | 修法 | 失败走 `pdf_table_normalize` 角色分带 p75 + 漏译补翻 |
 | 判据 | 表体字号种类 ≤3；拉丁漏译率下降 |
 
+### H 列内居中（049e）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 字都在，数值贴左列（`40阴性 90.0` / `37.1 38.9 38.3` 连排） |
+| 先查 | 原文同行数字是否已在分列 x 带；译文是否整行一段 |
+| 修法 | HPD **格**落笔（含表头关键词入槽）；数据 Visit 锁一列；禁止表头原位 restyle |
+| 判据 | 表3 表头 7 槽各在列中带；`第N周`/`安全性随访` 同 Visit 列；浓度中心 ≠ IGA 中心 |
+
+### I 表内西文半角 + 一族字体（049f/g）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | `Q 2 W` / `（13.3）` / SourceHan+Univers+helv 混用 / 表3 缺字方框 |
+| 先查 | 落笔是否 `qy-tbl`（NotoSansSC）；有无 `normalize_ascii` |
+| 修法 | 全角折半角；整格 NotoSansSC（含半角拉丁）；origin `Q4W` 覆盖 dest `每4周` |
+| 判据 | 表内无全角括号；无 china-s/helv 混排；无缺字 |
+
+### K 表头 N= / 拆行 / 小表对行（049i）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表1 丢掉 `(N=130)`；DLQI 的 `N=` 压到下一行；表2 行距乱；表3 访视错列、浓度与 IGA 挤一点、丢 EASI |
+| 先查 | 表头 N= 是否被 skip；上一行 `band=8` 是否吃到 N= 的 y；`_fit_cell_lines` 是否无溢出也拆行；`not_a_table` 是否整表跳过居中；spatial 末列是否空 |
+| 修法 | 表头 `N=` 按格回写 `(N=130)`；擦除带夹邻行中点；仅格宽不够才拆行；矮窄 `not_a_table`（表2）仍按原文行 y 居中；七列强制 EASI 槽，spatial 丢末列则改 `_assign`；HPD 反转列丢掉；dest 行少则按 origin 顺序舀段流 |
+| 判据 | 表1 y≈108 有三组 `N=`；DLQI 不侵入瘙痒行；表2 行 y 跟原文（容差 2pt）；表3 `第52周`/`安全性随访` 与「访视」同列；EASI 有独立 x 中心 |
+
+### J 三线从原文补（049g）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表1 缺底线 / 底线右段被截 |
+| 先查 | 原文 `table_rule_lines` 最底一条 x 跨度 vs 译文 |
+| 修法 | `restore_rule_lines` 按原文 drawings 重描；不整区擦线 |
+| 判据 | 译文底线 x1 与原文同宽（容差 4pt） |
+
 ### G 禁令
 
 - 运行时 `page.find_tables()`（与 SK-Q003 一致）
 - 把 HPD 脚注 OCR 原文写入交付译文
 - 对 `geometry_center` 网格落笔
+- 文献整区 `redact_table_region` + `paint_fitted_blocks`
 - 实样 PDF/截图入库（用 `QYUNSLATION_PLAN048_SAMPLE`）
 
 ## 降级阶梯
 
-1. HPD 网格 + 三闸门过 → 落笔 `.tbltr`
-2. `NOT_A_TABLE` → 跳结构，交图片链
+0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**
+1. 监管表单：HPD 网格 + 三闸门过 → 落笔 `.tbltr`
+2. `NOT_A_TABLE` → 大图交图片链；**表2 量级矮窄框仍列居中对行**（049i）
 3. 闸门未过 / `geometry_center` → 不落笔，字号归一
 4. HPD 不可达 → 空隙投影；列数可疑 → 退 3
 5. 全失败 → 只字号归一 `.tblnorm`
@@ -104,6 +145,7 @@ description: >-
 | `QYUNSLATION_HPD_BASE_URL` | 默认 `http://100.67.66.123:8120` |
 | `QYUNSLATION_HPD_GRID_CACHE` | 缓存目录 |
 | `QYUNSLATION_PLAN048_SAMPLE` | 实样 PDF 路径（verify 可选） |
+| `QYUNSLATION_FONT` | 表内一族字体，默认 `NotoSansSC-Regular.otf` |
 
 ## 相关文件
 
@@ -111,5 +153,5 @@ description: >-
 - `qyunslation/structure/table_structure.py`（`structure_table_ex` / `align_hpd_grid`）
 - `qyunslation/structure/table_qc.py`（三闸门 + `assert_grid_source_safe`）
 - `qyunslation/structure/tables.py`（`_expand_region_left`）
-- `scripts/pdf_table_translate.py` / `scripts/pdf_table_normalize.py`
+- `scripts/pdf_table_translate.py` / `scripts/pdf_table_normalize.py` / `scripts/pdf_table_column_center.py`
 - 踩坑：`pitfalls.md`
