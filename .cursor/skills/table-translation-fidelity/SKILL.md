@@ -7,7 +7,7 @@ description: >-
   HPD_GRID_MISMATCH、table normalize、.tbltr、.tblnorm、PLAN-048、PLAN-049、PLAN-049e、PLAN-049f、
   LITERATURE_LEAVE_BABELDOC、交还 BabelDOC、列内居中、居中对齐、数值贴左、全角括号、
   字母被拉开、遮盖、串行、NRS 拆行、缺底线、字体不统一、字体缺失、HPD 补全、
-  PLAN-049g、PLAN-049h、PLAN-049i、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、SK-Q009。
+  PLAN-049g、PLAN-049h、PLAN-049i、PLAN-049j、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、粘连、90.0111、SK-Q009。
 ---
 
 # 表格类翻译保真（SK-Q009）
@@ -111,6 +111,15 @@ description: >-
 | 修法 | 表头 `N=` 按格回写 `(N=130)`；擦除带夹邻行中点；仅格宽不够才拆行；矮窄 `not_a_table`（表2）仍按原文行 y 居中；七列强制 EASI 槽，spatial 丢末列则改 `_assign`；HPD 反转列丢掉；dest 行少则按 origin 顺序舀段流 |
 | 判据 | 表1 y≈108 有三组 `N=`；DLQI 不侵入瘙痒行；表2 行 y 跟原文（容差 2pt）；表3 `第52周`/`安全性随访` 与「访视」同列；EASI 有独立 x 中心 |
 
+### L 粘连切分 / 七列收口（049j）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | `90.0111`/`20.422`；表头无 IGA/EASI；第二行只剩 `Q2W`；`Q4WS`+`afetyFU` |
+| 先查 | `split_cells` 是否把 `90.011.2` 切成 `90.011`+`2`；`header_slots_from_blob(n=6)`；pretreat 是否拆 `Q4WSafety` |
+| 修法 | 按 origin 格形态（int/dec1/dec2）剥 token；pretreat 拆剂量粘连与小数粘连；`n_cols>=6` 强制七槽；空行从 blob 补 |
+| 判据 | 首行浓度=`90.0`、IGA=`1`、EASI=`11.2`；无三位以上小数粘连；七表头各在列中带 |
+
 ### J 三线从原文补（049g）
 
 | 项 | 内容 |
@@ -130,7 +139,7 @@ description: >-
 
 ## 降级阶梯
 
-0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**
+0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**；**049j origin 形态剥 token、粘连切分**
 1. 监管表单：HPD 网格 + 三闸门过 → 落笔 `.tbltr`
 2. `NOT_A_TABLE` → 大图交图片链；**表2 量级矮窄框仍列居中对行**（049i）
 3. 闸门未过 / `geometry_center` → 不落笔，字号归一

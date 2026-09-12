@@ -1,6 +1,6 @@
 # PLAN-049：文献三线表交还 BabelDOC
 
-> 状态：**已实现**（049e–i）+ **049i N= 回写 / 禁拆行压邻 / 表2 对行 / EASI 七列**
+> 状态：**已实现**（049e–j）+ **049j 粘连切分 / 七列收口**
 > 日期：2026-09-12
 > 前置：[PLAN-046](../PLAN-046-literature-structure-fidelity/PLAN-046-literature-structure-fidelity.md)
 > Skill：[SK-Q009](../../../.cursor/skills/table-translation-fidelity/SKILL.md)
@@ -46,6 +46,7 @@ ljae439 第一次译稿（BabelDOC，无 `.tbltr`）表 1/3 列齐可读；047d 
 | 049g | [PLAN-049g-hpd-font-rules.md](./PLAN-049g-hpd-font-rules.md) | HPD 补列；Noto 统一字体；原文三线 |
 | 049h | [PLAN-049h-hpd-cell-write.md](./PLAN-049h-hpd-cell-write.md) | 表头按格写；字号地板；Visit 锁列 |
 | 049i | [PLAN-049i-n-eq-overlap-easi.md](./PLAN-049i-n-eq-overlap-easi.md) | N= 回写；禁拆行压邻；表2 对行；EASI 七列 |
+| 049j | [PLAN-049j-table3-token-unglue.md](./PLAN-049j-table3-token-unglue.md) | 粘连切分；origin 形态剥 token；七槽收口 |
 
 ## 变更文件清单
 
