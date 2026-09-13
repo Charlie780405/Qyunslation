@@ -25,6 +25,7 @@ qyunslation/output/
 .vite
 # Environment variables
 .env
+var/oidc/
 
 # PLAN-034h release fingerprints (local only)
 artifacts/
