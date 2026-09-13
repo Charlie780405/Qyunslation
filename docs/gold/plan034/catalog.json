@@ -1,0 +1,446 @@
+{
+  "schema_version": "1.0.0",
+  "plan": "PLAN-034a1",
+  "description": "Pharma gold catalog; binaries under QYUNSLATION_PLAN034_GOLD_ROOT. tags: real|synthetic",
+  "entries": [
+    {
+      "id": "L-033-elsevier-ad",
+      "class": "L",
+      "title": "PLAN-033 Elsevier AD 11-page literature sample",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "c88ea994746e13904ed012943130896426b8812f939ae14917e1c48f59b2f8dc",
+      "relpath": "plan033-elsevier-ad.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "plan033",
+        "seed"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-ljae439",
+      "class": "L",
+      "title": "ljae439 tralokinumab literature PDF",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "8e9893b21e6aab4a057ba730eba40f6a9bd696f3538ed05ffc3fc5eb8470f10c",
+      "relpath": "ljae439.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "table3",
+        "seed"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-nature-comm-53384",
+      "class": "L",
+      "title": "Nature Communications 53384 literature fixture",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "566f97dd5c43e3a8c5729c25ad5004fe9e6995a6be4ad95fe64c9f18b5e37723",
+      "relpath": "L-nature-comm-53384.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "fixture"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-cai-2025-cont",
+      "class": "L",
+      "title": "CAI 2025 continued table literature fixture",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "b5ec069391306f5a1dd3155ae60ba5c25e3205d8b74ac4a617d3214158ebb0a8",
+      "relpath": "L-cai-2025-cont.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "fixture"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-nejm-392-12",
+      "class": "L",
+      "title": "NEJM 2025 vol 392 issue 12 fulltext attachment",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "c6ff37204a809d8522141c3c84e2f4486e5ab282bf6c3dc848f08f66de826ed3",
+      "relpath": "L-nejm-392-12.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "attachment"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-lancet-rm-13-1",
+      "class": "L",
+      "title": "Lancet Respir Med 2025 vol 13 issue 1 fulltext attachment",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "a78c4f1a294ed65b4f32ad84362a6296afa63cc9ca8e18e74e63cfbb693ea649",
+      "relpath": "L-lancet-rm-13-1.pdf",
+      "tags": [
+        "real",
+        "literature",
+        "attachment"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-07",
+      "class": "L",
+      "title": "Literature gold placeholder 7",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "7bd25cd9afe6037a4c66de23463489be27bcfc10fab47503cd0daf055df9a982",
+      "relpath": "L-07.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-08",
+      "class": "L",
+      "title": "Literature gold placeholder 8",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "92b23060d4d6ed6a1f5ff8cdcb1332b41cedf3f491030f6803e9b8a63733f7af",
+      "relpath": "L-08.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-09",
+      "class": "L",
+      "title": "Literature gold placeholder 9",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "509c0fb4d6783fff2274d4127e4c07028a82e5214e83a2fcef7173fba65687ad",
+      "relpath": "L-09.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "L-10",
+      "class": "L",
+      "title": "Literature gold placeholder 10",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "16aa93d279c1f6251c80efabb56f24b574237e9f2febbb1685e038448d291fbe",
+      "relpath": "L-10.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-qx027n-qna",
+      "class": "C",
+      "title": "QX027N clinical QnA slide deck (not strict CSP)",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "b2ab68c69ad0aa88cdd5269a9a1a0541b400f2e0c3e45c472b50ba882cba977b",
+      "relpath": "C-qx027n-qna.pdf",
+      "tags": [
+        "real",
+        "clinical-qna"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-fda-pind",
+      "class": "C",
+      "title": "FDA responses on PIND scanned regulatory correspondence",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "dae7401230ca270f1cedfa2052235dba5952d4f0a577e91dc84c36c0ba7b9cb4",
+      "relpath": "C-fda-pind.pdf",
+      "tags": [
+        "real",
+        "pind"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-fda-pind-ocr",
+      "class": "C",
+      "title": "FDA responses on PIND HPD-OCR layer PDF",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "ecdffaeafce7d9dfb6846ef402a2c81e485874438c418110fa7e0dedb3706bdc",
+      "relpath": "C-fda-pind-ocr.pdf",
+      "tags": [
+        "real",
+        "pind",
+        "ocr"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-04",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-04",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "c4f19f2d379d00846c22129587cb3686d8c03abf6fac538b0d2a839ec555fd61",
+      "relpath": "C-04.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-05",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-05",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "10d7ce87fb899f33ba3ad2c871204241c365cf5ed0adbf2ec225b51f0130537f",
+      "relpath": "C-05.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-06",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-06",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "350baacdb20f4754acbeac06ce32ab3d71d9af24a2f5d45560fc79b6d257603e",
+      "relpath": "C-06.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-07",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-07",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "8bcfd9e7764c311c5fec97e66508c4c4fa9369e670ea1631011ee7e252932340",
+      "relpath": "C-07.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-08",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-08",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "a02d62ca867d06523da2118160c724cfade247a0833e3930c43adc9fe2399645",
+      "relpath": "C-08.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-09",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-09",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "4c23c8c3081f8a0735dd717e344046890036a445c608876170d05ceb8cbff0fe",
+      "relpath": "C-09.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "C-10",
+      "class": "C",
+      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-10",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "e3042cf111385bb114c681cd932b4d2d72ddc4a212023daf986d7fbdfa3c89b5",
+      "relpath": "C-10.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-01",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 01",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "75476d7b0d2744db34b447b2c95e552e1c261c72e647475568d30eb348775adb",
+      "relpath": "R-01.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-02",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 02",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "81b9342e3611296edb33e09ee6d2a17e4b407e2baa3724c8a0d4caed5b0e4f69",
+      "relpath": "R-02.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-03",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 03",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "40faba6676d0c228267f39ebf16ca1efc760a87daf13cfa0ab9b4cb3b5544b22",
+      "relpath": "R-03.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-04",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 04",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "050ec8a93492ed5e0eb783c7771d96a9438e0e251bfa55a69f43b96c95aec30a",
+      "relpath": "R-04.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-05",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 05",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "22a1fe6a91d3ef8ad910a01052ab019e10841c941bc68e5c52486c8e5a335dbb",
+      "relpath": "R-05.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-06",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 06",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "596ba2257f73301bfea5e22b0514bc13d099235fb2fbbb089d7c760eff6d257a",
+      "relpath": "R-06.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-07",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 07",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "c9fc0e952753b1a7b0ad247b16fc37ac69dacc8c21f02b47c41b7347024242f8",
+      "relpath": "R-07.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-08",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 08",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "46451ead1b448cab061747d0f8f798fb6ad188d87bedf72ba179d93194823f32",
+      "relpath": "R-08.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-09",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 09",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "a528135d5df4f9ed40758b311d67f3d771279c13e411e3d4f1808a65c1b685ca",
+      "relpath": "R-09.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "R-10",
+      "class": "R",
+      "title": "CTD Module 2 Quality Overall Summary placeholder 10",
+      "format": "pdf",
+      "lang_pair": "en→zh",
+      "sha256": "ea7c29d5f635e044bb1f4ac23b9e642d21b85fe94179d0b302dd69ccb41371d5",
+      "relpath": "R-10.pdf",
+      "tags": [
+        "synthetic",
+        "synthetic-slot",
+        "ctd-m2"
+      ],
+      "status": "ready"
+    }
+  ]
+}

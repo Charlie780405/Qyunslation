@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PLAN-034g 审校工作台</title>
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <meta name="theme-color" content="#0b3d5c" />
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #111; }
+    body { margin: 1rem auto; max-width: 1100px; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    label { font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.2rem; }
+    input, select, textarea, button { font: inherit; padding: 0.35rem 0.5rem; }
+    button { cursor: pointer; }
+    .grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .card { border: 1px solid #ccc; border-radius: 6px; padding: 0.75rem; background: #fafafa; }
+    .seg { border-bottom: 1px solid #ddd; padding: 0.4rem 0; cursor: pointer; }
+    .seg.active { background: #e8f0fe; }
+    .muted { color: #666; font-size: 0.8rem; }
+    pre { white-space: pre-wrap; background: #111; color: #eee; padding: 0.5rem; border-radius: 4px; font-size: 0.75rem; max-height: 220px; overflow: auto; }
+    .banner { background: #fff3cd; border: 1px solid #ffc107; padding: 0.5rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
+    .ok { color: #0a7; }
+    .err { color: #c00; }
+  </style>
+</head>
+<body>
+  <h1>人工审校工作台（PLAN-034g）</h1>
+  <div class="banner">
+    开发旁路：设置 <code>QYUNSLATION_DEV_AUTH_BYPASS=1</code>，并用下方 Dev 头。
+    生产环境禁用旁路，OIDC 见 PLAN-034h。原始文件哈希只读，审校只改派生译文。
+  </div>
+
+  <div class="row">
+    <label>API 基址 <input id="base" value="" size="28" placeholder="http://127.0.0.1:8010" /></label>
+    <label>X-Dev-User <input id="user" value="reviewer" size="12" /></label>
+    <label>X-Dev-Tenant <input id="tenant" value="dev" size="10" /></label>
+    <label>Job ID <input id="jobId" size="36" placeholder="先创建 project/job" /></label>
+    <button type="button" id="btnLoad">刷新队列</button>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <strong>入队</strong>
+    <div class="row">
+      <label>policy
+        <select id="policy">
+          <option>HUMAN_REVIEW</option>
+          <option>TRANSLATE</option>
+          <option>TERM_ONLY</option>
+          <option>PRESERVE</option>
+        </select>
+      </label>
+      <label>role <input id="role" value="body" size="10" /></label>
+      <label>block_id <input id="blockId" value="" size="12" /></label>
+    </div>
+    <label style="width:100%">源文 <textarea id="source" rows="2" style="width:100%"></textarea></label>
+    <label style="width:100%">机译 <textarea id="machine" rows="2" style="width:100%"></textarea></label>
+    <button type="button" id="btnEnqueue">入队</button>
+    <span id="enqueueMsg" class="muted"></span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <strong>队列</strong>
+      <div class="row">
+        <label>status
+          <select id="filterStatus">
+            <option value="">全部</option>
+            <option value="pending">pending</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+          </select>
+        </label>
+      </div>
+      <div id="queue"></div>
+    </div>
+    <div class="card">
+      <strong>句段</strong>
+      <div id="detail" class="muted">选择左侧句段</div>
+      <div id="detailBody" style="display:none">
+        <p class="muted" id="meta"></p>
+        <label>修订译文 <textarea id="revised" rows="4" style="width:100%"></textarea></label>
+        <label>批注 <textarea id="noteBody" rows="2" style="width:100%"></textarea></label>
+        <div class="row">
+          <button type="button" id="btnNote">保存批注</button>
+          <button type="button" id="btnApprove">批准 → TM</button>
+          <button type="button" id="btnApproveTerm">批准 + 术语候选</button>
+          <button type="button" id="btnReject">驳回</button>
+          <button type="button" id="btnSuggest">建议面板</button>
+          <button type="button" id="btnDiff">版本 diff</button>
+        </div>
+        <pre id="out"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let current = null;
+    let segments = [];
+
+    function baseUrl() {
+      const v = $("base").value.trim();
+      if (v) return v.replace(/\/$/, "");
+      return location.origin;
+    }
+    function headers() {
+      return {
+        "Content-Type": "application/json",
+        "X-Dev-User": $("user").value.trim() || "reviewer",
+        "X-Dev-Tenant": $("tenant").value.trim() || "dev",
+      };
+    }
+    async function api(path, opts = {}) {
+      const res = await fetch(baseUrl() + path, {
+        ...opts,
+        headers: { ...headers(), ...(opts.headers || {}) },
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+      if (!res.ok) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+      return data;
+    }
+    function show(obj) {
+      $("out").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+    }
+    function renderQueue() {
+      const q = $("queue");
+      q.replaceChildren();
+      if (!segments.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "空";
+        q.appendChild(empty);
+        return;
+      }
+      for (const s of segments) {
+        const div = document.createElement("div");
+        div.className = "seg" + (current && current.id === s.id ? " active" : "");
+        const head = document.createElement("div");
+        const code = document.createElement("code");
+        code.textContent = s.status || "";
+        head.appendChild(code);
+        head.appendChild(document.createTextNode(" " + (s.policy || "")));
+        const src = document.createElement("div");
+        src.className = "muted";
+        src.textContent = (s.source_text || "").slice(0, 80);
+        div.appendChild(head);
+        div.appendChild(src);
+        div.onclick = () => selectSeg(s);
+        q.appendChild(div);
+      }
+    }
+    function selectSeg(s) {
+      current = s;
+      $("detailBody").style.display = "block";
+      $("detail").textContent = s.id;
+      $("meta").textContent = `job=${s.job_id} sha=${s.source_sha256.slice(0, 12)}… policy=${s.policy} role=${s.role} v=${s.version}`;
+      $("revised").value = s.revised_text || s.machine_text || "";
+      renderQueue();
+    }
+    async function loadQueue() {
+      const st = $("filterStatus").value;
+      const job = $("jobId").value.trim();
+      let path = "/api/v1/review/queue?";
+      if (st) path += "status=" + encodeURIComponent(st) + "&";
+      if (job) path += "job_id=" + encodeURIComponent(job) + "&";
+      segments = await api(path);
+      renderQueue();
+      show({ loaded: segments.length });
+    }
+    $("btnLoad").onclick = () => loadQueue().catch((e) => show(String(e)));
+    $("filterStatus").onchange = () => loadQueue().catch((e) => show(String(e)));
+    $("btnEnqueue").onclick = async () => {
+      try {
+        const jobId = $("jobId").value.trim();
+        if (!jobId) throw new Error("需要 Job ID");
+        const data = await api("/api/v1/review/enqueue", {
+          method: "POST",
+          body: JSON.stringify({
+            job_id: jobId,
+            segments: [{
+              source_text: $("source").value,
+              machine_text: $("machine").value,
+              policy: $("policy").value,
+              role: $("role").value,
+              block_id: $("blockId").value || null,
+            }],
+          }),
+        });
+        $("enqueueMsg").textContent = `created=${data.count} skipped=${(data.skipped || []).length}`;
+        await loadQueue();
+        show(data);
+      } catch (e) {
+        $("enqueueMsg").textContent = String(e);
+        show(String(e));
+      }
+    };
+    async function decide(action, promote) {
+      if (!current) return;
+      const data = await api(`/api/v1/review/segments/${current.id}/decide`, {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          revised_text: $("revised").value,
+          promote_term: !!promote,
+        }),
+      });
+      show(data);
+      await loadQueue();
+    }
+    $("btnApprove").onclick = () => decide("approve", false).catch((e) => show(String(e)));
+    $("btnApproveTerm").onclick = () => decide("approve", true).catch((e) => show(String(e)));
+    $("btnReject").onclick = () => decide("reject", false).catch((e) => show(String(e)));
+    $("btnNote").onclick = async () => {
+      try {
+        if (!current) return;
+        const data = await api(`/api/v1/review/segments/${current.id}/note`, {
+          method: "POST",
+          body: JSON.stringify({ body: $("noteBody").value }),
+        });
+        show(data);
+        await loadQueue();
+      } catch (e) { show(String(e)); }
+    };
+    $("btnSuggest").onclick = async () => {
+      try {
+        if (!current) return;
+        const q = new URLSearchParams({
+          source_text: current.source_text,
+          target_text: $("revised").value || current.machine_text || "",
+        });
+        show(await api("/api/v1/review/suggestions?" + q.toString()));
+      } catch (e) { show(String(e)); }
+    };
+    $("btnDiff").onclick = async () => {
+      try {
+        if (!current) return;
+        show(await api("/api/v1/review/diff?segment_id=" + encodeURIComponent(current.id)));
+      } catch (e) { show(String(e)); }
+    };
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/static/sw-034h.js").catch(() => {});
+    }
+  </script>
+</body>
+</html>

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .models import TranslationPolicy, TranslatableBlock
+from .models import TranslationPolicy, TranslatableBlock, DEFERRED_TRANSLATION_POLICIES
 from .protect import missing_protected_tokens, protect_tokens, restore_tokens
 from .table_cell_policy import assert_digit_tokens_preserved
 
@@ -63,6 +63,8 @@ def translate_table_blocks(
             policy = _policy_value(block)
             if policy is TranslationPolicy.PRESERVE:
                 continue
+            if policy in DEFERRED_TRANSLATION_POLICIES:
+                continue
             src = block.source_text or ""
             phase = normalize_phase_label(src)
             if phase != src and phase.startswith("Phase"):
@@ -79,6 +81,10 @@ def translate_table_blocks(
     for block in blocks:
         policy = _policy_value(block)
         if policy is TranslationPolicy.PRESERVE:
+            preserved[block.block_id] = block.source_text
+            continue
+        if policy in DEFERRED_TRANSLATION_POLICIES:
+            # PLAN-034b：不送 LLM；保留源文，完整 TERM_ONLY/审校走后续子计划
             preserved[block.block_id] = block.source_text
             continue
         if block.block_id in controlled:

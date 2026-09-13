@@ -26,6 +26,9 @@ qyunslation/output/
 # Environment variables
 .env
 
+# PLAN-034h release fingerprints (local only)
+artifacts/
+
 # 运行时术语表数据（用户自定义术语，运行时生成）
 glossary_db.json
 translation_cache.json
@@ -40,6 +43,7 @@ glossaries/merged.csv
 
 # 本地 PLAN 验收产物（verify-008/009/010 金样；体积大，不入库）
 deliverables/
+tmp-delivery/
 
 
 # PLAN 实样暂存（不入库）

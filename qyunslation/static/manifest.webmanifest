@@ -1,0 +1,19 @@
+{
+  "name": "Qyunslation",
+  "short_name": "Qyunslation",
+  "description": "医药文档翻译与审校（PLAN-034h PWA 壳）",
+  "start_url": "/static/review.html",
+  "scope": "/static/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b3d5c",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/static/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon",
+      "purpose": "any"
+    }
+  ]
+}

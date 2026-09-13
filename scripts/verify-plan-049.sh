@@ -28,7 +28,8 @@ PLAN_DIR="$ROOT/docs/plans/PLAN-049-literature-table-leave-babeldoc"
 for f in PLAN-049a-skip-literature-paint.md PLAN-049b-047d-numeric-guard.md \
   PLAN-049c-table2-font-only.md PLAN-049d-verify-docs.md PLAN-049e-column-center.md \
   PLAN-049f-latin-ascii-origin-rows.md PLAN-049g-hpd-font-rules.md \
-  PLAN-049h-hpd-cell-write.md PLAN-049i-n-eq-overlap-easi.md; do
+  PLAN-049h-hpd-cell-write.md PLAN-049i-n-eq-overlap-easi.md \
+  PLAN-049j-table3-token-unglue.md; do
   [[ -f "$PLAN_DIR/$f" ]] && pass "$f" || fail "missing $f"
 done
 
@@ -85,6 +86,14 @@ else
   fail "049i missing n-eq/bands/table2"
 fi
 
+if grep -q 'assign_by_origin_shapes' "$ROOT/scripts/pdf_table_column_center.py" \
+  && grep -q 'origin_cell_shape' "$ROOT/scripts/pdf_table_column_center.py" \
+  && grep -qE '90\.0111\.2|Q\[24\]W\)\(' "$ROOT/scripts/pdf_table_column_center.py"; then
+  pass "049j token unglue"
+else
+  fail "049j missing origin-shape peel"
+fi
+
 SKILL="$ROOT/.cursor/skills/table-translation-fidelity/SKILL.md"
 grep -q 'LITERATURE_LEAVE_BABELDOC\|文献默认不落笔\|交还 BabelDOC' "$SKILL" \
   && pass "SK-Q009 updated" || fail "SK-Q009 missing 049 rule"
@@ -96,6 +105,8 @@ grep -q '表头按格写\|_fit_cell_lines\|049h\|HPD \*\*格\*\*' "$SKILL" \
   && pass "SK-Q009 049h" || fail "SK-Q009 missing 049h rule"
 grep -q '049i\|表头 N=\|矮窄' "$SKILL" \
   && pass "SK-Q009 049i" || fail "SK-Q009 missing 049i rule"
+grep -q '049j\|粘连切分\|origin.*形态\|90\.0111' "$SKILL" \
+  && pass "SK-Q009 049j" || fail "SK-Q009 missing 049j rule"
 
 if "$PY" -m pytest -q --no-cov tests/structure/test_plan049_literature_leave.py \
   tests/structure/test_plan041_quality_gates.py \

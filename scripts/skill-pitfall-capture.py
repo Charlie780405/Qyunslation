@@ -131,6 +131,31 @@ def append_inbox(unmatched: list[str]) -> int:
     return added
 
 
+def _archive_inbox(sig_id: str, skill_id: str) -> int:
+    """待归档 → 已归档，hook 不再催。"""
+    if not INBOX.is_file():
+        return 0
+    text = INBOX.read_text(encoding="utf-8")
+    archived = 0
+
+    def repl(block: str) -> str:
+        nonlocal archived
+        if "status: 待归档" not in block:
+            return block
+        if f"suggested_skill: {skill_id}" not in block and "suggested_skill:" in block:
+            return block
+        archived += 1
+        block = block.replace("## [待归档]", f"## [已归档] {sig_id}", 1)
+        block = block.replace("- status: 待归档", f"- status: 已归档\n- promoted_as: {sig_id}")
+        return block
+
+    parts = re.split(r"(?=## \[)", text)
+    out = [repl(p) if p.startswith("## [待归档]") else p for p in parts]
+    if archived:
+        INBOX.write_text("".join(out), encoding="utf-8")
+    return archived
+
+
 def promote(sig_id: str, skill_id: str, note: str = "") -> None:
     slug = SKILL_DIRS.get(skill_id)
     if not slug:
@@ -143,11 +168,12 @@ def promote(sig_id: str, skill_id: str, note: str = "") -> None:
     entry = f"\n{len(pitfalls.read_text(encoding='utf-8').splitlines())}. **{sig_id}（{stamp}）** — {note or 'from capture promote'}\n"
     with pitfalls.open("a", encoding="utf-8") as fh:
         fh.write(entry)
+    n = _archive_inbox(sig_id, skill_id)
     # registry audit line
     if REGISTRY.is_file():
         with REGISTRY.open("a", encoding="utf-8") as fh:
             fh.write(f"| {stamp} | promote {sig_id} → {skill_id}（PLAN-047g） |\n")
-    print(f"promoted {sig_id} → {skill_id} ({slug})")
+    print(f"promoted {sig_id} → {skill_id} ({slug}); inbox_archived={n}")
 
 
 def main() -> int:

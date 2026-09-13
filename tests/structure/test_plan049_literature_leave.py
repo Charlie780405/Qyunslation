@@ -2,6 +2,7 @@
 """PLAN-049：文献表不落笔；047d 数字邻居门禁。"""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -532,3 +533,108 @@ def test_header_n_eq_survives_neighbor_redact():
     assert "N=130" in blob.replace(" ", "")
     odoc.close()
     ddoc.close()
+
+
+def test_split_cells_unglues_table3_decimals():
+    from pdf_table_column_center import pretreat_row, split_cells
+
+    # 90.0+1+11.2 粘连 → 90.0111.2
+    glued = "Q2W第52周40阴性90.0111.2"
+    toks = split_cells(glued)
+    assert "Q2W" in toks
+    assert "第52周" in toks
+    assert "40" in toks
+    assert "阴性" in toks
+    assert "90.0" in toks
+    assert "1" in toks
+    assert "11.2" in toks
+    assert not any(re.search(r"\d+\.\d{3,}", t) for t in toks)
+    assert pretreat_row("90.0111.2") == "90.0 1 11.2"
+    assert pretreat_row("20.422.3") == "20.4 2 2.3"
+
+
+def test_assign_by_origin_shapes_table3_row():
+    from pdf_table_column_center import assign_by_origin_shapes, prefer_origin_abbrev
+
+    ocels = ["Q2W", "Week 52", "40", "Negative", "90.0", "1", "11.2"]
+    out = assign_by_origin_shapes(ocels, "Q2W第52周40阴性90.0111.2")
+    assert out is not None
+    assert out[0] == "Q2W"
+    assert out[1] == "第52周"
+    assert out[2] == "40"
+    assert out[3] == "阴性"
+    assert out[4] == "90.0"
+    assert out[5] == "1"
+    assert out[6] == "11.2"
+    out2 = assign_by_origin_shapes(
+        ["Q4W", "Week 52", "40", "Negative", "20.4", "2", "2.3"],
+        "Q4W第52周40阴性20.422.3",
+    )
+    assert out2 is not None
+    assert out2[4:] == ["20.4", "2", "2.3"]
+    assert prefer_origin_abbrev("每4周", "Q4W") == "Q4W"
+
+
+def test_replay_ffc3_mono_table3_seven_cols():
+    """现网作业 ffc3 mono 表3：七列居中，无三位小数粘连 token。"""
+    import shutil
+
+    from pdf_table_column_center import center_table_region
+
+    job = Path("/home/dev/pdf2zh/pdf2zh_files/ffc3aa5e-b7f3-4955-9470-b59334367fdf")
+    mono = job / "ljae439.no_watermark.zh-CN.mono.pdf"
+    origin_pdf = job / "ljae439.pdf"
+    if not mono.is_file() or not origin_pdf.is_file():
+        import pytest
+
+        pytest.skip("ffc3 job artifacts not present")
+    out = Path("/tmp/test-ffc3-049j-table3.pdf")
+    shutil.copy(mono, out)
+    odoc = pymupdf.open(origin_pdf)
+    ddoc = pymupdf.open(out)
+    rect = (60, 70, 530, 245)
+    stats = center_table_region(ddoc[6], odoc[6], rect)
+    assert stats.get("moved", 0) >= 70
+    ddoc.saveIncr()
+    ddoc.close()
+    odoc.close()
+    ddoc = pymupdf.open(out)
+    spans = []
+    for block in (ddoc[6].get_text("dict", clip=pymupdf.Rect(rect)) or {}).get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            for sp in line.get("spans") or []:
+                t = (sp.get("text") or "").strip()
+                if not t:
+                    continue
+                bb = sp["bbox"]
+                spans.append(((bb[0] + bb[2]) / 2.0, t))
+    ddoc.close()
+    assert not any(re.search(r"\d+\.\d{3,}", t) for _, t in spans)
+    texts = {t for _, t in spans}
+    assert "90.0" in texts
+    assert "11.2" in texts
+    assert "20.4" in texts
+    assert "2.3" in texts
+    iga = [cx for cx, t in spans if "IGA" in t]
+    easi = [cx for cx, t in spans if "EASI" in t]
+    assert iga and easi and abs(iga[0] - easi[0]) > 20
+    visit_alone = [
+        cx
+        for cx, t in spans
+        if t == "访视" or (t.startswith("访视") and "IGA" not in t and "EASI" not in t)
+    ]
+    assert visit_alone
+    assert max(visit_alone) < 200
+
+
+def test_header_slots_six_cols_force_seven_defaults():
+    from pdf_table_column_center import _header_skip_cell, header_slots_from_blob
+
+    slots = header_slots_from_blob("剂量 ADA nAb 曲罗芦单抗", 6)
+    assert slots[0] == "剂量"
+    assert slots[1] == "访视"
+    assert slots[5] == "访视时 IGA"
+    assert _header_skip_cell("A") is True
+    assert _header_skip_cell("a") is True

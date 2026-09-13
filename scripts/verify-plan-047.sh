@@ -169,13 +169,16 @@ PY
 run_pass "047 capture dry-run" "$STAGE_DIR/capture.log" \
   "$PY" "$ROOT/scripts/skill-pitfall-capture.py"
 
-# capture inbox from synthetic unknown error
+# capture inbox from synthetic unknown error（测完还原，避免 hook 常驻催 promote）
+INBOX="$ROOT/.cursor/skills/skill-registry/pitfalls-inbox.md"
+cp -a "$INBOX" "$STAGE_DIR/inbox.bak"
 printf 'ERROR: totally_unknown_widget_xyz exploded\n' >"$STAGE_DIR/fake.log"
 run_pass "047 capture inbox" "$STAGE_DIR/capture2.log" \
   "$PY" "$ROOT/scripts/skill-pitfall-capture.py" --log "$STAGE_DIR/fake.log"
 grep -q 'totally_unknown_widget_xyz\|unknown_widget' \
-  "$ROOT/.cursor/skills/skill-registry/pitfalls-inbox.md" \
+  "$INBOX" \
   && pass "047 inbox entry" || fail "047 inbox entry"
+cp -a "$STAGE_DIR/inbox.bak" "$INBOX"
 
 # sample job assertions (optional env)
 SAMPLE_DIR="${QYUNSLATION_PLAN047_SAMPLE:-}"

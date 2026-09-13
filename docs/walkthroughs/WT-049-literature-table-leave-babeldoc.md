@@ -4,7 +4,7 @@
 
 ## 执行摘要
 
-文献表不再整区擦除重画；047d 停止合并同行短数字；窄矮表仅字号归一。049e 按原文列居中；049f 西文半角 + 原文视觉行 y；049g HPD 补列、Noto 一族、原文三线补底线；049h 表头按格写；049i 表头 N= 回写、禁拆行压邻、表2 对行、EASI 七列。监管表单单元格回写不变。
+文献表不再整区擦除重画；047d 停止合并同行短数字；窄矮表仅字号归一。049e 按原文列居中；049f 西文半角 + 原文视觉行 y；049g HPD 补列、Noto 一族、原文三线补底线；049h 表头按格写；049i 表头 N= 回写、禁拆行压邻、表2 对行、EASI 七列；049j 按 origin 形态切粘连小数、七槽表头、Q4WSafety 拆分。监管表单单元格回写不变。
 
 ## 变更明细
 
@@ -12,10 +12,10 @@
 | --- | --- |
 | `scripts/pdf_table_translate.py` | `literature_leave_babeldoc`；宽表不走 `.tblnorm`；049e/f 列居中 |
 | `scripts/pdf_table_normalize.py` | `allow_translate` |
-| `scripts/pdf_table_column_center.py` | 列居中；`normalize_ascii`；HPD 列；Noto；原文三线；049i N=/拆行/EASI |
+| `scripts/pdf_table_column_center.py` | 列居中；`normalize_ascii`；HPD 列；Noto；原文三线；049i N=/拆行/EASI；049j 形态切词 |
 | `scripts/apply-pdf2zh-047d-para-layout.py` | `_numeric_cell` 门禁 |
-| `tests/structure/test_plan049_literature_leave.py` | 半角 / NRS 续行 / Q4W 还原 |
-| `.cursor/skills/table-translation-fidelity/` | 铁律 H/I + 踩坑 |
+| `tests/structure/test_plan049_literature_leave.py` | 半角 / NRS 续行 / Q4W 还原 / 049j 粘连 |
+| `.cursor/skills/table-translation-fidelity/` | 铁律 H/I/L + 踩坑 |
 
 ## 验证结果
 
@@ -31,11 +31,12 @@
 | V8 | 049h 表头按格 + DLQI 字号 | PASS | 表3 表头 剂量/访视/ADA/nAb/浓度/IGA/EASI 各列；Visit 仅一列；DLQI 8pt 两行 |
 | V9 | 049i N= 回写 / 禁拆行 / 表2 / EASI | PASS | 回放 raw/049h：表1 `(N=130)` y≈104；DLQI 不压瘙痒；表2 行 y=624/640/651/658；表3 访视 x≈135、浓度/IGA/EASI 分列 |
 | V10 | 合 main + 生产部署 | PASS | `main` `b5e1dc6`（049 merge `46baf41`）；`pdf2zh`/`qyunslation-office` active；`:7860` 200；sidecar 指纹一致 |
+| V11 | 049j 粘连切分 / 七列 | PASS | 单测拆 `90.0111.2`；回放 ffc3 mono 表3：`90.0`/`1`/`11.2` 分列 x≈352/432/500；无三位小数 token；IGA/EASI 独立 |
 
 ## 生产
 
 - 远程：https://github.com/Charlie780405/Qyunslation/commit/b5e1dc6
-- 部署：`bash scripts/deploy-translate-stack.sh`（2026-09-12）
+- 部署：`bash scripts/deploy-translate-stack.sh`（2026-09-12；049j 后再部署一次）
 - 服务：`pdf2zh.service` + `qyunslation-office.service` active
 
 ## 回归确认

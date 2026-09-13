@@ -761,6 +761,17 @@
       "title": "DetectorEvidence",
       "type": "object"
     },
+    "DocumentDomain": {
+      "description": "文档领域（可选；金标 L/C/R 映射用）。",
+      "enum": [
+        "LITERATURE",
+        "CLINICAL",
+        "REGULATORY",
+        "OTHER"
+      ],
+      "title": "DocumentDomain",
+      "type": "string"
+    },
     "DocumentInfo": {
       "additionalProperties": true,
       "properties": {
@@ -856,6 +867,28 @@
           },
           "title": "Conversion Lineage",
           "type": "array"
+        },
+        "document_domain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DocumentDomain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "risk_level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RiskLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1571,6 +1604,30 @@
           "minLength": 1,
           "title": "Version",
           "type": "string"
+        },
+        "glossary_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Glossary Version"
+        },
+        "tm_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tm Version"
         }
       },
       "required": [
@@ -1598,6 +1655,17 @@
         "SCANNED"
       ],
       "title": "Representation",
+      "type": "string"
+    },
+    "RiskLevel": {
+      "description": "语义风险级别（可选；网关/审校用）。",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
+      "title": "RiskLevel",
       "type": "string"
     },
     "ShapeObject": {
@@ -2003,6 +2071,30 @@
           ],
           "default": null,
           "title": "Writing Direction"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "line_height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Height"
         }
       },
       "title": "SourceStyle",
@@ -2505,7 +2597,9 @@
       "enum": [
         "TRANSLATE",
         "PRESERVE",
-        "PROTECT_TOKENS"
+        "PROTECT_TOKENS",
+        "TERM_ONLY",
+        "HUMAN_REVIEW"
       ],
       "title": "TranslationPolicy",
       "type": "string"
@@ -2514,7 +2608,7 @@
   "additionalProperties": true,
   "properties": {
     "schema_version": {
-      "default": "1.2.0",
+      "default": "1.3.0",
       "title": "Schema Version",
       "type": "string"
     },

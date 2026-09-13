@@ -15,6 +15,7 @@ from .capabilities import (
 )
 from .models import (
     CURRENT_SCHEMA_VERSION,
+    DEFERRED_TRANSLATION_POLICIES,
     AssetRef,
     AssetRole,
     BlockExecutionEvidence,
@@ -27,6 +28,7 @@ from .models import (
     ContentProfile,
     CoordinateUnit,
     DetectorEvidence,
+    DocumentDomain,
     DocumentInfo,
     DocumentStructureManifest,
     ExecutionStatus,
@@ -44,6 +46,7 @@ from .models import (
     ProducerInfo,
     ProfileSource,
     Representation,
+    RiskLevel,
     SemanticObject,
     ShapeObject,
     SourceFormat,
@@ -107,6 +110,7 @@ from .captions import (
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
+    "DEFERRED_TRANSLATION_POLICIES",
     "CapabilityDecision",
     "AssetRef",
     "AssetRole",
@@ -120,6 +124,7 @@ __all__ = [
     "ContentProfile",
     "CoordinateUnit",
     "DetectorEvidence",
+    "DocumentDomain",
     "DocumentInfo",
     "DocumentStructureManifest",
     "ExecutionStatus",
@@ -144,6 +149,7 @@ __all__ = [
     "ReadingStrategy",
     "Representation",
     "RequirementLevel",
+    "RiskLevel",
     "RuntimeFeature",
     "RuntimeState",
     "SemanticObject",

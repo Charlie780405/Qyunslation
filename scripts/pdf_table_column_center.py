@@ -16,7 +16,8 @@ _CJK = re.compile(r"[\u4e00-\u9fff]")
 _CELL_RE = re.compile(
     r"(?:"
     r"\(?N\s*=\s*\d+\)?"
-    r"|(?:<\s*)?\d+(?:\.\d+)?"
+    # 最多两位小数，禁止贪吃后续数字（049j：90.0111.2）
+    r"|(?:<\s*)?\d+(?:\.\d{1,2})?(?!\d)"
     r"(?:\s*[（(][^）)]*\d[^）)]*[）)])?"
     r"(?:\s*[，,]?\s*N\s*=\s*\d+)?"
     r"|NA"
@@ -25,6 +26,8 @@ _CELL_RE = re.compile(
     r"|第\d+周"
     r"|安全性随访"
     r"|每[24]周"
+    r"|Safety(?:\s*FU)?"
+    r"|Week\s*\d+"
     r")",
     re.I,
 )
@@ -80,9 +83,13 @@ def normalize_ascii(text: str) -> str:
 def pretreat_row(text: str) -> str:
     s = normalize_ascii(_clean(text))
     s = re.sub(r"(\d)(阴性|阳性)", r"\1 \2", s)
+    # Q4WSafety / Q4W第52周 / Q4W<
+    s = re.sub(r"(Q[24]W)(?=[A-Za-z\u4e00-\u9fff第<])", r"\1 ", s)
     s = re.sub(r"(Q[24]W)(?=第|安全|每)", r"\1 ", s)
-    s = re.sub(r"(每[24]周)(?=第|安全)", r"\1 ", s)
+    s = re.sub(r"(每[24]周)(?=第|安全|<)", r"\1 ", s)
     s = re.sub(r"(第\d+周)(?=<)", r"\1 ", s)
+    s = re.sub(r"(Safety)(?=FU|随访|<|\d)", r"\1 ", s, flags=re.I)
+    s = re.sub(r"(FU)(?=<|\d)", r"\1 ", s, flags=re.I)
     s = re.sub(r"(随访)(?=<)", r"\1 ", s)
     s = re.sub(r"(阴性|阳性)(?=\d)", r"\1 ", s)
     s = re.sub(r"(NA)(?=NA)", r"\1 ", s)
@@ -91,6 +98,8 @@ def pretreat_row(text: str) -> str:
     s = re.sub(r"([A-Za-z\u4e00-\u9fff])N\s*=", r"\1 N=", s)
     s = re.sub(r"(\d)N\s*=", r"\1 N=", s)
     s = re.sub(r"<\s+(\d)", r"<\1", s)
+    # 049j：90.0111.2 → 90.0 1 11.2；20.422.3 → 20.4 2 2.3
+    s = re.sub(r"(\d+\.\d)(\d)(\d+\.\d+)", r"\1 \2 \3", s)
     return s
 
 
@@ -102,6 +111,132 @@ def split_cells(text: str) -> list[str]:
         tok = re.sub(r"(?<=\d)\s*\(", r" (", tok)
         tok = re.sub(r"\s+\)", ")", tok)
         out.append(tok)
+    return out
+
+
+def origin_cell_shape(text: str) -> str:
+    """PLAN-049j：原文格形态，指导 dest 切词。"""
+    t = normalize_ascii(text or "").strip()
+    if not t:
+        return "empty"
+    if re.fullmatch(r"Q[24]W", t, re.I):
+        return "dose"
+    if re.search(r"Week|Safety|Visit|第\d+周|随访", t, re.I):
+        return "visit"
+    if re.fullmatch(r"Negative|Positive|阴性|阳性", t, re.I):
+        return "pn"
+    if re.fullmatch(r"NA|N/?A", t, re.I):
+        return "na"
+    if t.startswith("<") or re.fullmatch(r"<\s*\d+(?:\.\d+)?", t):
+        return "lt_num"
+    if re.search(r"N\s*=", t, re.I):
+        return "neq"
+    m = re.fullmatch(r"(\d+)\.(\d+)", t)
+    if m:
+        return f"dec{min(2, len(m.group(2)))}"
+    if re.fullmatch(r"\d+", t):
+        return "int"
+    if re.fullmatch(r"\d+(?:\.\d+)?\s*\([^)]*\d[^)]*\)", t):
+        return "mean_sd"
+    return "text"
+
+
+def _peel_one(s: str, shape: str, remaining: list[str]) -> tuple[str | None, str]:
+    s = s.lstrip(" ,;；")
+    if not s or shape == "empty":
+        return ("" if shape == "empty" else None), s
+    if shape == "dose":
+        m = re.match(r"(Q[24]W|每[24]周)", s, re.I)
+        return (m.group(1), s[m.end() :]) if m else (None, s)
+    if shape == "visit":
+        m = re.match(r"(第\d+周|安全性随访|Week\s*\d+|Safety(?:\s*FU)?)", s, re.I)
+        return (m.group(1), s[m.end() :]) if m else (None, s)
+    if shape == "pn":
+        m = re.match(r"(阴性|阳性|Negative|Positive)", s, re.I)
+        return (m.group(1), s[m.end() :]) if m else (None, s)
+    if shape == "na":
+        m = re.match(r"(N\s*/?\s*A|不适用)", s, re.I)
+        return ("NA", s[m.end() :]) if m else (None, s)
+    if shape == "lt_num":
+        m = re.match(r"<\s*(\d+(?:\.\d{1,2})?)", s)
+        if m:
+            return f"<{m.group(1)}", s[m.end() :]
+        m = re.match(r"(\d+(?:\.\d{1,2})?)", s)
+        if m:
+            return f"<{m.group(1)}", s[m.end() :]
+        return None, s
+    if shape == "neq":
+        m = re.match(r"\(?\s*N\s*=\s*(\d+)\s*\)?", s, re.I)
+        return (f"(N={m.group(1)})", s[m.end() :]) if m else (None, s)
+    if shape.startswith("dec"):
+        nd = int(shape[3:] or "1")
+        m = re.match(rf"(\d+\.\d{{{nd}}})(?!\d)", s)
+        if m:
+            return m.group(1), s[m.end() :]
+        m = re.match(rf"(\d+)\.(\d{{{nd}}})(\d)", s)
+        if m:
+            return f"{m.group(1)}.{m.group(2)}", s[m.start(3) :]
+        m = re.match(r"(\d+\.\d{1,2})", s)
+        if m:
+            return m.group(1), s[m.end() :]
+        return None, s
+    if shape == "int":
+        # 1210.6 → 121 | 0 | 0.6
+        if (
+            remaining
+            and remaining[0] == "int"
+            and len(remaining) >= 2
+            and remaining[1].startswith("dec")
+        ):
+            m = re.match(r"(\d+)(\d)(\d\.\d+)", s)
+            if m:
+                return m.group(1), s[m.start(2) :]
+        if remaining and remaining[0].startswith("dec"):
+            m = re.match(r"(\d)(\d+\.\d+)", s)
+            if m:
+                return m.group(1), s[m.start(2) :]
+        m = re.match(r"(\d+)(?!\.\d)", s)
+        if m:
+            return m.group(1), s[m.end() :]
+        m = re.match(r"(\d+)", s)
+        if m:
+            return m.group(1), s[m.end() :]
+        return None, s
+    if shape == "mean_sd":
+        m = re.match(r"(\d+(?:\.\d{1,2})?\s*\([^)]*\d[^)]*\))", s)
+        if m:
+            return normalize_ascii(m.group(1)), s[m.end() :]
+        return None, s
+    if shape == "text":
+        m = re.match(r"(.+?)(?=\d|Q[24]W|第\d|安全|阴性|阳性|NA\b|$)", s, re.I)
+        if m and m.group(1).strip():
+            return m.group(1).strip(), s[m.end() :]
+        return None, s
+    return None, s
+
+
+def assign_by_origin_shapes(
+    origin_cells: list[str], dest_text: str
+) -> list[str] | None:
+    """按原文各格形态从 dest 段流顺序剥 token（049j）。"""
+    shapes = [origin_cell_shape(t) for t in origin_cells]
+    if sum(1 for sh in shapes if sh != "empty") < 2:
+        return None
+    rest = pretreat_row(dest_text)
+    out = [""] * len(origin_cells)
+    for i, shape in enumerate(shapes):
+        if shape == "empty":
+            continue
+        tok, rest = _peel_one(rest, shape, shapes[i + 1 :])
+        if tok is None:
+            # 首格失败则整行放弃；中途失败保留已剥部分
+            if not any(out):
+                return None
+            break
+        out[i] = tok
+        rest = rest.lstrip(" ,;；")
+    if sum(1 for t in out if t) < 2:
+        return None
     return out
 
 
@@ -467,6 +602,15 @@ def consume_data_row(blob: str, origin_cells: list[str]) -> tuple[list[str] | No
     n = len(origin_cells)
     if n < 2:
         return None, blob
+    shaped = assign_by_origin_shapes(origin_cells, blob)
+    if shaped and sum(1 for t in shaped if t) >= max(2, sum(1 for t in origin_cells if t) - 1):
+        # 从 blob 去掉已消耗前缀：用最后一个非空 token 定位
+        last = next((t for t in reversed(shaped) if t), "")
+        idx = blob.find(last)
+        if idx < 0:
+            idx = blob.find(last.replace(" ", ""))
+        rest = blob[idx + len(last) :].strip() if idx >= 0 else ""
+        return shaped, rest
     n_data = n - 1
     tokens = split_cells(blob)
     if len(tokens) < n_data:
@@ -501,6 +645,9 @@ def consume_data_row(blob: str, origin_cells: list[str]) -> tuple[list[str] | No
 
 
 def _assign(origin_cells: list[str], dest_text: str) -> list[str] | None:
+    shaped = assign_by_origin_shapes(origin_cells, dest_text)
+    if shaped and sum(1 for t in shaped if t) >= sum(1 for t in origin_cells if t) - 1:
+        return shaped
     tokens = split_cells(dest_text)
     if not tokens:
         return None
@@ -564,7 +711,7 @@ def lock_visit_column(texts: list[str], origin_cells: list[str]) -> list[str]:
 
 
 def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
-    """从 dest 表头段流按关键词舀入列槽。表1=4；表3=7（EASI 强制）。"""
+    """从 dest 表头段流按关键词舀入列槽。表1=4；表3≥6 强制 7 槽（含 EASI）。"""
     slots = [""] * max(n_cols, 0)
     s = normalize_ascii(blob or "")
     if n_cols == 4:
@@ -606,7 +753,8 @@ def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
             slots[idx] = "剂量"
         elif idx == 1:
             slots[idx] = "访视"
-    if n_cols >= 7:
+    # 049j：≥6 列也按七槽默认填满（HPD 偶发 6）
+    if n_cols >= 6:
         defaults = [
             "剂量",
             "访视",
@@ -636,7 +784,8 @@ def _is_table_header_line(ocels: list[str], otext: str) -> bool:
 
 def _header_skip_cell(text: str) -> bool:
     t = normalize_ascii(text or "")
-    return bool(re.fullmatch(r"with ADA|a", t, re.I))
+    # 孤立 a / A（脚注标、表头误粘）不入槽
+    return bool(re.fullmatch(r"with ADA|a|A", t, re.I))
 
 
 def _origin_body_size(spans: list[dict], fallback: float = 8.0) -> float:
@@ -966,7 +1115,14 @@ def center_table_region(
         )
         if use_flow:
             texts, remaining_blob = consume_data_row(remaining_blob, ocels)
-            if not texts:
+            filled_o = sum(1 for t in ocels if t)
+            filled_t = sum(1 for t in (texts or []) if t)
+            # 049j：origin 满格而 scoop 过稀 → 禁止只落 Q2W
+            if not texts or filled_t < max(2, filled_o - 1):
+                retry, rest2 = consume_data_row(remaining_blob, ocels)
+                if retry and sum(1 for t in retry if t) > filled_t:
+                    texts, remaining_blob = retry, rest2
+            if not texts or sum(1 for t in texts if t) < 2:
                 skipped += 1
                 prev_ocels = ocels
                 continue
@@ -993,6 +1149,29 @@ def center_table_region(
             prev_ocels = ocels
             continue
         if not dline:
+            # 049j：非 flowing 但 blob 仍有段流残留时尝试补行
+            if remaining_blob and sum(1 for t in ocels if t) >= 3:
+                texts, remaining_blob = consume_data_row(remaining_blob, ocels)
+                if texts and sum(1 for t in texts if t) >= 2:
+                    texts = lock_visit_column(
+                        _apply_origin_abbrevs(
+                            [normalize_ascii(t) if t else "" for t in texts], ocels
+                        ),
+                        ocels,
+                    )
+                    jobs.append(
+                        {
+                            "spans": oline,
+                            "texts": texts,
+                            "size": size,
+                            "ocy": ocy,
+                            "oy0": oy0_line,
+                            "oy1": oy1_line,
+                            "origin_y1": oy1_line,
+                        }
+                    )
+                    prev_ocels = ocels
+                    continue
             skipped += 1
             prev_ocels = ocels
             continue
@@ -1017,11 +1196,13 @@ def center_table_region(
             lost_last = (
                 len(texts) >= 7 and bool(ocels[-1]) and not (texts[-1] or "").strip()
             )
-            if squeezed or lost_last:
+            mashed = any(re.search(r"\d+\.\d{3,}", t or "") for t in texts)
+            if squeezed or lost_last or mashed:
                 assigned = _assign(ocels, dtext)
                 if assigned and (
                     (assigned[-1] or "").strip()
                     or sum(1 for t in assigned if t) > sum(1 for t in texts if t)
+                    or mashed
                 ):
                     texts = assigned
         else:
@@ -1098,10 +1279,16 @@ def center_table_region(
             fill=(1, 1, 1),
         )
     dest_page.apply_redactions(images=0, graphics=0)
-    # 脚注：只 restyle 最后数据行以下，禁止表头原位锁 x
+    # 脚注 + 题注：restyle 表体上下残留，禁止表头原位锁 x
+    first_y = min((j["oy0"] for j in jobs), default=oy1)
     last_data_y = max((j["oy1"] for j in jobs if not j.get("header")), default=oy0)
+    restyled = 0
+    cap_rect = (dest_rect[0], dest_rect[1], dest_rect[2], first_y - 1.0)
+    if cap_rect[3] - cap_rect[1] > 6:
+        restyled += unify_region_font(dest_page, cap_rect)
     foot_rect = (dest_rect[0], last_data_y + 2.0, dest_rect[2], dest_rect[3])
-    restyled = unify_region_font(dest_page, foot_rect) if foot_rect[3] - foot_rect[1] > 8 else 0
+    if foot_rect[3] - foot_rect[1] > 8:
+        restyled += unify_region_font(dest_page, foot_rect)
 
     moved = 0
     placed_baselines: list[float] = []
@@ -1132,7 +1319,7 @@ def center_table_region(
                 moved += 1
     rules = restore_rule_lines(dest_page, origin_page, origin_rect, x_shift=x_shift)
     logger.info(
-        "PLAN-049i centered cells=%s rows=%s skipped=%s src=%s rules=%s restyled=%s",
+        "PLAN-049j centered cells=%s rows=%s skipped=%s src=%s rules=%s restyled=%s",
         moved,
         len(jobs),
         skipped,

@@ -1,4 +1,4 @@
-"""PLAN-033g：Manifest 1.2.0 执行契约与模型溯源。"""
+"""PLAN-033g：Manifest 执行契约与模型溯源（schema 随 034b 升至 1.3.0）。"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -28,7 +28,7 @@ from tests.structure.test_manifest_contract import SOURCE_SHA256, _minimal_manif
 
 
 def test_schema_and_scanner_versions_for_033g():
-    assert CURRENT_SCHEMA_VERSION == "1.2.0"
+    assert CURRENT_SCHEMA_VERSION == "1.3.0"
     assert PDF_STRUCTURE_SCANNER_VERSION == "1.8.0"
 
 

@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-CURRENT_SCHEMA_VERSION = "1.2.0"
+CURRENT_SCHEMA_VERSION = "1.3.0"
 SUPPORTED_SCHEMA_MAJOR = 1
 _SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -142,6 +142,36 @@ class TranslationPolicy(ContractEnum):
     TRANSLATE = "TRANSLATE"
     PRESERVE = "PRESERVE"
     PROTECT_TOKENS = "PROTECT_TOKENS"
+    # PLAN-034b：契约预留；执行侧不得静默当 TRANSLATE
+    TERM_ONLY = "TERM_ONLY"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+
+
+class DocumentDomain(ContractEnum):
+    """文档领域（可选；金标 L/C/R 映射用）。"""
+
+    LITERATURE = "LITERATURE"
+    CLINICAL = "CLINICAL"
+    REGULATORY = "REGULATORY"
+    OTHER = "OTHER"
+
+
+class RiskLevel(ContractEnum):
+    """语义风险级别（可选；网关/审校用）。"""
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+# 执行器不得送入 LLM 全译的策略（fail-closed / 显式跳过）
+DEFERRED_TRANSLATION_POLICIES: frozenset[TranslationPolicy] = frozenset(
+    {
+        TranslationPolicy.TERM_ONLY,
+        TranslationPolicy.HUMAN_REVIEW,
+    }
+)
 
 
 class IssueSeverity(ContractEnum):
@@ -189,6 +219,9 @@ class ContractModel(BaseModel):
 class ProducerInfo(ContractModel):
     name: str = Field(min_length=1)
     version: str = Field(min_length=1)
+    # PLAN-034b 溯源占位（可空；不接 034e 逻辑）
+    glossary_version: str | None = None
+    tm_version: str | None = None
 
 
 class BoundingBox(ContractModel):
@@ -259,6 +292,9 @@ class DocumentInfo(ContractModel):
     input_asset: AssetRef
     derived_assets: list[AssetRef] = Field(default_factory=list)
     conversion_lineage: list[ConversionStep] = Field(default_factory=list)
+    # PLAN-034b：可选领域与风险（默认空）
+    document_domain: DocumentDomain | None = None
+    risk_level: RiskLevel | None = None
 
     @field_validator("source_sha256")
     @classmethod
@@ -324,6 +360,9 @@ class SourceStyle(ContractModel):
     alignment: str | None = None
     rotation: float | None = None
     writing_direction: str | None = None
+    # PLAN-034b：可选样式扩展（采不到则为 None，不编造）
+    color: str | None = None
+    line_height: float | None = None
 
 
 class TranslatableBlock(ContractModel):
