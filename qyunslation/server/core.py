@@ -622,6 +622,18 @@ class TranslationService:
         except Exception as exc:
             print(f"[{task_id}] glossary_ssot apply failed (non-fatal): {exc}")
 
+        # PLAN-034f：网关档位填 model_id/base_url（已有用户值不覆盖）
+        try:
+            from qyunslation.gateway.config import apply_gateway_profile
+
+            gw = apply_gateway_profile(payload)
+            print(
+                f"[{task_id}] gateway_profile={gw.get('profile')} "
+                f"model_id={gw.get('model_id')}"
+            )
+        except Exception as exc:
+            print(f"[{task_id}] gateway profile apply failed (non-fatal): {exc}")
+
         try:
             loop = asyncio.get_running_loop()
             task = loop.create_task(
