@@ -7,6 +7,16 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
+MAX_TMX_BYTES = 8 * 1024 * 1024
+MAX_TMX_UNITS = 20000
+MAX_LANG_LEN = 16
+MAX_SEG_CHARS = 20000
+
+
+class TmxRejected(ValueError):
+    """TMX 不可信或超出上限。"""
+
+
 @dataclass(frozen=True)
 class TmxUnit:
     source_text: str
@@ -22,8 +32,17 @@ def _local(tag: str) -> str:
 
 
 def parse_tmx(xml_text: str) -> list[TmxUnit]:
-    """解析 TMX；只读 ``tu`` / ``tuv`` / ``seg``。"""
-    root = ET.fromstring(xml_text)
+    """解析 TMX；只读 ``tu`` / ``tuv`` / ``seg``。
+
+    ``xml.etree`` 会展开内部实体（十亿笑），故先拒 DOCTYPE/ENTITY 再解析。
+    """
+    text = xml_text or ""
+    if len(text.encode("utf-8", "ignore")) > MAX_TMX_BYTES:
+        raise TmxRejected(f"TMX exceeds {MAX_TMX_BYTES} bytes")
+    head = text.lstrip()[:4096].upper()
+    if "<!DOCTYPE" in head or "<!ENTITY" in head:
+        raise TmxRejected("TMX must not declare DOCTYPE or ENTITY")
+    root = ET.fromstring(text)
     units: list[TmxUnit] = []
     for tu in root.iter():
         if _local(tu.tag) != "tu":
@@ -43,9 +62,16 @@ def parse_tmx(xml_text: str) -> list[TmxUnit]:
                 if _local(child.tag) == "seg":
                     seg_text = "".join(child.itertext()).strip()
                     break
-            if lang and seg_text:
-                segs.append((lang, seg_text))
+            if not lang or not seg_text:
+                continue
+            if len(lang) > MAX_LANG_LEN:
+                raise TmxRejected(f"xml:lang exceeds {MAX_LANG_LEN} chars: {lang[:24]}…")
+            if len(seg_text) > MAX_SEG_CHARS:
+                raise TmxRejected(f"seg exceeds {MAX_SEG_CHARS} chars")
+            segs.append((lang, seg_text))
         if len(segs) >= 2:
+            if len(units) >= MAX_TMX_UNITS:
+                raise TmxRejected(f"TMX exceeds {MAX_TMX_UNITS} units")
             units.append(
                 TmxUnit(
                     source_text=segs[0][1],

@@ -125,6 +125,9 @@ def stage_import_unit(
     return unit
 
 
+FUZZY_CANDIDATE_CAP = 2000
+
+
 def list_approved_units(
     session: Session,
     *,
@@ -132,6 +135,7 @@ def list_approved_units(
     src_lang: str | None = None,
     tgt_lang: str | None = None,
     project_id: str | None = None,
+    limit: int | None = None,
 ) -> list[TmUnit]:
     stmt = select(TmUnit).where(
         TmUnit.tenant_id == tenant_id,
@@ -145,6 +149,8 @@ def list_approved_units(
         stmt = stmt.where(
             (TmUnit.project_id == project_id) | (TmUnit.project_id.is_(None))
         )
+    if limit is not None:
+        stmt = stmt.order_by(TmUnit.updated_at.desc()).limit(limit)
     return list(session.scalars(stmt).all())
 
 
@@ -159,16 +165,28 @@ def lookup(
     fuzzy_threshold: float = 0.85,
     fuzzy_limit: int = 5,
 ) -> dict[str, Any]:
-    units = list_approved_units(
-        session,
-        tenant_id=tenant_id,
-        src_lang=src_lang,
-        tgt_lang=tgt_lang,
-        project_id=project_id,
-    )
     qn = normalize_source(source_text)
     qs = placeholder_signature(source_text)
-    hit = exact_lookup(source_text, units, query_norm=qn, query_sig=qs)
+
+    # 精确命中走 ix_tm_unit_lookup 索引，不把全租户 TM 拉进内存
+    exact_stmt = select(TmUnit).where(
+        TmUnit.tenant_id == tenant_id,
+        TmUnit.approved.is_(True),
+        TmUnit.src_lang == src_lang,
+        TmUnit.tgt_lang == tgt_lang,
+        TmUnit.source_norm == qn,
+        TmUnit.placeholder_sig == qs,
+    )
+    if project_id is not None:
+        exact_stmt = exact_stmt.where(
+            (TmUnit.project_id == project_id) | (TmUnit.project_id.is_(None))
+        )
+    exact_row = session.scalars(exact_stmt.limit(1)).first()
+    hit = (
+        exact_lookup(source_text, [exact_row], query_norm=qn, query_sig=qs)
+        if exact_row is not None
+        else None
+    )
     if hit is not None:
         return {
             "reuse": True,
@@ -184,9 +202,18 @@ def lookup(
             "query_norm": qn,
             "placeholder_sig": qs,
         }
+    # 模糊必须逐条比对，故只取最近 FUZZY_CANDIDATE_CAP 条候选
+    candidates = list_approved_units(
+        session,
+        tenant_id=tenant_id,
+        src_lang=src_lang,
+        tgt_lang=tgt_lang,
+        project_id=project_id,
+        limit=FUZZY_CANDIDATE_CAP,
+    )
     suggestions = fuzzy_suggest(
         source_text,
-        units,
+        candidates,
         threshold=fuzzy_threshold,
         limit=fuzzy_limit,
         query_norm=qn,

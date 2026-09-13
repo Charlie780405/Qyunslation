@@ -18,7 +18,13 @@ from qyunslation.persist.tm_repo import (
 )
 from qyunslation.tm.match import exact_lookup, fuzzy_suggest
 from qyunslation.tm.normalize import normalize_source, placeholder_signature
-from qyunslation.tm.tmx import build_tmx, parse_tmx
+from qyunslation.tm.tmx import (
+    MAX_LANG_LEN,
+    MAX_TMX_BYTES,
+    TmxRejected,
+    build_tmx,
+    parse_tmx,
+)
 
 
 @pytest.fixture()
@@ -44,6 +50,40 @@ def session():
 @pytest.fixture()
 def tenant(session):
     return repo.get_or_create_tenant(session, slug="tm-tenant", name="TM Tenant")
+
+
+def test_tmx_rejects_entity_expansion():
+    """xml.etree 会展开内部实体（十亿笑），必须在解析前拒掉。"""
+    bomb = (
+        '<?xml version="1.0"?>\n'
+        "<!DOCTYPE tmx [\n"
+        '  <!ENTITY a "AAAAAAAAAA">\n'
+        '  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        "]>\n"
+        '<tmx version="1.4"><body><tu>'
+        '<tuv xml:lang="en"><seg>&b;</seg></tuv>'
+        '<tuv xml:lang="zh"><seg>x</seg></tuv>'
+        "</tu></body></tmx>"
+    )
+    with pytest.raises(TmxRejected):
+        parse_tmx(bomb)
+
+
+def test_tmx_rejects_overlong_lang():
+    """超长 xml:lang 会溢出 TmUnit.src_lang 的 String(16)，须在解析层拦。"""
+    bad = (
+        '<tmx version="1.4"><body><tu>'
+        f'<tuv xml:lang="{"e" * (MAX_LANG_LEN + 4)}"><seg>a</seg></tuv>'
+        '<tuv xml:lang="zh"><seg>b</seg></tuv>'
+        "</tu></body></tmx>"
+    )
+    with pytest.raises(TmxRejected):
+        parse_tmx(bad)
+
+
+def test_tmx_rejects_oversize_payload():
+    with pytest.raises(TmxRejected):
+        parse_tmx("x" * (MAX_TMX_BYTES + 1))
 
 
 def test_normalize_and_signature():
