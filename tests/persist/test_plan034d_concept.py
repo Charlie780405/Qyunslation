@@ -135,9 +135,26 @@ def test_api_create_forces_staging(client):
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["status"] == "staging"
+    assert body["tenant_id"]
     listed = client.get("/api/v1/concepts?status=staging", headers=headers)
     assert listed.status_code == 200
     assert any(x["id"] == body["id"] for x in listed.json())
+
+
+def test_api_concepts_are_tenant_scoped(client):
+    a = {"X-Dev-User": "alice", "X-Dev-Tenant": "tenant-a"}
+    b = {"X-Dev-User": "bob", "X-Dev-Tenant": "tenant-b"}
+    created = client.post(
+        "/api/v1/concepts",
+        json={"preferred_source": "secret-term", "preferred_target": "密词"},
+        headers=a,
+    )
+    assert created.status_code == 201
+    cid = created.json()["id"]
+    listed_a = client.get("/api/v1/concepts?status=staging", headers=a)
+    listed_b = client.get("/api/v1/concepts?status=staging", headers=b)
+    assert any(x["id"] == cid for x in listed_a.json())
+    assert all(x["id"] != cid for x in listed_b.json())
 
 
 def test_csv_fallback_without_engine():

@@ -307,10 +307,10 @@ def list_concepts_api(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    _tenant_bundle(session, identity)
+    tenant = _tenant_bundle(session, identity)
     from qyunslation.persist.concept_repo import concept_to_dict, list_concepts
 
-    rows = list_concepts(session, status=status)
+    rows = list_concepts(session, status=status, tenant_id=tenant.id)
     return [concept_to_dict(c) for c in rows]
 
 
@@ -320,7 +320,7 @@ def create_concept_api(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _tenant_bundle(session, identity)
+    tenant = _tenant_bundle(session, identity)
     from qyunslation.persist.concept_repo import concept_to_dict, create_staging_concept
 
     forbidden = [
@@ -338,6 +338,7 @@ def create_concept_api(
         evidence=body.evidence,
         do_not_translate=body.do_not_translate,
         forbidden=forbidden,
+        tenant_id=tenant.id,
     )
     record_audit(
         session,
@@ -355,7 +356,7 @@ def create_concept_api(
 class TmUnitCreate(BaseModel):
     source_text: str = Field(min_length=1)
     target_text: str = Field(min_length=1)
-    approved: bool | None = None  # 缺省或 false → 400
+    approved: bool | None = None  # true → 400；正式库只走审校 decide
     project_id: str | None = Field(default=None, max_length=36)
     src_lang: str = Field(default="en", max_length=16)
     tgt_lang: str = Field(default="zh", max_length=16)
@@ -382,38 +383,35 @@ def create_tm_unit_api(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
-    from qyunslation.persist.tm_repo import (
-        ApprovalRequiredError,
-        create_approved_unit,
-        tm_unit_to_dict,
-    )
+    from qyunslation.persist.tm_repo import stage_import_unit, tm_unit_to_dict
 
-    if body.approved is not True:
+    if body.approved is True:
         raise HTTPException(
             status_code=400,
-            detail="approved=true required to enter formal TM (simulate 034g approval)",
+            detail="formal TM only via review decide; POST /tm/units writes staging",
         )
-    try:
-        unit = create_approved_unit(
-            session,
-            tenant_id=tenant.id,
-            source_text=body.source_text,
-            target_text=body.target_text,
-            approved=True,
-            approved_by=identity.user_sub,
-            project_id=body.project_id,
-            src_lang=body.src_lang,
-            tgt_lang=body.tgt_lang,
+    if body.project_id:
+        project = repo.get_project(
+            session, project_id=body.project_id, tenant_id=tenant.id
         )
-    except ApprovalRequiredError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+    unit = stage_import_unit(
+        session,
+        tenant_id=tenant.id,
+        source_text=body.source_text,
+        target_text=body.target_text,
+        project_id=body.project_id,
+        src_lang=body.src_lang,
+        tgt_lang=body.tgt_lang,
+    )
     record_audit(
         session,
         actor_sub=identity.user_sub,
-        action="tm.unit.create",
+        action="tm.unit.stage",
         extra={
             "unit_id": unit.id,
-            "approved": True,
+            "approved": False,
             "api_key": "should-strip",
         },
     )
@@ -525,7 +523,14 @@ def qa_run_api(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _tenant_bundle(session, identity)
+    tenant = _tenant_bundle(session, identity)
+    job = None
+    if body.job_id:
+        from qyunslation.persist.review_repo import job_owned_by_tenant
+
+        job = job_owned_by_tenant(session, job_id=body.job_id, tenant_id=tenant.id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
     from qyunslation.gateway.pipeline import run_segment_pipeline
 
     provider = None
@@ -562,17 +567,15 @@ def qa_run_api(
         enable_review=body.enable_review,
         enable_repair=body.enable_repair,
     )
-    if body.job_id and out.get("qa", {}).get("blocked"):
-        job = repo.get_job(session, job_id=body.job_id)
-        if job is not None:
-            repo.attach_provenance(
-                session,
-                job=job,
-                provenance=job.provenance or {"qa_blocked": True},
-                status="qa_blocked",
-            )
-            out["job_status"] = "qa_blocked"
-            out["job_id"] = job.id
+    if job is not None and out.get("qa", {}).get("blocked"):
+        repo.attach_provenance(
+            session,
+            job=job,
+            provenance=job.provenance or {"qa_blocked": True},
+            status="qa_blocked",
+        )
+        out["job_status"] = "qa_blocked"
+        out["job_id"] = job.id
     record_audit(
         session,
         actor_sub=identity.user_sub,

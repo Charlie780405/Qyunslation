@@ -225,3 +225,32 @@ def test_api_qa_run_and_block(client):
     assert data["repaired"] is True
     got = client.get(f"/api/v1/jobs/{jid}", headers=headers)
     assert got.status_code == 200
+
+
+def test_api_qa_run_rejects_foreign_job(client):
+    owner = {"X-Dev-User": "u", "X-Dev-Tenant": "gw"}
+    other = {"X-Dev-User": "v", "X-Dev-Tenant": "other"}
+    pid = client.post(
+        "/api/v1/projects",
+        headers=owner,
+        json={"slug": "p3", "name": "P3"},
+    ).json()["id"]
+    jid = client.post(
+        "/api/v1/jobs",
+        headers=owner,
+        json={"project_id": pid, "source_sha256": "c" * 64},
+    ).json()["id"]
+    r = client.post(
+        "/api/v1/qa/run",
+        headers=other,
+        json={
+            "source_text": "Dose was 10 mg",
+            "target_text": "剂量丢失",
+            "role": "table",
+            "job_id": jid,
+        },
+    )
+    assert r.status_code == 404
+    still = client.get(f"/api/v1/jobs/{jid}", headers=owner)
+    assert still.status_code == 200
+    assert still.json()["status"] != "qa_blocked"

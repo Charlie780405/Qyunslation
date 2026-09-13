@@ -198,21 +198,7 @@ def test_api_approve_gate_and_lookup(monkeypatch):
     app.include_router(api_v1_router)
     headers = {"X-Dev-User": "u1", "X-Dev-Tenant": "tm-tenant"}
     with TestClient(app) as client:
-        bad = client.post(
-            "/api/v1/tm/units",
-            headers=headers,
-            json={"source_text": "A", "target_text": "甲"},
-        )
-        assert bad.status_code == 400
-
-        bad2 = client.post(
-            "/api/v1/tm/units",
-            headers=headers,
-            json={"source_text": "A", "target_text": "甲", "approved": False},
-        )
-        assert bad2.status_code == 400
-
-        ok = client.post(
+        forbidden = client.post(
             "/api/v1/tm/units",
             headers=headers,
             json={
@@ -221,8 +207,55 @@ def test_api_approve_gate_and_lookup(monkeypatch):
                 "approved": True,
             },
         )
-        assert ok.status_code == 201
-        assert ok.json()["approved"] is True
+        assert forbidden.status_code == 400
+
+        staged = client.post(
+            "/api/v1/tm/units",
+            headers=headers,
+            json={"source_text": "Primary endpoint", "target_text": "主要终点"},
+        )
+        assert staged.status_code == 201
+        assert staged.json()["approved"] is False
+
+        miss = client.post(
+            "/api/v1/tm/lookup",
+            headers=headers,
+            json={"source_text": "primary endpoint"},
+        )
+        assert miss.status_code == 200
+        assert miss.json()["reuse"] is False
+
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"slug": "tm", "name": "TM"},
+        )
+        jid = client.post(
+            "/api/v1/jobs",
+            headers=headers,
+            json={"project_id": proj.json()["id"], "source_sha256": "a" * 64},
+        ).json()["id"]
+        enq = client.post(
+            "/api/v1/review/enqueue",
+            headers=headers,
+            json={
+                "job_id": jid,
+                "segments": [
+                    {
+                        "source_text": "Primary endpoint",
+                        "machine_text": "主要终点",
+                        "policy": "HUMAN_REVIEW",
+                    }
+                ],
+            },
+        )
+        sid = enq.json()["created"][0]["id"]
+        decided = client.post(
+            f"/api/v1/review/segments/{sid}/decide",
+            headers=headers,
+            json={"action": "approve", "revised_text": "主要终点"},
+        )
+        assert decided.status_code == 200
 
         hit = client.post(
             "/api/v1/tm/lookup",

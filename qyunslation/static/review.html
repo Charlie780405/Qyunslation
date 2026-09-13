@@ -129,16 +129,27 @@
     }
     function renderQueue() {
       const q = $("queue");
-      q.innerHTML = "";
+      q.replaceChildren();
       if (!segments.length) {
-        q.innerHTML = '<p class="muted">空</p>';
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "空";
+        q.appendChild(empty);
         return;
       }
       for (const s of segments) {
         const div = document.createElement("div");
         div.className = "seg" + (current && current.id === s.id ? " active" : "");
-        div.innerHTML = `<div><code>${s.status}</code> ${s.policy}</div>
-          <div class="muted">${(s.source_text || "").slice(0, 80)}</div>`;
+        const head = document.createElement("div");
+        const code = document.createElement("code");
+        code.textContent = s.status || "";
+        head.appendChild(code);
+        head.appendChild(document.createTextNode(" " + (s.policy || "")));
+        const src = document.createElement("div");
+        src.className = "muted";
+        src.textContent = (s.source_text || "").slice(0, 80);
+        div.appendChild(head);
+        div.appendChild(src);
         div.onclick = () => selectSeg(s);
         q.appendChild(div);
       }

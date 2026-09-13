@@ -47,6 +47,7 @@ WT_034="$ROOT/docs/walkthroughs/WT-034-pharma-rd-mvp.md"
 [[ -f "$ROOT/scripts/plan034h-release-checklist.sh" ]] && pass "release checklist" || fail "checklist"
 grep -q 'OidcAdapter' "$ROOT/qyunslation/persist/identity.py" \
   && grep -q 'PyJWKClient\|jwt.decode' "$ROOT/qyunslation/persist/identity.py" \
+  && ! grep -q 'X-Tenant' "$ROOT/qyunslation/persist/identity.py" \
   && pass "OIDC JWT code" || fail "OIDC JWT code"
 grep -q 'PyJWT' "$ROOT/pyproject.toml" && pass "PyJWT dep" || fail "PyJWT dep"
 # 伞门必须串本门（本门不反向递归调用伞门）

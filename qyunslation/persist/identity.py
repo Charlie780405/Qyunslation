@@ -136,9 +136,9 @@ class OidcAdapter:
         if not sub:
             raise HTTPException(status_code=401, detail="token missing sub")
         tenant_raw = claims.get(cfg["tenant_claim"])
-        if tenant_raw is None:
-            tenant_raw = request.headers.get("X-Tenant") or "default"
-        tenant = str(tenant_raw).strip() or "default"
+        tenant = str(tenant_raw or "").strip()
+        if not tenant:
+            raise HTTPException(status_code=401, detail="token missing tenant")
         return IdentityContext(tenant_slug=tenant, user_sub=sub)
 
 

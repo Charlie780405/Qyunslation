@@ -117,7 +117,7 @@ def test_oidc_valid_token_via_hook(monkeypatch):
     assert ctx.tenant_slug == "acme"
 
 
-def test_oidc_tenant_from_header_fallback(monkeypatch):
+def test_oidc_missing_tenant_claim_is_401(monkeypatch):
     monkeypatch.setenv("QYUNSLATION_OIDC_ISSUER", "https://issuer.example")
     monkeypatch.setenv("QYUNSLATION_OIDC_AUDIENCE", "qyunslation")
     monkeypatch.setenv("QYUNSLATION_OIDC_JWKS_URL", "https://issuer.example/jwks")
@@ -126,10 +126,27 @@ def test_oidc_tenant_from_header_fallback(monkeypatch):
         return {"sub": "user-2"}
 
     adapter = OidcAdapter(decode_hook=decode)
+    with pytest.raises(HTTPException) as ei:
+        adapter.resolve(
+            _make_request({"Authorization": "Bearer t", "X-Tenant": "from-header"})
+        )
+    assert ei.value.status_code == 401
+    assert "tenant" in str(ei.value.detail).lower()
+
+
+def test_oidc_ignores_x_tenant_when_claim_present(monkeypatch):
+    monkeypatch.setenv("QYUNSLATION_OIDC_ISSUER", "https://issuer.example")
+    monkeypatch.setenv("QYUNSLATION_OIDC_AUDIENCE", "qyunslation")
+    monkeypatch.setenv("QYUNSLATION_OIDC_JWKS_URL", "https://issuer.example/jwks")
+
+    def decode(token, cfg):
+        return {"sub": "user-3", "tenant": "from-jwt"}
+
+    adapter = OidcAdapter(decode_hook=decode)
     ctx = adapter.resolve(
-        _make_request({"Authorization": "Bearer t", "X-Tenant": "from-header"})
+        _make_request({"Authorization": "Bearer t", "X-Tenant": "spoofed"})
     )
-    assert ctx.tenant_slug == "from-header"
+    assert ctx.tenant_slug == "from-jwt"
 
 
 def test_dev_bypass_still_works_non_production(monkeypatch):

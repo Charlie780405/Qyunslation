@@ -59,12 +59,14 @@ run_pass "034g pytest" "$STAGE_DIR/t.log" \
   "$PY" -m pytest -q --no-cov tests/persist/test_plan034g_review.py
 
 run_pass "static page markers" "$STAGE_DIR/html.log" \
-  "$PY" -c "
+  "$PY" -c '
 from pathlib import Path
-html = Path('qyunslation/static/review.html').read_text(encoding='utf-8')
-assert 'X-Dev-User' in html and '批准' in html and '/api/v1/review/' in html
-print('ok')
-"
+html = Path("qyunslation/static/review.html").read_text(encoding="utf-8")
+assert "X-Dev-User" in html and "批准" in html and "/api/v1/review/" in html
+assert "textContent" in html
+assert "innerHTML =" not in html
+print("ok")
+'
 
 if [[ "$FAILURES" -gt 0 ]]; then
   printf 'SUMMARY: FAIL fail=%s\n' "$FAILURES"

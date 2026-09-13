@@ -32,12 +32,18 @@ def list_concepts(
     session: Session,
     *,
     status: str | None = None,
+    tenant_id: str | None = None,
     limit: int = 200,
 ) -> list[Concept]:
     stmt = select(Concept).options(
         selectinload(Concept.terms),
         selectinload(Concept.forbiddens),
     )
+    if tenant_id:
+        stmt = stmt.where(
+            (Concept.tenant_id == tenant_id)
+            | ((Concept.tenant_id.is_(None)) & (Concept.status == "curated"))
+        )
     if status:
         stmt = stmt.where(Concept.status == status)
     stmt = stmt.order_by(Concept.created_at.desc()).limit(limit)
@@ -64,6 +70,7 @@ def create_staging_concept(
     evidence: str | None = None,
     do_not_translate: bool = False,
     forbidden: list[tuple[str, str]] | None = None,
+    tenant_id: str | None = None,
 ) -> Concept:
     """API/LLM 路径：强制 staging。"""
     concept = Concept(
@@ -73,7 +80,7 @@ def create_staging_concept(
         evidence=evidence,
         do_not_translate=do_not_translate,
         layer=layer or "session",
-        tenant_id=None,
+        tenant_id=tenant_id,
         import_key=None,
     )
     session.add(concept)

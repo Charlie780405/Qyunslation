@@ -244,6 +244,7 @@ def decide_segment(
                 src_lng=src_lang,
                 tgt_lng=tgt_lang,
                 evidence=f"review_segment:{segment.id}",
+                tenant_id=tenant_id,
             )
 
     return {

@@ -16,7 +16,7 @@
 | 规则 | 说明 |
 | --- | --- |
 | 表 | `tm_unit`（与 concept **分表**）；整型 `version`，无版本子表 |
-| 入库 | 仅 `approved=true`；`POST /api/v1/tm/units` 须显式批准（模拟 034g）；缺省 400 |
+| 入库 | 仅 `approved=true`；`POST /api/v1/tm/units` 只写 staging（`approved=true` → 400）；正式库只经 034g decide |
 | 精确匹配 | `source_norm` 相等 **且** `placeholder_sig` 相等 → `reuse=true` |
 | 模糊匹配 | `difflib.SequenceMatcher` ≥0.85；`reuse=false`，仅 `suggestions[]` |
 | 作用域 | `tenant_id` + 可选 `project_id`；禁止跨租户 |
@@ -27,7 +27,7 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/v1/tm/units` | 批准入库（upsert 去重） |
+| POST | `/api/v1/tm/units` | staging 入库；正式库走审校批准 |
 | POST | `/api/v1/tm/lookup` | 精确 / 模糊查询 |
 | GET | `/api/v1/tm/export.tmx` | 导出已批准 |
 | POST | `/api/v1/tm/import.tmx` | 导入为未批准 |

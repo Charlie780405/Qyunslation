@@ -13,10 +13,10 @@ export QYUNSLATION_DATABASE_URL='postgresql+psycopg://qyunslation:qyunslation_de
 .venv/bin/python -m alembic -c alembic.ini upgrade head
 
 export QYUNSLATION_DEV_AUTH_BYPASS=1
-# 入库须显式批准
+# 此接口只写 staging；approved=true 会 400。正式库走审校 decide
 curl -sS -H 'X-Dev-User: a' -H 'X-Dev-Tenant: t' \
   -H 'Content-Type: application/json' \
-  -d '{"source_text":"Primary endpoint","target_text":"主要终点","approved":true}' \
+  -d '{"source_text":"Primary endpoint","target_text":"主要终点"}' \
   http://127.0.0.1:8010/api/v1/tm/units
 
 curl -sS -H 'X-Dev-User: a' -H 'X-Dev-Tenant: t' \

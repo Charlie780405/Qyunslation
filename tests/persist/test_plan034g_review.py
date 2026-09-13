@@ -309,3 +309,13 @@ def test_api_review_loop_and_audit_strip(client):
             assert "authorization" not in {k.lower() for k in extra}
     finally:
         s.close()
+
+
+def test_review_html_does_not_interpolate_source_into_html():
+    from pathlib import Path
+
+    html = Path("qyunslation/static/review.html").read_text(encoding="utf-8")
+    assert "textContent" in html
+    assert "source_text || \"\"" in html or "source_text || '')" in html
+    assert "innerHTML = `" not in html
+    assert "${s.source_text" not in html
