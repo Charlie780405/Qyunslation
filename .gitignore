@@ -26,6 +26,9 @@ qyunslation/output/
 # Environment variables
 .env
 
+# PLAN-034h release fingerprints (local only)
+artifacts/
+
 # 运行时术语表数据（用户自定义术语，运行时生成）
 glossary_db.json
 translation_cache.json
