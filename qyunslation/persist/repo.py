@@ -69,14 +69,37 @@ def create_job(
     source_sha256: str,
     storage_key: str | None = None,
     status: str = "pending",
+    provenance: dict | None = None,
 ) -> Job:
     job = Job(
         project_id=project_id,
         source_sha256=source_sha256.lower(),
         storage_key=storage_key,
         status=status,
+        provenance=provenance,
     )
     session.add(job)
+    session.flush()
+    return job
+
+
+def attach_provenance(
+    session: Session,
+    *,
+    job: Job,
+    provenance: dict,
+    status: str | None = None,
+) -> Job:
+    """写入去密钥 provenance；可选更新 status（如 qa_blocked）。"""
+    from qyunslation.persist.audit import sanitize_extra
+
+    cleaned = sanitize_extra(dict(provenance)) or {}
+    # sanitize_extra 会丢掉密钥键；再强制禁止
+    for bad in ("api_key", "apikey", "authorization", "password", "secret", "token"):
+        cleaned.pop(bad, None)
+    job.provenance = cleaned
+    if status is not None:
+        job.status = status
     session.flush()
     return job
 

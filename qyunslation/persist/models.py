@@ -1,8 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-034c/d：租户 / 项目 / 成员 / job / 审计 + Concept 术语 ORM。
-
-TM 表留给 034e。
-"""
+"""PLAN-034c–g：租户 / 项目 / job / 审计 + Concept + TM + Review ORM。"""
 from __future__ import annotations
 
 import uuid
@@ -96,6 +93,8 @@ class Job(Base):
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # PLAN-034f：模型/术语/TM/算法溯源（无 API Key）
+    provenance: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
@@ -188,3 +187,128 @@ class ConceptForbidden(Base):
     text: Mapped[str] = mapped_column(String(512), nullable=False)
 
     concept: Mapped[Concept] = relationship(back_populates="forbiddens")
+
+
+class TmUnit(Base):
+    """批准驱动的翻译记忆句段（与 concept 分表）。"""
+
+    __tablename__ = "tm_unit"
+    __table_args__ = (
+        Index(
+            "ix_tm_unit_lookup",
+            "tenant_id",
+            "src_lang",
+            "tgt_lang",
+            "source_norm",
+            "placeholder_sig",
+        ),
+        Index("ix_tm_unit_tenant_approved", "tenant_id", "approved"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("project.id", ondelete="SET NULL"), nullable=True
+    )
+    src_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
+    tgt_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="zh")
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    target_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    placeholder_sig: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approved_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+# --- PLAN-034g 人工审校 ---
+
+
+class ReviewSegment(Base):
+    """job 下待审句段；原始 source_sha256 只读引用。"""
+
+    __tablename__ = "review_segment"
+    __table_args__ = (
+        Index("ix_review_segment_job_status", "job_id", "status"),
+        Index("ix_review_segment_source_sha", "source_sha256"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    policy: Mapped[str] = mapped_column(String(32), nullable=False, default="TRANSLATE")
+    role: Mapped[str] = mapped_column(String(64), nullable=False, default="body")
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    machine_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    revised_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    decided_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    notes: Mapped[list["ReviewNote"]] = relationship(
+        back_populates="segment", cascade="all, delete-orphan"
+    )
+    revisions: Mapped[list["ReviewRevision"]] = relationship(
+        back_populates="segment", cascade="all, delete-orphan"
+    )
+
+
+class ReviewNote(Base):
+    __tablename__ = "review_note"
+    __table_args__ = (Index("ix_review_note_segment", "segment_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    segment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("review_segment.id", ondelete="CASCADE"), nullable=False
+    )
+    author_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    segment: Mapped[ReviewSegment] = relationship(back_populates="notes")
+
+
+class ReviewRevision(Base):
+    """每次批准/修订递增 version，供 diff。"""
+
+    __tablename__ = "review_revision"
+    __table_args__ = (
+        UniqueConstraint("segment_id", "version", name="uq_review_revision_seg_ver"),
+        Index("ix_review_revision_source_sha", "source_sha256"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    segment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("review_segment.id", ondelete="CASCADE"), nullable=False
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_text: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False, default="revise")
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    segment: Mapped[ReviewSegment] = relationship(back_populates="revisions")
