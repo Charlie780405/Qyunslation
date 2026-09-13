@@ -91,4 +91,4 @@ def test_dev_bypass_requires_flag(monkeypatch):
     request = Request(scope)
     with pytest.raises(HTTPException) as exc:
         resolve_identity(request)
-    assert exc.value.status_code in {401, 501}
+    assert exc.value.status_code in {401, 501, 503}

@@ -43,7 +43,8 @@ def test_health_and_service_coexist(client):
     h = client.get("/api/v1/health")
     assert h.status_code == 200
     body = h.json()
-    assert body["schema"] in {"034c", "034d"}
+    # schema 标签随 034 子计划推进（034c→034h），只要求属于 034 家族
+    assert str(body["schema"]).startswith("034")
     assert body["db"] == "ok"
     m = client.get("/service/meta")
     assert m.status_code == 200
