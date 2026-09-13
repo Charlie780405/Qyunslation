@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from .docx_table_exec import DocxSegmentBatch, merge_docx_translations
-from .models import DocumentStructureManifest, TranslationPolicy
+from .models import DocumentStructureManifest, TranslationPolicy, DEFERRED_TRANSLATION_POLICIES
 from .table_cell_policy import classify_cell_policy
 
 _PPTX_CELL_BLOCK = re.compile(r"^table:slide:(\d+):(\d+):r(\d+)c(\d+)$")
@@ -65,6 +65,10 @@ def partition_pptx_segments(
             policies=policies,
         )
         if policy is TranslationPolicy.PRESERVE:
+            preserved.add(index)
+            continue
+        if policy in DEFERRED_TRANSLATION_POLICIES:
+            # PLAN-034b：TERM_ONLY / HUMAN_REVIEW 不送 LLM
             preserved.add(index)
             continue
         text = original

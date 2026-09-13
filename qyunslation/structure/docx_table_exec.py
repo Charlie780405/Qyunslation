@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .models import DocumentStructureManifest, TranslationPolicy
+from .models import DocumentStructureManifest, TranslationPolicy, DEFERRED_TRANSLATION_POLICIES
 from .protect import protect_tokens, restore_tokens
 from .table_cell_policy import classify_cell_policy
 
@@ -74,6 +74,10 @@ def partition_docx_segments(
             policies=policies,
         )
         if policy is TranslationPolicy.PRESERVE:
+            preserved.add(index)
+            continue
+        if policy in DEFERRED_TRANSLATION_POLICIES:
+            # PLAN-034b：TERM_ONLY / HUMAN_REVIEW 不送 LLM
             preserved.add(index)
             continue
         text = original

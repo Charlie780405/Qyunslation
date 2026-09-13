@@ -19,11 +19,23 @@ Figure/Table 主计数来自去重后的语义对象，不来自 bitmap、xref�
 
 ## 版本
 
-- 当前版本为 `1.0.0`。
+- 当前版本为 `1.3.0`（PLAN-034b；此前代码曾停在 `1.2.0`，本合同曾误写 `1.0.0`，已收口）。
 - 相同 major 可增加可选字段；不得删除字段或改变已有字段语义。
 - 读取器接受相同 major 的未知扩展字段；写入器只产生当前模型字段。
+- **兼容**：`1.2.0` / `1.1.0` 等同 major 清单仍可 `model_validate`；新字段均为可选，缺省为 `null`/空。
 - 未知 major 返回 `MANIFEST_VERSION_UNSUPPORTED`。
 - 规范化 JSON 使用排序键和 UTF-8；`manifest_id` 从不包含 `created_at` 的稳定载荷生成。
+
+### PLAN-034b 增量（1.3.0）
+
+| 领域 | 内容 |
+| --- | --- |
+| `translation_policy` | 既有 `TRANSLATE` / `PRESERVE` / `PROTECT_TOKENS`；**新增** `TERM_ONLY`、`HUMAN_REVIEW` |
+| `SourceStyle` | 既有字体/字重/斜体/对齐/旋转；**新增可选** `color`、`line_height` |
+| `DocumentInfo` | **新增可选** `document_domain`、`risk_level` |
+| `ProducerInfo` | **新增可选** `glossary_version`、`tm_version`（溯源占位） |
+
+锁定：参考文献整区 `PRESERVE`，不得进入 LLM / 术语抽取 / 上下文。`TERM_ONLY` / `HUMAN_REVIEW` 执行侧不得静默当 `TRANSLATE`（本期跳过保留源文；审校队列 → 034g）。
 
 ## 身份
 

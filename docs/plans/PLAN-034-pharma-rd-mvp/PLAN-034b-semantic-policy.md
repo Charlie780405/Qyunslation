@@ -1,8 +1,10 @@
 # PLAN-034b：医药文档语义策略（Manifest 1.3.0）
 
-> 状态：**待编码**（骨架文档）
+> 状态：**已实现**
 > 父计划：[PLAN-034](./PLAN-034-pharma-rd-mvp.md)
-> 依赖：[034a](./PLAN-034a-gold-benchmark.md)
+> 依赖：[034a](./PLAN-034a-gold-benchmark.md)（样本门；本项不依赖 034a1 二进制）
+> 证据：[WT-034b](../../walkthroughs/WT-034b-semantic-policy.md)
+> 验收：`bash scripts/verify-plan-034b.sh`
 
 ## 目标
 
@@ -26,6 +28,7 @@ Manifest **1.3.0** 向后兼容扩展：翻译策略、样式与来源不可变�
 - 参考文献整区标记 `PRESERVE`，**不得**进入 LLM、术语抽取或上下文（033d/h 已落地执行侧；1.3.0 写入契约字段）。
 - 相同 major 可增可选字段；不得删除或改变已有字段语义。
 - 更新 `docs/contracts/document-structure-manifest-v1.md` 版本号与字段表，与 Python 模型一致。
+- `TERM_ONLY` / `HUMAN_REVIEW`：**不**静默当 `TRANSLATE`；本期显式跳过保留源文。
 
 ## 判据
 
@@ -37,9 +40,10 @@ Manifest **1.3.0** 向后兼容扩展：翻译策略、样式与来源不可变�
 
 - 换 Docling/Paddle 做结构识别
 - 实现审校队列（→ 034g，仅预留 `HUMAN_REVIEW` 枚举）
+- PostgreSQL / 租户（→ 034c）
 
 ## 完成定义
 
-- [ ] 模型 + 合同 + 迁移说明
-- [ ] 扫描器写入新字段的最小路径
-- [ ] verify 断言 1.3.0 与 PRESERVE 参考文献
+- [x] 模型 + 合同 + 迁移说明
+- [x] 扫描器写入新字段的最小路径（schema 1.3.0；样式采不到则 None）
+- [x] verify 断言 1.3.0 与 PRESERVE 参考文献
