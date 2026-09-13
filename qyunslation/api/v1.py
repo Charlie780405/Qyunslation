@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any, Generator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -101,15 +101,21 @@ def _tenant_bundle(session: Session, identity: IdentityContext):
 
 
 @router.get("/health")
-def api_health() -> dict[str, Any]:
+def api_health(request: Request) -> dict[str, Any]:
+    """匿名只回 schema/db；env 与配置位只对已认证身份可见。"""
     ensure_engine_ready()
     ok = ping_db()
-    return {
+    body: dict[str, Any] = {
         "schema": "034h",
         "db": "ok" if ok else "unavailable",
-        "database_url_set": bool(get_database_url()),
-        "env": (os.environ.get("QYUNSLATION_ENV") or "development"),
     }
+    try:
+        resolve_identity(request)
+    except Exception:
+        return body
+    body["database_url_set"] = bool(get_database_url())
+    body["env"] = os.environ.get("QYUNSLATION_ENV") or "development"
+    return body
 
 
 @router.get("/projects")
@@ -354,8 +360,8 @@ def create_concept_api(
 
 
 class TmUnitCreate(BaseModel):
-    source_text: str = Field(min_length=1)
-    target_text: str = Field(min_length=1)
+    source_text: str = Field(min_length=1, max_length=20000)
+    target_text: str = Field(min_length=1, max_length=20000)
     approved: bool | None = None  # true → 400；正式库只走审校 decide
     project_id: str | None = Field(default=None, max_length=36)
     src_lang: str = Field(default="en", max_length=16)
@@ -363,7 +369,7 @@ class TmUnitCreate(BaseModel):
 
 
 class TmLookupRequest(BaseModel):
-    source_text: str = Field(min_length=1)
+    source_text: str = Field(min_length=1, max_length=20000)
     project_id: str | None = Field(default=None, max_length=36)
     src_lang: str = Field(default="en", max_length=16)
     tgt_lang: str = Field(default="zh", max_length=16)
@@ -372,7 +378,7 @@ class TmLookupRequest(BaseModel):
 
 
 class TmImportBody(BaseModel):
-    tmx: str = Field(min_length=1)
+    tmx: str = Field(min_length=1, max_length=8 * 1024 * 1024)
     project_id: str | None = Field(default=None, max_length=36)
 
 
@@ -475,10 +481,6 @@ def tm_import_tmx_api(
     try:
         parsed = parse_tmx(body.tmx)
     except Exception as exc:
-        from xml.etree.ElementTree import ParseError
-
-        if isinstance(exc, ParseError):
-            raise HTTPException(status_code=400, detail=f"invalid TMX: {exc}") from exc
         raise HTTPException(status_code=400, detail=f"invalid TMX: {exc}") from exc
 
     created = []
@@ -590,28 +592,29 @@ def qa_run_api(
 
 
 class ReviewEnqueueItem(BaseModel):
-    source_text: str = Field(min_length=1)
-    machine_text: str = ""
-    block_id: str | None = None
-    policy: str = "TRANSLATE"
-    role: str = "body"
+    # 上限对齐 ORM 列宽，避免超长值到 PG 才报 500
+    source_text: str = Field(min_length=1, max_length=20000)
+    machine_text: str = Field(default="", max_length=20000)
+    block_id: str | None = Field(default=None, max_length=128)
+    policy: str = Field(default="TRANSLATE", max_length=32)
+    role: str = Field(default="body", max_length=64)
 
 
 class ReviewEnqueueBody(BaseModel):
     job_id: str = Field(min_length=1, max_length=36)
-    segments: list[ReviewEnqueueItem] = Field(min_length=1)
+    segments: list[ReviewEnqueueItem] = Field(min_length=1, max_length=500)
 
 
 class ReviewNoteBody(BaseModel):
-    body: str = Field(min_length=1)
+    body: str = Field(min_length=1, max_length=10000)
 
 
 class ReviewDecideBody(BaseModel):
-    action: str = Field(min_length=1)  # approve | reject
-    revised_text: str | None = None
+    action: str = Field(min_length=1, max_length=16)  # approve | reject
+    revised_text: str | None = Field(default=None, max_length=20000)
     promote_term: bool = False
-    src_lang: str = "en"
-    tgt_lang: str = "zh"
+    src_lang: str = Field(default="en", max_length=16)
+    tgt_lang: str = Field(default="zh", max_length=16)
 
 
 @router.post("/review/enqueue")
@@ -777,9 +780,9 @@ def review_diff_api(
 
 @router.get("/review/suggestions")
 def review_suggestions_api(
-    source_text: str,
-    target_text: str | None = None,
-    project_id: str | None = None,
+    source_text: str = Query(min_length=1, max_length=20000),
+    target_text: str | None = Query(default=None, max_length=20000),
+    project_id: str | None = Query(default=None, max_length=36),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:

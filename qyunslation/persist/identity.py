@@ -130,7 +130,8 @@ class OidcAdapter:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
+            # 不回显验签异常原文（可能含 issuer/kid/JWKS 细节）
+            raise HTTPException(status_code=401, detail="invalid token") from exc
 
         sub = str(claims.get("sub") or "").strip()
         if not sub:

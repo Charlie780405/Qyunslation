@@ -97,6 +97,8 @@ def test_oidc_forged_token(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         adapter.resolve(_make_request({"Authorization": "Bearer forged.jwt.here"}))
     assert ei.value.status_code == 401
+    # 不把验签异常原文回给调用方
+    assert "forged" not in str(ei.value.detail)
 
 
 def test_oidc_valid_token_via_hook(monkeypatch):

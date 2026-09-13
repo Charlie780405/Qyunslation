@@ -26,9 +26,44 @@ def client(monkeypatch):
     reset_engine()
 
 
+@pytest.fixture()
+def no_bypass_client(monkeypatch):
+    """无 Dev 旁路、未配 OIDC：等价生产下的匿名访问者。"""
+    reset_engine()
+    monkeypatch.setenv("QYUNSLATION_DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    monkeypatch.delenv("QYUNSLATION_DEV_AUTH_BYPASS", raising=False)
+    monkeypatch.setenv("QYUNSLATION_ENV", "development")
+    engine = init_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    app = FastAPI()
+    app.include_router(api_v1_router)
+    with TestClient(app) as c:
+        yield c
+    reset_engine()
+
+
+def test_health_hides_config_from_anonymous(no_bypass_client):
+    """匿名只应看到 schema/db，不应看到 env 与 DATABASE_URL 是否配置。"""
+    anon = no_bypass_client.get("/api/v1/health")
+    assert anon.status_code == 200
+    body = anon.json()
+    assert body["schema"] == "034h"
+    assert "env" not in body
+    assert "database_url_set" not in body
+
+
+def test_health_shows_config_to_authenticated(client):
+    authed = client.get(
+        "/api/v1/health",
+        headers={"X-Dev-User": "smoke", "X-Dev-Tenant": "pilot"},
+    )
+    assert authed.status_code == 200
+    assert "env" in authed.json()
+
+
 def test_saas_smoke_health_project_review(client):
     headers = {"X-Dev-User": "smoke", "X-Dev-Tenant": "pilot"}
-    health = client.get("/api/v1/health")
+    health = client.get("/api/v1/health", headers=headers)
     assert health.status_code == 200
     assert health.json().get("schema") == "034h"
 
