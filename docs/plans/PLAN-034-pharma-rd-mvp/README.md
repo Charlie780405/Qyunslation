@@ -8,7 +8,7 @@
 | 034a | [PLAN-034a-gold-benchmark.md](./PLAN-034a-gold-benchmark.md) | 已实现：catalog/MQM/阈值 |
 | 034a1 | [PLAN-034a1-gold-materialize.md](./PLAN-034a1-gold-materialize.md) | 已实现：真件+合成物化，verify PASS |
 | 034b | [PLAN-034b-semantic-policy.md](./PLAN-034b-semantic-policy.md) | 已实现：Manifest 1.3.0 |
-| 034c | [PLAN-034c-saas-persistence.md](./PLAN-034c-saas-persistence.md) |
+| 034c | [PLAN-034c-saas-persistence.md](./PLAN-034c-saas-persistence.md) | 已实现：PG/Alembic + /api/v1 骨架 |
 | 034d0 | [PLAN-034d0-glossary-ssot-bridge.md](./PLAN-034d0-glossary-ssot-bridge.md) |
 | 034d | [PLAN-034d-concept-termbase.md](./PLAN-034d-concept-termbase.md) |
 | 034e | [PLAN-034e-translation-memory.md](./PLAN-034e-translation-memory.md) |

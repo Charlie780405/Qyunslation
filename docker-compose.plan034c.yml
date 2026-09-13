@@ -1,0 +1,21 @@
+# PLAN-034c：本机开发 PostgreSQL（默认口令仅供本地，勿当生产密钥入库）
+services:
+  postgres:
+    image: postgres:16
+    container_name: qyunslation-plan034c-pg
+    environment:
+      POSTGRES_USER: qyunslation
+      POSTGRES_PASSWORD: qyunslation_dev_only
+      POSTGRES_DB: qyunslation
+    ports:
+      - "5433:5432"
+    volumes:
+      - plan034c_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qyunslation -d qyunslation"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  plan034c_pgdata:
