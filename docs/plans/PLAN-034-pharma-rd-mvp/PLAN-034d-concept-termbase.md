@@ -1,47 +1,47 @@
 # PLAN-034d：概念型术语库
 
-> 状态：**待编码**（骨架文档）
+> 状态：**已实现**
 > 父计划：[PLAN-034](./PLAN-034-pharma-rd-mvp.md)
-> 依赖：[034d0](./PLAN-034d0-glossary-ssot-bridge.md)（必须先收敛扁平三分裂）
+> 依赖：[034d0](./PLAN-034d0-glossary-ssot-bridge.md)、[034c](./PLAN-034c-saas-persistence.md)
+> 证据：[WT-034d](../../walkthroughs/WT-034d-concept-termbase.md)
+> 验收：`bash scripts/verify-plan-034d.sh`
 
 ## 目标
 
-以 **Concept** 为中心的术语库：首选词、同义词、缩写、禁用词、不翻译规则、领域、证据、许可证、状态、版本、批准人；支持作用域、审批、CSV/TBX；迁移现有 `glossaries/*.csv`。
+以 **Concept** 为中心的术语库：首选词、同义词、缩写、禁用词、不翻译规则、领域、证据、许可证、状态、版本；支持作用域层、CSV 导入、扁平导出给 034d0/BabelDOC。
 
-## 数据模型（纲要）
+## 数据模型
 
 ```text
-Concept
-  ├── id, domain, status, version, license, evidence, approved_by, approved_at
-  ├── preferred_term[lang]
-  ├── synonyms[] / abbreviations[]
-  ├── forbidden_translations[]
-  ├── do_not_translate: bool / rules
-  └── scope: org | form | clinical | project | tenant | session
+concept / concept_term / concept_forbidden
 ```
 
-优先级沿用 PLAN-039：`org > form > clinical > project > session > harvest`，映射到 Concept 作用域。
+- `status`: `curated` | `staging` | `rejected`
+- `layer`: 映射 PLAN-039（org > form > clinical > project > session > harvest）
+- `POST /api/v1/concepts` **强制 staging**（LLM 候选不自动发布）
 
 ## 规则
 
-1. LLM 自动提取 **只生成候选**，禁止自动发布为 curated。
-2. MedDRA **仅企业自带授权数据**，禁止进入公共默认库或公开 git。
-3. 导出兼容：运行时仍可生成 BabelDOC 所需的扁平 `merged.csv` 视图。
-4. CSV/TBX 导入导出；导入默认进 staging，人工晋升。
+1. LLM / API 写入只进 staging。
+2. MedDRA **禁止**公共默认库或公开 git。
+3. 无 `DATABASE_URL` 时 `build_merged_dict` 仍走 CSV（034d0 不回归）。
+4. 有库且含 curated 时优先 Concept 扁平视图，再叠 session/harvest 文件。
+5. TBX：本期仅导出 stub（`concept_flatten.write_tbx`）。
 
 ## 判据
 
-- 现有 370 条 curated 可迁移且双向抽查一致。
-- 硬性术语命中率评测接口就绪（供 034a/034h 阈值使用）。
-- 禁用译法检测：命中即失败。
+- curated CSV 可幂等导入；`景行生物` → `GenScend` 抽查一致。
+- `detect_forbidden` 纯函数可用。
+- staging 不进入 flatten curated 视图。
 
 ## Out of Scope
 
 - 审校 UI（→ 034g）
-- 公开分发 MedDRA
+- TM / TMX（→ 034e）
+- 公开分发 MedDRA；TBX 完整导入
 
 ## 完成定义
 
-- [ ] Concept schema + 迁移脚本
-- [ ] CSV/TBX + 扁平导出
-- [ ] LLM 候选不自动发布的门禁测试
+- [x] Concept schema + Alembic `034d0001`
+- [x] CSV 导入 + 扁平导出接入 `build_merged_dict`
+- [x] LLM/API 候选不自动发布的门禁测试

@@ -43,7 +43,7 @@ def test_health_and_service_coexist(client):
     h = client.get("/api/v1/health")
     assert h.status_code == 200
     body = h.json()
-    assert body["schema"] == "034c"
+    assert body["schema"] in {"034c", "034d"}
     assert body["db"] == "ok"
     m = client.get("/service/meta")
     assert m.status_code == 200

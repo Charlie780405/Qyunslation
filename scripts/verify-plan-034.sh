@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-034 pharma RD MVP — docs + 034d0 + 034a + 034b + 034c.
+# PLAN-034 pharma RD MVP — docs + 034d0 + 034a + 034b + 034c + 034d.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -167,6 +167,9 @@ run_pass "PLAN-034b" "$STAGE_DIR/034b.log" bash "$ROOT/scripts/verify-plan-034b.
 
 # --- 034c SaaS persistence ---
 run_pass "PLAN-034c" "$STAGE_DIR/034c.log" bash "$ROOT/scripts/verify-plan-034c.sh"
+
+# --- 034d Concept termbase ---
+run_pass "PLAN-034d" "$STAGE_DIR/034d.log" bash "$ROOT/scripts/verify-plan-034d.sh"
 
 if [[ "$FAILURES" -gt 0 ]]; then
   printf 'SUMMARY: FAIL fail=%s blocked=%s\n' "$FAILURES" "$BLOCKED"

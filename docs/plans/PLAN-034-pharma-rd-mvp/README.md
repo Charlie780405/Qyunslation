@@ -10,7 +10,7 @@
 | 034b | [PLAN-034b-semantic-policy.md](./PLAN-034b-semantic-policy.md) | 已实现：Manifest 1.3.0 |
 | 034c | [PLAN-034c-saas-persistence.md](./PLAN-034c-saas-persistence.md) | 已实现：PG/Alembic + /api/v1 骨架 |
 | 034d0 | [PLAN-034d0-glossary-ssot-bridge.md](./PLAN-034d0-glossary-ssot-bridge.md) |
-| 034d | [PLAN-034d-concept-termbase.md](./PLAN-034d-concept-termbase.md) |
+| 034d | [PLAN-034d-concept-termbase.md](./PLAN-034d-concept-termbase.md) | 已实现：Concept 三表 + CSV 导入 + staging 门禁 |
 | 034e | [PLAN-034e-translation-memory.md](./PLAN-034e-translation-memory.md) |
 | 034f | [PLAN-034f-model-gateway-qa.md](./PLAN-034f-model-gateway-qa.md) |
 | 034g | [PLAN-034g-human-review-bench.md](./PLAN-034g-human-review-bench.md) |

@@ -91,7 +91,7 @@ def api_health() -> dict[str, Any]:
     ensure_engine_ready()
     ok = ping_db()
     return {
-        "schema": "034c",
+        "schema": "034d",
         "db": "ok" if ok else "unavailable",
         "database_url_set": bool(get_database_url()),
         "env": (os.environ.get("QYUNSLATION_ENV") or "development"),
@@ -246,3 +246,68 @@ def get_job(
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
     }
+
+
+class ConceptCreate(BaseModel):
+    preferred_source: str = Field(min_length=1, max_length=512)
+    preferred_target: str = Field(min_length=1, max_length=512)
+    src_lng: str = Field(default="en", max_length=16)
+    tgt_lng: str = Field(default="zh", max_length=16)
+    domain: str = Field(default="", max_length=64)
+    layer: str = Field(default="session", max_length=32)
+    evidence: str | None = None
+    do_not_translate: bool = False
+    # 调用方即使传 curated 也强制 staging
+    status: str | None = None
+    forbidden: list[dict[str, str]] = Field(default_factory=list)
+
+
+@router.get("/concepts")
+def list_concepts_api(
+    status: str | None = None,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    _tenant_bundle(session, identity)
+    from qyunslation.persist.concept_repo import concept_to_dict, list_concepts
+
+    rows = list_concepts(session, status=status)
+    return [concept_to_dict(c) for c in rows]
+
+
+@router.post("/concepts", status_code=201)
+def create_concept_api(
+    body: ConceptCreate,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _tenant_bundle(session, identity)
+    from qyunslation.persist.concept_repo import concept_to_dict, create_staging_concept
+
+    forbidden = [
+        (str(item.get("lang") or ""), str(item.get("text") or ""))
+        for item in body.forbidden
+    ]
+    concept = create_staging_concept(
+        session,
+        domain=body.domain,
+        layer=body.layer,
+        preferred_source=body.preferred_source,
+        preferred_target=body.preferred_target,
+        src_lng=body.src_lng,
+        tgt_lng=body.tgt_lng,
+        evidence=body.evidence,
+        do_not_translate=body.do_not_translate,
+        forbidden=forbidden,
+    )
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="concept.create_staging",
+        extra={
+            "concept_id": concept.id,
+            "requested_status": body.status,
+            "api_key": "should-strip",
+        },
+    )
+    return concept_to_dict(concept)

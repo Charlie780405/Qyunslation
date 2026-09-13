@@ -247,7 +247,19 @@ def build_merged_dict(
     harvest_path: Path | None = None,
     session_entries: Iterable[GlossaryEntry] | None = None,
 ) -> dict[str, str]:
-    entries = list(load_curated_entries(root))
+    # PLAN-034d：有 Concept 库且含 curated 时优先用扁平视图，再叠 session/harvest 文件
+    db_entries: list[GlossaryEntry] | None = None
+    try:
+        from qyunslation.glossary.concept_flatten import try_db_curated_entries
+
+        db_entries = try_db_curated_entries()
+    except Exception:
+        db_entries = None
+
+    if db_entries is not None:
+        entries: list[GlossaryEntry] = list(db_entries)
+    else:
+        entries = list(load_curated_entries(root))
     if session_entries:
         entries.extend(session_entries)
     if harvest_path and Path(harvest_path).is_file():
