@@ -1,9 +1,11 @@
 # PLAN-034e：翻译记忆与上下文
 
-> 状态：**待编码**（骨架文档）
+> 状态：**已编码**（精确复用 + 模糊建议 + TMX；无向量检索）
 > 父计划：[PLAN-034](./PLAN-034-pharma-rd-mvp.md)
 > 依赖：[034c](./PLAN-034c-saas-persistence.md)、[034d](./PLAN-034d-concept-termbase.md)
-> 历史：关闭 PLAN-001d4「TM 精确匹配层待执行」悬空项
+> 历史：**关闭 PLAN-001d4**「TM 精确匹配层待执行」——精确匹配由本计划交付；向量/相似句检索仍不在范围内
+> 验收门：`bash scripts/verify-plan-034e.sh`
+> Walkthrough：[WT-034e](../../walkthroughs/WT-034e-translation-memory.md)
 
 ## 目标
 
@@ -13,20 +15,22 @@
 
 | 规则 | 说明 |
 | --- | --- |
-| 入库 | 仅审校批准句段（依赖 034g 批准事件；编码期可用 API 模拟批准） |
-| 精确匹配 | 规范化后源文相同 **且** 数字/占位符签名一致 → 允许自动复用 |
-| 模糊匹配 | 只作模型上下文或人工建议，**禁止静默覆盖** |
-| 反馈隔离 | 租户/项目作用域；默认不串租户 |
-| 交换 | TMX 导入导出 |
-| 存储 | TM 与术语库分别表、分别版本化 |
+| 表 | `tm_unit`（与 concept **分表**）；整型 `version`，无版本子表 |
+| 入库 | 仅 `approved=true`；`POST /api/v1/tm/units` 须显式批准（模拟 034g）；缺省 400 |
+| 精确匹配 | `source_norm` 相等 **且** `placeholder_sig` 相等 → `reuse=true` |
+| 模糊匹配 | `difflib.SequenceMatcher` ≥0.85；`reuse=false`，仅 `suggestions[]` |
+| 作用域 | `tenant_id` + 可选 `project_id`；禁止跨租户 |
+| TMX | 导入默认 `approved=false`；导出仅 approved |
+| 执行桥 | **不**改 BabelDOC / `start_translation` 自动套用 |
 
-## 与现有缓存的区别
+## API
 
-| 机制 | 性质 |
-| --- | --- |
-| BabelDOC 同文档段落缓存 | 非跨文档 TM |
-| 书信 SHA1 磁盘缓存 | 局部、非批准闭环 |
-| **034e TM** | 跨任务、批准驱动、可审计 |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v1/tm/units` | 批准入库（upsert 去重） |
+| POST | `/api/v1/tm/lookup` | 精确 / 模糊查询 |
+| GET | `/api/v1/tm/export.tmx` | 导出已批准 |
+| POST | `/api/v1/tm/import.tmx` | 导入为未批准 |
 
 ## 判据
 
@@ -37,12 +41,14 @@
 
 ## Out of Scope
 
-- 向量语义检索（可后续；MVP 精确 + 编辑距离模糊即可）
+- 向量语义检索
 - 计费与配额
+- 034g 审校 UI
+- BabelDOC 自动套用
 
 ## 完成定义
 
-- [ ] TM 表 + 精确/模糊 API
-- [ ] 批准门禁测试
-- [ ] TMX 导入导出
-- [ ] 文档关闭 001d4 悬空说明
+- [x] TM 表 + 精确/模糊 API
+- [x] 批准门禁测试
+- [x] TMX 导入导出
+- [x] 文档关闭 001d4 悬空说明
