@@ -1,0 +1,9 @@
+# PLAN-034a 发布阈值
+
+version = "1.0.0"
+critical_max = 0
+hard_term_hit_min = 0.98
+forbidden_translation_max = 0
+digit_unit_doi_ref_pass = 1.0
+
+# 说明：与纲领验收及 Pharma-MQM 1.0.0 对齐；由 qyunslation.gold.plan034.load_thresholds 读取。

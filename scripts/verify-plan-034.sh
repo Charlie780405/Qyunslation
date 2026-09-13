@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-034 pharma RD MVP — docs + 034d0 implementation gate.
+# PLAN-034 pharma RD MVP — docs + 034d0 + 034a gold gate.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,20 +10,25 @@ if [[ -z "$PY" || ! -x "$PY" ]]; then
 fi
 STAGE_DIR="$(mktemp -d)"
 FAILURES=0
+BLOCKED=0
 cleanup() { rm -rf -- "$STAGE_DIR"; }
 trap cleanup EXIT
 cd "$ROOT" || exit 1
 
 fail() { printf 'FAIL: %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 pass() { printf 'PASS: %s\n' "$1"; }
+blocked() { printf 'BLOCKED: %s\n' "$1"; BLOCKED=$((BLOCKED + 1)); }
 run_pass() {
   local label="$1" log="$2"
   shift 2
   if "$@" >"$log" 2>&1; then
-    pass "$label"
+    if grep -q '^SUMMARY: BLOCKED' "$log"; then blocked "$label"
+    else pass "$label"
+    fi
   else
-    fail "$label"
-    tail -n 40 "$log"
+    if grep -q '^SUMMARY: BLOCKED' "$log"; then blocked "$label"
+    else fail "$label"; tail -n 40 "$log"
+    fi
   fi
 }
 
@@ -136,7 +141,6 @@ else
 from qyunslation.extensions import glossary_db
 from qyunslation.extensions.glossary_db import load_glossary
 from qyunslation.glossary.governance import build_merged_dict
-# force empty user overlay for count compare
 glossary_db.PRESET_GLOSSARY.clear()
 import tempfile
 from pathlib import Path
@@ -155,9 +159,16 @@ fi
 [[ -f "$ROOT/docs/walkthroughs/WT-034d0-glossary-ssot.md" ]] \
   && pass "WT-034d0" || fail "missing WT-034d0"
 
-if [[ "$FAILURES" -eq 0 ]]; then
-  printf 'SUMMARY: PASS fail=0\n'
-  exit 0
+# --- 034a gold gate (may BLOCKED) ---
+run_pass "PLAN-034a" "$STAGE_DIR/034a.log" bash "$ROOT/scripts/verify-plan-034a.sh"
+
+if [[ "$FAILURES" -gt 0 ]]; then
+  printf 'SUMMARY: FAIL fail=%s blocked=%s\n' "$FAILURES" "$BLOCKED"
+  exit 1
 fi
-printf 'SUMMARY: FAIL fail=%s\n' "$FAILURES"
-exit 1
+if [[ "$BLOCKED" -gt 0 ]]; then
+  printf 'SUMMARY: BLOCKED blocked=%s fail=0\n' "$BLOCKED"
+  exit 2
+fi
+printf 'SUMMARY: PASS fail=0\n'
+exit 0
