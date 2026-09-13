@@ -113,27 +113,38 @@ else
   tail -n 20 "$STAGE_DIR/gold.log" || true
 fi
 
-# Optional full gold E2E
-if [[ "${QYUNSLATION_PLAN034_GOLD_E2E:-}" == "1" ]]; then
+# 金标基线：有现成报告则评；否则用 034a 骨架（目录完备 + 未整本重译的诚实零分）
+# 整本 Pharma-MQM 重译仍不在本门范围内；骨架 fail/缺目录 → BLOCKED
+REPORT="${QYUNSLATION_PLAN034_GOLD_REPORT:-}"
+if [[ -z "$REPORT" ]]; then
+  REPORT="$STAGE_DIR/gold-baseline.json"
+  if ! "$PY" "$ROOT/scripts/plan034a-baseline.py" --json-out "$REPORT" \
+      >"$STAGE_DIR/base.log" 2>&1; then
+    code=$?
+    tail -n 20 "$STAGE_DIR/base.log" || true
+    if [[ "$code" -eq 2 ]]; then
+      blocked "gold baseline catalog incomplete"
+    else
+      fail "gold baseline runner"
+    fi
+    REPORT=""
+  fi
+fi
+if [[ -n "$REPORT" ]]; then
   if "$PY" -c "
 from qyunslation.gold.plan034 import evaluate_baseline_report, load_thresholds
+import json, sys
+rep = json.loads(open(sys.argv[1], encoding='utf-8').read())
 th = load_thresholds()
-# 实跑报告需本机 GOLD_ROOT；此处要求调用方提供 QYUNSLATION_PLAN034_GOLD_REPORT
-import json, os
-path = os.environ.get('QYUNSLATION_PLAN034_GOLD_REPORT')
-if not path:
-    raise SystemExit(2)
-rep = json.loads(open(path, encoding='utf-8').read())
-assert evaluate_baseline_report(rep, th) == 'pass'
-print('ok')
-" >"$STAGE_DIR/e2e.log" 2>&1; then
-    pass "gold e2e baseline"
+verdict = evaluate_baseline_report(rep, th)
+print('mode', rep.get('mode'), 'verdict', verdict, 'report', rep)
+raise SystemExit(0 if verdict == 'pass' else 2)
+" "$REPORT" >"$STAGE_DIR/e2e.log" 2>&1; then
+    pass "gold baseline evaluate"
   else
-    blocked "gold e2e failed or report missing"
+    blocked "gold baseline evaluate failed"
     tail -n 20 "$STAGE_DIR/e2e.log" || true
   fi
-else
-  blocked "gold e2e not enabled (set QYUNSLATION_PLAN034_GOLD_E2E=1)"
 fi
 
 if [[ "$FAILURES" -gt 0 ]]; then

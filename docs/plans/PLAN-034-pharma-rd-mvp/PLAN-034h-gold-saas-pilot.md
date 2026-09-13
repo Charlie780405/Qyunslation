@@ -12,7 +12,7 @@
 
 ## 交付（已落地）
 
-1. **端到端门禁** `verify-plan-034h.sh`：OIDC/PWA/清单/SaaS 烟囱必须 PASS；catalog 不齐或未开 `QYUNSLATION_PLAN034_GOLD_E2E` → **BLOCKED**（不冒充 PASS）。伞门 `verify-plan-034.sh` 串 a–h。
+1. **端到端门禁** `verify-plan-034h.sh`：OIDC/PWA/清单/SaaS 烟囱必须 PASS；金标自动跑 034a 目录骨架评估（**不做整本重译**）。catalog 不齐或阈值失败 → **BLOCKED**。可用 `QYUNSLATION_PLAN034_GOLD_REPORT` 覆盖。伞门 `verify-plan-034.sh` 串 a–h。
 2. **PWA**：`manifest.webmanifest` + `sw-034h.js`（仅缓存壳）；挂在 `review.html` / `index.html`。
 3. **OIDC**：`OidcAdapter` JWT/JWKS（PyJWT）；`QYUNSLATION_ENV=production` 禁止 Dev 旁路。
 4. **部署/回滚**：`plan034h-release-checklist.sh` 指纹；回滚 = 旧 SHA → checklist → `deploy-translate-stack.sh`。

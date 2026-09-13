@@ -14,6 +14,13 @@ BLOCKED=0
 cleanup() { rm -rf -- "$STAGE_DIR"; }
 trap cleanup EXIT
 cd "$ROOT" || exit 1
+# 子门 034f ping 依赖本机 endpoint；不打印 .env
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
 
 fail() { printf 'FAIL: %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 pass() { printf 'PASS: %s\n' "$1"; }

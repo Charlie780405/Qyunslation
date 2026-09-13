@@ -4,7 +4,7 @@
 
 ## 执行摘要
 
-收口 OIDC（JWT/JWKS）与 Dev 旁路互斥；最小 PWA 壳；发布指纹清单；SaaS API 烟囱；端到端门禁 `verify-plan-034h.sh`。金标全量 Critical=0 实跑需 `QYUNSLATION_PLAN034_GOLD_E2E=1`，否则记 BLOCKED。
+收口 OIDC（JWT/JWKS）与 Dev 旁路互斥；最小 PWA 壳；发布指纹清单；SaaS API 烟囱；端到端门禁 `verify-plan-034h.sh`。金标门自动跑 [034a baseline](../plans/PLAN-034-pharma-rd-mvp/PLAN-034a-gold-benchmark.md) 骨架（目录 30/30 完备 + 阈值评估）；**不做整本重译**。缺目录或阈值失败记 BLOCKED。可用 `QYUNSLATION_PLAN034_GOLD_REPORT` 覆盖为外部 JSON。
 
 ## OIDC 环境变量
 

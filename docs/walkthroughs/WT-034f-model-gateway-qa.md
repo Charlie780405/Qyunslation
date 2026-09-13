@@ -10,6 +10,8 @@
 
 ```bash
 export QYUNSLATION_GATEWAY_PROFILE=quality
+# 本机也可把 endpoint 写在 .env 的 DOCUTRANSLATE_BASE_URL / QYUNSLATION_BASE_URL
+# verify-plan-034f.sh 会 source .env，不打印内容
 export QYUNSLATION_BASE_URL='http://127.0.0.1:11434/v1'   # 示例，勿提交真实密钥
 .venv/bin/python scripts/plan034f-sync-pdf2zh-model.py
 

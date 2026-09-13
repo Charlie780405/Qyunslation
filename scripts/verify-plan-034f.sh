@@ -14,6 +14,13 @@ BLOCKED=0
 cleanup() { rm -rf -- "$STAGE_DIR"; }
 trap cleanup EXIT
 cd "$ROOT" || exit 1
+# 本机 .env 含 DOCUTRANSLATE_BASE_URL / QYUNSLATION_BASE_URL；不打印内容
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
 
 fail() { printf 'FAIL: %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 pass() { printf 'PASS: %s\n' "$1"; }

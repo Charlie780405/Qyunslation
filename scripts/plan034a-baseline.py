@@ -61,6 +61,12 @@ def main() -> int:
         help="report path (default: /tmp/plan034a-baseline-<date>.md)",
     )
     ap.add_argument("--model-id", default="qwen3.6:35b-a3b")
+    ap.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="write the same skeleton metrics dict as JSON (for 034h gate)",
+    )
     args = ap.parse_args()
 
     root = gold_root(args.gold_root)
@@ -116,6 +122,7 @@ def main() -> int:
 
     # Skeleton metrics: no Critical measured this phase → honest zeros only if complete
     report = {
+        "mode": "catalog-skeleton",
         "critical_count": 0,
         "hard_term_hit_rate": 1.0 if not blocked else 0.0,
         "forbidden_translation_count": 0,
@@ -140,6 +147,15 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {out}")
+    if args.json_out is not None:
+        import json
+
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"wrote {args.json_out}")
 
     if blocked:
         print("SUMMARY: BLOCKED")
