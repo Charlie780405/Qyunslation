@@ -45,14 +45,16 @@ CSS_BLOCK = r"""
     }
     .qy-050-appbar {
       position: sticky; top: 0; z-index: 80;
-      display: flex; align-items: center; gap: var(--qy-space-3);
-      flex-flow: row nowrap !important;
+      display: grid !important;
+      grid-template-columns: max-content max-content minmax(112px, 136px) max-content minmax(96px, 120px) max-content max-content;
+      align-items: center;
+      column-gap: var(--qy-space-2);
       min-height: var(--qy-appbar-h);
       height: var(--qy-appbar-h) !important;
       max-height: var(--qy-appbar-h) !important;
       padding: 6px var(--qy-space-4);
       box-sizing: border-box;
-      overflow: visible !important;
+      overflow: hidden !important;
       white-space: nowrap;
       background: var(--qy-color-accent);
       border-bottom: 1px solid var(--qy-color-border);
@@ -61,8 +63,7 @@ CSS_BLOCK = r"""
     }
     .qy-050-appbar > *,
     .qy-050-appbar > .form, .qy-050-appbar .wrap,
-    .qy-050-appbar .contain, .qy-050-appbar .svelte-radio,
-    .qy-050-appbar label {
+    .qy-050-appbar .contain, .qy-050-appbar label {
       flex: 0 0 auto !important;
       width: auto !important;
       min-width: 0 !important;
@@ -78,24 +79,40 @@ CSS_BLOCK = r"""
       margin: 0 !important;
       padding: 0 !important;
     }
-    .qy-050-appbar .qy-050-dir .wrap,
-    .qy-050-appbar [role="radiogroup"],
-    .qy-050-appbar fieldset {
-      display: flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      gap: var(--qy-space-2) !important;
+    .qy-050-appbar .qy-050-control-label {
+      color: #fff !important;
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      line-height: 32px !important;
+      background: transparent !important;
     }
-    .qy-050-appbar fieldset {
-      border: 0 !important;
-      padding: 0 !important;
-    }
-    .qy-050-appbar [role="radiogroup"] > *,
-    .qy-050-appbar fieldset > label,
-    .qy-050-appbar [role="radio"] {
-      flex: 0 0 auto !important;
+    .qy-050-appbar .qy-050-control,
+    .qy-050-appbar .qy-050-control .wrap,
+    .qy-050-appbar .qy-050-control .form,
+    .qy-050-appbar .qy-050-control > div {
       min-width: 0 !important;
-      margin: 0 !important;
+      width: 100% !important;
+      height: 34px !important;
+      max-height: 34px !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+    }
+    .qy-050-appbar .qy-050-control input,
+    .qy-050-appbar .qy-050-control button,
+    .qy-050-appbar .qy-050-control [role="combobox"] {
+      min-height: 32px !important;
+      height: 32px !important;
+      max-height: 32px !important;
+      line-height: 30px !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+      box-sizing: border-box !important;
+    }
+    .qy-050-appbar .qy-050-control .label-wrap,
+    .qy-050-appbar .qy-050-control .block-label,
+    .qy-050-appbar .qy-050-control label {
+      display: none !important;
     }
     .qy-050-appbar button {
       flex: 0 0 auto !important;
@@ -113,7 +130,13 @@ CSS_BLOCK = r"""
       flex: 0 0 auto;
       font-weight: 600;
       white-space: nowrap;
+      color: #fff !important;
+      background: transparent !important;
+      line-height: 32px !important;
     }
+    .qy-050-appbar .qy-050-status,
+    .qy-050-appbar .qy-050-status *,
+    .qy-050-appbar .qy-050-status p { color: #fff !important; background: transparent !important; }
     .qy-050-appbar *:focus-visible,
     .qy-col-left button:focus-visible,
     .qy-col-left input:focus-visible,
@@ -206,7 +229,8 @@ CSS_BLOCK = r"""
     @media (max-width: 767px) {
       .qy-col-left { width: 100% !important; }
       .qy-050-appbar {
-        flex-flow: row wrap !important;
+        grid-template-columns: max-content minmax(104px, 1fr) max-content minmax(92px, 1fr) !important;
+        grid-auto-rows: 34px !important;
         height: auto !important;
         max-height: none !important;
         white-space: normal;
@@ -460,20 +484,25 @@ HTML_BLOCK = f"""        {HTML_BEGIN}
                 "**就绪**",
                 elem_classes=["qy-050-status"],
             )
-            qy_dir = gr.Radio(
+            gr.Markdown("方向", elem_classes=["qy-050-control-label"])
+            qy_dir = gr.Dropdown(
                 choices=["英→中", "中→英"],
                 value="英→中",
-                label="方向",
+                show_label=False,
+                container=False,
                 scale=0,
-                min_width=160,
-                elem_classes=["qy-050-dir"],
+                min_width=112,
+                elem_classes=["qy-050-control", "qy-050-dir"],
             )
-            qy_mode = gr.Radio(
+            gr.Markdown("模式", elem_classes=["qy-050-control-label"])
+            qy_mode = gr.Dropdown(
                 choices=["快速", "专业"],
                 value="快速",
-                label="模式",
+                show_label=False,
+                container=False,
                 scale=0,
-                min_width=140,
+                min_width=96,
+                elem_classes=["qy-050-control", "qy-050-mode"],
             )
             qy_help_btn = gr.Button("帮助", scale=0, min_width=72, size="sm")
             qy_insp_btn = gr.Button("检查器", scale=0, min_width=72, size="sm")
@@ -538,7 +567,7 @@ _MARKED_APPBAR_RE = re.compile(
 
 
 def apply_html(text: str) -> tuple[str, bool]:
-    if HTML_BEGIN in text and "qy_dir = gr.Radio" in text and "qy_help = gr.Column(" in text:
+    if HTML_BEGIN in text and "qy_dir = gr.Dropdown" in text and "qy_help = gr.Column(" in text:
         m = _MARKED_APPBAR_RE.search(text)
         if m and m.group(0) != HTML_BLOCK:
             return _MARKED_APPBAR_RE.sub(lambda _: HTML_BLOCK, text, count=1), True
@@ -748,8 +777,8 @@ def verify(text: str) -> int:
     _offscreen = "translate" + "X(100%)"
     need(_offscreen not in text, "drawer offscreen transform must be gone")
     need(text.count("// " + JS_MARKER + "\n") == 0, "050 js must not sit in Gradio js=")
-    need("qy_mode = gr.Radio" in text, "mode radio")
-    need("qy_dir = gr.Radio" in text, "dir radio")
+    need("qy_mode = gr.Dropdown" in text, "mode dropdown")
+    need("qy_dir = gr.Dropdown" in text, "dir dropdown")
     need("qy_help = gr.Column(" in text, "help panel column")
     need("qy_inspector = gr.Column(" in text, "inspector panel column")
     _acc = "qy_help = gr." + "Accordion("
@@ -769,6 +798,10 @@ def verify(text: str) -> int:
     need("min(38vh, 340px)" not in text, "old left-dock lock height must be overridden")
     need("qy-050-appbar" in text, "appbar class")
     need("focus-visible" in text, "focus-visible")
+    need("grid-template-columns" in text, "compact appbar grid")
+    need("qy-050-control-label" in text, "control labels")
+    need("color: #fff !important" in text, "status contrast")
+    need("show_label=False" in text, "compact controls hide duplicate labels")
     need(PY_MARKER in text, "prescan card hook")
     need(HEAD_MARKER not in text, "stale head= still present")
     need("__qyPageSyncInstalled" in text, "page-sync kept")

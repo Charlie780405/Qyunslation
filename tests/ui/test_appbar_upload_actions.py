@@ -26,13 +26,14 @@ def test_desktop_appbar_is_single_line_and_children_are_not_stretched():
     text = _source()
     css = text.split("JS_BLOCK", 1)[0]
 
-    assert "flex-flow: row nowrap !important" in css
+    assert "display: grid !important" in css
     assert "height: var(--qy-appbar-h) !important" in css
     assert "max-height: var(--qy-appbar-h) !important" in css
     assert ".qy-050-appbar .wrap" in css
     assert "height: auto !important" in css
-    assert '[role="radiogroup"]' in css
-    assert "flex-direction: row !important" in css
+    assert ".qy-050-control" in css
+    assert "overflow: hidden !important" in css
+    assert "color: #fff !important" in css
 
 
 def test_mobile_appbar_retains_responsive_wrap():
@@ -41,7 +42,7 @@ def test_mobile_appbar_retains_responsive_wrap():
 
     mobile = css.split("@media (max-width: 767px)", 1)[1]
     assert ".qy-050-appbar {" in mobile
-    assert "flex-flow: row wrap !important;" in mobile
+    assert "grid-template-columns:" in mobile
     assert "height: auto !important;" in mobile
 
 
@@ -57,6 +58,16 @@ def test_upload_keeps_translation_action_visible_and_reachable():
     assert "outputs=[translate_btn]" in text
     assert "file_input.upload(" in text
     assert "file_input.change(" in text
+
+
+def test_appbar_uses_compact_non_wrapping_controls_and_preserves_values():
+    text = _source()
+    assert "qy_dir = gr.Dropdown" in text
+    assert "qy_mode = gr.Dropdown" in text
+    assert 'choices=["英→中", "中→英"]' in text
+    assert 'choices=["快速", "专业"]' in text
+    assert 'elem_classes=["qy-050-control", "qy-050-dir"]' in text
+    assert 'elem_classes=["qy-050-control", "qy-050-mode"]' in text
 
 
 def test_upload_action_guard_is_idempotent_and_has_a_stable_anchor():

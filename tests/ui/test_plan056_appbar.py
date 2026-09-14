@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path("/home/dev/qyunslation")
+ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "scripts/apply-pdf2zh-050-workbench.py"
 
 
 def test_plan056_appbar_controls():
     text = PATCH.read_text(encoding="utf-8")
     css = text.split("JS_BLOCK", 1)[0]
-    assert "qy_dir = gr.Radio" in text
+    assert "qy_dir = gr.Dropdown" in text
     assert "英→中" in text
     assert "中→英" in text
     # 057 覆盖：面板为 Column，不再是 Accordion

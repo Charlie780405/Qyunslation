@@ -13,6 +13,7 @@ from .role_fitter import (
     QC_ROLE_SIZE_DRIFT,
     FitBlock,
     FitResult,
+    measure_textbox,
     table_hard_fail_codes,
 )
 from .table_translate import (
@@ -441,6 +442,23 @@ def paint_fitted_blocks(
                 current_row = row
             row_cells.append(result.text)
             continue
+        # A caller may provide a raw FitResult (for example from a retry or an
+        # OCR path) without setting ``overflow``.  Re-check the actual cell
+        # geometry before painting so an impossible body cell is continued
+        # instead of silently shrinking to an unreadable glyph size.
+        if allow_leftover and _is_body_role(role) and block.bbox:
+            box_w = max(1.0, float(block.bbox.x1 - block.bbox.x0))
+            box_h = max(1.0, float(block.bbox.y1 - block.bbox.y0))
+            if result.overflow or QC_OVERFLOW in result.qc or not measure_textbox(
+                result.text, result.font_size, box_w, box_h
+            ):
+                overflowing = True
+                row = block.row_index if block.row_index is not None else 0
+                if current_row != row:
+                    flush_row()
+                    current_row = row
+                row_cells.append(result.text)
+                continue
         codes.extend(result.qc)
         if not block.bbox:
             raise TableTranslateError(f"TABLE_CELL_BOX_MISSING:{block.block_id}")

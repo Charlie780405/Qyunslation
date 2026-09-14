@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path("/home/dev/qyunslation")
+ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "scripts/apply-pdf2zh-050-workbench.py"
 
 
@@ -14,7 +14,7 @@ def test_workbench_patch_exists():
     assert "qy-050-appbar" in text
     assert "qy_help_btn" in text
     assert "qy_mode.change" in text
-    assert "qy_dir = gr.Radio" in text
+    assert "qy_dir = gr.Dropdown" in text
     assert "focus-visible" in text
     assert "禁止再写入 Gradio js=" in text
     assert "translateX(100%)" not in css

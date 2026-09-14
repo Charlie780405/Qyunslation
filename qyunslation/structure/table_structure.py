@@ -1481,10 +1481,22 @@ def structure_table_ex(
     )
 
 
-# 兼容：旧名保留但标 deprecated；测试若仍 import 会得到恒等
+# 兼容：旧名保留给旧版列检测调用方。只合并明显的同一列碎片，
+# 不参与现代 HPD/gutter 主路径，避免把真实相邻列合并。
 def _merge_column_clusters(centers: list[float]) -> list[float]:
-    """PLAN-048b：已废弃。保留空操作供旧测试导入，不再合并。"""
-    return sorted(centers)
+    """Merge only near-identical centers while preserving well-spaced columns."""
+    ordered = sorted(float(value) for value in centers)
+    if not ordered:
+        return []
+    groups: list[list[float]] = [[ordered[0]]]
+    for value in ordered[1:]:
+        # 16pt is deliberately below the smallest realistic table-column gap
+        # in our PDF fixtures; it only absorbs span/text-fragment jitter.
+        if value - groups[-1][-1] <= 16.0:
+            groups[-1].append(value)
+        else:
+            groups.append([value])
+    return [sum(group) / len(group) for group in groups]
 
 
 def _band_edges(centers: list[float], span: float) -> list[tuple[float, float]]:
