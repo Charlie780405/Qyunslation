@@ -71,6 +71,8 @@ def create_staging_concept(
     do_not_translate: bool = False,
     forbidden: list[tuple[str, str]] | None = None,
     tenant_id: str | None = None,
+    project_id: str | None = None,
+    term_type: str = "general",
 ) -> Concept:
     """API/LLM 路径：强制 staging。"""
     concept = Concept(
@@ -81,6 +83,8 @@ def create_staging_concept(
         do_not_translate=do_not_translate,
         layer=layer or "session",
         tenant_id=tenant_id,
+        project_id=project_id,
+        term_type=term_type or "general",
         import_key=None,
     )
     session.add(concept)
@@ -90,6 +94,7 @@ def create_staging_concept(
             concept_id=concept.id,
             lang=normalize_lang(src_lng) or "en",
             text=preferred_source.strip(),
+            normalized_text=normalize_source(preferred_source),
             role="preferred",
         )
     )
@@ -98,6 +103,7 @@ def create_staging_concept(
             concept_id=concept.id,
             lang=normalize_lang(tgt_lng) or "zh",
             text=preferred_target.strip(),
+            normalized_text=normalize_source(preferred_target),
             role="preferred",
         )
     )
@@ -142,6 +148,7 @@ def upsert_curated_from_entry(session: Session, entry: GlossaryEntry) -> Concept
                 concept_id=concept_id,
                 lang=src_lang,
                 text=entry.source,
+                normalized_text=normalize_source(entry.source),
                 role="preferred",
             )
         )
@@ -151,6 +158,7 @@ def upsert_curated_from_entry(session: Session, entry: GlossaryEntry) -> Concept
                     concept_id=concept_id,
                     lang=tgt_lang,
                     text=entry.target,
+                    normalized_text=normalize_source(entry.target),
                     role="preferred",
                 )
             )
@@ -182,6 +190,8 @@ def upsert_curated_from_entry(session: Session, entry: GlossaryEntry) -> Concept
         do_not_translate=identity,
         layer=entry.layer,
         tenant_id=None,
+        project_id=None,
+        term_type="general",
         import_key=key,
     )
     session.add(concept)
@@ -239,9 +249,19 @@ def concept_to_dict(concept: Concept) -> dict:
         "evidence": concept.evidence,
         "do_not_translate": concept.do_not_translate,
         "layer": concept.layer,
+        "project_id": concept.project_id,
+        "term_type": concept.term_type,
+        "definition": concept.definition,
+        "authority": concept.authority,
         "tenant_id": concept.tenant_id,
         "terms": [
-            {"lang": t.lang, "text": t.text, "role": t.role} for t in concept.terms
+            {
+                "lang": t.lang,
+                "text": t.text,
+                "normalized_text": t.normalized_text,
+                "role": t.role,
+            }
+            for t in concept.terms
         ],
         "forbiddens": [
             {"lang": f.lang, "text": f.text} for f in concept.forbiddens

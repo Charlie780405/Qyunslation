@@ -18,6 +18,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
+try:  # Optional at import time so SQLite unit tests stay lightweight.
+    from pgvector.sqlalchemy import Vector as PgVector
+except ImportError:  # pragma: no cover - exercised only before optional install
+    PgVector = None
+
+from sqlalchemy.types import TypeDecorator
+
 
 def _uuid() -> str:
     return str(uuid.uuid4())
@@ -29,6 +36,22 @@ def _utcnow() -> datetime:
 
 class Base(DeclarativeBase):
     pass
+
+
+class EmbeddingVector(TypeDecorator):
+    """Use pgvector in PostgreSQL and JSON for portable test databases."""
+
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, dim: int = 1024, **kwargs):
+        self.dim = int(dim)
+        super().__init__(**kwargs)
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql" and PgVector is not None:
+            return dialect.type_descriptor(PgVector(self.dim))
+        return dialect.type_descriptor(JSON())
 
 
 class Tenant(Base):
@@ -125,7 +148,10 @@ class AuditEvent(Base):
 
 class Concept(Base):
     __tablename__ = "concept"
-    __table_args__ = (Index("ix_concept_status_layer", "status", "layer"),)
+    __table_args__ = (
+        Index("ix_concept_status_layer", "status", "layer"),
+        Index("ix_concept_runtime_scope", "tenant_id", "project_id", "status", "layer"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     domain: Mapped[str] = mapped_column(String(64), nullable=False, default="")
@@ -135,6 +161,12 @@ class Concept(Base):
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     do_not_translate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     layer: Mapped[str] = mapped_column(String(32), nullable=False, default="clinical")
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=True
+    )
+    term_type: Mapped[str] = mapped_column(String(64), nullable=False, default="general")
+    definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authority: Mapped[str | None] = mapped_column(String(256), nullable=True)
     tenant_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tenant.id", ondelete="SET NULL"), nullable=True
     )
@@ -159,6 +191,7 @@ class ConceptTerm(Base):
     __tablename__ = "concept_term"
     __table_args__ = (
         Index("ix_concept_term_text", "text"),
+        Index("ix_concept_term_normalized", "normalized_text"),
         UniqueConstraint("concept_id", "lang", "role", "text", name="uq_concept_term"),
     )
 
@@ -168,9 +201,28 @@ class ConceptTerm(Base):
     )
     lang: Mapped[str] = mapped_column(String(16), nullable=False)
     text: Mapped[str] = mapped_column(String(512), nullable=False)
+    normalized_text: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="preferred")
 
     concept: Mapped[Concept] = relationship(back_populates="terms")
+
+
+class ConceptTermEmbedding(Base):
+    """PLAN-058：ConceptTerm 向量；PostgreSQL 使用 pgvector，SQLite 使用 JSON。"""
+
+    __tablename__ = "concept_term_embedding"
+    __table_args__ = (Index("ix_concept_term_embedding_model", "model"),)
+
+    term_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("concept_term.id", ondelete="CASCADE"), primary_key=True
+    )
+    dim: Mapped[int] = mapped_column(Integer, nullable=False, default=1024)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    vector: Mapped[list] = mapped_column(EmbeddingVector(1024), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
 
 
 class ConceptForbidden(Base):
@@ -328,3 +380,114 @@ class ReviewRevision(Base):
     )
 
     segment: Mapped[ReviewSegment] = relationship(back_populates="revisions")
+
+
+# --- PLAN-058 译后术语候选与人工决策 ---
+
+
+class DocumentTermCandidate(Base):
+    """一个翻译任务中的术语候选；正式词库只接受人工决策结果。"""
+
+    __tablename__ = "document_term_candidate"
+    __table_args__ = (
+        Index("ix_document_term_candidate_job_status", "job_id", "status"),
+        Index("ix_document_term_candidate_project_source", "project_id", "source_norm"),
+        UniqueConstraint(
+            "job_id", "source_norm", "observed_target", name="uq_document_term_candidate"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=False
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    src_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
+    tgt_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="zh")
+    source_term: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_norm: Mapped[str] = mapped_column(String(512), nullable=False)
+    observed_target: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    suggested_target: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    term_type: Mapped[str] = mapped_column(String(64), nullable=False, default="general")
+    risk: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    match_type: Mapped[str] = mapped_column(String(32), nullable=False, default="candidate")
+    confidence: Mapped[float] = mapped_column(default=0.0, nullable=False)
+    concept_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("concept.id", ondelete="SET NULL"), nullable=True
+    )
+    termbase_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    occurrences: Mapped[list[DocumentTermOccurrence]] = relationship(
+        back_populates="candidate", cascade="all, delete-orphan"
+    )
+    decisions: Mapped[list[TermDecision]] = relationship(
+        back_populates="candidate", cascade="all, delete-orphan"
+    )
+
+
+class DocumentTermOccurrence(Base):
+    __tablename__ = "document_term_occurrence"
+    __table_args__ = (Index("ix_document_term_occurrence_candidate", "candidate_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    candidate_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("document_term_candidate.id", ondelete="CASCADE"), nullable=False
+    )
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    block_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    object_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    candidate: Mapped[DocumentTermCandidate] = relationship(back_populates="occurrences")
+
+
+class TermDecision(Base):
+    __tablename__ = "term_decision"
+    __table_args__ = (Index("ix_term_decision_candidate", "candidate_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    candidate_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("document_term_candidate.id", ondelete="CASCADE"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_term: Mapped[str] = mapped_column(String(512), nullable=False)
+    target_term: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    concept_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("concept.id", ondelete="SET NULL"), nullable=True
+    )
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="project")
+    from_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    to_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    candidate: Mapped[DocumentTermCandidate] = relationship(back_populates="decisions")
