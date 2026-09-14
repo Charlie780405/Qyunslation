@@ -1218,6 +1218,15 @@ try:
 except Exception as e:  # 持久化依赖缺失时不影响主服务
     logging.getLogger(__name__).warning("api/v1 load failed (service still up): %s", e)
 
+# PLAN-060：仅供本机 Gradio 回调使用的签名术语桥接。Caddy 不得代理
+# /internal/workbench；缺数据库或密钥时路由仍安全地返回 503。
+try:
+    from qyunslation.workbench.bridge import router as workbench_bridge_router
+
+    app.include_router(workbench_bridge_router)
+except Exception as e:
+    logging.getLogger(__name__).warning("workbench bridge load failed: %s", e)
+
 # 自定义扩展（图片嵌字 + 术语表管理）
 try:
     from qyunslation.custom_api import router as custom_router

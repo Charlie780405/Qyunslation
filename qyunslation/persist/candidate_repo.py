@@ -23,7 +23,9 @@ class CandidateConflict(ValueError):
     """候选已被其他审校者更新，调用方必须重新加载后再决定。"""
 
 
-VALID_DECISIONS = frozenset({"approve", "reject", "merge", "do_not_translate"})
+VALID_DECISIONS = frozenset(
+    {"approve", "reject", "merge", "do_not_translate", "submit_for_admin"}
+)
 
 
 def _utcnow() -> datetime:
@@ -330,12 +332,17 @@ def decide_candidate(
         raise CandidateConflict(
             f"candidate version {candidate.version} does not match {expected_version}"
         )
-    if candidate.status != "pending":
+    if action == "submit_for_admin":
+        if candidate.status != "pending":
+            raise CandidateConflict(f"candidate is already {candidate.status}")
+    elif candidate.status not in {"pending", "pending_admin"}:
         raise CandidateConflict(f"candidate is already {candidate.status}")
 
     target = (target_term or candidate.suggested_target or candidate.observed_target or "").strip()
     concept: Concept | None = None
-    if action in {"approve", "do_not_translate"}:
+    if action == "submit_for_admin":
+        candidate.status = "pending_admin"
+    elif action in {"approve", "do_not_translate"}:
         if not target and action == "approve":
             raise ValueError("target_term is required when approving a candidate")
         concept = _add_curated_concept(

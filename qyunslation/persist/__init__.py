@@ -30,6 +30,7 @@ from qyunslation.persist.models import (
     Tenant,
     TmUnit,
     UserMembership,
+    WorkbenchTranslationRun,
 )
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     "Tenant",
     "TmUnit",
     "UserMembership",
+    "WorkbenchTranslationRun",
     "get_database_url",
     "get_engine",
     "get_session",

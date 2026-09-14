@@ -128,6 +128,43 @@ class Job(Base):
     project: Mapped[Project] = relationship(back_populates="jobs")
 
 
+class WorkbenchTranslationRun(Base):
+    """PLAN-060：将 Gradio 的短生命周期任务绑定到可审计 Job。
+
+    术语策略和运行状态保存在服务端；浏览器只持有不透明的 run id，不能
+    指定租户、项目或角色。
+    """
+
+    __tablename__ = "workbench_translation_run"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_workbench_translation_run_job"),
+        Index("ix_workbench_translation_run_actor", "tenant_id", "actor_sub", "created_at"),
+        Index("ix_workbench_translation_run_state", "tenant_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    engine: Mapped[str] = mapped_column(String(64), nullable=False, default="gradio")
+    source_format: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    external_task_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="submitted")
+    termbase_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    term_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    degradation_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_event"
     __table_args__ = (Index("ix_audit_event_created_at", "created_at"),)

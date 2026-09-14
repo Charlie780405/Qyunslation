@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 from qyunslation.persist.models import Job, Project, Tenant, UserMembership
 
 
+COMPANY_TERMBASE_PROJECT_SLUG = "company-termbase"
+COMPANY_TERMBASE_PROJECT_NAME = "公司共享专业词库"
+
+
 def get_or_create_tenant(session: Session, *, slug: str, name: str | None = None) -> Tenant:
     row = session.scalar(select(Tenant).where(Tenant.slug == slug))
     if row is not None:
@@ -48,6 +52,29 @@ def create_project(
     session.add(project)
     session.flush()
     return project
+
+
+def get_or_create_company_termbase_project(session: Session, *, tenant_id: str) -> Project:
+    """Return the tenant-local project used by the Gradio shared termbase.
+
+    A Project remains mandatory for Jobs and Concepts.  A stable hidden project
+    preserves that invariant without making the workbench accept a client
+    supplied project id or creating a cross-tenant global dictionary.
+    """
+    existing = session.scalar(
+        select(Project).where(
+            Project.tenant_id == tenant_id,
+            Project.slug == COMPANY_TERMBASE_PROJECT_SLUG,
+        )
+    )
+    if existing is not None:
+        return existing
+    return create_project(
+        session,
+        tenant_id=tenant_id,
+        slug=COMPANY_TERMBASE_PROJECT_SLUG,
+        name=COMPANY_TERMBASE_PROJECT_NAME,
+    )
 
 
 def get_project(session: Session, *, project_id: str, tenant_id: str) -> Project | None:

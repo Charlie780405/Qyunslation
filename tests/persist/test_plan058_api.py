@@ -142,3 +142,37 @@ def test_elevated_term_scope_requires_term_admin(client):
         headers=headers,
     )
     assert response.status_code == 403
+
+
+def test_high_risk_candidate_requires_admin_after_submission(client):
+    headers = {"X-Dev-User": "reviewer", "X-Dev-Tenant": "term-tenant"}
+    project_id, job_id = _setup(client, headers)
+    extracted = client.post(
+        f"/api/v1/jobs/{job_id}/terms/extract",
+        json={
+            "candidates": [
+                {
+                    "source_term": "ABC-101",
+                    "observed_target": "ABC-101",
+                    "risk": "high",
+                    "term_type": "protocol",
+                }
+            ]
+        },
+        headers=headers,
+    )
+    candidate = extracted.json()["created"][0]
+    direct = client.post(
+        f"/api/v1/jobs/{job_id}/terms/{candidate['id']}/decide",
+        json={"action": "approve", "expected_version": 1, "target_term": "ABC-101"},
+        headers=headers,
+    )
+    assert direct.status_code == 403
+
+    submitted = client.post(
+        f"/api/v1/jobs/{job_id}/terms/{candidate['id']}/decide",
+        json={"action": "submit_for_admin", "expected_version": 1},
+        headers=headers,
+    )
+    assert submitted.status_code == 200
+    assert submitted.json()["candidate"]["status"] == "pending_admin"

@@ -438,6 +438,11 @@ class TermPromoteBody(BaseModel):
     note: str | None = Field(default=None, max_length=10000)
 
 
+def _term_admin_membership(session: Session, *, tenant_id: str, user_sub: str):
+    membership = repo.ensure_membership(session, tenant_id=tenant_id, user_sub=user_sub)
+    return membership, membership.role in {"term_admin", "admin", "owner"}
+
+
 @router.post("/terms/resolve")
 def resolve_terms_api(
     body: TermResolveRequest,
@@ -606,12 +611,19 @@ def decide_job_term_api(
     if candidate is None:
         raise HTTPException(status_code=404, detail="term candidate not found")
     scope = body.scope.strip().casefold()
+    membership, is_term_admin = _term_admin_membership(
+        session, tenant_id=tenant.id, user_sub=identity.user_sub
+    )
     if scope != "project":
-        membership = repo.ensure_membership(
-            session, tenant_id=tenant.id, user_sub=identity.user_sub
-        )
-        if membership.role not in {"term_admin", "admin", "owner"}:
+        if not is_term_admin:
             raise HTTPException(status_code=403, detail="term_admin role required")
+    action = body.action.strip().casefold()
+    high_risk = candidate.risk.strip().casefold() in {"high", "critical"}
+    if action == "submit_for_admin":
+        if not high_risk:
+            raise HTTPException(status_code=400, detail="only high-risk candidates require administrator review")
+    elif (high_risk or candidate.status == "pending_admin") and not is_term_admin:
+        raise HTTPException(status_code=403, detail="term_admin role required for high-risk term")
     try:
         result = decide_candidate(
             session,
@@ -670,17 +682,18 @@ def batch_decide_job_terms_api(
         if candidate is None:
             raise HTTPException(status_code=404, detail="term candidate not found")
         scope = item.scope.strip().casefold()
+        _membership, is_term_admin = _term_admin_membership(
+            session, tenant_id=tenant.id, user_sub=identity.user_sub
+        )
         if scope != "project":
-            membership = repo.ensure_membership(
-                session, tenant_id=tenant.id, user_sub=identity.user_sub
-            )
-            if membership.role not in {"term_admin", "admin", "owner"}:
+            if not is_term_admin:
                 raise HTTPException(status_code=403, detail="term_admin role required")
         # 未知、语义或多义候选必须逐条确认，避免批量操作绕过风险控制。
-        if item.action.strip().casefold() == "approve" and candidate.match_type not in {
-            "exact",
-            "alias",
-        }:
+        if item.action.strip().casefold() == "approve" and (
+            candidate.match_type not in {"exact", "alias"}
+            or candidate.risk.strip().casefold() in {"high", "critical"}
+            or candidate.status != "pending"
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=f"candidate {candidate.id} is not eligible for batch approval",
@@ -740,6 +753,8 @@ def term_review_summary_api(
         "job_id": job.id,
         "total": len(rows),
         "pending": counts.get("pending", 0),
+        "pending_admin": counts.get("pending_admin", 0),
+        "applied": counts.get("applied", 0),
         "approved": counts.get("approved", 0),
         "rejected": counts.get("rejected", 0),
         "high_risk_unresolved": len(unresolved_high_risk),
