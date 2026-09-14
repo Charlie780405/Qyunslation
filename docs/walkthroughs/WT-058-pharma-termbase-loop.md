@@ -66,3 +66,20 @@ LIVE 缺数据库、金标、pgvector 或泰州 bge-m3 时，结果必须是 `BL
 | 真实金标 / PostgreSQL / 泰州 bge-m3 LIVE | 本环境未执行，交由 Cursor 环境续接 |
 
 完整回归失败不归因于 PLAN-058 专项改动；生产上线仍需在目标环境完成真实 LIVE 门及依赖门。
+
+## 生产交付记录（2026-09-14）
+
+| 项目 | 结果 |
+| --- | --- |
+| 合并 / 远程 | `main` 与 `origin/main` 均为 `7736871`；功能分支已同步 |
+| 生产依赖 | `uv sync --frozen`；Python `pgvector==0.5.0` |
+| PostgreSQL | `pgvector/pgvector:pg16`，持久卷未删除；扩展 0.8.6 |
+| 数据库迁移 | `058b0001`；向量列为 `vector(1024)`，HNSW 索引存在 |
+| 迁移前备份 | `/tmp/qyunslation-pre-058-807b2bb.dump` |
+| 服务部署 | `deploy-translate-stack.sh` PASS；pdf2zh 与 qyunslation-office active |
+| 健康检查 | 本地与 `https://translate.qyunsgen.com/api/v1/health` 均 PASS |
+| sidecar 指纹 | `e85db39ed8e5`，本地/远端一致 |
+| 泰州 bge-m3 | 探活 PASS；模型名 `bge-m3`，返回 1024 维非零向量 |
+| 真实金标质量门 | 待 Cursor 环境提供金标 JSON 后执行；当前不宣称通过 |
+
+首次迁移曾因旧 PostgreSQL 镜像缺少 `vector` 扩展而事务回滚；切换同一持久卷到 pgvector 镜像并应用 058b 修复后已收口。数据库仍报告既有 libc collation 版本告警，未在本次交付中重建业务索引。
