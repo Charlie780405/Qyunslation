@@ -1,9 +1,9 @@
 # PLAN-058：医药专业术语闭环、预翻译解析与混合检索
 
-> 状态：**工程实现已完成，真实金标门待执行**  
-> 日期：2026-09-14  
-> 目标分支：`codex/plan-058-pharma-termbase-loop`  
-> 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-058-pharma-termbase-loop`  
+> 状态：**工程实现已完成，真实金标门待执行**
+> 日期：2026-09-14
+> 目标分支：`codex/plan-058-pharma-termbase-loop`
+> 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-058-pharma-termbase-loop`
 > 验收门：`bash scripts/verify-plan-058.sh`
 
 ## 目标

@@ -1,6 +1,6 @@
 # WT-058：医药术语闭环与混合检索
 
-> 计划：[PLAN-058](../plans/PLAN-058-pharma-termbase-loop/README.md)  
+> 计划：[PLAN-058](../plans/PLAN-058-pharma-termbase-loop/README.md)
 > 分支：`codex/plan-058-pharma-termbase-loop`
 
 ## 当前实现
