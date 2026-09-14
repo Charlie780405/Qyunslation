@@ -25,3 +25,11 @@ def test_plan058_migration_is_portable_to_sqlite(tmp_path, monkeypatch):
     assert "normalized_text" in {
         column["name"] for column in inspector.get_columns("concept_term")
     }
+
+    command.downgrade(config, "055a0001")
+    downgraded = inspect(create_engine(f"sqlite:///{database}"))
+    assert "concept_term_embedding" not in downgraded.get_table_names()
+    assert "document_term_candidate" not in downgraded.get_table_names()
+    assert "project_id" not in {
+        column["name"] for column in downgraded.get_columns("concept")
+    }

@@ -224,6 +224,10 @@ def _add_curated_concept(
     aliases: Iterable[str] | None = None,
     abbreviations: Iterable[str] | None = None,
 ) -> Concept:
+    normalized_scope = (scope or "project").strip().casefold() or "project"
+    if normalized_scope not in {"project", "org", "form", "clinical"}:
+        raise ValueError(f"unsupported candidate scope: {normalized_scope}")
+
     def attach_aliases(concept: Concept) -> None:
         existing_normalized = {
             (term.lang.casefold(), normalize_source(term.text))
@@ -234,6 +238,7 @@ def _add_curated_concept(
             *((value, "abbreviation") for value in abbreviations or ()),
             *((value, "synonym") for value in aliases or ()),
         ]
+        changed = False
         for value, role in values:
             text = str(value or "").strip()
             normalized = normalize_source(text)
@@ -249,6 +254,9 @@ def _add_curated_concept(
                 )
             )
             existing_normalized.add((source_lang, normalized))
+            changed = True
+        if changed:
+            concept.version += 1
 
     if concept_id:
         concept = session.get(Concept, concept_id)
@@ -268,7 +276,7 @@ def _add_curated_concept(
         version=1,
         evidence=f"document_term_candidate:{candidate.id};approved_by:{actor_sub}",
         do_not_translate=do_not_translate,
-        layer=(scope or "project").strip().casefold() or "project",
+        layer=normalized_scope,
         tenant_id=candidate.tenant_id,
         project_id=candidate.project_id,
         term_type=candidate.term_type or "general",
@@ -315,6 +323,7 @@ def decide_candidate(
 ) -> dict:
     """以乐观锁完成候选裁决，并在批准类动作时写入正式项目词库。"""
     action = (action or "").strip().casefold()
+    scope = (scope or "project").strip().casefold() or "project"
     if action not in VALID_DECISIONS:
         raise ValueError(f"unsupported candidate decision: {action}")
     if candidate.version != expected_version:

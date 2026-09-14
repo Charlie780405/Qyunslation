@@ -22,9 +22,9 @@ FIELDNAMES = (
 
 LAYER_PRIORITY = {
     "org": 100,
-    "form": 90,  # PLAN-042b：登记表固定字段 / 短值格，介于 org 与 clinical
+    "form": 90,  # PLAN-042b/058：固定表单词高于项目词
+    "project": 85,
     "clinical": 80,
-    "project": 60,
     "session": 40,
     "harvest": 20,
 }

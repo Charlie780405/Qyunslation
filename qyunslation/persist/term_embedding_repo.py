@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Callable
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.glossary.governance import normalize_lang
-from qyunslation.persist.models import Concept, ConceptTerm, ConceptTermEmbedding
+from qyunslation.persist.models import Concept, ConceptTerm, ConceptTermEmbedding, PgVector
 
 logger = logging.getLogger(__name__)
 EMBEDDING_MODEL = "bge-m3"
@@ -98,8 +98,9 @@ def backfill_concept_term_embeddings(
     failed_count = 0
     errors: list[str] = []
     embed_fn = embedder or _embed
-    for start in range(0, len(pending), max(1, min(batch_size, EMBED_BATCH))):
-        batch = pending[start : start + max(1, min(batch_size, EMBED_BATCH))]
+    actual_batch_size = max(1, min(batch_size, EMBED_BATCH))
+    for start in range(0, len(pending), actual_batch_size):
+        batch = pending[start : start + actual_batch_size]
         try:
             vectors, returned_model = embed_fn([term.text for term in batch])
             if len(vectors) != len(batch):
@@ -164,7 +165,8 @@ def _preferred_target(concept: Concept, *, src_lang: str, tgt_lang: str) -> str 
     targets = [
         term.text.strip()
         for term in concept.terms
-        if term.lang.casefold() == tgt_lang.casefold() and term.role == "preferred"
+        if normalize_lang(term.lang) == normalize_lang(tgt_lang)
+        and term.role == "preferred"
     ]
     if targets:
         return targets[0]
@@ -172,7 +174,8 @@ def _preferred_target(concept: Concept, *, src_lang: str, tgt_lang: str) -> str 
         sources = [
             term.text.strip()
             for term in concept.terms
-            if term.lang.casefold() == src_lang.casefold() and term.role == "preferred"
+            if normalize_lang(term.lang) == normalize_lang(src_lang)
+            and term.role == "preferred"
         ]
         return sources[0] if sources else None
     return None
@@ -216,10 +219,33 @@ def semantic_search_concept_terms(
         tenant_id=tenant_id,
         project_id=project_id,
     )
-    rows = session.execute(stmt).all()
+    is_postgres_vector = (
+        session.bind is not None
+        and session.bind.dialect.name == "postgresql"
+        and PgVector is not None
+    )
+    if is_postgres_vector:
+        # Let PostgreSQL use the HNSW cosine index created by 058a0001.  The
+        # SQLite/test path below intentionally keeps a small Python fallback.
+        query_param = bindparam("term_query_vector", type_=PgVector(dim))
+        distance = ConceptTermEmbedding.vector.op("<=>")(query_param)
+        rows = session.execute(
+            stmt.add_columns(distance.label("distance"))
+            .order_by(distance)
+            .limit(max(1, min(int(limit), 100)) * 4),
+            {"term_query_vector": query_vector},
+        ).all()
+    else:
+        rows = session.execute(stmt).all()
     hits = []
-    for embedding, source_term in rows:
-        score = _cosine_similarity(query_vector, list(embedding.vector or []))
+    for row in rows:
+        embedding, source_term = row[:2]
+        if is_postgres_vector:
+            # cosine distance is in [0, 2] for normalized vectors; clamp the
+            # derived score so the API never exposes an impossible confidence.
+            score = max(0.0, min(1.0, 1.0 - float(row[2])))
+        else:
+            score = _cosine_similarity(query_vector, list(embedding.vector or []))
         if score < threshold:
             continue
         concept = source_term.concept

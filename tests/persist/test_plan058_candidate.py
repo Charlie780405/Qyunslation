@@ -177,6 +177,7 @@ def test_approve_candidate_persists_aliases_and_abbreviations(session):
 
     concept = session.get(Concept, result["concept_id"])
     assert concept is not None
+    assert concept.version == 2
     assert {(term.lang, term.text, term.role) for term in concept.terms} == {
         ("en", "adverse event", "preferred"),
         ("zh", "不良事件", "preferred"),

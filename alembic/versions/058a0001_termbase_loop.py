@@ -229,11 +229,19 @@ def downgrade() -> None:
         )
     op.drop_index("ix_concept_term_embedding_model", table_name="concept_term_embedding")
     op.drop_table("concept_term_embedding")
-    op.drop_index("ix_concept_term_normalized", table_name="concept_term")
-    op.drop_column("concept_term", "normalized_text")
-    op.drop_index("ix_concept_runtime_scope", table_name="concept")
-    op.drop_constraint("fk_concept_project_id", "concept", type_="foreignkey")
-    op.drop_column("concept", "authority")
-    op.drop_column("concept", "definition")
-    op.drop_column("concept", "term_type")
-    op.drop_column("concept", "project_id")
+    if bind.dialect.name == "postgresql":
+        op.drop_index("ix_concept_term_normalized", table_name="concept_term")
+        op.drop_column("concept_term", "normalized_text")
+        op.drop_index("ix_concept_runtime_scope", table_name="concept")
+        op.drop_constraint("fk_concept_project_id", "concept", type_="foreignkey")
+        for column in ("authority", "definition", "term_type", "project_id"):
+            op.drop_column("concept", column)
+    else:
+        with op.batch_alter_table("concept_term", recreate="always") as batch:
+            batch.drop_index("ix_concept_term_normalized")
+            batch.drop_column("normalized_text")
+        with op.batch_alter_table("concept", recreate="always") as batch:
+            batch.drop_index("ix_concept_runtime_scope")
+            batch.drop_constraint("fk_concept_project_id", type_="foreignkey")
+            for column in ("authority", "definition", "term_type", "project_id"):
+                batch.drop_column(column)
