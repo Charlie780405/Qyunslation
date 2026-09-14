@@ -2,7 +2,7 @@
 """PLAN-058：租户/项目作用域术语加载和译前解析。"""
 from __future__ import annotations
 
-from collections import defaultdict
+from hashlib import sha256
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -91,6 +91,46 @@ def resolve_runtime_terms(
     return TermResolver(build_term_index(records)).resolve(text)
 
 
+def runtime_termbase_version(
+    session: Session,
+    *,
+    tenant_id: str,
+    project_id: str | None,
+) -> str:
+    """Return a stable scope/version token for translation and resolution caches."""
+    stmt = (
+        select(Concept.id, Concept.version, Concept.updated_at)
+        .where(Concept.status == "curated")
+        .where(or_(Concept.tenant_id.is_(None), Concept.tenant_id == tenant_id))
+        .where(or_(Concept.project_id.is_(None), Concept.project_id == project_id))
+        .order_by(Concept.id)
+    )
+    parts = [
+        f"{concept_id}:{version}:{updated_at.isoformat() if updated_at else ''}"
+        for concept_id, version, updated_at in session.execute(stmt)
+    ]
+    digest = sha256("|".join(parts).encode("utf-8")).hexdigest()
+    return f"058-{digest[:24]}"
+
+
+def match_to_dict(match: TermMatch) -> dict:
+    """Serialize a resolver result, including the fields needed by the policy pack."""
+    return {
+        "concept_id": match.concept_id,
+        "source_term": match.source_term,
+        "preferred_target": match.target_term,
+        "target_term": match.target_term,
+        "match_type": match.match_type,
+        "term_type": match.term_type,
+        "do_not_translate": match.do_not_translate,
+        "forbidden_targets": list(match.forbidden_targets),
+        "scope": match.layer,
+        "confidence": match.confidence,
+        "source_locations": [{"start": match.start, "end": match.end}],
+        "hard_constraint": match.match_type == "exact",
+    }
+
+
 def term_policy(matches: list[TermMatch]) -> dict[str, str]:
     """Return a legacy glossary dictionary for existing translators."""
     policy: dict[str, str] = {}
@@ -98,4 +138,3 @@ def term_policy(matches: list[TermMatch]) -> dict[str, str]:
         if match.match_type == "exact" and match.source_term not in policy:
             policy[match.source_term] = match.target_term
     return policy
-

@@ -100,6 +100,13 @@ def _tenant_bundle(session: Session, identity: IdentityContext):
     return tenant
 
 
+def _owned_job(session: Session, *, job_id: str, tenant_id: str):
+    """Load a job only after checking the tenant-owned project boundary."""
+    from qyunslation.persist.review_repo import job_owned_by_tenant
+
+    return job_owned_by_tenant(session, job_id=job_id, tenant_id=tenant_id)
+
+
 @router.get("/health")
 def api_health(request: Request) -> dict[str, Any]:
     """匿名只回 schema/db；env 与配置位只对已认证身份可见。"""
@@ -305,6 +312,8 @@ class ConceptCreate(BaseModel):
     # 调用方即使传 curated 也强制 staging
     status: str | None = None
     forbidden: list[dict[str, str]] = Field(default_factory=list)
+    project_id: str | None = Field(default=None, max_length=36)
+    term_type: str = Field(default="general", max_length=64)
 
 
 @router.get("/concepts")
@@ -333,6 +342,10 @@ def create_concept_api(
         (str(item.get("lang") or ""), str(item.get("text") or ""))
         for item in body.forbidden
     ]
+    if body.project_id and repo.get_project(
+        session, project_id=body.project_id, tenant_id=tenant.id
+    ) is None:
+        raise HTTPException(status_code=404, detail="project not found")
     concept = create_staging_concept(
         session,
         domain=body.domain,
@@ -345,6 +358,8 @@ def create_concept_api(
         do_not_translate=body.do_not_translate,
         forbidden=forbidden,
         tenant_id=tenant.id,
+        project_id=body.project_id,
+        term_type=body.term_type,
     )
     record_audit(
         session,
@@ -358,6 +373,384 @@ def create_concept_api(
     )
     return concept_to_dict(concept)
 
+
+# --- PLAN-058 术语预解析 / 译后候选闭环 ---
+
+
+class TermResolveRequest(BaseModel):
+    source_text: str = Field(min_length=1, max_length=20000)
+    project_id: str | None = Field(default=None, max_length=36)
+    src_lang: str = Field(default="en", max_length=16)
+    tgt_lang: str = Field(default="zh", max_length=16)
+
+
+class TermOccurrenceBody(BaseModel):
+    page_no: int | None = Field(default=None, ge=1)
+    block_id: str | None = Field(default=None, max_length=128)
+    object_id: str | None = Field(default=None, max_length=128)
+    char_start: int | None = Field(default=None, ge=0)
+    char_end: int | None = Field(default=None, ge=0)
+    bbox: dict[str, Any] | None = None
+    source_context: str | None = Field(default=None, max_length=20000)
+    target_context: str | None = Field(default=None, max_length=20000)
+
+
+class TermCandidateBody(BaseModel):
+    source_term: str = Field(min_length=1, max_length=512)
+    observed_target: str = Field(default="", max_length=512)
+    suggested_target: str | None = Field(default=None, max_length=512)
+    term_type: str = Field(default="general", max_length=64)
+    risk: str = Field(default="normal", max_length=32)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    match_type: str = Field(default="candidate", max_length=32)
+    source_context: str | None = Field(default=None, max_length=20000)
+    target_context: str | None = Field(default=None, max_length=20000)
+    occurrences: list[TermOccurrenceBody] = Field(default_factory=list, max_length=1000)
+
+
+class TermExtractBody(BaseModel):
+    candidates: list[TermCandidateBody] = Field(min_length=1, max_length=1000)
+    termbase_version: str | None = Field(default=None, max_length=128)
+
+
+class TermCandidateDecisionBody(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    expected_version: int = Field(ge=1)
+    target_term: str | None = Field(default=None, max_length=512)
+    concept_id: str | None = Field(default=None, max_length=36)
+    note: str | None = Field(default=None, max_length=10000)
+    scope: str = Field(default="project", max_length=32)
+
+
+class TermBatchDecisionItem(TermCandidateDecisionBody):
+    candidate_id: str = Field(min_length=1, max_length=36)
+
+
+class TermBatchDecisionBody(BaseModel):
+    decisions: list[TermBatchDecisionItem] = Field(min_length=1, max_length=200)
+
+
+class TermPromoteBody(BaseModel):
+    scope: str = Field(min_length=1, max_length=32)
+    project_id: str | None = Field(default=None, max_length=36)
+    note: str | None = Field(default=None, max_length=10000)
+
+
+@router.post("/terms/resolve")
+def resolve_terms_api(
+    body: TermResolveRequest,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    if body.project_id and repo.get_project(
+        session, project_id=body.project_id, tenant_id=tenant.id
+    ) is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    from qyunslation.glossary.termbase import (
+        match_to_dict,
+        resolve_runtime_terms,
+        runtime_termbase_version,
+    )
+
+    matches = resolve_runtime_terms(
+        session,
+        tenant_id=tenant.id,
+        project_id=body.project_id,
+        text=body.source_text,
+        src_lang=body.src_lang,
+        tgt_lang=body.tgt_lang,
+    )
+    return {
+        "matches": [match_to_dict(match) for match in matches],
+        "termbase_version": runtime_termbase_version(
+            session, tenant_id=tenant.id, project_id=body.project_id
+        ),
+        # 058c 首版只有本地确定性命中；语义候选接入后由实际路径置 true。
+        "semantic_used": any(match.match_type == "semantic" for match in matches),
+    }
+
+
+@router.get("/terms/search")
+def search_terms_api(
+    source_text: str = Query(min_length=1, max_length=20000),
+    project_id: str | None = Query(default=None, max_length=36),
+    src_lang: str = Query(default="en", max_length=16),
+    tgt_lang: str = Query(default="zh", max_length=16),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return resolve_terms_api(
+        TermResolveRequest(
+            source_text=source_text,
+            project_id=project_id,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+        ),
+        identity,
+        session,
+    )
+
+
+@router.post("/jobs/{job_id}/terms/extract", status_code=201)
+def extract_job_terms_api(
+    job_id: str,
+    body: TermExtractBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    job = _owned_job(session, job_id=job_id, tenant_id=tenant.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from qyunslation.persist.candidate_repo import candidate_to_dict, enqueue_candidate
+
+    created = []
+    for item in body.candidates:
+        candidate = enqueue_candidate(
+            session,
+            job=job,
+            tenant_id=tenant.id,
+            project_id=job.project_id,
+            source_term=item.source_term,
+            observed_target=item.observed_target,
+            suggested_target=item.suggested_target,
+            term_type=item.term_type,
+            risk=item.risk,
+            confidence=item.confidence,
+            match_type=item.match_type,
+            source_context=item.source_context,
+            target_context=item.target_context,
+            termbase_version=body.termbase_version,
+            occurrences=[occurrence.model_dump() for occurrence in item.occurrences],
+        )
+        created.append(candidate_to_dict(candidate))
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="term.candidate.extract",
+        source_sha256=job.source_sha256,
+        extra={"job_id": job.id, "count": len(created), "api_key": "should-strip"},
+    )
+    return {"created": created, "count": len(created)}
+
+
+@router.get("/jobs/{job_id}/terms")
+def list_job_terms_api(
+    job_id: str,
+    status: str | None = Query(default=None, max_length=32),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    tenant = _tenant_bundle(session, identity)
+    job = _owned_job(session, job_id=job_id, tenant_id=tenant.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from qyunslation.persist.candidate_repo import candidate_to_dict, list_candidates
+
+    rows = list_candidates(
+        session,
+        tenant_id=tenant.id,
+        job_id=job.id,
+        project_id=job.project_id,
+        status=status,
+    )
+    return [candidate_to_dict(row) for row in rows]
+
+
+@router.post("/jobs/{job_id}/terms/{candidate_id}/decide")
+def decide_job_term_api(
+    job_id: str,
+    candidate_id: str,
+    body: TermCandidateDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    job = _owned_job(session, job_id=job_id, tenant_id=tenant.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from qyunslation.persist.candidate_repo import (
+        CandidateConflict,
+        decide_candidate,
+        get_candidate,
+    )
+
+    candidate = get_candidate(
+        session, candidate_id=candidate_id, tenant_id=tenant.id, job_id=job.id
+    )
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="term candidate not found")
+    try:
+        result = decide_candidate(
+            session,
+            candidate=candidate,
+            actor_sub=identity.user_sub,
+            action=body.action,
+            expected_version=body.expected_version,
+            target_term=body.target_term,
+            concept_id=body.concept_id,
+            note=body.note,
+            scope=body.scope,
+        )
+    except CandidateConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action=f"term.candidate.{body.action.strip().lower()}",
+        source_sha256=job.source_sha256,
+        extra={
+            "job_id": job.id,
+            "candidate_id": candidate.id,
+            "concept_id": result.get("concept_id"),
+            "api_key": "should-strip",
+        },
+    )
+    return result
+
+
+@router.post("/jobs/{job_id}/terms/batch-decide")
+def batch_decide_job_terms_api(
+    job_id: str,
+    body: TermBatchDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    job = _owned_job(session, job_id=job_id, tenant_id=tenant.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from qyunslation.persist.candidate_repo import (
+        CandidateConflict,
+        decide_candidate,
+        get_candidate,
+    )
+
+    results = []
+    for item in body.decisions:
+        candidate = get_candidate(
+            session, candidate_id=item.candidate_id, tenant_id=tenant.id, job_id=job.id
+        )
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="term candidate not found")
+        # 未知、语义或多义候选必须逐条确认，避免批量操作绕过风险控制。
+        if item.action.strip().casefold() == "approve" and candidate.match_type not in {
+            "exact",
+            "alias",
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail=f"candidate {candidate.id} is not eligible for batch approval",
+            )
+        try:
+            results.append(
+                decide_candidate(
+                    session,
+                    candidate=candidate,
+                    actor_sub=identity.user_sub,
+                    action=item.action,
+                    expected_version=item.expected_version,
+                    target_term=item.target_term,
+                    concept_id=item.concept_id,
+                    note=item.note,
+                    scope=item.scope,
+                )
+            )
+        except CandidateConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"decided": results, "count": len(results)}
+
+
+@router.get("/jobs/{job_id}/term-review-summary")
+def term_review_summary_api(
+    job_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    job = _owned_job(session, job_id=job_id, tenant_id=tenant.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    from qyunslation.persist.candidate_repo import list_candidates
+
+    rows = list_candidates(
+        session,
+        tenant_id=tenant.id,
+        job_id=job.id,
+        project_id=job.project_id,
+        limit=1000,
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.status] = counts.get(row.status, 0) + 1
+    unresolved_high_risk = [
+        row
+        for row in rows
+        if row.risk.strip().casefold() in {"high", "critical"}
+        and row.status != "approved"
+    ]
+    return {
+        "job_id": job.id,
+        "total": len(rows),
+        "pending": counts.get("pending", 0),
+        "approved": counts.get("approved", 0),
+        "rejected": counts.get("rejected", 0),
+        "high_risk_unresolved": len(unresolved_high_risk),
+        "formal_gate": {
+            "passed": not unresolved_high_risk,
+            "blocking_candidate_ids": [row.id for row in unresolved_high_risk],
+        },
+    }
+
+
+@router.post("/concepts/{concept_id}/promote")
+def promote_concept_api(
+    concept_id: str,
+    body: TermPromoteBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    membership = repo.ensure_membership(
+        session, tenant_id=tenant.id, user_sub=identity.user_sub
+    )
+    if membership.role not in {"term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="term_admin role required")
+    from qyunslation.persist.concept_repo import concept_to_dict, get_concept
+
+    concept = get_concept(session, concept_id)
+    if concept is None or concept.tenant_id not in {None, tenant.id}:
+        raise HTTPException(status_code=404, detail="concept not found")
+    scope = body.scope.strip().casefold()
+    if scope not in {"org", "form", "clinical", "project"}:
+        raise HTTPException(status_code=400, detail="invalid promotion scope")
+    if body.project_id and repo.get_project(
+        session, project_id=body.project_id, tenant_id=tenant.id
+    ) is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    if scope == "project" and not body.project_id:
+        raise HTTPException(status_code=400, detail="project_id is required for project scope")
+    concept.status = "curated"
+    concept.layer = scope
+    concept.tenant_id = tenant.id
+    concept.project_id = body.project_id if scope == "project" else None
+    concept.evidence = (
+        f"{concept.evidence or ''};promoted_by:{identity.user_sub};note:{body.note or ''}"
+    )
+    concept.version += 1
+    session.flush()
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="concept.promote",
+        extra={"concept_id": concept.id, "scope": scope, "api_key": "should-strip"},
+    )
+    return concept_to_dict(concept)
 
 class TmUnitCreate(BaseModel):
     source_text: str = Field(min_length=1, max_length=20000)
@@ -803,4 +1196,3 @@ def review_suggestions_api(
         project_id=project_id,
         forbidden=forbidden,
     )
-
