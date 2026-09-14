@@ -484,7 +484,7 @@ def search_terms_api(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return resolve_terms_api(
+    exact = resolve_terms_api(
         TermResolveRequest(
             source_text=source_text,
             project_id=project_id,
@@ -494,6 +494,23 @@ def search_terms_api(
         identity,
         session,
     )
+    if exact["matches"]:
+        exact["semantic_suggestions"] = []
+        return exact
+    from qyunslation.persist.term_embedding_repo import semantic_search_concept_terms
+
+    suggestions = semantic_search_concept_terms(
+        session,
+        tenant_id=_tenant_bundle(session, identity).id,
+        project_id=project_id,
+        query=source_text,
+        src_lang=src_lang,
+        tgt_lang=tgt_lang,
+        limit=5,
+    )
+    exact["semantic_suggestions"] = suggestions
+    exact["semantic_used"] = bool(suggestions)
+    return exact
 
 
 @router.post("/jobs/{job_id}/terms/extract", status_code=201)
