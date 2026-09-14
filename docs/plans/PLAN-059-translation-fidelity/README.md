@@ -1,6 +1,6 @@
 # PLAN-059：医药资料翻译 12 项保真问题与工作台 UI 收口
 
-> 状态：**实施中：本地保真门禁与生产基础 smoke 通过，LIVE/浏览器/真实金标待验证**
+> 状态：**实施中：本地回归、Taizhou LIVE 与生产基础 smoke 通过，真实多格式金标/浏览器版式仍待验证**
 > 日期：2026-09-14  
 > 前置：PLAN-028/033/041/045/050/058；最近 UI 修复提交 `3cce0ac`  具体复现见用户提供的截图  
 > 目标分支：`codex/plan-059-translation-fidelity`  
@@ -141,7 +141,9 @@ Manifest 必须同时输出以下字段，避免把不同概念混为一个数�
 - 已落地本地实现：结构计数分层、参考文献 section 级硬保护、表格脚注强制翻译、源粗体/字号传递、派生图片 300 DPI、PDF/DOCX/PPTX/图片路径的原图隔离，以及工作台 Banner/上传操作收口。
 - 已新增 `scripts/verify-plan-059.sh`：默认使用仓库 `.venv`，支持 `QYUNSLATION_VERIFY_PY`、`QYUNSLATION_PLAN059_SAMPLE`、`QYUNSLATION_SAMPLE_ROOT`，并将样本缺失和远程模型不可达报告为 `BLOCKED`。
 - 本地验证已通过：059 专项聚焦回归 41 passed；模型 trace、网关、embedding 与保真契约回归 36 passed；059 门禁本地模式 `SUMMARY: PASS fail=0`。
-- 全量回归已覆盖 913 项：`906 passed, 6 skipped`；唯一失败为既有 logger capture 测试（独立运行通过），不属于 PLAN-059 翻译/结构/版式代码。
-- 运行时 trace 记录目标翻译模型 `qwen3.6:35b-a3b` 和 embedding `bge-m3` 的配置来源，但 `embedding_status=configured` 不等同于 LIVE。只有执行 `QYUNSLATION_PLAN059_LIVE=1 bash scripts/verify-plan-059.sh` 并探针命中目标服务后，才能将 059h 标记为 LIVE 通过。
+- 全量回归已覆盖 915 项：`909 passed, 6 skipped, 2 warnings`；Alembic 曾通过默认 `fileConfig()` 禁用了既有 logger，现已改为 `disable_existing_loggers=False`，并补充运行时恢复与测试隔离回归。
+- PLAN-029 旧门禁的 `_is_preserve_cell` 私有别名已保留兼容；PLAN-050 门禁已接受当前合法的 `gr.Radio`/`gr.Dropdown` 工作台控件；PLAN-041 已使用知识库真实 7 页 `611-3期.pdf` 样本完成 14 张表 gold。
+- PLAN-030d 的旧 gold 断言已从过时的 `text_layer` 对齐到当前表格 `translate_cells` 动作契约；corrected gold 已通过，未改变识别/翻译代码路径。
+- 通过 Tailscale 直连 Taizhou endpoint 完成 LIVE 探针：实际模型列表包含 `qwen3.6:35b-a3b`、`bge-m3:latest`，翻译探针返回目标模型，embedding 返回 bge-m3 的 1024 维非零向量。配置 trace 仍不能替代该 LIVE 证据。
 - 已完成生产基础交付：精确提交 `6830b1e` 已推送并部署；`pdf2zh.service` 与 `qyunslation-office.service` 已重启，公网 API、首页和图片翻译健康检查均通过；原生产提交 `3cce0ac` 保留为回滚点。
-- 尚未宣称计划完成：真实多格式金标、浏览器四尺寸 smoke、泰州 Qwen/bge-m3 LIVE 证据和完整质量门仍待在 Cursor/生产环境执行并写入 WT。
+- 尚未宣称计划完成：真实 PDF/DOCX/PPTX/图片/poster/监管资料的金标翻译结果、浏览器四尺寸 smoke、图片/表格字体溢出与可读性人工检查、术语遵从率和正式稿门禁仍需在 Cursor/生产环境完成。
