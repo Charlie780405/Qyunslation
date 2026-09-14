@@ -39,5 +39,6 @@
 | **PLAN-056** | [PLAN-056-appbar-inspector-ux](./PLAN-056-appbar-inspector-ux/) | **应用栏方向开关 + 检查器/帮助可见性** |
 | **PLAN-057** | [PLAN-057-chrome-dedupe](./PLAN-057-chrome-dedupe/) | **去掉方向/帮助/检查器双入口 + 高级区滚动** |
 | **PLAN-058** | [PLAN-058-pharma-termbase-loop](./PLAN-058-pharma-termbase-loop/) | **医药专业术语闭环、预翻译解析与混合检索** |
+| **PLAN-059** | [PLAN-059-translation-fidelity](./PLAN-059-translation-fidelity/) | **医药资料翻译 12 项保真问题与工作台 UI 收口** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
