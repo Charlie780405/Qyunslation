@@ -93,8 +93,13 @@ class DecisionBody(BaseModel):
     abbreviations: list[str] = Field(default_factory=list, max_length=20)
 
 
-class BatchDecisionItem(DecisionBody):
+class BatchDecisionItem(BaseModel):
     candidate_id: str = Field(min_length=1, max_length=36)
+    action: Literal["approve"]
+    expected_version: int = Field(ge=1)
+    target_term: str | None = Field(default=None, max_length=512)
+    concept_id: str | None = Field(default=None, max_length=36)
+    note: str | None = Field(default=None, max_length=10_000)
 
 
 class BatchDecisionBody(BaseModel):
@@ -164,9 +169,83 @@ def _extract_candidates(
     job = repo.get_job(session, job_id=run.job_id)
     if job is None:  # database invariant; do not turn it into a 500 leak
         raise HTTPException(status_code=404, detail="workbench job not found")
-    serialized: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    candidate_ids: set[str] = set()
+    seen_occurrences: set[tuple[str, str, int | None, str | None, str | None, int | None]] = set()
+
+    def append_candidate(
+        *,
+        source_term: str,
+        observed_target: str,
+        suggested_target: str | None,
+        term_type: str,
+        match_type: str,
+        confidence: float,
+        status: str,
+        extracted: dict,
+    ) -> None:
+        occurrence = (extracted.get("occurrences") or [{}])[0]
+        key = (
+            source_term.casefold(),
+            observed_target.casefold(),
+            occurrence.get("page_no"),
+            occurrence.get("block_id"),
+            occurrence.get("object_id"),
+            occurrence.get("char_start"),
+        )
+        if key in seen_occurrences:
+            return
+        seen_occurrences.add(key)
+        candidate = enqueue_candidate(
+            session,
+            job=job,
+            tenant_id=tenant_id,
+            project_id=job.project_id,
+            source_term=source_term,
+            observed_target=observed_target,
+            suggested_target=suggested_target,
+            term_type=term_type,
+            risk=classify_risk(source_term, term_type),
+            confidence=confidence,
+            match_type=match_type,
+            src_lang=job.provenance.get("src_lang", "en") if job.provenance else "en",
+            tgt_lang=job.provenance.get("tgt_lang", "zh") if job.provenance else "zh",
+            source_context=extracted["source_context"],
+            target_context=extracted["target_context"],
+            termbase_version=run.termbase_version,
+            occurrences=extracted["occurrences"],
+        )
+        if candidate.status == "pending" and status == "applied":
+            candidate.status = "applied"
+        candidate_ids.add(candidate.id)
+
     for item in evidence:
+        if not item.is_translatable:
+            continue
+        context = {
+            "source_context": item.source_text[:1000],
+            "target_context": item.target_text[:1000],
+            "occurrences": [item.occurrence()],
+        }
+        # Normal page/paragraph evidence need not already contain term spans:
+        # known hard terms are still checked against the aligned target text.
+        for term in policy.get("terms", []):
+            if not term.get("hard_constraint"):
+                continue
+            source_term = str(term.get("source_term") or "").strip()
+            preferred = str(term.get("preferred_target") or "").strip()
+            if not source_term or not preferred or source_term.casefold() not in item.source_text.casefold():
+                continue
+            applied = preferred.casefold() in item.target_text.casefold()
+            append_candidate(
+                source_term=source_term,
+                observed_target=preferred if applied else "",
+                suggested_target=preferred,
+                term_type=str(term.get("term_type") or "general"),
+                match_type="exact",
+                confidence=1.0,
+                status="applied" if applied else "pending",
+                extracted=context,
+            )
         for extracted in extract_term_pairs([item]):
             source_term = extracted["source_term"]
             applied, preferred = _is_applied(policy, item, source_term)
@@ -180,33 +259,20 @@ def _extract_candidates(
                 if applied:
                     status = "applied"
                     observed_target = preferred
-            key = (source_term.casefold(), observed_target.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            candidate = enqueue_candidate(
-                session,
-                job=job,
-                tenant_id=tenant_id,
-                project_id=job.project_id,
+            append_candidate(
                 source_term=source_term,
                 observed_target=observed_target,
                 suggested_target=suggested_target,
                 term_type=extracted["term_type"],
-                risk=classify_risk(source_term, extracted["term_type"]),
-                confidence=1.0 if match_type == "exact" else 0.0,
                 match_type=match_type,
-                src_lang=job.provenance.get("src_lang", "en") if job.provenance else "en",
-                tgt_lang=job.provenance.get("tgt_lang", "zh") if job.provenance else "zh",
-                source_context=extracted["source_context"],
-                target_context=extracted["target_context"],
-                termbase_version=run.termbase_version,
-                occurrences=extracted["occurrences"],
+                confidence=1.0 if match_type == "exact" else 0.0,
+                status=status,
+                extracted=extracted,
             )
-            if candidate.status == "pending" and status == "applied":
-                candidate.status = "applied"
-            serialized.append(candidate_to_dict(candidate))
-    return serialized
+    # Reload through the repository to include every idempotently aggregated
+    # occurrence, rather than returning the first occurrence only.
+    rows = list_candidates(session, tenant_id=tenant_id, job_id=job.id, limit=1000)
+    return [candidate_to_dict(row) for row in rows if row.id in candidate_ids]
 
 
 @router.post("/runs/start", status_code=201)
@@ -402,8 +468,6 @@ def batch_decide_terms(run_id: str, body: BatchDecisionBody, session: Session = 
     run, tenant, membership = _run_for_actor(session, run_id=run_id, actor_sub=body.actor_sub)
     decided: list[dict] = []
     for item in body.decisions:
-        if item.action != "approve":
-            raise HTTPException(status_code=400, detail="batch decisions only support approve")
         candidate = get_candidate(session, candidate_id=item.candidate_id, tenant_id=tenant.id, job_id=run.job_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="term candidate not found")
@@ -417,7 +481,14 @@ def batch_decide_terms(run_id: str, body: BatchDecisionBody, session: Session = 
                 actor_sub=body.actor_sub,
                 membership=membership,
                 candidate_id=item.candidate_id,
-                body=item,
+                body=DecisionBody(
+                    actor_sub=body.actor_sub,
+                    action=item.action,
+                    expected_version=item.expected_version,
+                    target_term=item.target_term,
+                    concept_id=item.concept_id,
+                    note=item.note,
+                ),
             )
         )
     return {"count": len(decided), "decided": decided, "summary": _summary(session, run, tenant.id)}

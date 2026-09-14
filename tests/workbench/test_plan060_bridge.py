@@ -218,3 +218,116 @@ def test_high_risk_term_requires_admin_final_review(client):
     )
     assert final.status_code == 200, final.text
     assert final.json()["candidate"]["status"] == "approved"
+
+
+def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exact(client):
+    first = _start(client, source_text="The primary endpoint was met twice.")
+    run_id = first["run_id"]
+
+    completed = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "The primary endpoint was met.",
+                    "target_text": "主要终点评估已达到。",
+                    "source_term": "primary endpoint",
+                    "target_term": "主要终点评估",
+                    "page_no": 1,
+                    "block_id": "p1-b1",
+                },
+                {
+                    "source_text": "The primary endpoint was reported.",
+                    "target_text": "主要终点评估已报告。",
+                    "source_term": "primary endpoint",
+                    "target_term": "主要终点评估",
+                    "page_no": 2,
+                    "block_id": "p2-b2",
+                },
+            ],
+        },
+        nonce="aggregate-060",
+    )
+    assert completed.status_code == 200, completed.text
+    rows = completed.json()["candidates"]
+    assert len(rows) == 1
+    assert len(rows[0]["occurrences"]) == 2
+
+    # It is still an unknown candidate: batch confirmation cannot launder it.
+    rejected = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/terms/batch-decision",
+        {
+            "actor_sub": "reviewer-1",
+            "decisions": [
+                {
+                    "candidate_id": rows[0]["id"],
+                    "action": "approve",
+                    "expected_version": rows[0]["version"],
+                    "target_term": "主要终点评估",
+                }
+            ],
+        },
+        nonce="batch-reject-060",
+    )
+    assert rejected.status_code == 400
+
+    # Confirm it once; the following run resolves it deterministically and is
+    # then eligible for the narrow exact-match batch path.
+    approved = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/terms/{rows[0]['id']}/decision",
+        {
+            "actor_sub": "reviewer-1",
+            "action": "approve",
+            "expected_version": rows[0]["version"],
+            "target_term": "主要终点评估",
+        },
+        nonce="aggregate-approve-060",
+    )
+    assert approved.status_code == 200, approved.text
+    second = _start(client, source_text="The primary endpoint was met again.", nonce="exact-batch-start-060")
+    completed_again = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{second['run_id']}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "The primary endpoint was met again.",
+                    "target_text": "终点再次达到。",
+                    "page_no": 3,
+                    "block_id": "p3-b1",
+                }
+            ],
+        },
+        nonce="exact-batch-complete-060",
+    )
+    exact = completed_again.json()["candidates"][0]
+    assert exact["match_type"] == "exact"
+    assert exact["status"] == "pending"
+    batched = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{second['run_id']}/terms/batch-decision",
+        {
+            "actor_sub": "reviewer-1",
+            "decisions": [
+                {
+                    "candidate_id": exact["id"],
+                    "action": "approve",
+                    "expected_version": exact["version"],
+                    "target_term": "主要终点评估",
+                }
+            ],
+        },
+        nonce="batch-exact-060",
+    )
+    assert batched.status_code == 200, batched.text
+    assert batched.json()["count"] == 1

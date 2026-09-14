@@ -54,7 +54,7 @@ def classify_risk(source_term: str, term_type: str | None = None) -> str:
     source = (source_term or "").strip()
     if normalized_type in _HIGH_RISK_TYPES:
         return "high"
-    if _CODE.fullmatch(source) or _DOSE.fullmatch(source):
+    if _CODE.search(source) or _DOSE.search(source):
         return "high"
     if _ABBREVIATION.fullmatch(source) and len(source) >= 3:
         return "high"
