@@ -1,7 +1,7 @@
 # PLAN-034c：本机开发 PostgreSQL（默认口令仅供本地，勿当生产密钥入库）
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: qyunslation-plan034c-pg
     environment:
       POSTGRES_USER: qyunslation
