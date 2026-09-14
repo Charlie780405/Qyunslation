@@ -1,6 +1,6 @@
 # PLAN-059：医药资料翻译 12 项保真问题与工作台 UI 收口
 
-> 状态：**实施中：本地保真门禁通过，LIVE/浏览器/生产交付待验证**
+> 状态：**实施中：本地保真门禁与生产基础 smoke 通过，LIVE/浏览器/真实金标待验证**
 > 日期：2026-09-14  
 > 前置：PLAN-028/033/041/045/050/058；最近 UI 修复提交 `3cce0ac`  具体复现见用户提供的截图  
 > 目标分支：`codex/plan-059-translation-fidelity`  
@@ -143,4 +143,5 @@ Manifest 必须同时输出以下字段，避免把不同概念混为一个数�
 - 本地验证已通过：059 专项聚焦回归 41 passed；模型 trace、网关、embedding 与保真契约回归 36 passed；059 门禁本地模式 `SUMMARY: PASS fail=0`。
 - 全量回归已覆盖 913 项：`906 passed, 6 skipped`；唯一失败为既有 logger capture 测试（独立运行通过），不属于 PLAN-059 翻译/结构/版式代码。
 - 运行时 trace 记录目标翻译模型 `qwen3.6:35b-a3b` 和 embedding `bge-m3` 的配置来源，但 `embedding_status=configured` 不等同于 LIVE。只有执行 `QYUNSLATION_PLAN059_LIVE=1 bash scripts/verify-plan-059.sh` 并探针命中目标服务后，才能将 059h 标记为 LIVE 通过。
-- 尚未宣称计划完成：真实多格式金标、浏览器四尺寸 smoke、泰州 Qwen/bge-m3 LIVE 证据及生产部署/回滚仍待在 Cursor/生产环境执行并写入 WT。
+- 已完成生产基础交付：精确提交 `6830b1e` 已推送并部署；`pdf2zh.service` 与 `qyunslation-office.service` 已重启，公网 API、首页和图片翻译健康检查均通过；原生产提交 `3cce0ac` 保留为回滚点。
+- 尚未宣称计划完成：真实多格式金标、浏览器四尺寸 smoke、泰州 Qwen/bge-m3 LIVE 证据和完整质量门仍待在 Cursor/生产环境执行并写入 WT。
