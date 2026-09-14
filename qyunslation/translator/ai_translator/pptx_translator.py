@@ -362,6 +362,7 @@ class PPTXTranslator(AiTranslator):
 
     def _overlay_images(self, elements: List[Dict[str, Any]]) -> None:
         from qyunslation.extensions.image_translate import translate_image_bytes
+        from qyunslation.extensions.doc_image_policy import ensure_master_dpi
 
         suffix_by_type = {
             "image/png": ".png",
@@ -389,7 +390,7 @@ class PPTXTranslator(AiTranslator):
                     to_lang=to_lang,
                 )
                 if new_blob:
-                    self._replace_picture_blob(shape, new_blob)
+                    self._replace_picture_blob(shape, ensure_master_dpi(new_blob))
                 info["execution_status"] = (
                     "TRANSLATED" if block_count > 0 else "EXPLICITLY_SKIPPED"
                 )

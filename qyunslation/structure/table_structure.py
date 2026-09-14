@@ -927,7 +927,20 @@ def _gutter_structure(
 ) -> StructureResult:
     """数据行空隙投影定列。"""
     lines = _line_buckets([(u[0], u[1], u[2], u[3], u[4]) for u in units])
-    col_centers = gutter_column_centers(lines, frame)
+    # For rotated/sideways tables, ``_line_buckets`` is page-y based while the
+    # visual rows are spread along page-y and the visual columns along page-x.
+    # Projecting through the local frame here can therefore turn every vertical
+    # text run into a separate pseudo-row.  Use the stable page axes for this
+    # fallback; the vector-grid path still owns tables with explicit borders.
+    use_page_axes = frame.rotation in (90, 270)
+    if use_page_axes:
+        col_centers = _adaptive_cluster(
+            [(float(item[0]) + float(item[2])) / 2.0 for item in units],
+            floor=6.0,
+            cap=24.0,
+        )
+    else:
+        col_centers = gutter_column_centers(lines, frame)
     if len(col_centers) < 2:
         return StructureResult(
             cells=[],
@@ -935,21 +948,33 @@ def _gutter_structure(
             qc_codes=["NOT_A_TABLE"],
             n_cols=len(col_centers),
         )
-    # 行中心：各线 mid-y 的 local v
-    row_centers: list[float] = []
-    for ln in lines:
-        ys = [(float(it[1]) + float(it[3])) / 2.0 for it in ln]
-        xs = [(float(it[0]) + float(it[2])) / 2.0 for it in ln]
-        if not ys:
-            continue
-        _u, v = frame.to_local(xs[0], sum(ys) / len(ys))
-        row_centers.append(v)
+    # 行中心：旋转表按 page-y 聚类；正常表继续使用局部坐标。
+    if use_page_axes:
+        row_centers = _adaptive_cluster(
+            [(float(item[1]) + float(item[3])) / 2.0 for item in units],
+            floor=3.0,
+            cap=16.0,
+        )
+    else:
+        row_centers = []
+        for ln in lines:
+            ys = [(float(it[1]) + float(it[3])) / 2.0 for it in ln]
+            xs = [(float(it[0]) + float(it[2])) / 2.0 for it in ln]
+            if not ys:
+                continue
+            _u, v = frame.to_local(xs[0], sum(ys) / len(ys))
+            row_centers.append(v)
     buckets: dict[tuple[int, int], list[TextUnit]] = {}
     for item in units:
         x0, y0, x1, y1, _text = item[:5]
-        u, v = frame.to_local((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-        row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - v))
-        col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - u))
+        xcenter, ycenter = (float(x0) + float(x1)) / 2.0, (float(y0) + float(y1)) / 2.0
+        if use_page_axes:
+            row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - ycenter))
+            col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - xcenter))
+        else:
+            u, v = frame.to_local(xcenter, ycenter)
+            row = min(range(len(row_centers)), key=lambda i: abs(row_centers[i] - v))
+            col = min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - u))
         buckets.setdefault((row, col), []).append(item)
     grid_has_title = any(
         _TITLE_RE.match(item[4] or "") for items in buckets.values() for item in items
@@ -1014,13 +1039,10 @@ def _hpd_structure(
     if grid.error:
         return None
     if grid.not_a_table or grid.n_rows < 2 or grid.n_cols < 2:
-        return StructureResult(
-            cells=[],
-            grid_source="not_a_table",
-            qc_codes=["NOT_A_TABLE"],
-            n_cols=grid.n_cols,
-            n_rows=grid.n_rows,
-        )
+        # HPD is advisory.  A negative/under-populated result must fall through
+        # to the deterministic gutter/geometry paths instead of suppressing
+        # the table entirely (especially for sparse and rotated fixtures).
+        return None
 
     lines = _line_buckets([(u[0], u[1], u[2], u[3], u[4]) for u in units])
     cell_items, rate, qc = align_hpd_grid(lines, grid.rows)

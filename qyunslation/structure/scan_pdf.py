@@ -436,6 +436,12 @@ class PdfStructureScanner:
         captionless_table_count = 0
         regulatory_signals: set[str] = set()
         regulatory_form_detected = False
+        # Keep physical image resources separate from semantic Figure objects.
+        # ``get_image_info`` reports occurrences; xrefs (and an inline fallback
+        # key) let the manifest deduplicate a reused resource without losing the
+        # number of page placements.
+        physical_image_keys: set[str] = set()
+        physical_image_occurrence_count = 0
 
         started = time.monotonic()
         pages_scanned = 0
@@ -462,6 +468,27 @@ class PdfStructureScanner:
                     continue
                 pages_scanned += 1
                 page_modes[i] = page_representation(page)
+                # A scanned page is already represented by its page canvas; an
+                # additional image-resource walk is both redundant and costly
+                # on the common full-page-scan path.  Native/hybrid pages still
+                # expose embedded image resources for physical-vs-semantic
+                # counts.
+                if page_modes[i] is Representation.SCANNED:
+                    image_infos = []
+                else:
+                    try:
+                        image_infos = page.get_image_info(xrefs=True) or []
+                    except Exception:
+                        image_infos = []
+                physical_image_occurrence_count += len(image_infos)
+                for image_index, info in enumerate(image_infos):
+                    xref = int(info.get("xref") or 0)
+                    if xref:
+                        physical_image_keys.add(f"xref:{xref}")
+                    else:
+                        # Inline images have no stable xref. The page-local
+                        # occurrence is still a truthful physical resource key.
+                        physical_image_keys.add(f"inline:page:{i}:{image_index}")
                 try:
                     analysis = self._analyze_page(
                         page,
@@ -1032,5 +1059,12 @@ class PdfStructureScanner:
                     str(k): page_modes[k].value for k in sorted(page_modes)
                 },
                 "needs_ocr": needs_ocr(ordered_modes),
+                "physical_image_count": len(physical_image_keys),
+                "physical_image_occurrence_count": physical_image_occurrence_count,
+                "semantic_figure_count": fig_n,
+                "table_count": tab_n,
+                "occurrence_count": sum(
+                    1 for item in objects if item.type in {ObjectType.FIGURE, ObjectType.TABLE}
+                ),
             },
         )

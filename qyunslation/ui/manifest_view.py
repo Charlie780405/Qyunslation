@@ -70,6 +70,15 @@ def summarize_for_ui(payload: dict[str, Any] | str | None) -> dict[str, Any]:
 
     figures = _count_or_unknown(summary.get("figure_count"), truncated=truncated)
     tables = _count_or_unknown(summary.get("table_count"), truncated=truncated)
+    physical_images = _count_or_unknown(
+        summary.get("physical_image_count"), truncated=truncated
+    )
+    occurrences = _count_or_unknown(
+        summary.get("occurrence_count"), truncated=truncated
+    )
+    unresolved = _count_or_unknown(
+        summary.get("unresolved_count"), truncated=truncated
+    )
     pages = data.get("canvases")
     page_count: int | str
     if not isinstance(pages, list):
@@ -99,6 +108,9 @@ def summarize_for_ui(payload: dict[str, Any] | str | None) -> dict[str, Any]:
         "page_count": page_count,
         "figure_count": figures,
         "table_count": tables,
+        "physical_image_count": physical_images,
+        "occurrence_count": occurrences,
+        "unresolved_count": unresolved,
         "image_count": _count_or_unknown(
             (summary.get("object_counts") or {}).get("IMAGE")
             if isinstance(summary.get("object_counts"), dict)
@@ -110,6 +122,11 @@ def summarize_for_ui(payload: dict[str, Any] | str | None) -> dict[str, Any]:
         "display": {
             "figures": "—" if figures == _UNKNOWN else str(figures),
             "tables": "—" if tables == _UNKNOWN else str(tables),
+            "physical_images": "—"
+            if physical_images == _UNKNOWN
+            else str(physical_images),
+            "occurrences": "—" if occurrences == _UNKNOWN else str(occurrences),
+            "unresolved": "—" if unresolved == _UNKNOWN else str(unresolved),
             "pages": "—" if page_count == _UNKNOWN else str(page_count),
         },
     }
@@ -128,5 +145,6 @@ def render_prescan_card(manifest_json: str, *, fallback: str) -> str:
     return (
         f"{fallback}\n\n"
         f"**结构摘要** 页 {disp['pages']} · Figure {disp['figures']} · "
-        f"Table {disp['tables']}{warn}"
+        f"Table {disp['tables']} · 图片资源 {disp['physical_images']} · "
+        f"出现 {disp['occurrences']} · 未解析 {disp['unresolved']}{warn}"
     )

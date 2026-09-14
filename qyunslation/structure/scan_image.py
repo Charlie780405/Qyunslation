@@ -421,6 +421,17 @@ class ImageStructureScanner:
                     if item.translatable_blocks
                 ),
                 "frame_count": len(prepared.canvases),
+                "physical_image_count": len(prepared.canvases),
+                "physical_image_occurrence_count": len(prepared.canvases),
+                "semantic_figure_count": sum(
+                    1 for item in objects if item.type is ObjectType.FIGURE
+                ),
+                "table_count": sum(
+                    1 for item in objects if item.type is ObjectType.TABLE
+                ),
+                "occurrence_count": sum(
+                    1 for item in objects if item.type in {ObjectType.FIGURE, ObjectType.TABLE}
+                ),
                 "tile_plan_required": any(
                     len(plan_image_tiles(int(c.width), int(c.height))) > 1
                     for c in prepared.canvases

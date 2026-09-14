@@ -11,6 +11,9 @@ from .table_cell_policy import assert_digit_tokens_preserved
 
 _LIST_PREFIX = re.compile(r"^(\d+\s*[.、．)]\s*)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_IMMUTABLE_TOKEN_KINDS = frozenset(
+    {"EMAIL", "URL", "DOI", "REG", "PROTOCOL", "ABBR", "DATE", "PHONE", "CITE"}
+)
 
 CONTINUATION_LABEL = "（续）"
 
@@ -56,14 +59,29 @@ def translate_table_blocks(
     maps: dict[str, dict[str, str]] = {}
     preserved: dict[str, str] = {}
     controlled: dict[str, str] = {}
+    forced_footnotes: set[str] = set()
+    try:
+        from .table_cell_policy import is_numeric_or_unit
+
+        for block in blocks:
+            role = str(getattr(block.role, "value", block.role))
+            is_footnote = role in {"table_footnote", "TABLE_FOOTNOTE"}
+            if is_footnote and not is_numeric_or_unit(block.source_text):
+                # A preserve/deferred hint is valid for abbreviations and
+                # numeric markers in cells, but never for explanatory footnote
+                # prose. Footnotes are part of the table's translatable text.
+                forced_footnotes.add(block.block_id)
+    except Exception:
+        forced_footnotes = set()
     try:
         from .regulatory_entities import lookup_controlled, normalize_phase_label
 
         for block in blocks:
             policy = _policy_value(block)
-            if policy is TranslationPolicy.PRESERVE:
+            force_footnote = block.block_id in forced_footnotes
+            if policy is TranslationPolicy.PRESERVE and not force_footnote:
                 continue
-            if policy in DEFERRED_TRANSLATION_POLICIES:
+            if policy in DEFERRED_TRANSLATION_POLICIES and not force_footnote:
                 continue
             src = block.source_text or ""
             phase = normalize_phase_label(src)
@@ -80,10 +98,11 @@ def translate_table_blocks(
         controlled = {}
     for block in blocks:
         policy = _policy_value(block)
-        if policy is TranslationPolicy.PRESERVE:
+        force_footnote = block.block_id in forced_footnotes
+        if policy is TranslationPolicy.PRESERVE and not force_footnote:
             preserved[block.block_id] = block.source_text
             continue
-        if policy in DEFERRED_TRANSLATION_POLICIES:
+        if policy in DEFERRED_TRANSLATION_POLICIES and not force_footnote:
             # PLAN-034b：不送 LLM；保留源文，完整 TERM_ONLY/审校走后续子计划
             preserved[block.block_id] = block.source_text
             continue
@@ -97,6 +116,24 @@ def translate_table_blocks(
         raw = translator(payloads)
         if not isinstance(raw, dict):
             raise TableTranslateError("TABLE_LLM_INVALID: expected id→text map")
+        # An English/target-language block cannot be safely reconstructed when
+        # the model drops its id. Chinese source can still be retained as an
+        # explicit SOURCE_RESIDUE fallback for the later QA gate, but silently
+        # omitting a non-CJK cell is a real table omission.
+        missing_target_ids = [
+            block.block_id
+            for block in blocks
+            if block.block_id in maps
+            and (
+                block.block_id not in raw
+                or not str(raw.get(block.block_id) or "").strip()
+            )
+            and not _CJK_RE.search(block.source_text or "")
+        ]
+        if missing_target_ids:
+            raise TableTranslateError(
+                "TABLE_LLM_INCOMPLETE:" + ",".join(missing_target_ids)
+            )
     # PLAN-044b/c：缺索引不再整表炸。
     # 中文源 → 回填源文供统一重绘（SOURCE_RESIDUE）；非中文源保持空串（MISSING_TARGET）。
     for block in blocks:
@@ -105,7 +142,12 @@ def translate_table_blocks(
         if block.block_id not in raw or not str(raw.get(block.block_id) or "").strip():
             src = block.source_text or ""
             raw[block.block_id] = src if _CJK_RE.search(src) else ""
-    footnotes = [b.block_id for b in blocks if str(b.role) in {"table_footnote", "TABLE_FOOTNOTE"}]
+    footnotes = [
+        b.block_id
+        for b in blocks
+        if str(getattr(b.role, "value", b.role))
+        in {"table_footnote", "TABLE_FOOTNOTE"}
+    ]
     if any(fid not in raw and fid not in preserved and fid not in controlled for fid in footnotes):
         raise TableTranslateError("TABLE_FOOTNOTE_MISSING")
     out = dict(preserved)
@@ -137,7 +179,26 @@ def translate_table_blocks(
         except Exception:
             pass
         policy = _policy_value(block)
-        if policy is not TranslationPolicy.PROTECT_TOKENS:
+        missing_tokens = missing_protected_tokens(block.source_text, text)
+        if missing_tokens and policy is TranslationPolicy.PROTECT_TOKENS:
+            # Identifier-like protected tokens (CTR/DOI/abbreviation, etc.)
+            # are safely restored from the source when the model drops them.
+            # Numeric/proportion tokens are deliberately excluded so a changed
+            # value remains a hard TABLE_DIGIT_DRIFT instead of being masked by
+            # the generic PROTECT_TOKENS fallback.
+            _protected_source, source_mapping = protect_tokens(block.source_text)
+            missing_kinds = [
+                key[1:].split("⟧", 1)[0].rstrip("0123456789")
+                for key, value in source_mapping.items()
+                if text.count(value) < 1
+            ]
+            if missing_kinds and all(kind in _IMMUTABLE_TOKEN_KINDS for kind in missing_kinds):
+                text = block.source_text or text
+                missing_tokens = []
+        # PROTECT_TOKENS protects placeholders but must not exempt the block
+        # from the numeric invariant; otherwise ``Rate 42%`` can silently
+        # become ``比率 99%``.
+        if policy is not TranslationPolicy.PRESERVE:
             if text.strip() != (block.source_text or "").strip():
                 try:
                     assert_digit_tokens_preserved(
@@ -148,11 +209,10 @@ def translate_table_blocks(
                     if _CJK_RE.search(block.source_text or ""):
                         text = block.source_text or text
                     else:
-                        raise
+                        raise TableTranslateError(
+                            f"TABLE_DIGIT_DRIFT:{block.block_id}"
+                        ) from None
         missing_tokens = missing_protected_tokens(block.source_text, text)
-        if missing_tokens and policy is TranslationPolicy.PROTECT_TOKENS:
-            text = block.source_text or text
-            missing_tokens = missing_protected_tokens(block.source_text, text)
         if missing_tokens:
             raise TableTranslateError(
                 f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"

@@ -3,6 +3,7 @@
 # qyunslation.core.factory.py
 
 import logging
+import os
 
 from qyunslation.agents.glossary_agent import GlossaryAgentConfig
 from qyunslation.core.schemas import TranslatePayload, MarkdownWorkflowParams, TextWorkflowParams, JsonWorkflowParams, \
@@ -58,6 +59,25 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
             bind_task_model_trace(
                 model_id=getattr(payload, "model_id", None),
                 endpoint=getattr(payload, "base_url", None),
+                extras={
+                    "provider": getattr(payload, "provider", None) or "qwen_ollama",
+                    "source_lang": "auto",
+                    "target_lang": getattr(payload, "to_lang", None) or "",
+                    "termbase_version": getattr(payload, "termbase_version", None) or "",
+                    "termbase_policy_present": bool(
+                        getattr(payload, "termbase_policy", None)
+                    ),
+                    # This is configuration provenance, not a LIVE claim.
+                    # The 059 gate upgrades the status only after a health
+                    # probe confirms the remote service and exact model.
+                    "embedding_model": os.environ.get(
+                        "OLLAMA_EMBED_MODEL", "bge-m3"
+                    ),
+                    "embedding_endpoint": os.environ.get(
+                        "OLLAMA_EMBED_URL", "http://100.67.66.123:11434"
+                    ),
+                    "embedding_status": "configured",
+                },
             )
         except Exception as exc:
             logger.warning("bind task model_trace failed: %s", exc)

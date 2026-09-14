@@ -551,8 +551,9 @@ def translate_pdf_images(
                     all_ok = False
                     break
 
+            work_png = policy.ensure_display_dpi(png, best["w"], best["h"])
             new_png, n, qc = _translate_via_local(
-                policy.ensure_display_dpi(png, best["w"], best["h"]),
+                work_png,
                 to_lang,
             )
             new_png, n, qc = _upsample_if_below_target(
@@ -568,6 +569,13 @@ def translate_pdf_images(
                     }
                 )
                 continue
+            # The source xref is never rewritten in-place on disk. The output
+            # stream is a derived 300-DPI asset even when the OCR service
+            # returned an image without metadata.
+            ensure_master_dpi = getattr(policy, "ensure_master_dpi", lambda data: data)
+            new_png = ensure_master_dpi(new_png)
+            qc = dict(qc or {})
+            qc.setdefault("dpi", 300)
             nw, nh = _png_size(new_png)
             if nw and oh and (nw != ow or nh != oh):
                 # 尺寸不一致（含 300 DPI 升采样）：禁止 replace_image，改逐实例 overlay
@@ -735,7 +743,10 @@ def translate_pdf_images(
                     if obj is not None:
                         _mark(obj, "EXPLICITLY_SKIPPED", "policy_declined")
                     continue
-                new_png, n, qc = _translate_via_local(png, to_lang)
+                work_png = policy.ensure_display_dpi(
+                    png, float(rect.width), float(rect.height)
+                )
+                new_png, n, qc = _translate_via_local(work_png, to_lang)
                 new_png, n, qc = _upsample_if_below_target(
                     policy, png, float(rect.width), float(rect.height), to_lang, new_png, n, qc
                 )
@@ -744,6 +755,10 @@ def translate_pdf_images(
                     if obj is not None:
                         _mark(obj, "EXPLICITLY_SKIPPED", "no_translatable_text")
                     continue
+                ensure_master_dpi = getattr(policy, "ensure_master_dpi", lambda data: data)
+                new_png = ensure_master_dpi(new_png)
+                qc = dict(qc or {})
+                qc.setdefault("dpi", 300)
                 try:
                     page.insert_image(
                         rect,

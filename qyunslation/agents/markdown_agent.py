@@ -5,6 +5,11 @@ from dataclasses import dataclass
 
 from .agent import Agent, AgentConfig
 from ..glossary.glossary import Glossary
+from ..structure.references import (
+    ReferenceProtectionError,
+    mask_reference_sections,
+    restore_reference_sections,
+)
 
 
 def get_original_markdown(prompt: str):
@@ -61,15 +66,52 @@ You are a professional machine translation engine.
         return system_prompt, prompt
 
     def send_chunks(self, prompts: list[str]):
-        prompts = [generate_prompt(prompt, self.to_lang) for prompt in prompts]
-        return super().send_prompts(prompts=prompts, pre_send_handler=self._pre_send_handler,
-                                    error_result_handler=lambda prompt, logger: get_original_markdown(prompt))
+        source_prompts = list(prompts)
+        masked_prompts: list[dict[str, str]] = []
+        requests: list[str] = []
+        for source in source_prompts:
+            masked, sections = mask_reference_sections(source)
+            masked_prompts.append(sections)
+            requests.append(generate_prompt(masked, self.to_lang))
+        translated = super().send_prompts(
+            prompts=requests,
+            pre_send_handler=self._pre_send_handler,
+            error_result_handler=lambda prompt, logger: get_original_markdown(prompt),
+        )
+        return self._restore_results(source_prompts, masked_prompts, translated)
 
     async def send_chunks_async(self, prompts: list[str]):
-        prompts = [generate_prompt(prompt, self.to_lang) for prompt in prompts]
-        return await super().send_prompts_async(prompts=prompts, pre_send_handler=self._pre_send_handler,
-                                                error_result_handler=lambda prompt, logger: get_original_markdown(
-                                                    prompt))
+        source_prompts = list(prompts)
+        masked_prompts: list[dict[str, str]] = []
+        requests: list[str] = []
+        for source in source_prompts:
+            masked, sections = mask_reference_sections(source)
+            masked_prompts.append(sections)
+            requests.append(generate_prompt(masked, self.to_lang))
+        translated = await super().send_prompts_async(
+            prompts=requests,
+            pre_send_handler=self._pre_send_handler,
+            error_result_handler=lambda prompt, logger: get_original_markdown(prompt),
+        )
+        return self._restore_results(source_prompts, masked_prompts, translated)
+
+    def _restore_results(
+        self,
+        sources: list[str],
+        sections: list[dict[str, str]],
+        translated: list[str],
+    ) -> list[str]:
+        restored: list[str] = []
+        for source, protected, result in zip(sources, sections, translated):
+            try:
+                restored.append(restore_reference_sections(result, protected, strict=True))
+            except ReferenceProtectionError:
+                # Never return a citation that the model was allowed to alter.
+                # Returning the source chunk is conservative and observable in
+                # logs through the existing agent error channel.
+                self.logger.warning("reference sentinel lost; returning source chunk")
+                restored.append(source)
+        return restored
 
     def update_glossary_dict(self, update_dict: dict | None):
         # PLAN-034d0：经 Glossary.update 规范化，禁止裸 | 合并

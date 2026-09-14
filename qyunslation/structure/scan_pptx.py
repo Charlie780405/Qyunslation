@@ -207,6 +207,7 @@ class PptxStructureScanner:
         objects: list = []
         derived_assets = list(prepared.derived_assets)
         pictures = 0
+        physical_image_keys: set[str] = set()
 
         if selected is ProcessingMode.RENDERED:
             pages = render_pptx_slides(prepared.content, renderer=self.slide_renderer)
@@ -252,6 +253,7 @@ class PptxStructureScanner:
                 )
                 canvas.reading_order = [object_id]
             pictures = len(pages)
+            physical_image_keys = {f"rendered:slide:{index}" for index in range(1, len(pages) + 1)}
         else:
             presentation = Presentation(BytesIO(prepared.content))
             for index, slide in enumerate(presentation.slides, start=1):
@@ -334,6 +336,12 @@ class PptxStructureScanner:
                     )
                 for pic_i, pic in enumerate(found_pictures, start=1):
                     pictures += 1
+                    try:
+                        physical_image_keys.add(
+                            f"blob:{hashlib.sha256(pic.image.blob).hexdigest()}"
+                        )
+                    except Exception:
+                        physical_image_keys.add(f"shape:{index}:{pic.shape_id}")
                     key = f"image:slide:{index}:{pic.shape_id}"
                     object_id = build_object_id(
                         prepared.source_sha256,
@@ -411,5 +419,15 @@ class PptxStructureScanner:
             document=document,
             canvases=list(prepared.canvases),
             objects=objects,
-            extensions={"picture_count": pictures, "slide_count": len(prepared.canvases)},
+            extensions={
+                "picture_count": pictures,
+                "slide_count": len(prepared.canvases),
+                "physical_image_count": len(physical_image_keys),
+                "physical_image_occurrence_count": pictures,
+                "semantic_figure_count": 0,
+                "table_count": sum(1 for item in objects if item.type is ObjectType.TABLE),
+                "occurrence_count": sum(
+                    1 for item in objects if item.type in {ObjectType.FIGURE, ObjectType.TABLE}
+                ),
+            },
         ).refresh_summary()

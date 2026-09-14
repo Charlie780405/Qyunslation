@@ -296,7 +296,11 @@ def _paint_short_line(
     size = min(float(font_size), max(4.5, float(inset.height) * 0.92))
     while size > 4.5 and float(measure_font.text_length(text, fontsize=size)) > inset.width:
         size -= 0.25
-    y = min(inset.y0 + size * 0.88, inset.y1 - 0.15)
+    # PyMuPDF's text bbox extends above the insertion baseline by the font
+    # ascent. The old 0.88 multiplier placed the visible glyph outside the
+    # cell's top edge for 7pt Latin labels (notably ``Healthy Subjects``).
+    # Keep a small bottom guard while positioning against the actual ascent.
+    y = min(inset.y0 + size * 1.08, inset.y1 - size * 0.18)
     page.insert_text((inset.x0, y), text, fontname=fontname, fontsize=size)
     return size
 

@@ -153,7 +153,7 @@ APPLY_NEW = """        import sys as _qy_sys
         if _qy_name == "literature":
             _qy_patch_lit(_qy_prof)
             if _qy_prof.get("min_scale") is not None:
-                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))
+                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.8))
         else:
             _qy_reset_ms()
         if _qy_name == "regulatory":
@@ -493,7 +493,7 @@ def apply_fixed(text: str) -> str:
             )
             text = text.replace(
                 '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        _qy_merge_agg',
-                '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))\n        if _qy_name == "regulatory":\n            _qy_patch_reg(_qy_prof)\n        _qy_merge_agg',
+                '        if _qy_name == "letter":\n            _qy_patch_letter(_qy_prof)\n        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.8))\n        if _qy_name == "regulatory":\n            _qy_patch_reg(_qy_prof)\n        _qy_merge_agg',
                 1,
             )
         changed = True
@@ -505,7 +505,7 @@ def apply_fixed(text: str) -> str:
         )
         text = text.replace(
             '        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n        if _qy_name == "regulatory":\n',
-            '        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.12))\n        if _qy_name == "regulatory":\n',
+            '        if _qy_name == "literature":\n            _qy_patch_lit(_qy_prof)\n            if _qy_prof.get("min_scale") is not None:\n                _qy_patch_ms(float(_qy_prof.get("min_scale") or 0.8))\n        if _qy_name == "regulatory":\n',
             1,
         )
         changed = True

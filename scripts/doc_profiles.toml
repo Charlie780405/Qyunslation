@@ -27,7 +27,7 @@ signature_line_skip = 1.25
 label = "学术文献"
 primary_font_family = "serif"
 line_skip = 1.25
-min_scale = 0.12
+min_scale = 0.8
 # PLAN-047d：中文首行缩进封顶（字宽倍数）与段间距归一
 indent_cap_em = 2.0
 indent_src_scale = 0.5

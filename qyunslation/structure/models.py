@@ -507,6 +507,12 @@ class ManifestIssue(ContractModel):
 class ManifestSummary(ContractModel):
     figure_count: int = Field(default=0, ge=0)
     table_count: int = Field(default=0, ge=0)
+    # Keep physical resources, semantic objects, and page occurrences separate.
+    # A single embedded image may occur more than once and a semantic Figure
+    # may be composed of several physical resources.
+    physical_image_count: int = Field(default=0, ge=0)
+    occurrence_count: int = Field(default=0, ge=0)
+    unresolved_count: int = Field(default=0, ge=0)
     object_counts: dict[str, int] = Field(default_factory=dict)
     status_counts: dict[str, int] = Field(default_factory=dict)
     issue_counts: dict[str, int] = Field(default_factory=dict)
@@ -564,7 +570,9 @@ def build_object_id(
 
 
 def _derive_summary(
-    objects: list[SemanticObject], issues: list[ManifestIssue]
+    objects: list[SemanticObject],
+    issues: list[ManifestIssue],
+    extensions: dict[str, Any] | None = None,
 ) -> ManifestSummary:
     object_counts = Counter(item.type.value for item in objects)
     status_counts = Counter(item.execution_status.value for item in objects)
@@ -580,9 +588,35 @@ def _derive_summary(
         unnumbered = sum(item.semantic_id is None for item in matching)
         return len(numbered) + unnumbered
 
+    extensions = extensions or {}
+    physical = extensions.get("physical_image_count")
+    try:
+        physical_count = int(physical)
+    except (TypeError, ValueError):
+        physical_count = sum(item.type is ObjectType.IMAGE for item in objects)
+    if physical_count < 0:
+        physical_count = 0
+    occurrence_count = sum(
+        item.type in {ObjectType.FIGURE, ObjectType.TABLE} for item in objects
+    )
+    unresolved = extensions.get("unresolved_count")
+    try:
+        unresolved_count = int(unresolved)
+    except (TypeError, ValueError):
+        unresolved_count = sum(
+            1
+            for issue in issues
+            if any(token in issue.code.upper() for token in ("UNRESOLVED", "UNLINKED", "CONFLICT"))
+        )
+    if unresolved_count < 0:
+        unresolved_count = 0
+
     return ManifestSummary(
         figure_count=semantic_count(ObjectType.FIGURE),
         table_count=semantic_count(ObjectType.TABLE),
+        physical_image_count=physical_count,
+        occurrence_count=occurrence_count,
+        unresolved_count=unresolved_count,
         object_counts=dict(sorted(object_counts.items())),
         status_counts=dict(sorted(status_counts.items())),
         issue_counts=dict(sorted(issue_counts.items())),
@@ -620,7 +654,7 @@ class DocumentStructureManifest(ContractModel):
         执行阶段回写 execution_status 后必须调用，否则 summary 与对象不一致，
         序列化后无法通过 MANIFEST_SUMMARY_MISMATCH 校验。
         """
-        self.summary = _derive_summary(self.objects, self.issues)
+        self.summary = _derive_summary(self.objects, self.issues, self.extensions)
         return self
 
     @model_validator(mode="after")
@@ -785,7 +819,7 @@ class DocumentStructureManifest(ContractModel):
                     "MANIFEST_ISSUE_OBJECT_UNKNOWN: issue references an unknown object"
                 )
 
-        derived = _derive_summary(self.objects, self.issues)
+        derived = _derive_summary(self.objects, self.issues, self.extensions)
         if self.summary is not None:
             for field_name in self.summary.model_fields_set:
                 if getattr(self.summary, field_name) != getattr(derived, field_name):

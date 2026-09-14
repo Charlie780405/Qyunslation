@@ -1342,6 +1342,24 @@
           "title": "Table Count",
           "type": "integer"
         },
+        "physical_image_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Physical Image Count",
+          "type": "integer"
+        },
+        "occurrence_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Occurrence Count",
+          "type": "integer"
+        },
+        "unresolved_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unresolved Count",
+          "type": "integer"
+        },
         "object_counts": {
           "additionalProperties": {
             "type": "integer"

@@ -104,6 +104,42 @@ def ensure_display_dpi(
         return img_bytes
 
 
+def ensure_master_dpi(img_bytes: bytes, *, target_dpi: int | None = None) -> bytes:
+    """Write a derived image with an explicit DPI tag for downstream layout/QC.
+
+    PDF pixmaps commonly have no DPI metadata even when their pixel geometry is
+    sufficient. The old display helper intentionally returned such bytes
+    unchanged, which made a visually good image fail the 300-DPI delivery
+    contract. This helper never mutates source bytes and never resizes; it only
+    annotates the derived image. Pixel upsampling remains the responsibility of
+    :func:`ensure_display_dpi`.
+    """
+    if not img_bytes or Image is None:
+        return img_bytes
+    dpi = int(target_dpi if target_dpi is not None else TARGET_DPI)
+    if dpi <= 0:
+        return img_bytes
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as im:
+            im.load()
+            fmt = (im.format or "PNG").upper()
+            if fmt not in ("PNG", "JPEG", "WEBP", "BMP", "TIFF"):
+                fmt = "PNG"
+            out = im
+            if fmt == "JPEG" and im.mode in {"RGBA", "LA", "P"}:
+                out = im.convert("RGB")
+            buf = io.BytesIO()
+            save_kw: dict = {"dpi": (dpi, dpi)}
+            if fmt == "JPEG":
+                save_kw.update(quality=95, optimize=True)
+            out.save(buf, format=fmt, **save_kw)
+            if out is not im:
+                out.close()
+            return buf.getvalue()
+    except Exception:
+        return img_bytes
+
+
 def _target_is_chinese(target_lang: str) -> bool:
     t = (target_lang or "").lower()
     return any(x in t for x in ("中文", "chinese", "zh", "简体", "繁体"))

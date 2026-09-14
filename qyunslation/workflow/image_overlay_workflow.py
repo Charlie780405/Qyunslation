@@ -71,6 +71,7 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
     def translate(self) -> Self:
         self.progress_tracker.update(percent=10, message="图片嵌字中…")
         from qyunslation.extensions.image_translate import translate_image_bytes
+        from qyunslation.extensions.doc_image_policy import ensure_master_dpi
 
         suffix = (self.document_original.suffix or ".png").lower()
         structure_manifest = self._structure_manifest(self.document_original)
@@ -79,6 +80,9 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
             suffix=suffix,
             to_lang=self.config.to_lang,
         )
+        data = ensure_master_dpi(data or self.document_original.content)
+        qc = dict(qc or {})
+        qc.setdefault("dpi", 300)
         self._apply_execution_audit(structure_manifest, block_count=n, qc=qc or {})
         if structure_manifest is not None:
             from qyunslation.structure.model_trace import apply_current_model_trace

@@ -60,12 +60,21 @@ def embed_health() -> dict[str, Any]:
             for m in (data.get("models") or [])
         ]
         has = any(model in n or n.startswith(model) for n in names if n)
-        return {"ok": True, "url": base, "model": model, "has_bge_m3": has}
+        return {
+            "ok": True,
+            "url": base,
+            "model": model,
+            "has_bge_m3": has,
+            "model_match": has,
+            "live": has,
+        }
     except Exception as exc:
         return {
             "ok": False,
             "url": base,
             "model": model,
+            "model_match": False,
+            "live": False,
             "error": f"{type(exc).__name__}: {exc}",
         }
 

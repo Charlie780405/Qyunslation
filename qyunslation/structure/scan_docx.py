@@ -79,6 +79,9 @@ class DocxStructureScanner:
         _, segments, elements, texts = walk_docx(content)
         doc = docx.Document(BytesIO(content))
         drawing_occ = enumerate_drawing_occurrences(doc)
+        physical_image_keys = {
+            (occ.container, occ.embed_rid) for occ in drawing_occ
+        }
 
         objects: list = []
         issues: list[ManifestIssue] = []
@@ -343,6 +346,13 @@ class DocxStructureScanner:
                 ),
                 "segment_count": len(segments),
                 "drawing_occurrence_count": len(drawing_occ),
+                "physical_image_count": len(physical_image_keys),
+                "physical_image_occurrence_count": len(drawing_occ),
+                "semantic_figure_count": fig_n,
+                "table_count": tab_n,
+                "occurrence_count": sum(
+                    1 for item in objects if item.type in {ObjectType.FIGURE, ObjectType.TABLE}
+                ),
             },
         )
         return manifest.refresh_summary()

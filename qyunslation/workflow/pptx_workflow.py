@@ -79,6 +79,7 @@ class PPTXWorkflow(Workflow[PPTXWorkflowConfig, Document, Document], HTMLExporta
 
     def _translate_rendered(self, document: Document, structure_manifest) -> Document:
         from qyunslation.extensions.image_translate import translate_image_bytes
+        from qyunslation.extensions.doc_image_policy import ensure_master_dpi
 
         pages = render_pptx_slides(document.content, renderer=self.config.slide_renderer)
         translated_pages = []
@@ -89,7 +90,7 @@ class PPTXWorkflow(Workflow[PPTXWorkflowConfig, Document, Document], HTMLExporta
                 translated_pages.append(page)
                 continue
             data, _n, _qc = translate_image_bytes(page, suffix=".png", to_lang=to_lang)
-            translated_pages.append(data or page)
+            translated_pages.append(ensure_master_dpi(data or page))
 
         first_canvas = structure_manifest.canvases[0] if structure_manifest and structure_manifest.canvases else None
         packed = pack_image_pptx(

@@ -279,6 +279,14 @@ def overlay_docx_embedded_images(
 
         work_blob = ensure_display_dpi(blob, occ.width_pt, occ.height_pt)
         new_blob, n, qc = translate_image_bytes(work_blob, suffix=suffix, to_lang=to_lang)
+        # Preserve source bytes and attach an explicit DPI tag only to the
+        # derived translated asset. Pixel upsampling has already happened in
+        # ``work_blob`` when the display geometry requires it.
+        from qyunslation.extensions.doc_image_policy import ensure_master_dpi
+
+        new_blob = ensure_master_dpi(new_blob)
+        qc = dict(qc or {})
+        qc.setdefault("dpi", 300)
         elapsed = time.time() - t0
         result = (new_blob, n, {**(qc or {}), "elapsed": round(elapsed, 2)})
         blob_cache[fhash] = result

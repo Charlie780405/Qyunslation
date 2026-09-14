@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import re
 
+# A stable ASCII sentinel is deliberately used instead of translated text. It
+# survives markdown/XML conversion and can be checked before we put the exact
+# source section back into the result.
+_REFERENCE_SENTINEL_RE = re.compile(r"__QYUNSLATION_REFERENCE_([0-9A-F]{8})__")
+
 HEADING_RE = re.compile(
-    r"^\s*(references|bibliography|参考文献|参考资料)\s*\.?\s*$",
+    r"^\s*(?:#{1,6}\s*)?(references|bibliography|参考文献|参考资料)\s*[:：]?\s*\.?\s*$",
     re.IGNORECASE,
 )
 SECTION_BREAK_RE = re.compile(
@@ -108,3 +113,86 @@ def text_excluding_reference_entries(doc) -> str:
             parts.append(text)
         heading_y = None
     return "\n".join(parts)
+
+
+def _markdown_heading_level(line: str) -> int | None:
+    match = re.match(r"^\s*(#{1,6})\s+\S", line or "")
+    return len(match.group(1)) if match else None
+
+
+def mask_reference_sections(text: str) -> tuple[str, dict[str, str]]:
+    """Replace complete markdown reference sections with opaque sentinels.
+
+    The section heading is included in the protected range. A section ends at
+    the next markdown heading of the same or a higher level; when the input is
+    a reference-only chunk it therefore safely runs to EOF. The returned map is
+    intentionally explicit so callers can fail closed if a model drops a
+    sentinel instead of accidentally returning partially translated citations.
+    """
+    source = str(text or "")
+    if not source:
+        return source, {}
+    lines = source.splitlines(keepends=True)
+    starts = [index for index, line in enumerate(lines) if is_reference_heading(line)]
+    if not starts:
+        return source, {}
+
+    ranges: list[tuple[int, int]] = []
+    for start in starts:
+        level = _markdown_heading_level(lines[start])
+        end = len(lines)
+        if level is not None:
+            for index in range(start + 1, len(lines)):
+                next_level = _markdown_heading_level(lines[index])
+                if next_level is not None and next_level <= level:
+                    end = index
+                    break
+        ranges.append((start, end))
+
+    # Overlapping headings are possible in malformed OCR. Merge them so no
+    # reference line can leak into the translation request.
+    merged: list[tuple[int, int]] = []
+    for start, end in ranges:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    masked: list[str] = []
+    sections: dict[str, str] = {}
+    cursor = 0
+    for ordinal, (start, end) in enumerate(merged, start=1):
+        masked.extend(lines[cursor:start])
+        section = "".join(lines[start:end])
+        token = f"__QYUNSLATION_REFERENCE_{ordinal:08X}__"
+        sections[token] = section
+        # Keep a line boundary where the protected section was, avoiding a
+        # sentinel being glued to the preceding paragraph after conversion.
+        masked.append(token + ("" if section.endswith(("\n", "\r")) else "\n"))
+        cursor = end
+    masked.extend(lines[cursor:])
+    return "".join(masked), sections
+
+
+class ReferenceProtectionError(ValueError):
+    """The model modified or removed a protected reference sentinel."""
+
+
+def restore_reference_sections(
+    text: str,
+    sections: dict[str, str],
+    *,
+    strict: bool = False,
+) -> str:
+    """Restore exact source sections; optionally fail if any sentinel is gone."""
+    result = str(text or "")
+    if not sections:
+        return result
+    missing = [token for token in sections if token not in result]
+    if missing and strict:
+        raise ReferenceProtectionError(
+            "REFERENCE_SENTINEL_MISSING:" + ",".join(sorted(missing))
+        )
+    for token, section in sections.items():
+        result = result.replace(token, section)
+    return result

@@ -114,28 +114,62 @@ def get_provider(*, profile: str | None = None, api_key: str | None = None) -> Q
 
 
 def ping_provider(*, profile: str | None = None) -> dict[str, Any]:
-    """轻量可达性探测；失败由 verify 记 BLOCKED。"""
+    """探测服务可达性和目标模型是否真实出现在模型目录中。
+
+    ``ok`` only means that a supported model-list endpoint responded.  The
+    stricter ``model_match``/``live`` fields are used by PLAN-059 and prevent
+    configuration-only provenance from being reported as LIVE evidence.
+    """
     try:
         provider = get_provider(profile=profile)
         root = provider.base_url.rstrip("/")
-        # 优先 /api/tags（Ollama），否则试 /v1/models
+        base = root[: -len("/v1")] if root.endswith("/v1") else root
+        reachable: dict[str, Any] | None = None
         with httpx.Client(timeout=5.0) as client:
             for path in ("/api/tags", "/v1/models"):
-                base = root[: -len("/v1")] if root.endswith("/v1") else root
-                url = f"{base}{path}" if path.startswith("/api") else f"{root if root.endswith('/v1') else root + '/v1'}/models"
-                if path == "/api/tags":
-                    url = f"{base}/api/tags"
+                url = f"{base}/api/tags" if path == "/api/tags" else f"{base}/v1/models"
                 try:
                     r = client.get(url)
                     if r.status_code < 500:
-                        return {
+                        try:
+                            data = r.json()
+                        except ValueError:
+                            data = {}
+                        if path == "/api/tags":
+                            entries = data.get("models") or []
+                            names = [
+                                str(item.get("name") or item.get("model") or "")
+                                for item in entries
+                                if isinstance(item, dict)
+                            ]
+                        else:
+                            entries = data.get("data") or []
+                            names = [
+                                str(item.get("id") or item.get("name") or "")
+                                for item in entries
+                                if isinstance(item, dict)
+                            ]
+                        match = provider.model_id in names
+                        reachable = {
                             "ok": True,
                             "model_id": provider.model_id,
                             "status_code": r.status_code,
                             "url": url,
+                            "models": names,
+                            "model_match": match,
+                            "live": match,
                         }
+                        if match:
+                            return reachable
                 except httpx.HTTPError:
                     continue
-        return {"ok": False, "model_id": provider.model_id, "error": "unreachable"}
+        if reachable is not None:
+            reachable.update(
+                ok=False,
+                live=False,
+                error="target model is not present in model list",
+            )
+            return reachable
+        return {"ok": False, "model_id": provider.model_id, "live": False, "error": "unreachable"}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "live": False, "error": str(exc)}
