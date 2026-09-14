@@ -18,6 +18,7 @@ from qyunslation.workflow.base import Workflow, WorkflowConfig
 @dataclass(kw_only=True)
 class ImageOverlayWorkflowConfig(WorkflowConfig):
     to_lang: str = "简体中文"
+    glossary_dict: dict[str, str] | None = None
 
 
 class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Document]):
@@ -75,10 +76,14 @@ class ImageOverlayWorkflow(Workflow[ImageOverlayWorkflowConfig, Document, Docume
 
         suffix = (self.document_original.suffix or ".png").lower()
         structure_manifest = self._structure_manifest(self.document_original)
+        overlay_kwargs = {}
+        if self.config.glossary_dict:
+            overlay_kwargs["glossary"] = self.config.glossary_dict
         data, n, qc = translate_image_bytes(
             self.document_original.content,
             suffix=suffix,
             to_lang=self.config.to_lang,
+            **overlay_kwargs,
         )
         data = ensure_master_dpi(data or self.document_original.content)
         qc = dict(qc or {})

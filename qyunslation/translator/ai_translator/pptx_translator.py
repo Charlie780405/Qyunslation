@@ -384,10 +384,13 @@ class PPTXTranslator(AiTranslator):
             try:
                 blob = shape.image.blob
                 content_type = (shape.image.content_type or "image/png").lower()
+                term_glossary = self.glossary.glossary_dict if self.glossary else {}
+                overlay_kwargs = {"glossary": term_glossary} if term_glossary else {}
                 new_blob, block_count, _qc = translate_image_bytes(
                     blob,
                     suffix=suffix_by_type.get(content_type, ".png"),
                     to_lang=to_lang,
+                    **overlay_kwargs,
                 )
                 if new_blob:
                     self._replace_picture_blob(shape, ensure_master_dpi(new_blob))

@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import tempfile
 import time
 import uuid
 import zipfile
@@ -32,6 +33,13 @@ _DEFAULT_BRIDGE_URL = "http://127.0.0.1:8010/internal/workbench/v1"
 _TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".html", ".htm", ".csv", ".json"}
 _IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 _MEANINGFUL_TEXT = re.compile(r"[A-Za-z\u4e00-\u9fff]")
+
+
+def _ocr_policy_asset_limit() -> int:
+    try:
+        return max(0, int(os.environ.get("QYUNSLATION_TERM_POLICY_OCR_IMAGE_LIMIT", "12")))
+    except ValueError:
+        return 12
 
 
 def _cell_term_pair(source_text: str, target_text: str) -> tuple[str | None, str | None]:
@@ -67,15 +75,92 @@ def _language(value: str | None) -> str:
     return normalized or "auto"
 
 
+def _ocr_text(path: Path) -> str:
+    """Return stable OCR reading order without ever blocking translation setup."""
+    try:
+        from qyunslation.extensions.image_translate import ocr_image
+
+        return "\n".join(
+            str(box[4]).strip()
+            for box in ocr_image(path)
+            if len(box) >= 5 and str(box[4]).strip()
+        )
+    except Exception:
+        return ""
+
+
+def _ocr_blob(blob: bytes, suffix: str) -> str:
+    if not blob or _ocr_policy_asset_limit() <= 0:
+        return ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
+        handle.write(blob)
+        handle.flush()
+        return _ocr_text(Path(handle.name))
+
+
+def _package_media_ocr_text(path: Path, prefix: str) -> list[str]:
+    """Read a bounded number of Office image assets for pre-translation terms."""
+    limit = _ocr_policy_asset_limit()
+    if limit <= 0:
+        return []
+    rows: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            media = sorted(
+                member
+                for member in archive.namelist()
+                if member.startswith(prefix)
+                and Path(member).suffix.casefold() in _IMAGE_SUFFIXES
+            )[:limit]
+            for member in media:
+                text = _ocr_blob(archive.read(member), Path(member).suffix)
+                if text:
+                    rows.append(text)
+    except (OSError, zipfile.BadZipFile):
+        return []
+    return rows
+
+
+def _pdf_image_ocr_text(document: Any) -> list[str]:
+    limit = _ocr_policy_asset_limit()
+    if limit <= 0:
+        return []
+    rows: list[str] = []
+    seen_xrefs: set[int] = set()
+    for page in document:
+        for image in page.get_images(full=True):
+            xref = int(image[0])
+            if xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+            try:
+                extracted = document.extract_image(xref)
+                text = _ocr_blob(
+                    extracted.get("image", b""),
+                    f".{str(extracted.get('ext') or 'png')}",
+                )
+            except Exception:
+                continue
+            if text:
+                rows.append(text)
+            if len(seen_xrefs) >= limit:
+                return rows
+    return rows
+
+
 def _read_text(path: Path, *, limit: int = 1_500_000) -> str:
     try:
         if path.suffix.lower() in _TEXT_SUFFIXES:
             return path.read_text(encoding="utf-8", errors="replace")[:limit]
+        if path.suffix.lower() in _IMAGE_SUFFIXES:
+            return _ocr_text(path)[:limit]
         if path.suffix.lower() == ".pdf":
             import fitz
 
             with fitz.open(path) as document:
-                return text_excluding_reference_entries(document)[:limit]
+                parts = [text_excluding_reference_entries(document)]
+                parts.extend(_pdf_image_ocr_text(document))
+                return "\n".join(part for part in parts if part)[:limit]
         if path.suffix.lower() == ".docx":
             from docx import Document
 
@@ -88,6 +173,7 @@ def _read_text(path: Path, *, limit: int = 1_500_000) -> str:
             ]
             for table in document.tables:
                 parts.extend(cell.text for row in table.rows for cell in row.cells)
+            parts.extend(_package_media_ocr_text(path, "word/media/"))
             return "\n".join(parts)[:limit]
         if path.suffix.lower() in {".ppt", ".pptx"}:
             from pptx import Presentation
@@ -100,6 +186,7 @@ def _read_text(path: Path, *, limit: int = 1_500_000) -> str:
                         parts.append(shape.text)
                     if getattr(shape, "has_table", False):
                         parts.extend(cell.text for row in shape.table.rows for cell in row.cells)
+            parts.extend(_package_media_ocr_text(path, "ppt/media/"))
             return "\n".join(parts)[:limit]
     except Exception:
         return ""
@@ -293,6 +380,47 @@ def _pptx_evidence(source: Path, target: Path) -> list[BilingualTermEvidence]:
     return rows[:1000]
 
 
+def _pptx_embedded_image_evidence(source: Path, target: Path) -> tuple[list[BilingualTermEvidence], str | None]:
+    try:
+        from pptx import Presentation
+
+        source_deck, target_deck = Presentation(source), Presentation(target)
+    except Exception:
+        return [], "pptx_embedded_image_adapter_failed"
+    rows: list[BilingualTermEvidence] = []
+    reasons: list[str] = []
+    for slide_index, source_slide in enumerate(source_deck.slides, start=1):
+        target_slide = target_deck.slides[slide_index - 1] if slide_index <= len(target_deck.slides) else None
+        for shape_index, source_shape in enumerate(source_slide.shapes, start=1):
+            try:
+                source_blob = source_shape.image.blob
+            except Exception:
+                continue
+            target_shape = target_slide.shapes[shape_index - 1] if target_slide and shape_index <= len(target_slide.shapes) else None
+            try:
+                target_blob = target_shape.image.blob if target_shape else None
+            except Exception:
+                target_blob = None
+            if not target_blob:
+                reasons.append("pptx_embedded_image_count_or_shape_mismatch")
+                continue
+            image_rows, reason = _image_blob_evidence(
+                source_blob,
+                target_blob,
+                object_id=f"slide-{slide_index}-image-{shape_index}",
+            )
+            rows.extend(image_rows)
+            if reason:
+                reasons.append(reason)
+    return rows, ";".join(sorted(set(reasons))) or None
+
+
+def _pptx_evidence_with_status(source: Path, target: Path) -> tuple[list[BilingualTermEvidence], str | None]:
+    rows = _pptx_evidence(source, target)
+    image_rows, reason = _pptx_embedded_image_evidence(source, target)
+    return rows + image_rows, reason
+
+
 def _docx_footnotes(path: Path) -> dict[str, str]:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -335,6 +463,48 @@ def _docx_footnote_evidence(source: Path, target: Path) -> list[BilingualTermEvi
             )
         )
     return rows
+
+
+def _docx_embedded_image_evidence(source: Path, target: Path) -> tuple[list[BilingualTermEvidence], str | None]:
+    """Pair DOCX DrawingML occurrences by document occurrence order.
+
+    DOCX writeback preserves occurrence order even when a source blob is reused
+    by more than one drawing.  A count mismatch is visible as degradation.
+    """
+    try:
+        from docx import Document
+        from qyunslation.extensions.docx_image_overlay import enumerate_drawing_occurrences
+
+        source_images = enumerate_drawing_occurrences(Document(source))
+        target_images = enumerate_drawing_occurrences(Document(target))
+    except Exception:
+        return [], "docx_embedded_image_adapter_failed"
+    rows: list[BilingualTermEvidence] = []
+    reasons: list[str] = []
+    for index, source_image in enumerate(source_images):
+        if index >= len(target_images):
+            reasons.append("docx_embedded_image_count_mismatch")
+            break
+        try:
+            image_rows, reason = _image_blob_evidence(
+                source_image.image_part.blob,
+                target_images[index].image_part.blob,
+                object_id=f"docx-image-{index + 1}",
+            )
+            rows.extend(image_rows)
+            if reason:
+                reasons.append(reason)
+        except Exception:
+            reasons.append("docx_embedded_image_adapter_failed")
+    if len(target_images) != len(source_images):
+        reasons.append("docx_embedded_image_count_mismatch")
+    return rows, ";".join(sorted(set(reasons))) or None
+
+
+def _docx_evidence_with_status(source: Path, target: Path) -> tuple[list[BilingualTermEvidence], str | None]:
+    rows = _docx_evidence(source, target)
+    image_rows, reason = _docx_embedded_image_evidence(source, target)
+    return rows + image_rows, reason
 
 
 def _image_evidence(source: Path, target: Path, *, object_id: str = "image-1") -> tuple[list[BilingualTermEvidence], str | None]:
@@ -404,6 +574,17 @@ def _image_evidence(source: Path, target: Path, *, object_id: str = "image-1") -
     return (rows, None) if rows and len(rows) == len(source_boxes) else (rows, "image_ocr_alignment_incomplete")
 
 
+def _image_blob_evidence(source_blob: bytes, target_blob: bytes, *, object_id: str) -> tuple[list[BilingualTermEvidence], str | None]:
+    """Run the same evidence adapter for Office embedded raster images."""
+    with tempfile.TemporaryDirectory(prefix="qyunslation-term-evidence-") as directory:
+        root = Path(directory)
+        source = root / "source.png"
+        target = root / "target.png"
+        source.write_bytes(source_blob)
+        target.write_bytes(target_blob)
+        return _image_evidence(source, target, object_id=object_id)
+
+
 def build_bilingual_evidence(source_path: str | Path, target_path: str | Path) -> tuple[list[BilingualTermEvidence], str | None]:
     """Build format-aware evidence; never pretend unsupported binary paths are empty."""
     source, target = Path(source_path), Path(target_path)
@@ -412,9 +593,9 @@ def build_bilingual_evidence(source_path: str | Path, target_path: str | Path) -
         if suffix == ".pdf" and target.suffix.casefold() == ".pdf":
             rows = _pdf_evidence(source, target)
         elif suffix == ".docx" and target.suffix.casefold() == ".docx":
-            rows = _docx_evidence(source, target)
+            return _docx_evidence_with_status(source, target)
         elif suffix in {".ppt", ".pptx"} and target.suffix.casefold() == ".pptx":
-            rows = _pptx_evidence(source, target)
+            return _pptx_evidence_with_status(source, target)
         elif suffix in _IMAGE_SUFFIXES and target.suffix.casefold() in _IMAGE_SUFFIXES:
             return _image_evidence(source, target)
         elif suffix in _TEXT_SUFFIXES and target.suffix.casefold() in _TEXT_SUFFIXES:

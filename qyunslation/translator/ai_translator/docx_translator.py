@@ -762,6 +762,7 @@ class DocxTranslator(AiTranslator):
             manifest = overlay_docx_embedded_images(
                 doc,
                 to_lang=self.config.to_lang,
+                glossary=(self.glossary.glossary_dict if self.glossary and self.glossary.glossary_dict else None),
                 progress_cb=_progress,
                 document_name=doc_name or "document.docx",
                 manifest_path=manifest_path,

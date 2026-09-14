@@ -94,6 +94,26 @@ def test_bridge_rejects_unsigned_and_replayed_requests(client):
     assert replay.status_code == 409
 
 
+def test_bridge_rejects_correctly_signed_non_loopback_callers(client):
+    body = {
+        "actor_sub": "reviewer-1",
+        "source_sha256": "b" * 64,
+        "source_text": "primary endpoint",
+        "src_lang": "en",
+        "tgt_lang": "zh",
+        "source_format": "pdf",
+    }
+    with TestClient(client.app, client=("198.51.100.7", 39060)) as remote:
+        response = _request(
+            remote,
+            "POST",
+            "/internal/workbench/v1/runs/start",
+            body,
+            nonce="non-loopback-060",
+        )
+    assert response.status_code == 403
+
+
 def test_normal_confirmation_enters_company_library_and_reuses_next_file(client):
     first = _start(client, source_text="The primary endpoint was met.")
     run_id = first["run_id"]
@@ -219,6 +239,33 @@ def test_high_risk_term_requires_admin_final_review(client):
     assert final.status_code == 200, final.text
     assert final.json()["candidate"]["status"] == "approved"
 
+    reused = _start(
+        client,
+        source_text="ABC-101 was administered again.",
+        nonce="high-reuse-start-060",
+    )
+    reused_complete = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{reused['run_id']}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "ABC-101 was administered again.",
+                    "target_text": "再次给予 ABC-101。",
+                    "role": "body",
+                    "page_no": 2,
+                    "block_id": "p2-b1",
+                }
+            ],
+        },
+        nonce="high-reuse-complete-060",
+    )
+    assert reused_complete.status_code == 200, reused_complete.text
+    assert reused_complete.json()["candidates"][0]["status"] == "applied"
+    assert reused_complete.json()["summary"]["formal_gate"]["passed"] is True
+
 
 def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exact(client):
     first = _start(client, source_text="The primary endpoint was met twice.")
@@ -255,6 +302,36 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
     rows = completed.json()["candidates"]
     assert len(rows) == 1
     assert len(rows[0]["occurrences"]) == 2
+
+    repeated = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "The primary endpoint was met.",
+                    "target_text": "主要终点评估已达到。",
+                    "source_term": "primary endpoint",
+                    "target_term": "主要终点评估",
+                    "page_no": 1,
+                    "block_id": "p1-b1",
+                },
+                {
+                    "source_text": "The primary endpoint was reported.",
+                    "target_text": "主要终点评估已报告。",
+                    "source_term": "primary endpoint",
+                    "target_term": "主要终点评估",
+                    "page_no": 2,
+                    "block_id": "p2-b2",
+                },
+            ],
+        },
+        nonce="aggregate-repeat-060",
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert len(repeated.json()["candidates"][0]["occurrences"]) == 2
 
     # It is still an unknown candidate: batch confirmation cannot launder it.
     rejected = _request(

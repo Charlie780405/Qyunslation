@@ -1296,6 +1296,7 @@ class TranslationService:
                     logger=task_logger,
                     progress_tracker=progress_tracker,
                     to_lang=payload.to_lang,
+                    glossary_dict=payload.glossary_dict,
                 )
             )
 

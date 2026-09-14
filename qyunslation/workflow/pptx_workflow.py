@@ -89,7 +89,18 @@ class PPTXWorkflow(Workflow[PPTXWorkflowConfig, Document, Document], HTMLExporta
             if skip:
                 translated_pages.append(page)
                 continue
-            data, _n, _qc = translate_image_bytes(page, suffix=".png", to_lang=to_lang)
+            glossary = (
+                self.config.translator_config.glossary.glossary_dict
+                if self.config.translator_config.glossary
+                else self.config.translator_config.glossary_dict
+            )
+            overlay_kwargs = {"glossary": glossary} if glossary else {}
+            data, _n, _qc = translate_image_bytes(
+                page,
+                suffix=".png",
+                to_lang=to_lang,
+                **overlay_kwargs,
+            )
             translated_pages.append(ensure_master_dpi(data or page))
 
         first_canvas = structure_manifest.canvases[0] if structure_manifest and structure_manifest.canvases else None

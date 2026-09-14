@@ -170,7 +170,9 @@ def _extract_candidates(
     if job is None:  # database invariant; do not turn it into a 500 leak
         raise HTTPException(status_code=404, detail="workbench job not found")
     candidate_ids: set[str] = set()
-    seen_occurrences: set[tuple[str, str, int | None, str | None, str | None, int | None]] = set()
+    seen_occurrences: set[
+        tuple[str, str, int | None, str | None, str | None, int | None, int | None]
+    ] = set()
 
     def append_candidate(
         *,
@@ -191,6 +193,7 @@ def _extract_candidates(
             occurrence.get("block_id"),
             occurrence.get("object_id"),
             occurrence.get("char_start"),
+            occurrence.get("char_end"),
         )
         if key in seen_occurrences:
             return
@@ -372,7 +375,8 @@ def _summary(session: Session, run: WorkbenchTranslationRun, tenant_id: str) -> 
     high_unresolved = [
         row.id
         for row in rows
-        if row.risk.casefold() in _HIGH_RISK and row.status not in {"approved", "rejected"}
+        if row.risk.casefold() in _HIGH_RISK
+        and row.status not in {"applied", "approved", "rejected"}
     ]
     return {
         "run_id": run.id,

@@ -14,6 +14,13 @@ _ABBREVIATION = re.compile(r"\b[A-Z]{2,}(?:-[A-Z0-9]+)*\b")
 _CODE = re.compile(r"\b[A-Z]{2,}[A-Z0-9]*(?:-[A-Z0-9]+)+\b")
 _DOSE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|g|µg|ug|mcg|mL|ml|IU|%)\b", re.I)
 _MEDICINE = re.compile(r"\b[a-z][a-z-]*(?:mab|nib|cept|itis|emia|osis)\b", re.I)
+_DRUG = re.compile(r"\b[a-z][a-z-]*(?:mab|nib|cept)\b", re.I)
+_TARGET = re.compile(r"\b(?:IL-?\d+[A-Za-zαβ]?|PD-?L?1|CD\d+|TNF(?:-?[A-Za-z])?|EGFR|VEGF|JAK\d*)(?![A-Za-z0-9])", re.I)
+_ORGANIZATION = re.compile(
+    r"\b(?:hospital|university|institute|biotech|pharma(?:ceutical)?|inc\.?|ltd\.?|llc|corp\.?)\b|医院|大学|研究所|生物科技|制药|公司",
+    re.I,
+)
+_STUDY_ABBREVIATION = re.compile(r"\b(?:[A-Z]{2,}[A-Za-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z]{2,}\d+[A-Za-z0-9-]*)\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +61,11 @@ def classify_risk(source_term: str, term_type: str | None = None) -> str:
     source = (source_term or "").strip()
     if normalized_type in _HIGH_RISK_TYPES:
         return "high"
-    if _CODE.search(source) or _DOSE.search(source):
+    if _CODE.search(source) or _DOSE.search(source) or _DRUG.search(source):
+        return "high"
+    if _TARGET.search(source) or _ORGANIZATION.search(source):
+        return "high"
+    if _STUDY_ABBREVIATION.search(source):
         return "high"
     if _ABBREVIATION.fullmatch(source) and len(source) >= 3:
         return "high"

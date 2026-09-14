@@ -10,6 +10,7 @@ import os
 import re
 import time
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 import cv2
@@ -523,12 +524,21 @@ def translate_texts(
     model: str = MODEL,
     num_ctx: int = 8192,
     to_lang: str = "简体中文",
+    glossary: Mapping[str, str] | None = None,
 ) -> dict[int, str]:
     """批量翻译：think=false、分批、缺失条目单条重试。返回 1-based 编号 → 译文。"""
     if not texts:
         return {}
-    glossary = _load_glossary()
-    prepared = [_apply_glossary(t, glossary) for t in texts]
+    merged_glossary = _load_glossary()
+    # The task-local company termbase contains approved hard constraints.  It
+    # wins over the static fallback glossary, but never mutates that shared
+    # process-wide source.
+    for source, target in (glossary or {}).items():
+        normalized_source = str(source).strip()
+        normalized_target = str(target).strip()
+        if normalized_source and normalized_target:
+            merged_glossary[normalized_source] = normalized_target
+    prepared = [_apply_glossary(t, merged_glossary) for t in texts]
     target = (to_lang or "简体中文").strip() or "简体中文"
     result: dict[int, str] = {}
     batch_size = max(1, TRANSLATE_BATCH)
@@ -2490,15 +2500,25 @@ def probe_image(
 
 
 def translate_image(
-    img_path: str | Path, out_path: str | Path, to_lang: str = "简体中文"
+    img_path: str | Path,
+    out_path: str | Path,
+    to_lang: str = "简体中文",
+    *,
+    glossary: Mapping[str, str] | None = None,
 ) -> int:
     """完整图片嵌字翻译。返回实际绘制块数；失败返回 0（调用方应保留原图）。"""
-    n, _qc = translate_image_with_qc(img_path, out_path, to_lang=to_lang)
+    n, _qc = translate_image_with_qc(
+        img_path, out_path, to_lang=to_lang, glossary=glossary
+    )
     return n
 
 
 def translate_image_with_qc(
-    img_path: str | Path, out_path: str | Path, to_lang: str = "简体中文"
+    img_path: str | Path,
+    out_path: str | Path,
+    to_lang: str = "简体中文",
+    *,
+    glossary: Mapping[str, str] | None = None,
 ) -> tuple[int, dict]:
     """完整图片嵌字翻译。返回 (绘制块数, qc_report)。失败返回 (0, {})。"""
     img_path = Path(img_path)
@@ -2546,7 +2566,7 @@ def translate_image_with_qc(
     except Exception:
         kept = texts
 
-    trans = translate_texts(texts, to_lang=to_lang)
+    trans = translate_texts(texts, to_lang=to_lang, glossary=glossary)
 
     finals: list[str] = []
     redraw: list[bool] = []
@@ -3090,7 +3110,11 @@ def translate_image_with_qc(
 
 
 def translate_image_bytes(
-    data: bytes, suffix: str = ".png", to_lang: str = "简体中文"
+    data: bytes,
+    suffix: str = ".png",
+    to_lang: str = "简体中文",
+    *,
+    glossary: Mapping[str, str] | None = None,
 ) -> tuple[bytes, int, dict]:
     """嵌字内存版，供 Word 内嵌图调用。返回 (bytes, blocks, qc)；失败则返回原字节、0、{}。"""
     import tempfile
@@ -3100,7 +3124,9 @@ def translate_image_bytes(
         dst = Path(td) / f"out{suffix}"
         src.write_bytes(data)
         try:
-            n, qc = translate_image_with_qc(src, dst, to_lang=to_lang)
+            n, qc = translate_image_with_qc(
+                src, dst, to_lang=to_lang, glossary=glossary
+            )
         except Exception as exc:
             logger.warning("image overlay failed, keep original: %s", exc)
             return data, 0, {}

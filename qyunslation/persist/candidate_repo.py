@@ -2,6 +2,7 @@
 """PLAN-058：译后术语候选、出现位置与人工裁决仓储。"""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -153,12 +154,40 @@ def enqueue_candidate(
         if termbase_version and not candidate.termbase_version:
             candidate.termbase_version = termbase_version
 
+    existing_occurrence_keys = {
+        (
+            occurrence.page_no,
+            occurrence.block_id,
+            occurrence.object_id,
+            occurrence.char_start,
+            occurrence.char_end,
+            json.dumps(occurrence.bbox, ensure_ascii=False, sort_keys=True),
+            occurrence.source_context,
+            occurrence.target_context,
+        )
+        for occurrence in candidate.occurrences
+    }
     for occurrence_data in occurrences or ():
         if not isinstance(occurrence_data, dict):
             raise ValueError("occurrences must contain mapping values")
-        session.add(
+        occurrence_key = (
+            occurrence_data.get("page_no"),
+            occurrence_data.get("block_id"),
+            occurrence_data.get("object_id"),
+            occurrence_data.get("char_start"),
+            occurrence_data.get("char_end"),
+            json.dumps(occurrence_data.get("bbox"), ensure_ascii=False, sort_keys=True),
+            occurrence_data.get("source_context"),
+            occurrence_data.get("target_context"),
+        )
+        if occurrence_key in existing_occurrence_keys:
+            continue
+        # Keep the already-loaded relationship in sync with the database.  The
+        # public extract endpoint serializes this object immediately after the
+        # flush; adding only ``candidate_id`` leaves a stale empty collection
+        # in that response until the session is refreshed.
+        candidate.occurrences.append(
             DocumentTermOccurrence(
-                candidate_id=candidate.id,
                 page_no=occurrence_data.get("page_no"),
                 block_id=occurrence_data.get("block_id"),
                 object_id=occurrence_data.get("object_id"),
@@ -169,6 +198,7 @@ def enqueue_candidate(
                 target_context=occurrence_data.get("target_context"),
             )
         )
+        existing_occurrence_keys.add(occurrence_key)
     session.flush()
     return candidate
 

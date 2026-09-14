@@ -70,7 +70,7 @@ else
 fi
 
 if [[ -f "$GUI" ]] \
-  && grep -q 'qy_dir = gr.Radio' "$GUI" \
+  && grep -Eq 'qy_dir = gr\.(Radio|Dropdown)' "$GUI" \
   && grep -q 'qy_help = gr.Column(' "$GUI" \
   && grep -q 'qy_inspector = gr.Column(' "$GUI" \
   && grep -q 'elem_classes=\["lang-row"\], visible=False' "$GUI" \

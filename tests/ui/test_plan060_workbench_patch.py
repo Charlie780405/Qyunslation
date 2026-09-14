@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "scripts" / "apply-pdf2zh-060-termbase-workbench.py"
 
@@ -38,3 +40,12 @@ def test_plan060_patch_is_idempotent_on_supported_gui_anchors():
     repeated, changed_again = module.apply(patched)
     assert changed_again is False
     assert repeated == patched
+
+
+def test_plan060_patch_compiles_against_installed_upstream_gui_when_available():
+    module = _module()
+    if not module.GUI.is_file():
+        pytest.skip("pdf2zh-next GUI is not installed in this test environment")
+    patched, _changed = module.apply(module.GUI.read_text(encoding="utf-8"))
+    assert module.verify(patched) == 0
+    compile(patched, str(module.GUI), "exec")
