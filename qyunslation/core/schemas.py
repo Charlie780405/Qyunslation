@@ -7,6 +7,7 @@ import os
 from typing import (
     List,
     Dict,
+    Any,
     Optional,
     Literal,
     Union,
@@ -187,6 +188,16 @@ class BaseWorkflowParams(BaseModel):
     )
     glossary_dict: Optional[Dict[str, str]] = Field(
         None, description="术语表字典，key为原文，value为译文。", examples=[None]
+    )
+    termbase_policy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="PLAN-058：当前任务的只读项目术语策略包。",
+        examples=[None],
+    )
+    termbase_version: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="PLAN-058：术语库版本，用于翻译缓存失效。",
     )
     glossary_generate_enable: bool = Field(
         default=GLOSSARY_GENERATE_ENABLE, description="是否开启术语表自动生成。"

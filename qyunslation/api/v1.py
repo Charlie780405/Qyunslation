@@ -452,6 +452,7 @@ def resolve_terms_api(
         resolve_runtime_terms,
         runtime_termbase_version,
     )
+    from qyunslation.glossary.term_policy import compile_term_policy
 
     matches = resolve_runtime_terms(
         session,
@@ -461,11 +462,14 @@ def resolve_terms_api(
         src_lang=body.src_lang,
         tgt_lang=body.tgt_lang,
     )
+    termbase_version = runtime_termbase_version(
+        session, tenant_id=tenant.id, project_id=body.project_id
+    )
+    policy = compile_term_policy(matches, termbase_version=termbase_version)
     return {
         "matches": [match_to_dict(match) for match in matches],
-        "termbase_version": runtime_termbase_version(
-            session, tenant_id=tenant.id, project_id=body.project_id
-        ),
+        "policy": policy,
+        "termbase_version": termbase_version,
         # 058c 首版只有本地确定性命中；语义候选接入后由实际路径置 true。
         "semantic_used": any(match.match_type == "semantic" for match in matches),
     }

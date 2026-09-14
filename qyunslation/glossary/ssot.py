@@ -61,3 +61,36 @@ def apply_ssot_to_payload(payload: Any) -> dict[str, str]:
         f"(custom_prompt not filled with full table)"
     )
     return merged
+
+
+def apply_term_policy_to_payload(payload: Any, policy: dict | None) -> dict[str, str]:
+    """Inject only policy-approved hard terms into every legacy workflow.
+
+    Existing workflow adapters consume ``payload.glossary_dict``.  Keeping the
+    adapter boundary here lets PDF/DOCX/PPTX/image and text paths share the
+    same project-scoped policy without teaching each file workflow about the
+    database.  Semantic suggestions remain in the policy for review but are
+    deliberately not injected as hard glossary entries.
+    """
+    from qyunslation.glossary.term_policy import policy_to_glossary
+
+    hard = policy_to_glossary(policy)
+    existing = getattr(payload, "glossary_dict", None)
+    merged: dict[str, str] = {}
+    if isinstance(existing, dict):
+        hard_keys = {_normalize_key(source) for source in hard}
+        for source, target in existing.items():
+            key = _normalize_key(str(source))
+            if key and key not in hard_keys and target is not None and str(target).strip():
+                merged[str(source)] = str(target)
+    merged.update(hard)
+    payload.glossary_dict = merged or None
+    payload.termbase_policy = policy
+    payload.termbase_version = policy.get("termbase_version") if policy else None
+    logger.info(
+        "termbase_policy_injected hard_terms=%s semantic_suggestions=%s version=%s",
+        len(hard),
+        sum(1 for term in (policy or {}).get("terms", []) if not term.get("hard_constraint")),
+        payload.termbase_version,
+    )
+    return merged

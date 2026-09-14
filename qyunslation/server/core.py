@@ -501,6 +501,7 @@ class TranslationService:
                 "skip_translate", "base_url", "api_key", "model_id", "to_lang",
                 "chunk_size", "concurrent", "temperature", "top_p", "timeout", "thinking", "retry",
                 "system_proxy_enable", "custom_prompt", "glossary_dict",
+                "termbase_policy", "termbase_version",
                 "glossary_generate_enable", "glossary_agent_config",
                 "force_json", "rpm", "tpm", "provider", "extra_body"
             ]
@@ -619,8 +620,14 @@ class TranslationService:
             from qyunslation.glossary.ssot import apply_ssot_to_payload
 
             apply_ssot_to_payload(payload)
+            if getattr(payload, "termbase_policy", None):
+                from qyunslation.glossary.ssot import apply_term_policy_to_payload
+
+                apply_term_policy_to_payload(payload, payload.termbase_policy)
         except Exception as exc:
-            print(f"[{task_id}] glossary_ssot apply failed (non-fatal): {exc}")
+            # 术语策略解析失败不能静默伪装成已注入；保留 SSOT 基础术语，
+            # 但在任务日志中明确标记，供 UI/审计定位。
+            print(f"[{task_id}] glossary/termbase policy apply failed: {exc}")
 
         # PLAN-034f：网关档位填 model_id/base_url（已有用户值不覆盖）
         try:
