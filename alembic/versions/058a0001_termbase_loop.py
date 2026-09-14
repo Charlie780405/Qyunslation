@@ -24,8 +24,8 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _vector_type():
-    return Vector(1024) if Vector is not None else sa.JSON()
+def _vector_type(is_postgres: bool):
+    return Vector(1024) if is_postgres and Vector is not None else sa.JSON()
 
 
 def upgrade() -> None:
@@ -93,7 +93,7 @@ def upgrade() -> None:
         sa.Column("dim", sa.Integer(), nullable=False, server_default="1024"),
         sa.Column("model", sa.String(128), nullable=False),
         sa.Column("text_hash", sa.String(64), nullable=False),
-        sa.Column("vector", _vector_type(), nullable=False),
+        sa.Column("vector", _vector_type(is_postgres), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["term_id"], ["concept_term.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("term_id"),

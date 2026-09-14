@@ -12,6 +12,7 @@
 | 术语 resolver / alias 快路径 | 已实现，精确路径不调用 embedding |
 | 项目/租户隔离与 ConceptTerm | 已实现 |
 | SQLite 迁移回归 | 已通过 |
+| PostgreSQL pgvector 修复迁移 | `058b0001` 已实现，待目标库执行 |
 | 人工候选与乐观锁裁决 | 已实现 |
 | 策略注入与译后 QA | 已实现；二进制写回报告 unavailable |
 | bge-m3 / PostgreSQL LIVE | 待当前环境执行 |

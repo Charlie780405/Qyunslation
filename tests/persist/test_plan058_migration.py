@@ -11,7 +11,7 @@ def test_plan058_migration_is_portable_to_sqlite(tmp_path, monkeypatch):
     database = tmp_path / "plan058.sqlite"
     monkeypatch.setenv("QYUNSLATION_DATABASE_URL", f"sqlite:///{database}")
     config = Config("alembic.ini")
-    command.upgrade(config, "058a0001")
+    command.upgrade(config, "head")
 
     inspector = inspect(create_engine(f"sqlite:///{database}"))
     tables = set(inspector.get_table_names())

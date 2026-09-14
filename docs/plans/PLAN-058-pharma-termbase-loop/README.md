@@ -24,7 +24,7 @@ PostgreSQL 是正式事实源，`pgvector` 存储 ConceptTerm 向量；SQLite JS
 
 - Concept 增加项目、术语类型、定义、权威来源和运行时作用域索引。
 - ConceptTerm 增加规范化文本；支持 preferred、synonym、abbreviation。
-- 新增 ConceptTermEmbedding、DocumentTermCandidate、DocumentTermOccurrence、TermDecision 及 `058a0001` 迁移。
+- 新增 ConceptTermEmbedding、DocumentTermCandidate、DocumentTermOccurrence、TermDecision 及 `058a0001`/`058b0001` 迁移；058b 兼容修复首次部署缺少 Python pgvector 时的 JSON 向量列。
 - 译前 `/api/v1/terms/resolve` 返回匹配、术语策略包和 termbase 版本；`/terms/search` 对未命中词提供低置信语义建议。
 - 译后候选提取、位置聚合、乐观锁人工裁决、批量确认、词条提升和审校摘要 API。
 - 术语策略可注入现有 TXT、Markdown、HTML、JSON、SRT、ASS 及 Markdown-based PDF/Office 路径；可比较文本的硬术语 QA 未通过时阻止正式稿，二进制原生写回路径明确记录 QA unavailable。
