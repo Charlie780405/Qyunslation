@@ -128,6 +128,13 @@ def test_reference_section_heading_supports_markdown_heading_form():
     assert is_reference_heading("## References:")
 
 
+def test_md_tables_keeps_legacy_preserve_cell_alias(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    import md_tables
+
+    assert md_tables._is_preserve_cell is md_tables.is_preserve_cell
+
+
 def test_model_trace_records_declared_qwen_and_embedding_route_without_live_claim():
     from qyunslation.structure.model_trace import (
         EXPECTED_EMBEDDING_MODEL,

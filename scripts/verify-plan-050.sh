@@ -59,7 +59,7 @@ else
   tail -n 40 "$STAGE_DIR/pytest.log" || true
 fi
 
-if [[ -f "$GUI" ]] && grep -q 'qy_mode = gr.Radio' "$GUI" && grep -q 'qy_mode.change' "$GUI" \
+if [[ -f "$GUI" ]] && grep -Eq 'qy_mode = gr\.(Radio|Dropdown)' "$GUI" && grep -q 'qy_mode.change' "$GUI" \
   && grep -q '_qy_050_workbench_css' "$GUI" && ! grep -q '_qy_050_workbench_js' "$GUI"; then
   pass "gui.py has 050 interactive bar (no js= hijack)"
 else

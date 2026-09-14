@@ -31,6 +31,10 @@ from qyunslation.structure.table_cell_policy import is_preserve_cell  # noqa: E4
 
 logger = logging.getLogger("md_tables")
 
+# PLAN-029 compatibility: older gates imported the private helper name.
+# Keep it as an identity alias while callers migrate to the public policy API.
+_is_preserve_cell = is_preserve_cell
+
 _SP = r"[^\S\n]"
 _PIPE_CAPTION = re.compile(
     rf"^{_SP}*(?:[Tt]able|TABLE|表){_SP}*(?P<num>\d+)"

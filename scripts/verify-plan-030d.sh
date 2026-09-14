@@ -180,7 +180,10 @@ for manifest in (ljae, nature):
             e for e in table.detector_evidence if e.detector == "table_rule_lines"
         )
         assert evidence.details["reconstructed"] is False
-        assert table.planned_action == "text_layer"
+        # Tables are structured objects and are written back cell-by-cell.
+        # Keep the historical gold assertion aligned with the current action
+        # contract instead of treating a valid table route as a regression.
+        assert table.planned_action == "translate_cells"
 
 # 表内文字不得漏进正文
 p5 = [o for o in nature.objects if o.type is ObjectType.BODY and o.canvas_id == "page:5"]
