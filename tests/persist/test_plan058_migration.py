@@ -2,6 +2,8 @@
 """PLAN-058：从空 SQLite 数据库验证完整 Alembic 链路可执行。"""
 from __future__ import annotations
 
+import logging
+
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
@@ -12,6 +14,7 @@ def test_plan058_migration_is_portable_to_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("QYUNSLATION_DATABASE_URL", f"sqlite:///{database}")
     config = Config("alembic.ini")
     command.upgrade(config, "head")
+    assert logging.getLogger("TranslaterLogger").disabled is False
 
     inspector = inspect(create_engine(f"sqlite:///{database}"))
     tables = set(inspector.get_table_names())

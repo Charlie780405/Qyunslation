@@ -52,7 +52,7 @@ from qyunslation.config import API_TOKEN, PORT
 from qyunslation.core.schemas import TranslatePayload
 from qyunslation.exporter.md.types import ConvertEngineType
 from qyunslation.global_values.conditional_import import DOCLING_EXIST
-from qyunslation.logger import global_logger
+from qyunslation.logger import configure_runtime_logging, global_logger
 # Shared server layer imports
 from qyunslation.server import (
     TranslationService,
@@ -104,8 +104,7 @@ async def lifespan(app: FastAPI):
     translation_service.initialize(httpx_client, app.state.main_event_loop)
     translation_service.clear_all()
 
-    global_logger.propagate = False
-    global_logger.setLevel(logging.INFO)
+    configure_runtime_logging()
     # PLAN-023: 确保 image_translate 等模块 logger 能进 journalctl
     if not logging.root.handlers:
         logging.basicConfig(

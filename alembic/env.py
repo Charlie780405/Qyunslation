@@ -13,7 +13,9 @@ from qyunslation.persist.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Do not disable application loggers when Alembic loads its own config.
+    # This module runs in-process in the verification suite and in deployments.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
