@@ -1,6 +1,6 @@
 # PLAN-059：医药资料翻译 12 项保真问题与工作台 UI 收口
 
-> 状态：**待批准，未开始实施**  
+> 状态：**实施中：本地保真门禁通过，LIVE/浏览器/生产交付待验证**
 > 日期：2026-09-14  
 > 前置：PLAN-028/033/041/045/050/058；最近 UI 修复提交 `3cce0ac`  具体复现见用户提供的截图  
 > 目标分支：`codex/plan-059-translation-fidelity`  
@@ -135,3 +135,12 @@ Manifest 必须同时输出以下字段，避免把不同概念混为一个数�
 ## 九、批准后执行规则
 
 批准本纲领后，按 059a→059b/059c→059d/059e/059f→059g/059h→059i 顺序分别执行。每个子计划须在自己的门禁和 WT 证据完成后才能进入下一阶段；未批准前只允许补充基线，不修改生产代码、不重启、不部署。
+
+## 十、实施记录（截至 2026-09-14）
+
+- 已落地本地实现：结构计数分层、参考文献 section 级硬保护、表格脚注强制翻译、源粗体/字号传递、派生图片 300 DPI、PDF/DOCX/PPTX/图片路径的原图隔离，以及工作台 Banner/上传操作收口。
+- 已新增 `scripts/verify-plan-059.sh`：默认使用仓库 `.venv`，支持 `QYUNSLATION_VERIFY_PY`、`QYUNSLATION_PLAN059_SAMPLE`、`QYUNSLATION_SAMPLE_ROOT`，并将样本缺失和远程模型不可达报告为 `BLOCKED`。
+- 本地验证已通过：059 专项聚焦回归 41 passed；模型 trace、网关、embedding 与保真契约回归 36 passed；059 门禁本地模式 `SUMMARY: PASS fail=0`。
+- 全量回归已覆盖 913 项：`906 passed, 6 skipped`；唯一失败为既有 logger capture 测试（独立运行通过），不属于 PLAN-059 翻译/结构/版式代码。
+- 运行时 trace 记录目标翻译模型 `qwen3.6:35b-a3b` 和 embedding `bge-m3` 的配置来源，但 `embedding_status=configured` 不等同于 LIVE。只有执行 `QYUNSLATION_PLAN059_LIVE=1 bash scripts/verify-plan-059.sh` 并探针命中目标服务后，才能将 059h 标记为 LIVE 通过。
+- 尚未宣称计划完成：真实多格式金标、浏览器四尺寸 smoke、泰州 Qwen/bge-m3 LIVE 证据及生产部署/回滚仍待在 Cursor/生产环境执行并写入 WT。

@@ -1,7 +1,7 @@
 # WT-059：医药资料翻译 12 项保真问题与 UI 收口
 
 > 对应计划：[PLAN-059](../plans/PLAN-059-translation-fidelity/README.md)  
-> 状态：**计划待批准，尚未执行**  
+> 状态：**实施中：本地门禁通过，LIVE/生产证据待补**
 > 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-059-translation-fidelity`
 
 ## 记录规则
@@ -10,16 +10,30 @@
 
 ## 待记录证据
 
-- [ ] PLAN-059a：12 项问题复现矩阵、Manifest/API/QA 契约
-- [ ] PLAN-059b：桌面/移动 Banner 截图、对比度、上传后按钮 smoke
-- [ ] PLAN-059c：Figure/Table 数量、编号、occurrence、多栏阅读顺序
-- [ ] PLAN-059d：参考文献逐字 preserve、标题/表格粗体、缩写脚注
-- [ ] PLAN-059e：300 DPI、源 hash、图片字体 fit/overflow
-- [ ] PLAN-059f：表格/脚注完整性、字号、粗体、合并单元格
-- [ ] PLAN-059g：单/双/多栏行数、行宽、行距、段距和页面 QA
-- [ ] PLAN-059h：泰州 Qwen/bge-m3 LIVE 模型探针与术语遵从率
+- [x] PLAN-059a：Manifest/API/QA 契约已补齐；真实 12 项逐文件矩阵仍待金标环境补录
+- [x] PLAN-059b：静态 Banner 契约、白色状态和上传后主操作测试通过；真实四尺寸截图仍待浏览器环境补录
+- [x] PLAN-059c：期刊 fixture 的 Figure/Table 语义计数和物理资源分层测试通过
+- [x] PLAN-059d：参考文献逐字 preserve、标题/表格粗体和脚注策略测试通过
+- [x] PLAN-059e：派生图片 300 DPI、源 hash 不变和多格式路径测试通过
+- [x] PLAN-059f：表格脚注完整性、字号/粗体传递和溢出分流测试通过
+- [ ] PLAN-059g：单/双/多栏真实输出的行数、行宽、行距、段距和页面 QA 待金标补录
+- [ ] PLAN-059h：泰州 Qwen/bge-m3 LIVE 模型探针与术语遵从率待 Cursor 环境执行
 - [ ] PLAN-059i：全量门禁、部署、重启、健康检查和回滚点
+
+## 已执行的本地证据
+
+| 日期 | 验证 | 结果 |
+| --- | --- | --- |
+| 2026-09-14 | `tests/structure/test_plan059_fidelity.py`、四类 scanner、PPT 图片 OCR、既有图片译后链路 | `41 passed` |
+| 2026-09-14 | 033g model trace、034f gateway、055 embedding、059 fidelity | `36 passed` |
+| 2026-09-14 | 表格结构/续表/数字保护、扫描 PDF 性能、日志与文献缩放回归 | `16 + 21 + 18 passed` |
+| 2026-09-14 | `/home/dev/qyunslation/.venv/bin/python -m pytest -q --no-cov` | `906 passed, 6 skipped；1 项既有 logger capture 失败（非 PLAN-059）` |
+| 2026-09-14 | `bash scripts/verify-plan-059.sh` | `SUMMARY: PASS fail=0`（LIVE 与依赖全量门未启用） |
+| 2026-09-14 | `dd970a8` | 结构/引用/图片/表格/模型 trace 实现与契约测试提交 |
+| 2026-09-14 | `d85840f` | 可移植 PLAN-059 门禁提交 |
+
+本地 PASS 只表示仓内实现和离线契约通过，不代表真实金标、浏览器、泰州服务或生产交付已经通过。全量回归的唯一失败是既有 `test_logger_can_log_messages`：独立运行通过，属于应用生命周期对进程级 logger 状态的历史污染，未纳入本计划代码范围。模型方面当前证据是配置 trace：翻译目标为 `qwen3.6:35b-a3b`，embedding 目标为 `bge-m3`；需在 LIVE 门中确认 endpoint 返回的实际模型列表和 embedding 维度。
 
 ## 结论
 
-待 PLAN-059 及子计划批准后填写。
+PLAN-059 已获批准并进入实施；当前本地实现证据已记录，真实金标、LIVE 模型、浏览器和生产交付证据尚未完成，因此不能标记为完成。
