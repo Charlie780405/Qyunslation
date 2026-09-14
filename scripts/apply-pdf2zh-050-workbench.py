@@ -46,19 +46,56 @@ CSS_BLOCK = r"""
     .qy-050-appbar {
       position: sticky; top: 0; z-index: 80;
       display: flex; align-items: center; gap: var(--qy-space-3);
-      flex-wrap: wrap;
+      flex-flow: row nowrap !important;
       min-height: var(--qy-appbar-h);
+      height: var(--qy-appbar-h) !important;
+      max-height: var(--qy-appbar-h) !important;
       padding: 6px var(--qy-space-4);
+      box-sizing: border-box;
+      overflow: visible !important;
+      white-space: nowrap;
       background: var(--qy-color-accent);
       border-bottom: 1px solid var(--qy-color-border);
       color: var(--qy-color-accent-fg);
       font-family: system-ui, sans-serif;
     }
+    .qy-050-appbar > *,
     .qy-050-appbar > .form, .qy-050-appbar .wrap,
-    .qy-050-appbar .svelte-radio, .qy-050-appbar label {
+    .qy-050-appbar .contain, .qy-050-appbar .svelte-radio,
+    .qy-050-appbar label {
       flex: 0 0 auto !important;
       width: auto !important;
       min-width: 0 !important;
+      min-height: 0 !important;
+      height: auto !important;
+      max-height: none !important;
+      margin: 0 !important;
+    }
+    .qy-050-appbar .block-label,
+    .qy-050-appbar legend {
+      width: auto !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .qy-050-appbar .qy-050-dir .wrap,
+    .qy-050-appbar [role="radiogroup"],
+    .qy-050-appbar fieldset {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      gap: var(--qy-space-2) !important;
+    }
+    .qy-050-appbar fieldset {
+      border: 0 !important;
+      padding: 0 !important;
+    }
+    .qy-050-appbar [role="radiogroup"] > *,
+    .qy-050-appbar fieldset > label,
+    .qy-050-appbar [role="radio"] {
+      flex: 0 0 auto !important;
+      min-width: 0 !important;
+      margin: 0 !important;
     }
     .qy-050-appbar button {
       flex: 0 0 auto !important;
@@ -106,6 +143,37 @@ CSS_BLOCK = r"""
     .qy-col-left .lang-row {
       display: none !important;
     }
+    /* 上传后预扫描摘要会把原本位于选项末尾的主操作推到首屏外；
+       将主操作提升为左栏首个、始终可见的操作条。 */
+    .qy-col-left > .action-row {
+      order: -1 !important;
+      display: flex !important;
+      flex-flow: row nowrap !important;
+      align-items: center !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      position: sticky !important;
+      top: 0 !important;
+      bottom: auto !important;
+      z-index: 35 !important;
+      background: var(--qy-color-surface) !important;
+      padding-top: 8px !important;
+      padding-bottom: 8px !important;
+      margin-top: 0 !important;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+    }
+    .qy-col-left > .action-row > *,
+    .qy-col-left > .action-row .action-btn,
+    .qy-col-left > .action-row .action-btn button {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      min-height: var(--qy-touch) !important;
+    }
+    .qy-col-left > .action-row > * {
+      flex: 1 1 0 !important;
+      min-width: 0 !important;
+    }
     /* PLAN-057: adv scroll override also applied after left-dock via apply_adv_scroll */
     .qy-col-left > .qy-adv-acc {
       overflow: visible !important;
@@ -137,7 +205,12 @@ CSS_BLOCK = r"""
     }
     @media (max-width: 767px) {
       .qy-col-left { width: 100% !important; }
-      .qy-050-appbar { flex-wrap: wrap; height: auto; }
+      .qy-050-appbar {
+        flex-flow: row wrap !important;
+        height: auto !important;
+        max-height: none !important;
+        white-space: normal;
+      }
     }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -576,6 +649,41 @@ def apply_adv_scroll(text: str) -> tuple[str, bool]:
     return text.replace(old, new), True
 
 
+ACTION_GUARD_MARKER = "# _qy_060_upload_action_guard"
+ACTION_GUARD_BLOCK = f'''        {ACTION_GUARD_MARKER}
+        def _qy060_show_translate_action():
+            return gr.update(visible=True, interactive=True)
+
+        # Upload/change handlers must never leave the primary action hidden.
+        file_input.upload(
+            _qy060_show_translate_action,
+            inputs=[],
+            outputs=[translate_btn],
+            queue=False,
+        )
+        file_input.change(
+            _qy060_show_translate_action,
+            inputs=[],
+            outputs=[translate_btn],
+            queue=False,
+        )
+'''
+
+
+def apply_action_guard(text: str) -> tuple[str, bool]:
+    """Keep the primary action visible after upload and file-list changes."""
+    if ACTION_GUARD_MARKER in text:
+        return text, False
+    anchors = (
+        "        # _qy_dual_clear\n",
+        "        # Handle file clear/delete event\n",
+    )
+    for anchor in anchors:
+        if anchor in text:
+            return text.replace(anchor, ACTION_GUARD_BLOCK + "\n" + anchor, 1), True
+    return text, False
+
+
 def apply_py(text: str) -> tuple[str, bool]:
     if PY_MARKER in text:
         return text, False
@@ -619,6 +727,7 @@ def apply(text: str) -> tuple[str, bool]:
         apply_html,
         apply_adv,
         apply_adv_scroll,
+        apply_action_guard,
         apply_py,
     ):
         text, c = fn(text)
@@ -652,6 +761,9 @@ def verify(text: str) -> int:
     need("qy_adv_acc = gr.Accordion(" in text, "adv accordion named")
     need("qy_mode.change(" in text, "mode wires adv")
     need("qy_dir.change(" in text, "dir wires lang")
+    need(ACTION_GUARD_MARKER in text, "upload action guard")
+    need("_qy060_show_translate_action" in text, "translate action visibility callback")
+    need("outputs=[translate_btn]" in text, "translate action visibility output")
     need('elem_classes=["lang-row"], visible=False' in text, "lang-row hidden")
     need("min(55vh, 560px)" in text, "adv scroll override")
     need("min(38vh, 340px)" not in text, "old left-dock lock height must be overridden")
