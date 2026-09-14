@@ -37,6 +37,9 @@ RapidOCR → translate_texts → _analyze_box_style（含 _ink_geometry/_infer_a
 3. **`to_lang` 必须透传**——docx/custom_api 漏传会永远输出简体中文。
 3b. **译后强制术语**（PLAN-045a）——`sanitize_translated_text` 校正「皮肤清晰」及 `clear or almost clear` / `tralokinumab` 等短语。**禁止**把已有「每2周一次（Q2W）」再展成「每2周一次（每 2 周一次（Q2W））」；`Q2W`/`Q4W`/`IGA 0/1`/`EASI-75` 只进 prompt，不进译后强制。嵌套剂量式须塌回短写。
 3c. **文献摘要不得越框**——`doc_profiles.toml` literature `line_skip=1.25`；`patch_literature_typesetting` 裁掉画出段落框底的字。禁止为塞进术语而加长缩写，否则「目的」压进「背景」。
+3d. **孤立数据标记不译不并**——柱顶百分数、`n/N`（如 `77.8`、`14/18`）、轴刻度、`Q2W`/`Q4W` 禁止送译，禁止 `_group_vertical_runs` 并入邻框。并框会把 `65.5+38/58+Q2W` 写成 `65.538/58Q2W` 贴到柱上。
+3e. **图内题注与横轴必译**——`Figure N` / 面板标题 / `Time (weeks)` / `Patients at risk` 与纵轴同等必擦+画。禁止因 `ERASE_COVER_MIN` 把长英文题注整框跳过（中文常短于英文，覆盖率假低）。字号贴原文墨迹带高，禁过大过小；放不下则缩小到能放下，不跳过。
+3f. **题注整带擦除**——题注/轴标题用背景色填满原 OCR 框（加 `ERASE_PAD`），禁止半擦留英文。单框残留只放弃该框，禁止 `SOURCE_INK_LEFT` 整图熔断把图1/示意图打回原图。
 
 ### B. 取色与擦除（原则 1、2）
 
@@ -158,6 +161,10 @@ for i,b in enumerate(ocr_image(path),1):
 | 全屏裁底 | 嵌套 `.qy-viewer-inner` |
 | 双语左侧原文变中文 | 矢量框是否横跨整页；`_clip_rect_to_allowed` |
 | 摘要叠字 / Q2W 套娃 | `apply_forced_terms` 是否展开了缩写；literature 框裁切 |
+| 柱上出现 77.814/18 | `_group_vertical_runs` 是否把数据标记并进竖排 |
+| 图1/示意图整图英文 | 是否 C5 全跳过或 SOURCE_INK_LEFT 整图熔断 |
+| 图5 只有纵轴中文 | 横轴是否被 cover&lt;70% 跳过；`_is_must_draw_label` |
+| 题注英文残留/字过大 | 是否整框填背景；字号是否贴墨迹带高 |
 
 详表见 [reference.md](reference.md)；踩坑见 [pitfalls.md](pitfalls.md)。
 
@@ -166,6 +173,7 @@ for i,b in enumerate(ocr_image(path),1):
 
 - 竖排 OCR 多框必须先 `_group_vertical_runs` 再走旋转通道。
 - `PANEL_TIER` 全图统一中位字号；`TIER_K_FLOOR=0.95`，`FIGURE_TIER_MIN_PX=22`。
-- 擦除区译文覆盖率 ≥ `ERASE_COVER_MIN`（默认 0.70）才擦。
+- 擦除区译文覆盖率 ≥ `ERASE_COVER_MIN`（默认 0.70）才擦；**题注/轴标题豁免**，整带擦+缩小字号。
+- 孤立数据标记（`77.8`/`14/18`/`Q2W`）不进竖排聚合、不送译。
 - 左对齐：同 panel 墨迹左缘成组，不再要求右缘参差。
 - 进程边界见 SK-Q004——改本文件必须重启 sidecar。

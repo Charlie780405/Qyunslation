@@ -230,6 +230,22 @@ class TmUnit(Base):
     )
 
 
+class TmUnitEmbedding(Base):
+    """PLAN-055：tm_unit 旁路向量（JSON，非 pgvector）。"""
+
+    __tablename__ = "tm_unit_embedding"
+
+    unit_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tm_unit.id", ondelete="CASCADE"), primary_key=True
+    )
+    dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    vector: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
 # --- PLAN-034g 人工审校 ---
 
 

@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0.0",
+  "plan": "PLAN-052",
+  "description": "Local real-source registry for promote; no PDF binaries in git. windows_hint = operator laptop path; copy into GOLD_ROOT/inbox then promote. host_hint = Linux path if already synced.",
+  "inbox_rel": "inbox/{L,C,R}/",
+  "entries": [
+    {
+      "entry_id": "C-04",
+      "class": "C",
+      "kind": "protocol",
+      "status": "promoted",
+      "inbox_name": "STREAM-AD-Protocol.pdf",
+      "title": "STREAM-AD Phase 2b Protocol",
+      "host_hint": "/home/dev/.hermes/attachments/STREAM-AD-Protocol.pdf",
+      "windows_hint": "",
+      "extra_tags": ["protocol"]
+    },
+    {
+      "entry_id": "C-05",
+      "class": "C",
+      "kind": "protocol",
+      "status": "promoted",
+      "inbox_name": "SOLO1-2-Protocol.pdf",
+      "title": "SOLO1-2 Protocol",
+      "host_hint": "/home/dev/.hermes/desktop-attachments/SOLO1-2-Protocol.pdf",
+      "windows_hint": "",
+      "extra_tags": ["protocol"]
+    },
+    {
+      "entry_id": "C-06",
+      "class": "C",
+      "kind": "protocol",
+      "status": "promoted",
+      "inbox_name": "GS101-Phase1-Protocol-V1.0-20251023clean.docx",
+      "title": "GS101 Phase 1 Clinical Study Protocol V1.0 (景行 IND)",
+      "host_hint": "/home/dev/qyunslation/docs/Resources/GS101注射液1期临床研究方案-V1.0-20251023clean.docx",
+      "windows_hint": "d:\\景行生物\\IND NMPA\\GS101注射液临床试验申请临床资料-Final-20251023\\GS101注射液1期临床研究方案\\GS101注射液1期临床研究方案-V1.0-20251023clean.docx",
+      "extra_tags": ["protocol", "gs101", "ind"]
+    },
+    {
+      "entry_id": "C-07",
+      "class": "C",
+      "kind": "cdp",
+      "status": "promoted",
+      "inbox_name": "GS101-CDP-V1.0-20251023-Final-Clean.docx",
+      "title": "GS101 Clinical Development Plan V1.0 (景行 IND)",
+      "host_hint": "/home/dev/qyunslation/docs/Resources/GS101注射液临床开发计划-V1.0-20251023-Final-Clean.docx",
+      "windows_hint": "d:\\景行生物\\IND NMPA\\GS101注射液临床试验申请临床资料-Final-20251023\\GS101注射液临床开发计划\\GS101注射液临床开发计划-V1.0-20251023-Final-Clean.docx",
+      "extra_tags": ["cdp", "clinical", "gs101", "ind"]
+    },
+    {
+      "entry_id": "R-01",
+      "class": "R",
+      "kind": "ctd-m2",
+      "status": "promoted",
+      "inbox_name": "GS101-Clinical-Overview-V1.0-20251023-Final-Clean.docx",
+      "title": "GS101 Clinical Overview / CTD M2.5 V1.0 (景行 IND)",
+      "host_hint": "/home/dev/qyunslation/docs/Resources/GS101注射液临床综述-V1.0-20251023-Final-Clean.docx",
+      "windows_hint": "d:\\景行生物\\IND NMPA\\GS101注射液临床试验申请临床资料-Final-20251023\\GS101注射液临床综述\\GS101注射液临床综述-V1.0-20251023-Final-Clean.docx",
+      "extra_tags": ["ctd-m2", "m2-5", "clinical-overview", "gs101", "ind"]
+    },
+    {
+      "entry_id": "R-02",
+      "class": "R",
+      "kind": "ctd-m2",
+      "status": "pending",
+      "inbox_name": "R-02-ctd-m2.pdf",
+      "title": "CTD Module 2 slot pending",
+      "host_hint": "",
+      "windows_hint": "",
+      "extra_tags": ["ctd-m2"]
+    }
+  ]
+}

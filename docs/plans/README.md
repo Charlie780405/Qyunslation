@@ -30,5 +30,13 @@
 | PLAN-047 | [PLAN-047-delivery-loop-fidelity](./PLAN-047-delivery-loop-fidelity/) | 交付闭环 |
 | PLAN-048 | [PLAN-048-table-hpd-grid](./PLAN-048-table-hpd-grid/) | HPD 逻辑网格 |
 | PLAN-049 | [PLAN-049-literature-table-leave-babeldoc](./PLAN-049-literature-table-leave-babeldoc/) | 文献三线表交还 BabelDOC |
+| **PLAN-050** | [PLAN-050-qyunslation-ui-ux](./PLAN-050-qyunslation-ui-ux/) | **中英医药翻译工作台 UI/UX** |
+| **PLAN-051** | [PLAN-051-gold-pharma-mqm](./PLAN-051-gold-pharma-mqm/) | **金标整本 Pharma-MQM 门** |
+| **PLAN-052** | [PLAN-052-gold-real-fill](./PLAN-052-gold-real-fill/) | **金标真件补齐（promote/inbox）** |
+| **PLAN-053** | [PLAN-053-saas-caddy-expose](./PLAN-053-saas-caddy-expose/) | **SaaS 接线（Caddy 对外 /api/v1）** |
+| **PLAN-054** | [PLAN-054-company-idp](./PLAN-054-company-idp/) | **正式公司 IdP（自建 Authentik）** |
+| **PLAN-055** | [PLAN-055-tm-vector-embed](./PLAN-055-tm-vector-embed/) | **TM 向量 + 泰州 bge-m3 MCP** |
+| **PLAN-056** | [PLAN-056-appbar-inspector-ux](./PLAN-056-appbar-inspector-ux/) | **应用栏方向开关 + 检查器/帮助可见性** |
+| **PLAN-057** | [PLAN-057-chrome-dedupe](./PLAN-057-chrome-dedupe/) | **去掉方向/帮助/检查器双入口 + 高级区滚动** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。

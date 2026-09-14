@@ -1,5 +1,19 @@
 # SK-Q009 踩坑
 
+## 2026-09-14 / 第一列格线不贯穿、表2 右栏线缺
+
+- **现象**：表3 剂量/Q2W 列底下没有横线；表2 三线只画到因素列，% 列悬空
+- **根因**：OUP 把一条三线切成多段。`_horizontal_lines` 先用页宽 10% 丢掉短段（表3 左段 26pt、表2 右段 52pt），再按 y 合并，整条线 x0/x1 被截。`table_rule_lines` 又按检测 bbox 再截一次。
+- **修法**：短段先收再合并，合并后才用页宽阈值；restore 用完整 x，不按 bbox 裁
+- **判据**：表3 线 x0≤68；表2 线 x1≥280
+
+## 2026-09-14 / 折行表头每行重写 → 剂量重复、访视空、末列名错
+
+- **现象**：表3 数据已分列，表头仍糊：`剂量` 出现两列；第 2 列不是「访视」；末列不是「伴ADA访视的EASI」（英文 `EASI at visit with ADA`）
+- **根因**：原文表头折两行（上行 `IGA at visit`/`EASI at visit`/`Tralokinumab`，下行 `Dose`/`Visit with ADA`/`with ADA`）。旧逻辑对**每一 origin 行**各画一遍 `header_slots`。下行访视列若只有 `with ADA` 被 `_header_skip_cell` 跳过，该槽不落「访视」，BabelDOC 段流残留的「剂量」露出来，看起来像剂量重复。末列规范写成了「访视时 EASI」，丢掉 with ADA。
+- **修法**：`merge_origin_header_cells` + `header_texts_from_merged` 并折行后**每槽一次**；七槽=`剂量/访视/ADA/nAb/曲罗芦单抗浓度/伴ADA访视的IGA/伴ADA访视的EASI`；「剂量」只允许槽 0
+- **判据**：`texts.count("剂量")==1`；`texts[1]==访视`；`texts[6]==伴ADA访视的EASI`；表头 job 一条
+
 ## 2026-09-12 PLAN-049j / 小数贪心切错 + 七列塌观感
 
 - **现象**：`90.0111`/`20.422`；表头无 IGA/EASI；第二行空；`Q4WS`+`afetyFU`
@@ -48,6 +62,12 @@
 - **根因**：047d 合并同行短数字 → BabelDOC 列塌；`.tbltr` 再整区擦除重画
 - **修法**：文献 `literature_leave_babeldoc`；047d `_numeric_cell` 不合并；窄表只调字号
 - **判据**：文献宽表不写涂改 `.tbltr`；重译表1/3 列对齐接近第一次
+
+## 2026-09-14 表底脚注被当成第二行表头
+
+- **现象**：表3 七列表头对了，但底线下方又出现一行「剂量/访视/…/伴ADA访视的EASI」，盖住 EASI/IGA/FU 缩写注释。
+- **根因**：原文脚注 `EASI, Eczema Area…` 被切碎后 `_is_table_header_line` 仍判 True，`flush_header()` 再写一遍规范七槽。
+- **修法**：`_is_table_footnote_line`；已有 header job 后不再积累第二段表头。
 
 ## 2026-09-12 PLAN-048 / ljae439（BJD/OUP 三线表）
 

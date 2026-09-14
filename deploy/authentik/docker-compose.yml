@@ -1,0 +1,91 @@
+# PLAN-054：Authentik（独立栈，不并入 qyunsgen 主 compose）
+# 基于官方 2025.10 compose；仅绑定 127.0.0.1:9000，TLS 由 Caddy 终结。
+services:
+  postgresql:
+    image: docker.io/library/postgres:16-alpine
+    container_name: qyunslation-authentik-pg
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${PG_DB:-authentik}
+      POSTGRES_PASSWORD: ${PG_PASS:?database password required}
+      POSTGRES_USER: ${PG_USER:-authentik}
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_period: 20s
+      test:
+        - CMD-SHELL
+        - pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
+      timeout: 5s
+    volumes:
+      - database:/var/lib/postgresql/data
+    networks:
+      - authentik
+
+  server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.10.4}
+    container_name: qyunslation-authentik-server
+    restart: unless-stopped
+    command: server
+    env_file:
+      - .env
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?secret key required}
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:-https://auth.qyunsgen.com/}
+    volumes:
+      - ./media:/media
+      - ./custom-templates:/templates
+      - ./blueprints:/blueprints/custom
+    ports:
+      - "127.0.0.1:9000:9000"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    networks:
+      - authentik
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.10.4}
+    container_name: qyunslation-authentik-worker
+    restart: unless-stopped
+    command: worker
+    user: root
+    env_file:
+      - .env
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?secret key required}
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:-https://auth.qyunsgen.com/}
+    volumes:
+      - ./media:/media
+      - ./certs:/certs
+      - ./custom-templates:/templates
+      - ./blueprints:/blueprints/custom
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    networks:
+      - authentik
+
+volumes:
+  database:
+    driver: local
+
+networks:
+  authentik:
+    name: qyunslation-authentik

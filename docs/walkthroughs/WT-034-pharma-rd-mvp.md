@@ -30,6 +30,7 @@ bash scripts/verify-plan-034.sh
 
 - 金标 PDF 不入库；本机 `GOLD_ROOT` / 合成物化。
 - 034h 金标门跑 034a 目录骨架评估，不是整本 Pharma-MQM 重译。
+- **产品完成线（整本 Pharma-MQM）改看 [PLAN-051](../plans/PLAN-051-gold-pharma-mqm/PLAN-051-gold-pharma-mqm.md) / [WT-051](./WT-051-gold-pharma-mqm.md)**；真件补齐见 [WT-052](./WT-052-gold-real-fill.md)（本机 R-01 M2.5 已 promote）。
 - Ollama 不可达时 034f 记 BLOCKED；本机 `.env` 的 endpoint 会被 verify 读取。
 - PWA 仅缓存静态壳，不离线翻译。
 - OIDC 生产需配置 issuer/audience/JWKS；不自动推 `main`。

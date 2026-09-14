@@ -27,6 +27,11 @@ qyunslation/output/
 .env
 var/oidc/
 
+# PLAN-054 Authentik 本机密文与运行时数据
+deploy/authentik/.env
+deploy/authentik/media/
+deploy/authentik/certs/
+
 # PLAN-034h release fingerprints (local only)
 artifacts/
 

@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
+# PLAN-054b：qyunslation OIDC Provider + Application + tenant ScopeMapping
+# 注：2025.10 要求 redirect_uris；若文件挂载 apply 失败，用 scripts/plan054-apply-blueprint.sh（API）幂等落地。
+version: 1
+metadata:
+  name: qyunslation-oidc
+  labels:
+    blueprints.goauthentik.io/description: "PLAN-054 qyunslation SaaS API OIDC"
+entries:
+  - model: authentik_providers_oauth2.scopemapping
+    id: scope-tenant
+    state: present
+    identifiers:
+      managed: goauthentik.io/qyunslation/scope-tenant
+    attrs:
+      name: "qyunslation OAuth Mapping: tenant"
+      scope_name: tenant
+      description: "Tenant slug for qyunslation IdentityContext"
+      expression: |
+        return {
+            "tenant": request.user.attributes.get("tenant", "pilot"),
+        }
+
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider
+    state: present
+    identifiers:
+      name: qyunslation
+    attrs:
+      name: qyunslation
+      client_type: confidential
+      client_id: qyunslation
+      client_secret: !Env [QYUNSLATION_OIDC_CLIENT_SECRET, change-me-qyunslation-client-secret]
+      redirect_uris:
+        - url: https://translate.qyunsgen.com/oauth2/callback
+          matching_mode: strict
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+      access_code_validity: minutes=1
+      access_token_validity: hours=1
+      refresh_token_validity: days=30
+      include_claims_in_id_token: true
+      sub_mode: hashed_user_id
+      issuer_mode: per_provider
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/qyunslation/scope-tenant]]
+
+  - model: authentik_core.application
+    id: app
+    state: present
+    identifiers:
+      slug: qyunslation
+    attrs:
+      name: qyunslation
+      slug: qyunslation
+      meta_launch_url: https://translate.qyunsgen.com/api/v1/health
+      open_in_new_tab: false
+      provider: !KeyOf provider
+      policy_engine_mode: any

@@ -197,56 +197,61 @@
     {
       "id": "C-04",
       "class": "C",
-      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-04",
+      "title": "STREAM-AD Phase 2b Protocol",
       "format": "pdf",
       "lang_pair": "en→zh",
-      "sha256": "c4f19f2d379d00846c22129587cb3686d8c03abf6fac538b0d2a839ec555fd61",
+      "sha256": "c0c4e196259cd852895701a0fae16578f7b65a11dc53af9b235bf669c573ff38",
       "relpath": "C-04.pdf",
       "tags": [
-        "synthetic",
-        "synthetic-slot"
+        "real",
+        "protocol"
       ],
       "status": "ready"
     },
     {
       "id": "C-05",
       "class": "C",
-      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-05",
+      "title": "SOLO1-2 Protocol",
       "format": "pdf",
       "lang_pair": "en→zh",
-      "sha256": "10d7ce87fb899f33ba3ad2c871204241c365cf5ed0adbf2ec225b51f0130537f",
+      "sha256": "53ac6532b15480a1ebd55cb8028eb6e7341103c9874b4b68ab3c9459a73e28f3",
       "relpath": "C-05.pdf",
       "tags": [
-        "synthetic",
-        "synthetic-slot"
+        "real",
+        "protocol"
       ],
       "status": "ready"
     },
     {
       "id": "C-06",
       "class": "C",
-      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-06",
+      "title": "GS101 Phase 1 Clinical Study Protocol V1.0 (景行 IND)",
       "format": "pdf",
       "lang_pair": "en→zh",
-      "sha256": "350baacdb20f4754acbeac06ce32ab3d71d9af24a2f5d45560fc79b6d257603e",
+      "sha256": "4767f88bfc196570dd78e82b413043baa133bfd2901af845e79b8ccdffe63e0b",
       "relpath": "C-06.pdf",
       "tags": [
-        "synthetic",
-        "synthetic-slot"
+        "real",
+        "protocol",
+        "gs101",
+        "ind"
       ],
       "status": "ready"
     },
     {
       "id": "C-07",
       "class": "C",
-      "title": "Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-07",
+      "title": "GS101 Clinical Development Plan V1.0 (景行 IND)",
       "format": "pdf",
       "lang_pair": "en→zh",
-      "sha256": "8bcfd9e7764c311c5fec97e66508c4c4fa9369e670ea1631011ee7e252932340",
+      "sha256": "d2ef9218680de9172249281e96ab11b2489a9e7c30cb8f3f8650a2c6a17db02f",
       "relpath": "C-07.pdf",
       "tags": [
-        "synthetic",
-        "synthetic-slot"
+        "real",
+        "cdp",
+        "clinical",
+        "gs101",
+        "ind"
       ],
       "status": "ready"
     },
@@ -295,15 +300,18 @@
     {
       "id": "R-01",
       "class": "R",
-      "title": "CTD Module 2 Quality Overall Summary placeholder 01",
+      "title": "GS101 Clinical Overview / CTD M2.5 V1.0 (景行 IND)",
       "format": "pdf",
       "lang_pair": "en→zh",
-      "sha256": "75476d7b0d2744db34b447b2c95e552e1c261c72e647475568d30eb348775adb",
+      "sha256": "f3e5887ab75c3b576e3b8ebb0aac40b970314887245c6c708b7b1ca516179284",
       "relpath": "R-01.pdf",
       "tags": [
-        "synthetic",
-        "synthetic-slot",
-        "ctd-m2"
+        "real",
+        "ctd-m2",
+        "m2-5",
+        "clinical-overview",
+        "gs101",
+        "ind"
       ],
       "status": "ready"
     },

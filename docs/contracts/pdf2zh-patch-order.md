@@ -34,6 +34,7 @@
 | 28 | `apply-pdf2zh-fidelity-033h.py` | 033h 保真 |
 | 29 | `apply-pdf2zh-045c-sanitize.py` | **045c** IL span/id 消毒 |
 | 30 | `apply-pdf2zh-042b-short-label.py` | **042b** 短标签/固定字段译前直替 |
+| 31 | `apply-pdf2zh-050-workbench.py` | **050** 工作台壳层/检查器/响应式 |
 
 部署前自检：
 

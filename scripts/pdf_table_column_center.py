@@ -452,7 +452,7 @@ def hpd_column_ranges(origin_page, rect, *, grid=None) -> list[tuple[float, floa
 
 
 def table_rule_lines(page, rect) -> list[tuple[float, float, float]]:
-    """表区内足够长的横线 (x0, x1, y)。"""
+    """表区横线 (x0, x1, y)。保留并段后的完整 x（第一列短段、表2 右栏），不按 bbox 截断。"""
     try:
         from qyunslation.structure.tables import _horizontal_lines
     except Exception:
@@ -462,7 +462,7 @@ def table_rule_lines(page, rect) -> list[tuple[float, float, float]]:
     out: list[tuple[float, float, float]] = []
     for lx0, lx1, y in _horizontal_lines(page):
         if y0 - 3.0 <= y <= y1 + 3.0 and min(lx1, x1) - max(lx0, x0) >= 0.35 * width:
-            out.append((max(lx0, x0 - 1.0), min(lx1, x1 + 1.0), y))
+            out.append((lx0, lx1, y))
     return out
 
 
@@ -710,6 +710,18 @@ def lock_visit_column(texts: list[str], origin_cells: list[str]) -> list[str]:
     return out
 
 
+# 表3（ADA 七列）规范表头。折行英文是 Dose | Visit with ADA | … | EASI at visit with ADA。
+ADA7_HEADER_SLOTS = (
+    "剂量",
+    "访视",
+    "ADA",
+    "nAb",
+    "曲罗芦单抗浓度",
+    "伴ADA访视的IGA",
+    "伴ADA访视的EASI",
+)
+
+
 def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
     """从 dest 表头段流按关键词舀入列槽。表1=4；表3≥6 强制 7 槽（含 EASI）。"""
     slots = [""] * max(n_cols, 0)
@@ -723,13 +735,13 @@ def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
     if n_cols < 6:
         return slots
     rules = [
-        (5, r"访视时\s*IGA"),
-        (6, r"访视时\s*EASI"),
-        (4, r"曲罗芦单抗|浓度\s*\(?\s*μg|浓度\s*\(?\s*ug"),
+        (5, r"伴ADA访视的IGA|IGA\s*at\s*visit|访视时\s*IGA"),
+        (6, r"伴ADA访视的EASI|EASI\s*at\s*visit|访视时\s*EASI"),
+        (4, r"曲罗芦单抗|浓度\s*\(?\s*μg|浓度\s*\(?\s*ug|Tralok|concentration"),
         (3, r"nAb"),
-        (2, r"ADA"),
-        (0, r"剂量"),
-        (1, r"访视(?!时)"),
+        (2, r"(?<![A-Za-z])ADA(?![A-Za-z])"),
+        (0, r"剂量|Dose"),
+        (1, r"Visit with ADA|访视(?!时)"),
     ]
     for idx, pat in rules:
         if idx >= n_cols or slots[idx]:
@@ -738,13 +750,13 @@ def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
         if not m:
             continue
         if idx == 4:
-            slots[idx] = "浓度 (μg mL-1)" if re.search(r"浓度|μg|ug", s, re.I) else "曲罗芦单抗"
-            if "曲罗芦单抗" in s and "浓度" in s:
+            slots[idx] = "浓度 (μg mL-1)" if re.search(r"浓度|μg|ug|conc", s, re.I) else "曲罗芦单抗"
+            if re.search(r"曲罗芦单抗|Tralok", s, re.I) and re.search(r"浓度|conc", s, re.I):
                 slots[idx] = "曲罗芦单抗浓度"
         elif idx == 5:
-            slots[idx] = "访视时 IGA"
+            slots[idx] = "伴ADA访视的IGA"
         elif idx == 6:
-            slots[idx] = "访视时 EASI"
+            slots[idx] = "伴ADA访视的EASI"
         elif idx == 3:
             slots[idx] = "nAb"
         elif idx == 2:
@@ -755,25 +767,37 @@ def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
             slots[idx] = "访视"
     # 049j：≥6 列也按七槽默认填满（HPD 偶发 6）
     if n_cols >= 6:
-        defaults = [
-            "剂量",
-            "访视",
-            "ADA",
-            "nAb",
-            "曲罗芦单抗浓度",
-            "访视时 IGA",
-            "访视时 EASI",
-        ]
-        for i, label in enumerate(defaults):
+        for i, label in enumerate(ADA7_HEADER_SLOTS):
             if i < n_cols and not slots[i]:
                 slots[i] = label
     return slots
+
+
+_FOOTNOTE_GLOSS = re.compile(
+    r"Eczema|Investigator|follow-?up|eczema area|"
+    r"湿疹|研究者总体|中和抗体|不适用|"
+    r"EASI.{0,12}(FU|IGA)|FU.{0,12}IGA",
+    re.I,
+)
+
+
+def _is_table_footnote_line(ocels: list[str], otext: str) -> bool:
+    """表底缩写注释：EASI, Eczema Area… 不得当第二行表头重画。"""
+    blob = " ".join(t for t in ocels if t) + " " + (otext or "")
+    if _FOOTNOTE_GLOSS.search(blob):
+        return True
+    shorts = [t for t in ocels if t and len(t.strip()) <= 4]
+    if len(shorts) >= 4 and not re.search(r"Dose|Visit with ADA|Tralok", blob, re.I):
+        return True
+    return False
 
 
 def _is_table_header_line(ocels: list[str], otext: str) -> bool:
     joined = " ".join(t for t in ocels if t)
     # Q2W 在药名表头合法；数据访视（第N周/Safety）才排除
     if re.search(r"第\d+周|安全性随访|Week\s*\d+|Safety\s*FU", joined, re.I):
+        return False
+    if _is_table_footnote_line(ocels, otext):
         return False
     if any(re.search(r"N\s*=", t or "", re.I) for t in ocels):
         return False
@@ -783,9 +807,65 @@ def _is_table_header_line(ocels: list[str], otext: str) -> bool:
 
 
 def _header_skip_cell(text: str) -> bool:
-    t = normalize_ascii(text or "")
-    # 孤立 a / A（脚注标、表头误粘）不入槽
-    return bool(re.fullmatch(r"with ADA|a|A", t, re.I))
+    t = normalize_ascii(text or "").strip()
+    # 折行残片：不得单独成槽，更不得把「剂量」再写入访视列
+    return bool(
+        re.fullmatch(
+            r"with ADA|at visit(?: with ADA)?|a|A|concentration \(|"
+            r"μg mL-1|µg mL-1|g mL|-1|\)",
+            t,
+            re.I,
+        )
+    )
+
+
+def merge_origin_header_cells(
+    header_lines: list[list[dict]], cols: list[tuple[float, float]]
+) -> list[str]:
+    """把折成两行的英文表头并成一格/列（Dose + Visit with ADA + IGA at visit / with ADA）。"""
+    merged = [""] * len(cols)
+    for ln in header_lines:
+        cells = _cells_by_col(ln, cols)
+        for i, t in enumerate(cells):
+            piece = (t or "").strip()
+            if not piece:
+                continue
+            if not merged[i]:
+                merged[i] = piece
+            elif piece.lower() not in merged[i].lower():
+                merged[i] = f"{merged[i]} {piece}".strip()
+    return merged
+
+
+def header_texts_from_merged(merged: list[str], header_slots: list[str]) -> list[str]:
+    """每个列槽只写一次规范表头。折行残片不另起一行，也不复用「剂量」。"""
+    n = max(len(merged), len(header_slots))
+    texts = [""] * n
+    for i in range(n):
+        ocell = merged[i] if i < len(merged) else ""
+        slot = header_slots[i] if i < len(header_slots) else ""
+        if not ocell and not slot:
+            continue
+        ol = ocell.lower()
+        if i == 4 and ("tralok" in ol or "conc" in ol or "μg" in ol or "ml" in ol):
+            texts[i] = (
+                "曲罗芦单抗浓度"
+                if ("tralok" in ol or "曲罗" in slot)
+                else "浓度 (μg mL-1)"
+            )
+        else:
+            texts[i] = slot
+    if len(header_slots) >= 6:
+        for i, label in enumerate(header_slots):
+            if i < n and label and not texts[i]:
+                texts[i] = label
+    # 剂量只能出现在第 0 槽
+    for i, t in enumerate(texts):
+        if i != 0 and t == "剂量":
+            texts[i] = header_slots[i] if i < len(header_slots) and header_slots[i] != "剂量" else ""
+            if i == 1 and not texts[i]:
+                texts[i] = "访视"
+    return texts
 
 
 def _origin_body_size(spans: list[dict], fallback: float = 8.0) -> float:
@@ -1027,6 +1107,33 @@ def center_table_region(
     jobs: list[dict] = []
     skipped = 0
     prev_ocels: list[str] | None = None
+    pending_header: list[int] = []
+
+    def flush_header() -> None:
+        nonlocal prev_ocels
+        if not pending_header:
+            return
+        lines = [origin_lines[i] for i in pending_header]
+        merged = merge_origin_header_cells(lines, cols)
+        texts = header_texts_from_merged(merged, header_slots)
+        oy0_h = min(min(s["bbox"][1] for s in ln) for ln in lines)
+        oy1_h = max(max(s["bbox"][3] for s in ln) for ln in lines)
+        if any(texts):
+            jobs.append(
+                {
+                    "spans": dest_groups.get(pending_header[0]) or lines[0],
+                    "texts": texts,
+                    "size": _origin_body_size(lines[0]),
+                    "ocy": (oy0_h + oy1_h) / 2.0,
+                    "oy0": oy0_h,
+                    "oy1": oy1_h,
+                    "origin_y1": oy1_h,
+                    "header": True,
+                }
+            )
+        prev_ocels = merged
+        pending_header.clear()
+
     for oi, oline in enumerate(origin_lines):
         otext = _join(oline)
         ocy = _mean_cy(oline)
@@ -1037,37 +1144,11 @@ def center_table_region(
         oy1_line = max(s["bbox"][3] for s in oline)
         size = _origin_body_size(oline)
         if _is_table_header_line(ocels, otext):
-            texts = [""] * len(ocels)
-            for i, ocell in enumerate(ocels):
-                if not ocell or _header_skip_cell(ocell):
-                    continue
-                slot = header_slots[i] if i < len(header_slots) else ""
-                ol = ocell.lower()
-                if i == 4 and ("tralok" in ol or "曲罗" in slot):
-                    texts[i] = (
-                        "浓度 (μg mL-1)"
-                        if ("conc" in ol or "μg" in ol or "ml" in ol)
-                        else "曲罗芦单抗"
-                    )
-                elif i in (5, 6) and "with ada" in ol and "iga" not in ol and "easi" not in ol:
-                    continue
-                else:
-                    texts[i] = slot
-            if any(texts):
-                jobs.append(
-                    {
-                        "spans": dest_groups.get(oi) or oline,
-                        "texts": texts,
-                        "size": size,
-                        "ocy": ocy,
-                        "oy0": oy0_line,
-                        "oy1": oy1_line,
-                        "origin_y1": oy1_line,
-                        "header": True,
-                    }
-                )
-            prev_ocels = ocels
+            if any(j.get("header") for j in jobs):
+                continue
+            pending_header.append(oi)
             continue
+        flush_header()
         if sum(1 for t in ocels[1:] if t) < 1 and _digit_clusters(oline) < 2:
             continue
         if sum(1 for t in ocels if t) < 2:
@@ -1243,6 +1324,8 @@ def center_table_region(
             }
         )
         prev_ocels = ocels
+
+    flush_header()
 
     if not jobs:
         restyled = unify_region_font(dest_page, dest_rect)

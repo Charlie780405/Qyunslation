@@ -344,6 +344,25 @@ def test_restore_rule_lines_completes_bottom():
     ddoc.close()
 
 
+def test_restore_rule_lines_keeps_first_col_stub():
+    """短左段 + 长右段并成一条后，重描必须穿过第一列。"""
+    from pdf_table_column_center import restore_rule_lines, table_rule_lines
+
+    odoc = pymupdf.open()
+    origin = odoc.new_page(width=600, height=200)
+    origin.draw_line((67, 80), (93, 80), width=0.5)
+    origin.draw_line((93, 80), (520, 80), width=0.5)
+    ddoc = pymupdf.open()
+    dest = ddoc.new_page(width=600, height=200)
+    dest.draw_line((93, 80), (520, 80), width=0.5)
+    n = restore_rule_lines(dest, origin, (90, 70, 530, 100))
+    assert n >= 1
+    lines = table_rule_lines(dest, (90, 70, 530, 100))
+    assert lines and min(ln[0] for ln in lines) <= 68.0
+    odoc.close()
+    ddoc.close()
+
+
 def test_header_slots_seven_cols():
     from pdf_table_column_center import header_slots_from_blob
 
@@ -354,8 +373,8 @@ def test_header_slots_seven_cols():
     assert slots[2] == "ADA"
     assert slots[3] == "nAb"
     assert "浓度" in slots[4] or "曲罗" in slots[4]
-    assert slots[5] == "访视时 IGA"
-    assert slots[6] == "访视时 EASI"
+    assert slots[5] == "伴ADA访视的IGA"
+    assert slots[6] == "伴ADA访视的EASI"
 
 
 def test_header_slots_four_cols_and_force_easi():
@@ -366,8 +385,8 @@ def test_header_slots_four_cols_and_force_easi():
     assert t1[2] == "曲罗芦单抗 Q4W"
     assert t1[3] == "安慰剂 Q2W"
     forced = header_slots_from_blob("剂量 ADA nAb 访视 曲罗芦单抗", 7)
-    assert forced[6] == "访视时 EASI"
-    assert forced[5] == "访视时 IGA"
+    assert forced[6] == "伴ADA访视的EASI"
+    assert forced[5] == "伴ADA访视的IGA"
 
 
 def test_header_n_eq_texts_from_origin():
@@ -600,7 +619,8 @@ def test_replay_ffc3_mono_table3_seven_cols():
     odoc.close()
     ddoc = pymupdf.open(out)
     spans = []
-    for block in (ddoc[6].get_text("dict", clip=pymupdf.Rect(rect)) or {}).get("blocks") or []:
+    clip = pymupdf.Rect(55, 70, 545, 255)
+    for block in (ddoc[6].get_text("dict", clip=clip) or {}).get("blocks") or []:
         if block.get("type") != 0:
             continue
         for line in block.get("lines") or []:
@@ -609,24 +629,29 @@ def test_replay_ffc3_mono_table3_seven_cols():
                 if not t:
                     continue
                 bb = sp["bbox"]
-                spans.append(((bb[0] + bb[2]) / 2.0, t))
+                spans.append(((bb[0] + bb[2]) / 2.0, (bb[1] + bb[3]) / 2.0, t))
     ddoc.close()
-    assert not any(re.search(r"\d+\.\d{3,}", t) for _, t in spans)
-    texts = {t for _, t in spans}
+    assert not any(re.search(r"\d+\.\d{3,}", t) for _, _, t in spans)
+    texts = {t for _, _, t in spans}
     assert "90.0" in texts
     assert "11.2" in texts
     assert "20.4" in texts
     assert "2.3" in texts
-    iga = [cx for cx, t in spans if "IGA" in t]
-    easi = [cx for cx, t in spans if "EASI" in t]
+    iga = [cx for cx, cy, t in spans if cy < 110 and "伴ADA访视的IGA" in t]
+    easi = [cx for cx, cy, t in spans if cy < 110 and "伴ADA访视的EASI" in t]
     assert iga and easi and abs(iga[0] - easi[0]) > 20
     visit_alone = [
         cx
-        for cx, t in spans
-        if t == "访视" or (t.startswith("访视") and "IGA" not in t and "EASI" not in t)
+        for cx, cy, t in spans
+        if cy < 110
+        and (t == "访视" or (t.startswith("访视") and "IGA" not in t and "EASI" not in t))
     ]
     assert visit_alone
     assert max(visit_alone) < 200
+    assert not any(
+        cy > 230 and (t == "访视" or "伴ADA访视的" in t or t in {"剂量", "剂量"})
+        for _, cy, t in spans
+    )
 
 
 def test_header_slots_six_cols_force_seven_defaults():
@@ -635,6 +660,69 @@ def test_header_slots_six_cols_force_seven_defaults():
     slots = header_slots_from_blob("剂量 ADA nAb 曲罗芦单抗", 6)
     assert slots[0] == "剂量"
     assert slots[1] == "访视"
-    assert slots[5] == "访视时 IGA"
+    assert slots[5] == "伴ADA访视的IGA"
     assert _header_skip_cell("A") is True
     assert _header_skip_cell("a") is True
+    assert _header_skip_cell("with ADA") is True
+    assert _header_skip_cell("at visit with ADA") is True
+
+
+def test_ada7_header_merge_once_no_duplicate_dose():
+    from pdf_table_column_center import (
+        header_slots_from_blob,
+        header_texts_from_merged,
+        merge_origin_header_cells,
+    )
+
+    cols = [(0, 40), (40, 90), (90, 120), (120, 150), (150, 230), (230, 300), (300, 370)]
+
+    def sp(x0, x1, y0, y1, text):
+        return {
+            "bbox": (x0, y0, x1, y1),
+            "cx": (x0 + x1) / 2,
+            "cy": (y0 + y1) / 2,
+            "text": text,
+            "size": 8.0,
+        }
+
+    top = [
+        sp(160, 220, 0, 8, "Tralokinumab"),
+        sp(240, 290, 0, 8, "IGA at visit"),
+        sp(310, 360, 0, 8, "EASI at visit"),
+    ]
+    bot = [
+        sp(2, 38, 10, 18, "Dose"),
+        sp(42, 88, 10, 18, "Visit with ADA"),
+        sp(92, 118, 10, 18, "ADA"),
+        sp(122, 148, 10, 18, "nAb"),
+        sp(152, 228, 10, 18, "concentration (μg mL-1)"),
+        sp(232, 298, 10, 18, "with ADA"),
+        sp(302, 368, 10, 18, "with ADA"),
+    ]
+    merged = merge_origin_header_cells([top, bot], cols)
+    assert "Dose" in merged[0]
+    assert "Visit" in merged[1]
+    slots = header_slots_from_blob(" ".join(merged), 7)
+    texts = header_texts_from_merged(merged, slots)
+    assert texts.count("剂量") == 1
+    assert texts[0] == "剂量"
+    assert texts[1] == "访视"
+    assert texts[6] == "伴ADA访视的EASI"
+    assert texts[5] == "伴ADA访视的IGA"
+
+
+def test_footnote_line_is_not_header():
+    from pdf_table_column_center import _is_table_footnote_line, _is_table_header_line
+
+    ocels = [
+        "EASI E",
+        "A d S it",
+        "I d FU f ll",
+        "IGA I ti t",
+        "Gl b l A t",
+        "NA t li bl",
+        "Ab t li i",
+    ]
+    otext = "EASI Eczema Area and Severity Index FU follow-up IGA Investigator"
+    assert _is_table_footnote_line(ocels, otext) is True
+    assert _is_table_header_line(ocels, otext) is False

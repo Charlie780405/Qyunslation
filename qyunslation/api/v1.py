@@ -375,6 +375,7 @@ class TmLookupRequest(BaseModel):
     tgt_lang: str = Field(default="zh", max_length=16)
     fuzzy_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     fuzzy_limit: int = Field(default=5, ge=0, le=20)
+    semantic_limit: int = Field(default=5, ge=0, le=20)
 
 
 class TmImportBody(BaseModel):
@@ -442,6 +443,7 @@ def tm_lookup_api(
         project_id=body.project_id,
         fuzzy_threshold=body.fuzzy_threshold,
         fuzzy_limit=body.fuzzy_limit,
+        semantic_limit=body.semantic_limit,
     )
 
 

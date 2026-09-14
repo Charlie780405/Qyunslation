@@ -85,6 +85,8 @@ def capability_probe() -> dict:
         "tier_k_floor": TIER_K_FLOOR,
         "has_vertical_run_group": True,
         "erase_cover_min": ERASE_COVER_MIN,
+        "has_data_mark_guard": True,
+        "has_caption_must_draw": True,
     }
 
 
@@ -1040,6 +1042,28 @@ def _wipe_remaining_source_ink(
     return wiped
 
 
+def _box_source_ink_left(
+    img_cv: np.ndarray, orig: np.ndarray, box, style: dict
+) -> bool:
+    """单框：擦后原文墨迹是否仍成片残留。"""
+    x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+    roi_o = orig[y1:y2, x1:x2]
+    roi = img_cv[y1:y2, x1:x2]
+    if roi.size == 0 or roi_o.size == 0:
+        return False
+    bg = tuple(int(c) for c in style.get("bg_bgr", (255, 255, 255)))
+    tm = _text_mask_u8(roi_o, heavy=True)
+    if not tm.size or int(tm.max()) == 0:
+        return False
+    g = _line_guard_mask(roi_o, bg, _text_mask_u8(roi_o, heavy=False))
+    still = (tm > 0) & (
+        np.abs(roi.astype(np.int16) - np.array(bg, dtype=np.int16)).max(axis=2) > 40
+    )
+    if g.size and int(g.max()) > 0:
+        still = still & (g == 0)
+    return int(still.sum()) >= 40
+
+
 def _source_ink_still_present(
     img_cv: np.ndarray,
     orig: np.ndarray,
@@ -1048,27 +1072,9 @@ def _source_ink_still_present(
     redraw: list[bool],
     texts: list[str],
 ) -> bool:
-    """PLAN-045d：两轮擦除后若源文墨迹仍在，触发单图熔断。"""
+    """PLAN-045d：两轮擦除后若源文墨迹仍在。"""
     for i, b in enumerate(boxes):
-        if not redraw[i]:
-            continue
-        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
-        roi_o = orig[y1:y2, x1:x2]
-        roi = img_cv[y1:y2, x1:x2]
-        if roi.size == 0 or roi_o.size == 0:
-            continue
-        bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
-        tm = _text_mask_u8(roi_o, heavy=True)
-        if not tm.size or int(tm.max()) == 0:
-            continue
-        g = _line_guard_mask(roi_o, bg, _text_mask_u8(roi_o, heavy=False))
-        still = (tm > 0) & (
-            np.abs(roi.astype(np.int16) - np.array(bg, dtype=np.int16)).max(axis=2) > 40
-        )
-        if g.size and int(g.max()) > 0:
-            still = still & (g == 0)
-        # 允许少量抗锯齿残点；大块残墨才算未洗净
-        if int(still.sum()) >= 40:
+        if redraw[i] and _box_source_ink_left(img_cv, orig, b, styles[i]):
             return True
     return False
 
@@ -1378,6 +1384,68 @@ def _assign_left_groups(
     return out
 
 
+_DOSE_TICK_RE = re.compile(r"^Q\d+W$", re.I)
+_AXIS_TICK_RE = re.compile(r"^[-+]?\d+(?:[.,]\d+)?%?-?$")
+_N_OVER_N_RE = re.compile(r"^\d+\s*/\s*\d+$")
+_CAPTION_START_RE = re.compile(r"^(?:Figure|Fig\.?|图)\s*\d+", re.I)
+_AXIS_TITLE_RE = re.compile(
+    r"time\s*\(|patients?|responders?|probability|criteria|"
+    r"week\s*\d+|open[- ]?label|at\s*week|cumulative|"
+    r"maintenance|transfer|i\.e\.",
+    re.I,
+)
+
+
+def _is_isolated_data_mark(text: str) -> bool:
+    """图内孤立数据标记：柱顶百分数、n/N、轴刻度、Q2W/Q4W。不译不并。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _DOSE_TICK_RE.fullmatch(t) or _AXIS_TICK_RE.fullmatch(t) or _N_OVER_N_RE.fullmatch(t):
+        return True
+    try:
+        from qyunslation.extensions.doc_image_policy import is_numeric_or_unit
+
+        if is_numeric_or_unit(t):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_vertical_axis_fragment(text: str) -> bool:
+    """仅字母占优的短片段才允许竖排聚合（Responders 被切成多框）。"""
+    t = (text or "").strip()
+    if not t or len(t) > 6:
+        return False
+    if _is_isolated_data_mark(t) or _is_ocr_garbage(t) or _is_panel_letter(t):
+        return False
+    letters = len(re.findall(r"[A-Za-z]", t))
+    digits = len(re.findall(r"\d", t))
+    return letters >= 1 and letters > digits
+
+
+def _is_must_draw_label(text: str, box=None) -> bool:
+    """图内题注 / 轴标题 / 三词以上标题：必须擦+画，禁止因覆盖率跳过。"""
+    t = (text or "").strip()
+    if not t or _is_isolated_data_mark(t) or _is_ocr_garbage(t) or _is_panel_letter(t):
+        return False
+    if _CAPTION_START_RE.match(t) or _AXIS_TITLE_RE.search(t):
+        return True
+    words = re.findall(r"[A-Za-z]{2,}", t)
+    if len(words) >= 3:
+        return True
+    # 示意图分区标题：Analyses / Results / Placebo
+    if len(words) == 1 and len(words[0]) >= 6:
+        return True
+    if box is not None:
+        ow = max(1, int(box[2]) - int(box[0]))
+        oh = max(1, int(box[3]) - int(box[1]))
+        if ow >= 2 * oh and len(words) >= 2:
+            return True
+    return False
+
+
 def _group_vertical_runs(
     boxes: list,
     texts: list[str],
@@ -1416,6 +1484,11 @@ def _group_vertical_runs(
         if used[a]:
             continue
         seed = items[a]
+        # 柱顶数字 / n/N / Q2W 禁止进竖排聚合（否则会贴到柱上）
+        if not _is_vertical_axis_fragment(seed["text"]):
+            used[a] = True
+            singles.append(seed)
+            continue
         # 已是高窄框则不必聚合
         if seed["h"] >= 2 * seed["w"] and len(seed["text"]) >= 2:
             used[a] = True
@@ -1427,6 +1500,8 @@ def _group_vertical_runs(
             if used[b_i]:
                 continue
             cur = items[b_i]
+            if not _is_vertical_axis_fragment(cur["text"]):
+                continue
             prev = group[-1]
             if abs(cur["cx"] - prev["cx"]) > max(prev["w"], cur["w"]) * 0.8:
                 continue
@@ -1549,9 +1624,11 @@ def _mark_unfittable_redraw(
     font_regular: str | None,
     font_bold: str | None,
     outliers: list[int] | None = None,
+    texts: list[str] | None = None,
 ) -> list[int]:
     """PLAN-046a：擦除前试排。放不下且非 outlier → 不擦不画，保留英文原字。
 
+    题注/轴标题（must_draw）禁止因覆盖率跳过；字号贴原文带高缩小到能放下。
     返回被跳过的 1-based box 索引（记 C5_SKIPPED）。
     """
     outlier_set = {int(x) for x in (outliers or [])}
@@ -1564,6 +1641,8 @@ def _mark_unfittable_redraw(
             continue
         if styles[i].get("rotated"):
             continue
+        src = (texts[i] if texts and i < len(texts) else "") or ""
+        must = _is_must_draw_label(src, boxes[i])
         ax1, ay1, ax2, ay2 = avails[i]
         box_w = max(8, ax2 - ax1)
         box_h = max(8, ay2 - ay1)
@@ -1582,10 +1661,19 @@ def _mark_unfittable_redraw(
         total_h = lh * len(lines) + gap * max(0, len(lines) - 1)
         max_tw = max((_text_size(font, ln)[0] for ln in lines), default=0)
         if max_tw <= box_w * 1.05 and total_h <= box_h:
-            # PLAN-047f：译文墨迹预估覆盖率 < 70% → 不擦不画（避免脏背景）
+            # PLAN-047f：短标签覆盖率 < 70% → 不擦不画（避免脏背景）
+            # 题注/轴标题必须擦原文整带，覆盖率低也画（中文常短于英文）
+            if must:
+                continue
             cover = min(1.0, (max_tw * total_h) / float(max(1, box_w * box_h)))
             if cover >= ERASE_COVER_MIN:
                 continue
+        if must:
+            _, _, fit, _ = _fit_font_and_lines(
+                finals[i], box_w, box_h, use_path, size, min_size=10
+            )
+            assigned[i] = max(10, int(fit))
+            continue
         redraw[i] = False
         skipped.append(i + 1)
     return skipped
@@ -2473,12 +2561,15 @@ def translate_image_with_qc(
         try:
             from qyunslation.extensions.doc_image_policy import is_numeric_or_unit
 
-            if is_numeric_or_unit(src):
+            if is_numeric_or_unit(src) or _is_isolated_data_mark(src):
                 finals.append(src)
                 redraw.append(False)
                 continue
         except Exception:
-            pass
+            if _is_isolated_data_mark(src):
+                finals.append(src)
+                redraw.append(False)
+                continue
         zh = (trans.get(i + 1) or "").strip()
         if zh:
             finals.append(zh)
@@ -2494,6 +2585,8 @@ def translate_image_with_qc(
         st = _analyze_box_style(roi)
         if _is_rotated_axis_box(b, texts[i] if i < len(texts) else ""):
             st["rotated"] = True
+        if i < len(texts) and _is_must_draw_label(texts[i], b):
+            st["must_draw"] = True
         styles.append(st)
 
     ocr_rects = [(b[0], b[1], b[2], b[3]) for b in boxes]
@@ -2540,6 +2633,7 @@ def translate_image_with_qc(
         font_regular=font_regular,
         font_bold=font_bold,
         outliers=tier_meta.get("outliers"),
+        texts=texts,
     )
     if c5_skipped:
         logger.info("C5_SKIPPED boxes (no erase/draw): %s", c5_skipped)
@@ -2577,20 +2671,30 @@ def translate_image_with_qc(
         if guard.size and int(guard.max()) > 0:
             guard_pix = roi.copy()
         if st["solid"]:
-            # 核心带（pad=2）整框填，加厚圈（pad=4）只擦文字 mask，避免涂掉括号线
-            ty1, ty2 = _fill_band(roi, pad=2)
-            by1, by2 = _fill_band(roi)
-            fill_bands[i] = (x1, y1, x2, y2, by1, by2, tm.copy() if tm.size else None)
-            fy1, fy2 = y1 + ty1, y1 + ty2
-            cv2.rectangle(img_cv, (x1, fy1), (x2, fy2), st["bg_bgr"], -1)
-            if tm.size and int(tm.max()) > 0:
-                m = tm > 0
-                if guard.size and int(guard.max()) > 0:
-                    m = m & (guard == 0)
-                # 加厚圈 + 带外残字：只按 mask 擦
-                ring = np.ones(m.shape, bool)
-                ring[ty1:ty2, :] = False
-                img_cv[y1:y2, x1:x2][m & ring] = st["bg_bgr"]
+            # 题注/轴标题：整 OCR 框填背景，避免半擦英文残留
+            if st.get("must_draw"):
+                pad = ERASE_PAD_PX
+                fx1, fy1 = max(0, x1 - pad), max(0, y1 - pad)
+                fx2, fy2 = min(img_w, x2 + pad), min(img_h, y2 + pad)
+                cv2.rectangle(img_cv, (fx1, fy1), (fx2, fy2), st["bg_bgr"], -1)
+                fill_bands[i] = (
+                    x1, y1, x2, y2, 0, y2 - y1, tm.copy() if tm.size else None
+                )
+            else:
+                # 核心带（pad=2）整框填，加厚圈（pad=4）只擦文字 mask，避免涂掉括号线
+                ty1, ty2 = _fill_band(roi, pad=2)
+                by1, by2 = _fill_band(roi)
+                fill_bands[i] = (x1, y1, x2, y2, by1, by2, tm.copy() if tm.size else None)
+                fy1, fy2 = y1 + ty1, y1 + ty2
+                cv2.rectangle(img_cv, (x1, fy1), (x2, fy2), st["bg_bgr"], -1)
+                if tm.size and int(tm.max()) > 0:
+                    m = tm > 0
+                    if guard.size and int(guard.max()) > 0:
+                        m = m & (guard == 0)
+                    # 加厚圈 + 带外残字：只按 mask 擦
+                    ring = np.ones(m.shape, bool)
+                    ring[ty1:ty2, :] = False
+                    img_cv[y1:y2, x1:x2][m & ring] = st["bg_bgr"]
         else:
             if tm.size:
                 erase_tm = tm.copy()
@@ -2662,12 +2766,30 @@ def translate_image_with_qc(
             wiped,
         )
     if _source_ink_still_present(img_cv, orig, boxes, styles, redraw, texts):
-        logger.warning("SOURCE_INK_LEFT after erase passes; keep original image")
-        return 0, {
-            "ok": False,
-            "issues": [{"code": "SOURCE_INK_LEFT", "msg": "source ink remains after erase"}],
-            "object_qc": ["SOURCE_INK_LEFT"],
-        }
+        # 题注/轴标题再整框填一次；仍残则只放弃该框，禁止整图熔断把图1/示意图打回原图
+        leftover_idx: list[int] = []
+        for i, b in enumerate(boxes):
+            if not redraw[i]:
+                continue
+            if not _box_source_ink_left(img_cv, orig, b, styles[i]):
+                continue
+            x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            bg = tuple(int(c) for c in styles[i].get("bg_bgr", (255, 255, 255)))
+            if styles[i].get("must_draw") and styles[i].get("solid"):
+                cv2.rectangle(img_cv, (x1, y1), (x2, y2), bg, -1)
+                if not _box_source_ink_left(img_cv, orig, b, styles[i]):
+                    continue
+            leftover_idx.append(i)
+        if leftover_idx:
+            logger.warning(
+                "SOURCE_INK_LEFT boxes=%s; drop those boxes, keep rest",
+                [i + 1 for i in leftover_idx],
+            )
+            for i in leftover_idx:
+                x1, y1, x2, y2 = int(boxes[i][0]), int(boxes[i][1]), int(boxes[i][2]), int(boxes[i][3])
+                img_cv[y1:y2, x1:x2] = orig[y1:y2, x1:x2]
+                redraw[i] = False
+            tier_meta["source_ink_dropped"] = [i + 1 for i in leftover_idx]
 
     for (x1, y1, x2, y2), roi in kept_rois:
         img_cv[y1:y2, x1:x2] = roi

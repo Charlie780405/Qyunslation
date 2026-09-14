@@ -13,8 +13,10 @@ from typing import Literal
 
 # 同一条横线被切成多段时的 y 合并容差（pt）
 LINE_MERGE_TOL = 1.5
-# 线段至少要有这么宽才算表格横线，滤掉下划线、短装饰
+# 合并后的整条横线至少要有这么宽才算表格线，滤掉孤立下划线
 MIN_LINE_WIDTH_FRAC = 0.10
+# 分段先收再并：OUP 第一列/表2 右栏常被切成 <10% 页宽的短段
+MIN_RULE_SEGMENT_PT = 8.0
 # 相邻横线间距超过页高这个比例即认为表格结束，用于甩掉页脚线。
 # 金样实测下界 0.139（表头线到底线），上界 0.293（表格底到页脚线）。见 WT-030d。
 ROW_GAP_BREAK_FRAC = 0.20
@@ -274,7 +276,7 @@ def captionless_table_regions(
 def _horizontal_lines(
     page, *, drawings: list | None = None
 ) -> list[tuple[float, float, float]]:
-    """页面横线，返回 (x0, x1, y)，已按 y 合并同一条线的分段。"""
+    """页面横线，返回 (x0, x1, y)。短段先收再按 y 合并，合并后才用页宽阈值。"""
     width = float(page.rect.width)
     if width <= 0:
         return []
@@ -298,7 +300,7 @@ def _horizontal_lines(
                 x0, x1, y = rect.x0, rect.x1, rect.y0
             else:
                 continue
-            if (x1 - x0) / width < MIN_LINE_WIDTH_FRAC:
+            if (x1 - x0) < MIN_RULE_SEGMENT_PT:
                 continue
             raw.append((float(x0), float(x1), float(y)))
 
@@ -309,7 +311,11 @@ def _horizontal_lines(
             merged[-1][1] = max(merged[-1][1], x1)
         else:
             merged.append([x0, x1, y])
-    return [(m[0], m[1], m[2]) for m in merged]
+    return [
+        (m[0], m[1], m[2])
+        for m in merged
+        if (m[1] - m[0]) / width >= MIN_LINE_WIDTH_FRAC
+    ]
 
 
 def _vertical_lines(

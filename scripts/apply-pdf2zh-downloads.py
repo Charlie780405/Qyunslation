@@ -148,9 +148,21 @@ HOOK_CODE = '''
                 return str(hits[-1].resolve())
 
             if not _exists(mono):
-                mono = _pick(True, "*.mono.tbltr.pdf", "*.mono.imgtr.tbltr.pdf", "*.mono.pdf")
+                mono = _pick(
+                    True,
+                    "*.mono.imgtr.tbltr.pdf",
+                    "*.mono.imgtr.pdf",
+                    "*.mono.tbltr.pdf",
+                    "*.mono.pdf",
+                )
             if not _exists(dual):
-                dual = _pick(False, "*.dual.tbltr.pdf", "*.dual.imgtr.tbltr.pdf", "*.dual.pdf")
+                dual = _pick(
+                    False,
+                    "*.dual.imgtr.tbltr.pdf",
+                    "*.dual.imgtr.pdf",
+                    "*.dual.tbltr.pdf",
+                    "*.dual.pdf",
+                )
             return (str(_P(mono).resolve()) if _exists(mono) else None), (
                 str(_P(dual).resolve()) if _exists(dual) else None
             )

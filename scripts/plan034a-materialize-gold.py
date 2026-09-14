@@ -45,6 +45,7 @@ def _slots() -> list[Slot]:
     pdf2zh = Path("/home/dev/pdf2zh/pdf2zh_files")
     qna = pdf2zh / "57114032-8727-41f9-b826-b5ff40fcf733" / "QX027N QnA-2026.08.19-临床.pdf"
     pind_dir = pdf2zh / "5fa54bcf-4843-4e97-8cd0-85c797fa9b5d"
+    gs101_conv = Path("/home/dev/qyunslation-gold/plan034/inbox/_convert")
     job_ljae = (
         pdf2zh / "ffc3aa5e-b7f3-4955-9470-b59334367fdf" / "ljae439.pdf"
     )
@@ -140,10 +141,52 @@ def _slots() -> list[Slot]:
             Slot(
                 f"C-{i:02d}",
                 "C",
-                f"Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-{i:02d}",
+                (
+                    "STREAM-AD Phase 2b Protocol"
+                    if i == 4
+                    else "SOLO1-2 Protocol"
+                    if i == 5
+                    else "GS101 Phase 1 Clinical Study Protocol V1.0 (景行 IND)"
+                    if i == 6
+                    else "GS101 Clinical Development Plan V1.0 (景行 IND)"
+                    if i == 7
+                    else f"Protocol / IB / CSR placeholder; Protocol Number: QY-034A1-C-{i:02d}"
+                ),
                 f"C-{i:02d}.pdf",
-                (),
-                ("synthetic-slot",),
+                (
+                    (Path("/home/dev/.hermes/attachments/STREAM-AD-Protocol.pdf"),)
+                    if i == 4
+                    else (
+                        (
+                            Path(
+                                "/home/dev/.hermes/desktop-attachments/SOLO1-2-Protocol.pdf"
+                            ),
+                        )
+                        if i == 5
+                        else (
+                            (
+                                gs101_conv
+                                / "C-06"
+                                / "GS101注射液1期临床研究方案-V1.0-20251023clean.pdf",
+                            )
+                            if i == 6
+                            else (
+                                (
+                                    gs101_conv
+                                    / "C-07"
+                                    / "GS101注射液临床开发计划-V1.0-20251023-Final-Clean.pdf",
+                                )
+                                if i == 7
+                                else ()
+                            )
+                        )
+                    )
+                ),
+                (
+                    ("protocol",)
+                    if i in (4, 5, 6)
+                    else (("cdp", "clinical") if i == 7 else ("synthetic-slot",))
+                ),
             )
             for i in range(4, 11)
         ],
@@ -152,10 +195,22 @@ def _slots() -> list[Slot]:
             Slot(
                 f"R-{i:02d}",
                 "R",
-                f"CTD Module 2 Quality Overall Summary placeholder {i:02d}",
+                (
+                    "GS101 Clinical Overview / CTD M2.5 V1.0 (景行 IND)"
+                    if i == 1
+                    else f"CTD Module 2 Quality Overall Summary placeholder {i:02d}"
+                ),
                 f"R-{i:02d}.pdf",
-                (),
-                ("synthetic-slot", "ctd-m2"),
+                (
+                    (
+                        gs101_conv
+                        / "R-01"
+                        / "GS101注射液临床综述-V1.0-20251023-Final-Clean.pdf",
+                    )
+                    if i == 1
+                    else ()
+                ),
+                (("ctd-m2", "m2-5", "clinical-overview") if i == 1 else ("synthetic-slot", "ctd-m2")),
             )
             for i in range(1, 11)
         ],

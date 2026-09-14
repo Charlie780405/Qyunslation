@@ -99,3 +99,39 @@ symptom = "表格结构退化/全走 normalize"
 first_check = "curl HPD /health；QYUNSLATION_HPD_BASE_URL"
 fix = "恢复泰州 HPD 或 QYUNSLATION_HPD_GRID=gutter"
 verify = "health ok 且缓存命中"
+
+[[signature]]
+id = "SIG-ADA7-HEADER-WRAP"
+skill = "SK-Q009"
+pattern = "剂量重复|伴ADA访视的EASI|Visit with ADA|header_texts_from_merged"
+symptom = "数据已分开但表头没分开/剂量重复/末列不是伴ADA访视的EASI"
+first_check = "origin 表头是否两行；是否每行重写 header_slots；with ADA 是否 skip 后访视列空"
+fix = "merge_origin_header_cells + 每槽一次；七槽末列=伴ADA访视的EASI"
+verify = "texts.count(剂量)==1 且 texts[1]==访视 且 texts[6]==伴ADA访视的EASI"
+
+[[signature]]
+id = "SIG-RULE-STUB-DROPPED"
+skill = "SK-Q009"
+pattern = "第一列格线|格线不贯穿|表2格线不完整|MIN_LINE_WIDTH_FRAC"
+symptom = "表3第一列无线/表2右栏%列无线"
+first_check = "原文 raw 分段是否先被页宽10%滤掉再合并；table_rule_lines 是否按 bbox 截 x"
+fix = "短段先收再并；restore 用完整 x"
+verify = "表3线x0<=68 且 表2线x1>=280"
+
+[[signature]]
+id = "SIG-BAR-DATA-MERGE"
+skill = "SK-Q002"
+pattern = "77.8.*14/18|65.538/58|柱上.*Q2W|_group_vertical_runs"
+symptom = "柱顶数字/n/N被连到柱上/图上出现77.814/18"
+first_check = "竖排聚合成员是否含 is_isolated_data_mark；合并文本是否含 数字+n/N"
+fix = "数据标记不进 _group_vertical_runs、不送译"
+verify = "合并文本不含 65.538/58 且 14/18 原位保留"
+
+[[signature]]
+id = "SIG-CAPTION-C5-SKIP"
+skill = "SK-Q002"
+pattern = "C5_SKIPPED|图5只译纵轴|题注没译|示意图没译|ERASE_COVER_MIN"
+symptom = "图1/示意图/题注/横轴仍是英文"
+first_check = "题注是否 must_draw；cover<70% 是否跳过；SOURCE_INK_LEFT 是否整图熔断"
+fix = "题注整带擦+必画；残留只丢该框"
+verify = "图1有中文题注；图5横轴有中文；柱上无拼接数字"

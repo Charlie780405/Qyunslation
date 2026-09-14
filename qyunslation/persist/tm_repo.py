@@ -1,20 +1,55 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-034e：tm_unit 仓库（批准门禁 + 租户作用域）。"""
+"""PLAN-034e / PLAN-055：tm_unit 仓库（批准门禁 + 租户作用域 + 语义建议）。"""
 from __future__ import annotations
 
+import logging
+import math
+import os
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from qyunslation.persist.models import TmUnit
+from qyunslation.persist.models import TmUnit, TmUnitEmbedding
 from qyunslation.tm.match import exact_lookup, fuzzy_suggest
 from qyunslation.tm.normalize import normalize_source, placeholder_signature
+
+logger = logging.getLogger(__name__)
+
+FUZZY_CANDIDATE_CAP = 2000
+DEFAULT_SEMANTIC_THRESHOLD = 0.88
 
 
 class ApprovalRequiredError(ValueError):
     """正式 TM 入库必须显式批准。"""
+
+
+def _semantic_threshold() -> float:
+    raw = (os.environ.get("QYUNSLATION_TM_SEMANTIC_THRESHOLD") or "").strip()
+    if not raw:
+        return DEFAULT_SEMANTIC_THRESHOLD
+    try:
+        return float(raw)
+    except ValueError:
+        return DEFAULT_SEMANTIC_THRESHOLD
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        xf = float(x)
+        yf = float(y)
+        dot += xf * yf
+        na += xf * xf
+        nb += yf * yf
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return dot / (math.sqrt(na) * math.sqrt(nb))
 
 
 def tm_unit_to_dict(unit: TmUnit) -> dict[str, Any]:
@@ -35,6 +70,40 @@ def tm_unit_to_dict(unit: TmUnit) -> dict[str, Any]:
         "created_at": unit.created_at.isoformat(),
         "updated_at": unit.updated_at.isoformat(),
     }
+
+
+def upsert_unit_embedding(session: Session, unit: TmUnit) -> TmUnitEmbedding | None:
+    """同步写入向量；失败返回 None，不抛（不挡批准）。"""
+    try:
+        from qyunslation.embed import client as embed_client
+
+        vectors = embed_client.embed_texts([unit.source_text])
+        if not vectors:
+            return None
+        vec = vectors[0]
+        model = embed_client._model()
+        dim = len(vec)
+    except Exception as exc:  # noqa: BLE001 — 批准路径必须吞掉
+        logger.warning("tm embed failed unit=%s: %s", getattr(unit, "id", "?"), exc)
+        return None
+    now = datetime.now(timezone.utc)
+    row = session.get(TmUnitEmbedding, unit.id)
+    if row is None:
+        row = TmUnitEmbedding(
+            unit_id=unit.id,
+            dim=dim,
+            model=model,
+            vector=vec,
+            created_at=now,
+        )
+        session.add(row)
+    else:
+        row.dim = dim
+        row.model = model
+        row.vector = vec
+        row.created_at = now
+    session.flush()
+    return row
 
 
 def create_approved_unit(
@@ -75,6 +144,7 @@ def create_approved_unit(
         existing.approved_at = now
         existing.updated_at = now
         session.flush()
+        upsert_unit_embedding(session, existing)
         return existing
     unit = TmUnit(
         tenant_id=tenant_id,
@@ -92,6 +162,7 @@ def create_approved_unit(
     )
     session.add(unit)
     session.flush()
+    upsert_unit_embedding(session, unit)
     return unit
 
 
@@ -123,9 +194,6 @@ def stage_import_unit(
     session.add(unit)
     session.flush()
     return unit
-
-
-FUZZY_CANDIDATE_CAP = 2000
 
 
 def list_approved_units(
@@ -164,6 +232,8 @@ def lookup(
     project_id: str | None = None,
     fuzzy_threshold: float = 0.85,
     fuzzy_limit: int = 5,
+    semantic_limit: int = 5,
+    semantic_threshold: float | None = None,
 ) -> dict[str, Any]:
     qn = normalize_source(source_text)
     qs = placeholder_signature(source_text)
@@ -199,6 +269,7 @@ def lookup(
                 "placeholder_sig": hit.placeholder_sig,
             },
             "suggestions": [],
+            "semantic_suggestions": [],
             "query_norm": qn,
             "placeholder_sig": qs,
         }
@@ -210,6 +281,15 @@ def lookup(
         tgt_lang=tgt_lang,
         project_id=project_id,
         limit=FUZZY_CANDIDATE_CAP,
+    )
+    semantic_suggestions = _semantic_suggestions(
+        session,
+        source_text=source_text,
+        candidates=candidates,
+        limit=semantic_limit,
+        threshold=semantic_threshold
+        if semantic_threshold is not None
+        else _semantic_threshold(),
     )
     suggestions = fuzzy_suggest(
         source_text,
@@ -232,6 +312,60 @@ def lookup(
             }
             for s in suggestions
         ],
+        "semantic_suggestions": semantic_suggestions,
         "query_norm": qn,
         "placeholder_sig": qs,
     }
+
+
+def _semantic_suggestions(
+    session: Session,
+    *,
+    source_text: str,
+    candidates: list[TmUnit],
+    limit: int,
+    threshold: float,
+) -> list[dict[str, Any]]:
+    if limit <= 0 or not candidates:
+        return []
+    try:
+        from qyunslation.embed.client import embed_texts
+
+        qvecs = embed_texts([source_text])
+        if not qvecs:
+            return []
+        qvec = qvecs[0]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tm semantic query embed failed: %s", exc)
+        return []
+
+    ids = [u.id for u in candidates]
+    emb_rows = list(
+        session.scalars(
+            select(TmUnitEmbedding).where(TmUnitEmbedding.unit_id.in_(ids))
+        ).all()
+    )
+    by_id = {e.unit_id: e for e in emb_rows}
+    scored: list[tuple[float, TmUnit]] = []
+    for unit in candidates:
+        emb = by_id.get(unit.id)
+        if emb is None or not isinstance(emb.vector, list):
+            continue
+        score = cosine_similarity(qvec, list(emb.vector))
+        if score >= threshold:
+            scored.append((score, unit))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    out: list[dict[str, Any]] = []
+    for score, unit in scored[:limit]:
+        out.append(
+            {
+                "unit_id": unit.id,
+                "source_text": unit.source_text,
+                "target_text": unit.target_text,
+                "score": round(float(score), 6),
+                "source_norm": unit.source_norm,
+                "placeholder_sig": unit.placeholder_sig,
+                "kind": "semantic",
+            }
+        )
+    return out

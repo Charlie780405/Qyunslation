@@ -7,7 +7,9 @@ description: >-
   HPD_GRID_MISMATCH、table normalize、.tbltr、.tblnorm、PLAN-048、PLAN-049、PLAN-049e、PLAN-049f、
   LITERATURE_LEAVE_BABELDOC、交还 BabelDOC、列内居中、居中对齐、数值贴左、全角括号、
   字母被拉开、遮盖、串行、NRS 拆行、缺底线、字体不统一、字体缺失、HPD 补全、
-  PLAN-049g、PLAN-049h、PLAN-049i、PLAN-049j、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、粘连、90.0111、SK-Q009。
+  PLAN-049g、PLAN-049h、PLAN-049i、PLAN-049j、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、粘连、90.0111、
+  剂量重复、表头没分开、伴ADA访视的EASI、Visit with ADA、折行表头、
+  第一列格线、格线不贯穿、表2格线不完整、SK-Q009。
 ---
 
 # 表格类翻译保真（SK-Q009）
@@ -109,7 +111,7 @@ description: >-
 | 症状 | 表1 丢掉 `(N=130)`；DLQI 的 `N=` 压到下一行；表2 行距乱；表3 访视错列、浓度与 IGA 挤一点、丢 EASI |
 | 先查 | 表头 N= 是否被 skip；上一行 `band=8` 是否吃到 N= 的 y；`_fit_cell_lines` 是否无溢出也拆行；`not_a_table` 是否整表跳过居中；spatial 末列是否空 |
 | 修法 | 表头 `N=` 按格回写 `(N=130)`；擦除带夹邻行中点；仅格宽不够才拆行；矮窄 `not_a_table`（表2）仍按原文行 y 居中；七列强制 EASI 槽，spatial 丢末列则改 `_assign`；HPD 反转列丢掉；dest 行少则按 origin 顺序舀段流 |
-| 判据 | 表1 y≈108 有三组 `N=`；DLQI 不侵入瘙痒行；表2 行 y 跟原文（容差 2pt）；表3 `第52周`/`安全性随访` 与「访视」同列；EASI 有独立 x 中心 |
+| 判据 | 表1 y≈108 有三组 `N=`；DLQI 不侵入瘙痒行；表2 行 y 跟原文（容差 2pt）；表3 `第52周`/`安全性随访` 与「访视」同列；末列表头=`伴ADA访视的EASI` |
 
 ### L 粘连切分 / 七列收口（049j）
 
@@ -120,14 +122,23 @@ description: >-
 | 修法 | 按 origin 格形态（int/dec1/dec2）剥 token；pretreat 拆剂量粘连与小数粘连；`n_cols>=6` 强制七槽；空行从 blob 补 |
 | 判据 | 首行浓度=`90.0`、IGA=`1`、EASI=`11.2`；无三位以上小数粘连；七表头各在列中带 |
 
+### M 折行表头只落一次（数据已分列、表头仍糊）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表3 **数据已分开**，但表头仍粘：`剂量` 出现两列；第 2 列不是「访视」；末列不是「伴ADA访视的EASI」而是「访视时 EASI」或缺头 |
+| 先查 | origin 表头是否两行（`IGA at visit` / `EASI at visit` 上行，`Dose` / `Visit with ADA` / `with ADA` 下行）；是否对**每一行**各写一遍 `header_slots`；`_header_skip_cell("with ADA")` 是否让访视列空着、BabelDOC 残留「剂量」 |
+| 修法 | `merge_origin_header_cells` 并折行再 `header_texts_from_merged` **每槽只写一次**；规范七槽=`剂量/访视/ADA/nAb/曲罗芦单抗浓度/伴ADA访视的IGA/伴ADA访视的EASI`；折行残片不入槽；「剂量」禁止出现在槽 0 以外 |
+| 判据 | `texts.count("剂量")==1`；`texts[1]==访视`；`texts[6]==伴ADA访视的EASI`；表头 jobs 只有 1 条 |
+
 ### J 三线从原文补（049g）
 
 | 项 | 内容 |
 | --- | --- |
-| 症状 | 表1 缺底线 / 底线右段被截 |
-| 先查 | 原文 `table_rule_lines` 最底一条 x 跨度 vs 译文 |
-| 修法 | `restore_rule_lines` 按原文 drawings 重描；不整区擦线 |
-| 判据 | 译文底线 x1 与原文同宽（容差 4pt） |
+| 症状 | 表1 缺底线 / 底线右段被截；**第一列格线不贯穿**；表2 右栏（% 列）无线 |
+| 先查 | 原文 raw 分段：表3 左段约 26pt（Dose）、表2 右段约 52pt；`_horizontal_lines` 是否**先按页宽 10% 丢掉短段再合并** |
+| 修法 | 短段先收（≥8pt）再按 y 合并，**合并后**才用页宽阈值；`table_rule_lines` **不按 bbox 截 x**；`restore_rule_lines` 重描完整 x；擦字白块之后再画线 |
+| 判据 | 表3 横线 x0≤68（穿过剂量/Q2W）；表2 横线 x1≥280（含 % 列）；底线与原文同宽（容差 4pt） |
 
 ### G 禁令
 
@@ -139,7 +150,7 @@ description: >-
 
 ## 降级阶梯
 
-0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**；**049j origin 形态剥 token、粘连切分**
+0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**；**049j origin 形态剥 token、粘连切分**；**折行表头并格后每槽只写一次（规范末列=伴ADA访视的EASI）**
 1. 监管表单：HPD 网格 + 三闸门过 → 落笔 `.tbltr`
 2. `NOT_A_TABLE` → 大图交图片链；**表2 量级矮窄框仍列居中对行**（049i）
 3. 闸门未过 / `geometry_center` → 不落笔，字号归一

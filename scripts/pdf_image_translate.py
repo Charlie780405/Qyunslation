@@ -592,10 +592,8 @@ def translate_pdf_images(
                     page = doc[occurrences[0]["page"]]
                     page.replace_image(xref, stream=new_png)
                     status = image_status_from_qc(list((qc or {}).get("object_qc") or []))
-                    if status == "FAILED_HARD":
-                        manifest.bitmap_skipped += 1
-                    else:
-                        manifest.bitmap_translated += 1
+                    # 已落笔必须计数，否则 C5/OVERFLOW 硬标会丢掉整本 overlay
+                    manifest.bitmap_translated += 1
                     manifest.details.append(
                         detail_with_qc(
                             {
@@ -645,10 +643,7 @@ def translate_pdf_images(
                         logger.warning("overlay xref %s page %s: %s", xref, o["page"], exc)
                 if ok_n:
                     status = image_status_from_qc(list((qc or {}).get("object_qc") or []))
-                    if status == "FAILED_HARD":
-                        manifest.bitmap_skipped += 1
-                    else:
-                        manifest.bitmap_translated += 1
+                    manifest.bitmap_translated += 1
                     manifest.details.append(
                         detail_with_qc(
                             {
@@ -757,10 +752,7 @@ def translate_pdf_images(
                         keep_proportion=False,
                     )
                     status = _mark_image(obj, qc)
-                    if status == "FAILED_HARD":
-                        manifest.vector_skipped += 1
-                    else:
-                        manifest.vector_translated += 1
+                    manifest.vector_translated += 1
                     manifest.details.append(
                         detail_with_qc(
                             {

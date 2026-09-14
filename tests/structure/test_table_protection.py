@@ -105,6 +105,21 @@ def test_segmented_rule_lines_are_merged():
     assert len(ys) == len(set(ys))
 
 
+def test_ljae439_stub_segments_join_full_rules():
+    """表3 第一列短段、表2 右栏短段必须并进整条横线。"""
+    doc = pymupdf.open(LJAE)
+    try:
+        t3 = [ln for ln in _horizontal_lines(doc[6]) if 70 < ln[2] < 110]
+        t2 = [ln for ln in _horizontal_lines(doc[4]) if 615 < ln[2] < 680]
+        regs = table_regions(doc[4])
+    finally:
+        doc.close()
+    assert t3 and min(ln[0] for ln in t3) <= 68.0
+    assert t2 and max(ln[1] for ln in t2) >= 280.0
+    t2_reg = next(r for r in regs if r.number == 2)
+    assert t2_reg.x1 >= 280.0
+
+
 def test_footer_rule_is_excluded_by_gap_break():
     """Nature 每页底部 0.954 处有页脚线，不得并入表格区域。"""
     doc = pymupdf.open(NATURE)
