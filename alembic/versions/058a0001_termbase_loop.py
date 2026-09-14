@@ -34,34 +34,58 @@ def upgrade() -> None:
     if is_postgres:
         op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    op.add_column("concept", sa.Column("project_id", sa.String(36), nullable=True))
-    op.add_column(
-        "concept",
+    concept_columns = [
+        sa.Column("project_id", sa.String(36), nullable=True),
         sa.Column("term_type", sa.String(64), nullable=False, server_default="general"),
-    )
-    op.add_column("concept", sa.Column("definition", sa.Text(), nullable=True))
-    op.add_column("concept", sa.Column("authority", sa.String(256), nullable=True))
-    op.create_foreign_key(
-        "fk_concept_project_id",
-        "concept",
-        "project",
-        ["project_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
-    op.create_index(
-        "ix_concept_runtime_scope",
-        "concept",
-        ["tenant_id", "project_id", "status", "layer"],
-    )
+        sa.Column("definition", sa.Text(), nullable=True),
+        sa.Column("authority", sa.String(256), nullable=True),
+    ]
+    if is_postgres:
+        for column in concept_columns:
+            op.add_column("concept", column)
+        op.create_foreign_key(
+            "fk_concept_project_id",
+            "concept",
+            "project",
+            ["project_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
+        op.create_index(
+            "ix_concept_runtime_scope",
+            "concept",
+            ["tenant_id", "project_id", "status", "layer"],
+        )
+    else:
+        # SQLite cannot ALTER TABLE ADD CONSTRAINT; batch mode rebuilds the
+        # table while preserving existing rows and the new FK.
+        with op.batch_alter_table("concept", recreate="always") as batch:
+            for column in concept_columns:
+                batch.add_column(column)
+            batch.create_foreign_key(
+                "fk_concept_project_id",
+                "project",
+                ["project_id"],
+                ["id"],
+                ondelete="CASCADE",
+            )
+            batch.create_index(
+                "ix_concept_runtime_scope",
+                ["tenant_id", "project_id", "status", "layer"],
+            )
 
     op.add_column(
         "concept_term",
         sa.Column("normalized_text", sa.String(512), nullable=True),
     )
     op.execute("UPDATE concept_term SET normalized_text = lower(trim(text))")
-    op.alter_column("concept_term", "normalized_text", nullable=False)
-    op.create_index("ix_concept_term_normalized", "concept_term", ["normalized_text"])
+    if is_postgres:
+        op.alter_column("concept_term", "normalized_text", nullable=False)
+        op.create_index("ix_concept_term_normalized", "concept_term", ["normalized_text"])
+    else:
+        with op.batch_alter_table("concept_term", recreate="always") as batch:
+            batch.alter_column("normalized_text", nullable=False)
+            batch.create_index("ix_concept_term_normalized", ["normalized_text"])
 
     op.create_table(
         "concept_term_embedding",
@@ -198,9 +222,11 @@ def downgrade() -> None:
         "ix_document_term_candidate_job_status", table_name="document_term_candidate"
     )
     op.drop_table("document_term_candidate")
-    op.drop_index(
-        "ix_concept_term_embedding_vector_hnsw", table_name="concept_term_embedding"
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.drop_index(
+            "ix_concept_term_embedding_vector_hnsw", table_name="concept_term_embedding"
+        )
     op.drop_index("ix_concept_term_embedding_model", table_name="concept_term_embedding")
     op.drop_table("concept_term_embedding")
     op.drop_index("ix_concept_term_normalized", table_name="concept_term")

@@ -221,7 +221,35 @@ def _add_curated_concept(
     scope: str,
     do_not_translate: bool = False,
     concept_id: str | None = None,
+    aliases: Iterable[str] | None = None,
+    abbreviations: Iterable[str] | None = None,
 ) -> Concept:
+    def attach_aliases(concept: Concept) -> None:
+        existing_normalized = {
+            (term.lang.casefold(), normalize_source(term.text))
+            for term in concept.terms
+        }
+        source_lang = normalize_lang(candidate.src_lang) or "en"
+        values = [
+            *((value, "abbreviation") for value in abbreviations or ()),
+            *((value, "synonym") for value in aliases or ()),
+        ]
+        for value, role in values:
+            text = str(value or "").strip()
+            normalized = normalize_source(text)
+            if not normalized or (source_lang, normalized) in existing_normalized:
+                continue
+            session.add(
+                ConceptTerm(
+                    concept_id=concept.id,
+                    lang=source_lang,
+                    text=text,
+                    normalized_text=normalized,
+                    role=role,
+                )
+            )
+            existing_normalized.add((source_lang, normalized))
+
     if concept_id:
         concept = session.get(Concept, concept_id)
         if concept is None:
@@ -230,6 +258,8 @@ def _add_curated_concept(
             raise ValueError("concept is outside tenant scope")
         if concept.project_id not in {None, candidate.project_id}:
             raise ValueError("concept is outside project scope")
+        attach_aliases(concept)
+        session.flush()
         return concept
 
     concept = Concept(
@@ -264,6 +294,7 @@ def _add_curated_concept(
             role="preferred",
         )
     )
+    attach_aliases(concept)
     session.flush()
     return concept
 
@@ -279,6 +310,8 @@ def decide_candidate(
     concept_id: str | None = None,
     note: str | None = None,
     scope: str = "project",
+    aliases: Iterable[str] | None = None,
+    abbreviations: Iterable[str] | None = None,
 ) -> dict:
     """以乐观锁完成候选裁决，并在批准类动作时写入正式项目词库。"""
     action = (action or "").strip().casefold()
@@ -304,6 +337,8 @@ def decide_candidate(
             scope=scope,
             do_not_translate=action == "do_not_translate",
             concept_id=concept_id,
+            aliases=aliases,
+            abbreviations=abbreviations,
         )
         candidate.status = "approved"
         candidate.concept_id = concept.id
@@ -318,6 +353,8 @@ def decide_candidate(
             actor_sub=actor_sub,
             scope=scope,
             concept_id=concept_id,
+            aliases=aliases,
+            abbreviations=abbreviations,
         )
         candidate.status = "approved"
         candidate.concept_id = concept.id

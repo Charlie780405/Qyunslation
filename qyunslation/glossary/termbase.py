@@ -8,11 +8,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.glossary.resolver import TermMatch, TermRecord, TermResolver, build_term_index
+from qyunslation.glossary.governance import normalize_lang
 from qyunslation.persist.models import Concept, ConceptTerm
 
 
 def _preferred_target(terms: list[ConceptTerm], lang: str) -> str | None:
-    preferred = [t.text.strip() for t in terms if t.lang.casefold() == lang.casefold() and t.role == "preferred"]
+    preferred = [
+        t.text.strip()
+        for t in terms
+        if normalize_lang(t.lang) == normalize_lang(lang) and t.role == "preferred"
+    ]
     return preferred[0] if preferred else None
 
 
@@ -25,6 +30,8 @@ def list_runtime_terms(
     tgt_lang: str = "zh",
 ) -> list[TermRecord]:
     """Load only approved terms visible to this tenant/project."""
+    src_lang = normalize_lang(src_lang) or "en"
+    tgt_lang = normalize_lang(tgt_lang) or "zh"
     stmt = (
         select(Concept)
         .where(Concept.status == "curated")
@@ -43,9 +50,11 @@ def list_runtime_terms(
         forbidden = tuple(
             f.text.strip()
             for f in concept.forbiddens
-            if f.text.strip() and (not f.lang or f.lang.casefold() == tgt_lang.casefold())
+            if f.text.strip() and (not f.lang or normalize_lang(f.lang) == tgt_lang)
         )
-        source_terms = [t for t in concept.terms if t.lang.casefold() == src_lang.casefold()]
+        source_terms = [
+            t for t in concept.terms if normalize_lang(t.lang) == src_lang
+        ]
         for term in source_terms:
             source = term.text.strip()
             if not source:
@@ -127,7 +136,7 @@ def match_to_dict(match: TermMatch) -> dict:
         "scope": match.layer,
         "confidence": match.confidence,
         "source_locations": [{"start": match.start, "end": match.end}],
-        "hard_constraint": match.match_type == "exact",
+        "hard_constraint": match.match_type in {"exact", "alias"},
     }
 
 

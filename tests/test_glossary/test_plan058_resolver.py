@@ -72,7 +72,7 @@ def test_alias_and_abbreviation_are_exact_fast_path():
     matches = resolver.resolve("GVHD was assessed after graft-versus-host disease.")
 
     assert [m.concept_id for m in matches] == ["gvhd", "gvhd"]
-    assert all(m.match_type == "exact" for m in matches)
+    assert [m.match_type for m in matches] == ["alias", "exact"]
     assert calls == []
 
 

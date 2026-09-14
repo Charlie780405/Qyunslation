@@ -66,6 +66,9 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
     def __init__(self, config: MarkdownBasedWorkflowConfig):
         super().__init__(config=config)
         self.convert_engine = config.convert_engine
+        # PLAN-058：PDF/Office → Markdown 路径需要保留翻译前的可比较文本，
+        # 供译后术语 QA 使用；不把二进制原文件强行当作文本解码。
+        self.term_qa_source_content: bytes | None = None
         self._translator: MDTranslator | None = None  # 保存translator引用
         if config.logger:
             for sub_config in [self.config.converter_config, self.config.translator_config,
@@ -126,6 +129,7 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
         convert_engine, convert_config, translator_config, translator = self._pre_translate(self.document_original)
         self._translator = translator  # 保存translator引用
         document_md = self._get_document_md(convert_engine, convert_config)
+        self.term_qa_source_content = document_md.content
 
         # 翻译阶段
         translator.translate(document_md)
@@ -145,6 +149,7 @@ class MarkdownBasedWorkflow(Workflow[MarkdownBasedWorkflowConfig, Document, Mark
         convert_engine, convert_config, translator_config, translator = self._pre_translate(self.document_original)
         self._translator = translator  # 保存translator引用
         document_md = await asyncio.to_thread(self._get_document_md, convert_engine, convert_config)
+        self.term_qa_source_content = document_md.content
 
         # 翻译阶段 - 由 agent 更新细粒度进度
         await translator.translate_async(document_md)

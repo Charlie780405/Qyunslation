@@ -5,6 +5,7 @@ from __future__ import annotations
 from qyunslation.glossary.resolver import TermMatch
 from qyunslation.glossary.term_policy import (
     compile_term_policy,
+    evaluate_term_policy,
     policy_cache_key,
     policy_to_glossary,
     validate_term_policy,
@@ -70,6 +71,26 @@ def test_cache_key_changes_when_scope_or_termbase_changes():
     )
     assert first != second
     assert "t1" in first and "p1" in first and "v1" in first
+
+
+def test_evaluate_term_policy_returns_machine_readable_gate_result():
+    policy = {
+        "terms": [
+            {
+                "concept_id": "c1",
+                "source_term": "primary endpoint",
+                "preferred_target": "主要终点评估",
+                "hard_constraint": True,
+            }
+        ]
+    }
+    result = evaluate_term_policy(
+        "The primary endpoint was met.", "主要终点已达到。", policy
+    )
+    assert result["available"] is True
+    assert result["passed"] is False
+    assert result["finding_count"] == 1
+    assert result["findings"][0]["code"] == "TERM_MISSING_TARGET"
 
 
 def test_policy_injection_overrides_conflicting_legacy_glossary_only_for_hard_terms():

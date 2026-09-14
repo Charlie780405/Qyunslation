@@ -10,6 +10,7 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from qyunslation.glossary.governance import normalize_lang
 from qyunslation.persist.models import Concept, ConceptTerm, ConceptTermEmbedding
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,8 @@ def semantic_search_concept_terms(
     """Return semantic suggestions; never promote a suggestion to a hard hit."""
     if not (query or "").strip():
         return []
+    src_lang = normalize_lang(src_lang) or "en"
+    tgt_lang = normalize_lang(tgt_lang) or "zh"
     try:
         vectors, model = (embedder or _embed)([query.strip()])
         query_vector = vectors[0]

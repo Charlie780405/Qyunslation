@@ -91,7 +91,16 @@ def normalize_lang(lang: str) -> str:
     raw = (lang or "").strip().casefold()
     if raw in {"", "en", "eng", "english"}:
         return "en" if raw else ""
-    if raw in {"zh", "zh-cn", "zh_cn", "cn", "chinese", "中文", "简体中文"}:
+    if raw in {
+        "zh",
+        "zh-cn",
+        "zh_cn",
+        "cn",
+        "chinese",
+        "simplified chinese",
+        "中文",
+        "简体中文",
+    }:
         return "zh"
     return raw
 

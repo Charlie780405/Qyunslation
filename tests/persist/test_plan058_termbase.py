@@ -91,6 +91,41 @@ def test_runtime_terms_are_project_scoped_and_project_wins_clinical(session):
     ]
 
 
+def test_runtime_terms_normalize_human_language_names(session):
+    tenant = Tenant(slug="tenant-058-lang", name="Tenant 058 language")
+    session.add(tenant)
+    session.flush()
+    project = Project(tenant_id=tenant.id, slug="p", name="P")
+    session.add(project)
+    session.flush()
+    concept = Concept(
+        tenant_id=tenant.id,
+        project_id=project.id,
+        status="curated",
+        layer="project",
+        domain="clinical",
+    )
+    session.add(concept)
+    session.flush()
+    session.add_all(
+        [
+            ConceptTerm(concept_id=concept.id, lang="en", text="endpoint", role="preferred"),
+            ConceptTerm(concept_id=concept.id, lang="zh", text="终点", role="preferred"),
+        ]
+    )
+    session.commit()
+
+    matches = resolve_runtime_terms(
+        session,
+        tenant_id=tenant.id,
+        project_id=project.id,
+        text="endpoint",
+        src_lang="English",
+        tgt_lang="Simplified Chinese",
+    )
+    assert matches[0].target_term == "终点"
+
+
 def test_resolve_runtime_terms_uses_exact_path_without_embedding(session, monkeypatch):
     tenant = Tenant(slug="tenant-058b", name="Tenant 058b")
     session.add(tenant)

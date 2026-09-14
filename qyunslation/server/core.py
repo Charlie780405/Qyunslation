@@ -133,6 +133,75 @@ def _translation_failure_message(statistics: Any) -> str | None:
     return f"翻译请求失败：有 {unresolved} 个分块未生成有效译文，已阻止导出原文/伪译文。"
 
 
+_TERM_QA_TEXT_SUFFIXES = frozenset(
+    {".txt", ".md", ".markdown", ".html", ".htm", ".json", ".srt", ".ass"}
+)
+
+
+def _decode_term_qa_content(
+    content: bytes | bytearray | str | None, suffix: str
+) -> str | None:
+    """Decode only text-like documents for post-translation terminology QA."""
+    suffix_value = (suffix or "").lower()
+    extension = Path(suffix_value).suffix or (
+        suffix_value if suffix_value.startswith(".") else ""
+    )
+    if not content or extension not in _TERM_QA_TEXT_SUFFIXES:
+        return None
+    if isinstance(content, str):
+        return content
+    raw = bytes(content)
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            import charset_normalizer
+
+            detected = charset_normalizer.from_bytes(raw).best()
+            return detected.output() if detected is not None else None
+        except Exception:  # noqa: BLE001 - QA must not break binary translation
+            return None
+
+
+def _run_term_policy_qa(
+    workflow: Workflow,
+    *,
+    fallback_source_content: bytes,
+    original_filename: str,
+    policy: dict | None,
+) -> dict | None:
+    """Evaluate a policy after translation when comparable text is available.
+
+    Markdown-based conversion stores its pre-translation Markdown separately,
+    allowing PDF/Office → Markdown to be checked. Binary write-back formats are
+    reported as unavailable and continue through their native structural QA.
+    """
+    if not policy:
+        return None
+    source_content = getattr(workflow, "term_qa_source_content", None)
+    source_suffix = ".md" if source_content is not None else Path(original_filename).suffix
+    source_text = _decode_term_qa_content(
+        source_content if source_content is not None else fallback_source_content,
+        source_suffix,
+    )
+    translated = getattr(workflow, "document_translated", None)
+    target_text = _decode_term_qa_content(
+        getattr(translated, "content", None), getattr(translated, "suffix", "")
+    )
+    if source_text is None or target_text is None:
+        return {
+            "available": False,
+            "passed": True,
+            "finding_count": 0,
+            "findings": [],
+            "reason": "binary_or_unavailable_text_path",
+            "termbase_version": policy.get("termbase_version"),
+        }
+    from qyunslation.glossary.term_policy import evaluate_term_policy
+
+    return evaluate_term_policy(source_text, target_text, policy)
+
+
 # --- Workflow dictionary ---
 WORKFLOW_DICT: Dict[str, Type[Workflow]] = {
     "markdown_based": MarkdownBasedWorkflow,
@@ -741,8 +810,27 @@ class TranslationService:
             workflow.read_bytes(content=file_contents, stem=file_stem, suffix=file_suffix)
             await workflow.translate_async()
 
+            termbase_qa = _run_term_policy_qa(
+                workflow,
+                fallback_source_content=file_contents,
+                original_filename=original_filename,
+                policy=getattr(payload, "termbase_policy", None),
+            )
+            if termbase_qa is not None:
+                task_state["termbase_qa"] = termbase_qa
+                if not termbase_qa["passed"]:
+                    task_logger.error(
+                        "术语 QA 未通过，阻止正式稿导出：%s",
+                        termbase_qa["findings"],
+                    )
+                    raise RuntimeError(
+                        f"术语 QA 未通过：发现 {termbase_qa['finding_count']} 个问题"
+                    )
+
             # 收集统计信息并在导出前执行失败门禁。
             statistics = workflow.get_statistics()
+            if termbase_qa is not None:
+                statistics["termbase_qa"] = termbase_qa
             task_logger.info(f"收集统计信息: {statistics}")
             failure_message = _translation_failure_message(statistics)
             if failure_message:
@@ -820,6 +908,8 @@ class TranslationService:
 
             # 收集统计信息
             statistics = workflow.get_statistics()
+            if task_state.get("termbase_qa") is not None:
+                statistics["termbase_qa"] = task_state["termbase_qa"]
             task_logger.info(f"收集统计信息: {statistics}")
 
             task_state.update(
@@ -863,6 +953,8 @@ class TranslationService:
                     statistics = workflow.get_statistics()
             except Exception:
                 pass
+            if task_state.get("termbase_qa") is not None:
+                statistics["termbase_qa"] = task_state["termbase_qa"]
             task_state.update(
                 {
                     "status_message": f"翻译任务已取消 (用时 {duration:.2f} 秒).",
@@ -885,6 +977,8 @@ class TranslationService:
                     statistics = workflow.get_statistics()
             except Exception:
                 pass
+            if task_state.get("termbase_qa") is not None:
+                statistics["termbase_qa"] = task_state["termbase_qa"]
             task_state.update(
                 {
                     "status_message": f"翻译过程中发生错误 (用时 {duration:.2f} 秒): {mask_secrets(str(e))}",

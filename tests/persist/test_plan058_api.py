@@ -120,3 +120,25 @@ def test_term_resolve_requires_project_tenant_scope(client):
         headers=other,
     )
     assert response.status_code == 404
+
+
+def test_elevated_term_scope_requires_term_admin(client):
+    headers = {"X-Dev-User": "reviewer", "X-Dev-Tenant": "term-tenant"}
+    project_id, job_id = _setup(client, headers)
+    extracted = client.post(
+        f"/api/v1/jobs/{job_id}/terms/extract",
+        json={"candidates": [{"source_term": "target", "observed_target": "靶点"}]},
+        headers=headers,
+    )
+    candidate = extracted.json()["created"][0]
+    response = client.post(
+        f"/api/v1/jobs/{job_id}/terms/{candidate['id']}/decide",
+        json={
+            "action": "approve",
+            "expected_version": 1,
+            "target_term": "靶点",
+            "scope": "org",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 403

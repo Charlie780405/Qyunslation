@@ -142,7 +142,7 @@ def _match_to_result(record: TermRecord, start: int, end: int, match_type: str) 
         layer=record.layer,
         role=record.role,
         term_type=record.term_type,
-        confidence=1.0 if match_type == "exact" else 0.0,
+        confidence=1.0 if match_type in {"exact", "alias"} else 0.0,
         do_not_translate=record.do_not_translate,
         forbidden_targets=record.forbidden_targets,
     )
@@ -167,7 +167,8 @@ def _exact_matches(root: _TrieNode, text: str) -> list[TermMatch]:
             cursor += 1
             continue
         end, record = best
-        out.append(_match_to_result(record, cursor, end, "exact"))
+        match_type = "alias" if record.role in {"synonym", "abbreviation"} else "exact"
+        out.append(_match_to_result(record, cursor, end, match_type))
         cursor = end
     return out
 
@@ -222,6 +223,6 @@ def matches_to_glossary(matches: Iterable[TermMatch]) -> dict[str, str]:
     """Build the legacy prompt dictionary from approved exact matches."""
     result: dict[str, str] = {}
     for match in matches:
-        if match.match_type == "exact" and match.source_term not in result:
+        if match.match_type in {"exact", "alias"} and match.source_term not in result:
             result[match.source_term] = match.target_term
     return result

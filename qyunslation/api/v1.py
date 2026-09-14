@@ -420,6 +420,8 @@ class TermCandidateDecisionBody(BaseModel):
     concept_id: str | None = Field(default=None, max_length=36)
     note: str | None = Field(default=None, max_length=10000)
     scope: str = Field(default="project", max_length=32)
+    aliases: list[str] = Field(default_factory=list, max_length=50)
+    abbreviations: list[str] = Field(default_factory=list, max_length=50)
 
 
 class TermBatchDecisionItem(TermCandidateDecisionBody):
@@ -507,6 +509,7 @@ def search_terms_api(
         src_lang=src_lang,
         tgt_lang=tgt_lang,
         limit=5,
+        threshold=0.88,
     )
     exact["semantic_suggestions"] = suggestions
     exact["semantic_used"] = bool(suggestions)
@@ -602,6 +605,13 @@ def decide_job_term_api(
     )
     if candidate is None:
         raise HTTPException(status_code=404, detail="term candidate not found")
+    scope = body.scope.strip().casefold()
+    if scope != "project":
+        membership = repo.ensure_membership(
+            session, tenant_id=tenant.id, user_sub=identity.user_sub
+        )
+        if membership.role not in {"term_admin", "admin", "owner"}:
+            raise HTTPException(status_code=403, detail="term_admin role required")
     try:
         result = decide_candidate(
             session,
@@ -612,7 +622,9 @@ def decide_job_term_api(
             target_term=body.target_term,
             concept_id=body.concept_id,
             note=body.note,
-            scope=body.scope,
+            scope=scope,
+            aliases=body.aliases,
+            abbreviations=body.abbreviations,
         )
     except CandidateConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -657,6 +669,13 @@ def batch_decide_job_terms_api(
         )
         if candidate is None:
             raise HTTPException(status_code=404, detail="term candidate not found")
+        scope = item.scope.strip().casefold()
+        if scope != "project":
+            membership = repo.ensure_membership(
+                session, tenant_id=tenant.id, user_sub=identity.user_sub
+            )
+            if membership.role not in {"term_admin", "admin", "owner"}:
+                raise HTTPException(status_code=403, detail="term_admin role required")
         # 未知、语义或多义候选必须逐条确认，避免批量操作绕过风险控制。
         if item.action.strip().casefold() == "approve" and candidate.match_type not in {
             "exact",
@@ -677,7 +696,9 @@ def batch_decide_job_terms_api(
                     target_term=item.target_term,
                     concept_id=item.concept_id,
                     note=item.note,
-                    scope=item.scope,
+                    scope=scope,
+                    aliases=item.aliases,
+                    abbreviations=item.abbreviations,
                 )
             )
         except CandidateConflict as exc:

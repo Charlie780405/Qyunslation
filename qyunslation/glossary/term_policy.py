@@ -130,6 +130,33 @@ def validate_term_policy(
     return findings
 
 
+def evaluate_term_policy(
+    source_text: str, target_text: str, policy: dict | None
+) -> dict:
+    """Return a stable post-translation QA result for task state and APIs.
+
+    ``available`` is false only when the caller cannot provide comparable text;
+    this is normal for binary write-back paths such as DOCX/PPTX/image.  When
+    text is available, a finding is a hard gate for the formal output.
+    """
+    if policy is None:
+        return {
+            "available": False,
+            "passed": True,
+            "finding_count": 0,
+            "findings": [],
+            "reason": "no_termbase_policy",
+        }
+    findings = validate_term_policy(source_text, target_text, policy)
+    return {
+        "available": True,
+        "passed": not findings,
+        "finding_count": len(findings),
+        "findings": findings,
+        "termbase_version": policy.get("termbase_version"),
+    }
+
+
 def policy_cache_key(
     *,
     tenant_id: str,

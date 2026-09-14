@@ -150,3 +150,36 @@ def test_list_candidates_is_tenant_and_job_scoped(session):
     assert len(list_candidates(session, tenant_id=tenant.id, job_id=job.id)) == 1
     assert list_candidates(session, tenant_id="other-tenant", job_id=job.id) == []
 
+
+def test_approve_candidate_persists_aliases_and_abbreviations(session):
+    tenant, project, job = _job(session)
+    candidate = enqueue_candidate(
+        session,
+        job=job,
+        tenant_id=tenant.id,
+        project_id=project.id,
+        source_term="adverse event",
+        observed_target="不良事件",
+        term_type="safety",
+    )
+
+    result = decide_candidate(
+        session,
+        candidate=candidate,
+        actor_sub="reviewer",
+        action="approve",
+        expected_version=1,
+        target_term="不良事件",
+        aliases=["adverse events", "AE"],
+        abbreviations=["AE"],
+    )
+    session.commit()
+
+    concept = session.get(Concept, result["concept_id"])
+    assert concept is not None
+    assert {(term.lang, term.text, term.role) for term in concept.terms} == {
+        ("en", "adverse event", "preferred"),
+        ("zh", "不良事件", "preferred"),
+        ("en", "adverse events", "synonym"),
+        ("en", "AE", "abbreviation"),
+    }
