@@ -166,15 +166,21 @@ UI_BLOCK = f'''        {UI_MARKER}
                 label="筛选",
             )
             qy060_term_table = gr.Dataframe(
-                headers=["源词", "实际译法", "推荐译法", "风险", "类型", "次数", "状态"],
-                datatype=["str", "str", "str", "str", "str", "number", "str"],
+                headers=["源词", "实际译法", "推荐译法", "确认译法", "风险", "类型", "次数", "状态"],
+                datatype=["str", "str", "str", "str", "str", "str", "number", "str"],
                 value=[],
-                interactive=False,
+                type="array",
+                interactive=True,
+                static_columns=[0, 1, 2, 4, 5, 6, 7],
+                col_count=(8, "fixed"),
                 label="术语候选",
             )
             qy060_candidate_id = gr.Dropdown(choices=[], label="待审术语")
             qy060_context = gr.Markdown("翻译完成后可查看页码、表格或 OCR 定位。")
-            qy060_target = gr.Textbox(label="确认译法")
+            gr.Markdown("选择候选后可编辑“确认译法”列或下方确认译法；实际译法和推荐译法为本次证据与 AI 建议。保存后确认译法将进入词库。")
+            qy060_actual = gr.Textbox(label="实际译法（原文证据）", interactive=False)
+            qy060_recommended = gr.Textbox(label="推荐译法（AI 建议）", interactive=False)
+            qy060_target = gr.Textbox(label="确认译法（保存采用）", placeholder="请输入最终确认译法")
             qy060_action = gr.Dropdown(
                 choices=["批准", "编辑后批准", "关联已有词条", "不译", "拒绝", "提交管理员复核"],
                 value="批准",
@@ -195,6 +201,42 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         def _qy060_filter_status(label):
             return {{"待确认": "pending", "待管理员": "pending_admin", "已应用": "applied", "已处理": None}}.get(label)
 
+        def _qy060_rows_for_filter(rows, selected_filter):
+            status = _qy060_filter_status(selected_filter)
+            if selected_filter == "已处理":
+                return [row for row in rows if row.get("status") in {{"approved", "rejected"}}]
+            if status:
+                return [row for row in rows if row.get("status") == status]
+            return list(rows)
+
+        def _qy060_row_context(row):
+            if not row:
+                return "当前筛选下没有待确认术语。"
+            locations = [
+                f"第{{item.get('page_no') or '-'}}页 / {{item.get('block_id') or item.get('object_id') or '正文'}}"
+                for item in row.get("occurrences") or []
+            ]
+            return "\\n\\n".join([
+                f"**源词：** {{row.get('source_term', '')}}",
+                f"**原文上下文：** {{row.get('source_context') or '-'}}",
+                f"**译文上下文：** {{row.get('target_context') or '-'}}",
+                f"**定位：** {{'；'.join(locations) or '-'}}",
+            ])
+
+        def _qy060_table_confirmation(review, candidate_id, table_data, selected_filter):
+            """读取唯一可编辑列；证据列永远不作为人工决定写入。"""
+            if not isinstance(table_data, list):
+                return None
+            rows = _qy060_rows_for_filter(review.get("candidates", []), selected_filter)
+            index = next((index for index, row in enumerate(rows) if row.get("id") == candidate_id), None)
+            if index is None or index >= len(table_data) or not isinstance(table_data[index], (list, tuple)):
+                return None
+            values = table_data[index]
+            if len(values) <= 3:
+                return ""
+            value = values[3]
+            return str(value or "").strip()
+
         def _qy060_render_terms(state, selected_filter):
             from qyunslation.workbench.gui_client import get_workbench_term_review
             run = _qy060_current_run(state)
@@ -205,6 +247,9 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                     gr.update(value=[]),
                     gr.update(choices=[], value=None),
                     gr.update(value=note or "尚无可审校术语。"),
+                    gr.update(value=""),
+                    gr.update(value=""),
+                    gr.update(value=""),
                 )
             try:
                 review = get_workbench_term_review(run)
@@ -214,18 +259,16 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                     gr.update(value=[]),
                     gr.update(choices=[], value=None),
                     gr.update(value="专业词库暂不可用；译文未受影响，未写入共享词库。"),
+                    gr.update(value=""),
+                    gr.update(value=""),
+                    gr.update(value=""),
                 )
             summary = review["summary"]
-            rows = review["candidates"]
-            status = _qy060_filter_status(selected_filter)
-            if selected_filter == "已处理":
-                rows = [row for row in rows if row.get("status") in {{"approved", "rejected"}}]
-            elif status:
-                rows = [row for row in rows if row.get("status") == status]
+            rows = _qy060_rows_for_filter(review["candidates"], selected_filter)
             table = [[
-                row.get("source_term", ""), row.get("observed_target", ""),
-                row.get("suggested_target", ""), row.get("risk", ""),
-                row.get("term_type", ""), len(row.get("occurrences") or []), row.get("status", ""),
+                row.get("source_term", ""), row.get("observed_target") or "未可靠对齐",
+                row.get("suggested_target") or "暂无 AI 推荐", row.get("suggested_target") or row.get("observed_target") or "",
+                row.get("risk", ""), row.get("term_type", ""), len(row.get("occurrences") or []), row.get("status", ""),
             ] for row in rows]
             choices = [(f"{{row.get('source_term', '')}} · {{row.get('status', '')}}", row["id"]) for row in rows]
             badge = f"专业词汇：待确认 {{summary.get('pending', 0)}}"
@@ -233,33 +276,81 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                 badge += f" · 待复核 {{summary['pending_admin']}}"
             if summary.get("status") == "extraction_degraded":
                 badge += " · 提取降级"
-            return gr.update(value=badge, visible=True), gr.update(value=table), gr.update(choices=choices, value=choices[0][1] if choices else None), gr.update(value="选择术语查看定位与上下文。")
+            selected = rows[0] if rows else None
+            actual = (selected or {{}}).get("observed_target") or ""
+            recommended = (selected or {{}}).get("suggested_target") or ""
+            return (
+                gr.update(value=badge, visible=True),
+                gr.update(value=table),
+                gr.update(choices=choices, value=choices[0][1] if choices else None),
+                gr.update(value=_qy060_row_context(selected)),
+                gr.update(value=actual or "未可靠对齐"),
+                gr.update(value=recommended or "暂无 AI 推荐"),
+                gr.update(value=recommended or actual),
+            )
 
         def _qy060_select_term(state, candidate_id):
             from qyunslation.workbench.gui_client import get_workbench_term_review
             run = _qy060_current_run(state)
             if not run or not candidate_id:
-                return gr.update(value=""), gr.update(value="")
+                return gr.update(value=""), gr.update(value=""), gr.update(value=""), gr.update(value="")
             try:
                 candidates = get_workbench_term_review(run).get("candidates", [])
             except Exception:
-                return gr.update(value="专业词库暂不可用。"), gr.update(value="")
+                return gr.update(value="专业词库暂不可用。"), gr.update(value=""), gr.update(value=""), gr.update(value="")
             row = next((item for item in candidates if item.get("id") == candidate_id), None)
             if not row:
-                return gr.update(value="术语已更新，请刷新列表。"), gr.update(value="")
-            locations = [
-                f"第{{item.get('page_no') or '-'}}页 / {{item.get('block_id') or item.get('object_id') or '正文'}}"
-                for item in row.get("occurrences") or []
-            ]
-            context = "\\n\\n".join([
-                f"**源词：** {{row.get('source_term', '')}}",
-                f"**原文上下文：** {{row.get('source_context') or '-'}}",
-                f"**译文上下文：** {{row.get('target_context') or '-'}}",
-                f"**定位：** {{'；'.join(locations) or '-'}}",
-            ])
-            return gr.update(value=context), gr.update(value=row.get("suggested_target") or row.get("observed_target") or "")
+                return gr.update(value="术语已更新，请刷新列表。"), gr.update(value=""), gr.update(value=""), gr.update(value="")
+            actual = row.get("observed_target") or ""
+            recommended = row.get("suggested_target") or ""
+            return (
+                gr.update(value=_qy060_row_context(row)),
+                gr.update(value=actual or "未可靠对齐"),
+                gr.update(value=recommended or "暂无 AI 推荐"),
+                gr.update(value=recommended or actual),
+            )
 
-        def _qy060_decide_term(state, candidate_id, label, target, concept_id, note, selected_filter):
+        def _qy060_select_table_row(state, selected_filter, event: gr.SelectData):
+            from qyunslation.workbench.gui_client import get_workbench_term_review
+            run = _qy060_current_run(state)
+            if not run:
+                return gr.update(value=None), gr.update(value=""), gr.update(value=""), gr.update(value=""), gr.update(value="")
+            try:
+                review = get_workbench_term_review(run)
+                rows = _qy060_rows_for_filter(review.get("candidates", []), selected_filter)
+                raw_index = event.index[0] if isinstance(event.index, (list, tuple)) else event.index
+                try:
+                    index = int(raw_index)
+                except (TypeError, ValueError):
+                    index = -1
+                row = rows[index] if 0 <= index < len(rows) else None
+            except Exception:
+                row = None
+            if not row:
+                return gr.update(value=None), gr.update(value=""), gr.update(value=""), gr.update(value=""), gr.update(value="")
+            actual = row.get("observed_target") or ""
+            recommended = row.get("suggested_target") or ""
+            return (
+                gr.update(value=row.get("id")),
+                gr.update(value=_qy060_row_context(row)),
+                gr.update(value=actual or "未可靠对齐"),
+                gr.update(value=recommended or "暂无 AI 推荐"),
+                gr.update(value=recommended or actual),
+            )
+
+        def _qy060_table_input(table_data, state, candidate_id, selected_filter):
+            from qyunslation.workbench.gui_client import get_workbench_term_review
+            run = _qy060_current_run(state)
+            if not run or not candidate_id:
+                return gr.update()
+            try:
+                review = get_workbench_term_review(run)
+                value = _qy060_table_confirmation(review, candidate_id, table_data, selected_filter)
+            except Exception:
+                return gr.update()
+            return gr.update() if value is None else gr.update(value=value)
+
+        def _qy060_decide_term(state, candidate_id, label, target, concept_id, note, selected_filter, table_data):
             from qyunslation.workbench.gui_client import decide_workbench_term, get_workbench_term_review
             run = _qy060_current_run(state)
             if not run or not candidate_id:
@@ -268,11 +359,15 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             try:
                 review = get_workbench_term_review(run)
                 row = next(item for item in review["candidates"] if item.get("id") == candidate_id)
-                decide_workbench_term(run, candidate_id, {{"action": actions[label], "expected_version": row["version"], "target_term": target or None, "concept_id": concept_id or None, "note": note or None}})
+                table_target = _qy060_table_confirmation(review, candidate_id, table_data, selected_filter)
+                chosen_target = target if table_target is None else table_target
+                if actions[label] in {{"approve", "merge"}} and not chosen_target:
+                    return gr.update(value="请先填写确认译法，再保存术语决定。"), *_qy060_render_terms(state, selected_filter)
+                decide_workbench_term(run, candidate_id, {{"action": actions[label], "expected_version": row["version"], "target_term": chosen_target or None, "concept_id": concept_id or None, "note": note or None}})
             except Exception:
                 return gr.update(value="保存失败：术语可能已被其他审校者更新，请刷新后重试。"), *_qy060_render_terms(state, selected_filter)
-            badge, table, choices, context = _qy060_render_terms(state, selected_filter)
-            return gr.update(value="术语决定已保存。"), badge, table, choices, context
+            badge, table, choices, context, actual, recommended, next_target = _qy060_render_terms(state, selected_filter)
+            return gr.update(value="术语决定已保存，已返回候选列表并定位下一条。"), badge, table, choices, context, actual, recommended, next_target
 
         def _qy060_batch_confirm_exact(state, selected_filter):
             from qyunslation.workbench.gui_client import batch_decide_workbench_terms, get_workbench_term_review
@@ -302,10 +397,12 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             return gr.update(value=f"已确认 {{result.get('count', 0)}} 个精确术语。"), *_qy060_render_terms(state, selected_filter)
 
         qy060_term_badge.click(_qy050_flip_insp, [qy_insp_on], [qy_insp_on, qy_inspector])
-        qy060_term_filter.change(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
-        qy060_candidate_id.change(_qy060_select_term, [state, qy060_candidate_id], [qy060_context, qy060_target])
-        qy060_decide.click(_qy060_decide_term, [state, qy060_candidate_id, qy060_action, qy060_target, qy060_concept, qy060_note, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
-        qy060_batch_exact.click(_qy060_batch_confirm_exact, [state, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
+        qy060_term_filter.change(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
+        qy060_candidate_id.change(_qy060_select_term, [state, qy060_candidate_id], [qy060_context, qy060_actual, qy060_recommended, qy060_target])
+        qy060_term_table.select(_qy060_select_table_row, [state, qy060_term_filter], [qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
+        qy060_term_table.input(_qy060_table_input, [qy060_term_table, state, qy060_candidate_id, qy060_term_filter], [qy060_target])
+        qy060_decide.click(_qy060_decide_term, [state, qy060_candidate_id, qy060_action, qy060_target, qy060_concept, qy060_note, qy060_term_filter, qy060_term_table], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
+        qy060_batch_exact.click(_qy060_batch_confirm_exact, [state, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
         {TIMER_MARKER}
         def _qy060_poll_terms(state, selected_filter):
             rendered = _qy060_render_terms(state, selected_filter)
@@ -316,10 +413,10 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         qy060_term_timer.tick(
             _qy060_poll_terms,
             [state, qy060_term_filter],
-            [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_term_timer],
+            [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target, qy060_term_timer],
             show_progress="hidden",
         )
-        _qy_translate_evt.then(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
+        _qy_translate_evt.then(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
 '''
 
 TIMER_BLOCK = f'''        {TIMER_MARKER}
@@ -502,20 +599,38 @@ def apply_complete_hook(text: str) -> tuple[str, bool]:
 
 def apply_ui(text: str) -> tuple[str, bool]:
     if UI_MARKER in text:
-        return text, False
+        pattern = re.compile(
+            rf"(?m)^        {re.escape(UI_MARKER)}\n.*?(?=^        qy_help_on = gr\.State\(False\)\n)",
+            re.S,
+        )
+        match = pattern.search(text)
+        if not match:
+            return text, False
+        replacement = UI_BLOCK.rstrip("\n") + "\n"
+        updated = text[: match.start()] + replacement + text[match.end() :]
+        return updated, updated != text
     anchor = "        qy_help_on = gr.State(False)\n"
     if anchor not in text:
         return text, False
-    return text.replace(anchor, UI_BLOCK + "\n" + anchor, 1), True
+    return text.replace(anchor, UI_BLOCK.rstrip("\n") + "\n" + anchor, 1), True
 
 
 def apply_events(text: str) -> tuple[str, bool]:
     if EVENT_MARKER in text:
-        return text, False
+        pattern = re.compile(
+            rf"(?m)^        {re.escape(EVENT_MARKER)}\n.*?(?=^        # _qy_office_preview_then\n)",
+            re.S,
+        )
+        match = pattern.search(text)
+        if not match:
+            return text, False
+        replacement = EVENT_BLOCK.rstrip("\n") + "\n"
+        updated = text[: match.start()] + replacement + text[match.end() :]
+        return updated, updated != text
     anchor = "        # _qy_office_preview_then\n"
     if anchor not in text:
         return text, False
-    return text.replace(anchor, EVENT_BLOCK + "\n" + anchor, 1), True
+    return text.replace(anchor, EVENT_BLOCK.rstrip("\n") + "\n" + anchor, 1), True
 
 
 def apply_timer(text: str) -> tuple[str, bool]:
