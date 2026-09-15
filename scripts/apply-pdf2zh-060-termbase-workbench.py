@@ -20,8 +20,10 @@ GUI = Path(
 PY_MARKER = "# _qy_060_term_bridge_runtime"
 OFFICE_MARKER = "# _qy_060_term_bridge_office"
 COMPLETE_MARKER = "# _qy_060_term_bridge_complete"
+EARLY_COMPLETE_MARKER = "# _qy_060_term_bridge_early_complete"
 UI_MARKER = "# _qy_060_term_review_ui"
 EVENT_MARKER = "# _qy_060_term_review_events"
+TIMER_MARKER = "# _qy_060_term_review_timer"
 CSS_MARKER = "/* _qy_060_term_review_css */"
 
 CSS_BLOCK = r'''
@@ -77,12 +79,20 @@ _TRANSLATE_SIGNATURE = '''async def translate_files(
     *ui_args,
     progress=None,
 ):'''
-_TRANSLATE_SIGNATURE_PATCHED = '''async def translate_files(
+_TRANSLATE_SIGNATURE_LEGACY = '''async def translate_files(
     file_type,
     file_input,
     link_input,
     *ui_args,
     request: gr.Request | None = None,
+    progress=None,
+):'''
+_TRANSLATE_SIGNATURE_PATCHED = '''async def translate_files(
+    file_type,
+    file_input,
+    link_input,
+    request: gr.Request | None = None,
+    *ui_args,
     progress=None,
 ):'''
 
@@ -91,6 +101,7 @@ PY_BLOCK = f'''    {PY_MARKER}
     state.setdefault("_qy060_runs", {{}})
     state.setdefault("_qy060_term_summaries", {{}})
     state.setdefault("_qy060_term_note", "")
+    state["_qy060_term_done"] = False
 '''
 
 START_BLOCK = '''            _qy060_current = None
@@ -295,7 +306,35 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         qy060_candidate_id.change(_qy060_select_term, [state, qy060_candidate_id], [qy060_context, qy060_target])
         qy060_decide.click(_qy060_decide_term, [state, qy060_candidate_id, qy060_action, qy060_target, qy060_concept, qy060_note, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
         qy060_batch_exact.click(_qy060_batch_confirm_exact, [state, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
+        {TIMER_MARKER}
+        def _qy060_poll_terms(state, selected_filter):
+            rendered = _qy060_render_terms(state, selected_filter)
+            active = not bool((state or {{}}).get("_qy060_term_done"))
+            return (*rendered, gr.update(active=active))
+
+        qy060_term_timer = gr.Timer(value=1.0, active=True)
+        qy060_term_timer.tick(
+            _qy060_poll_terms,
+            [state, qy060_term_filter],
+            [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_term_timer],
+            show_progress="hidden",
+        )
         _qy_translate_evt.then(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])
+'''
+
+TIMER_BLOCK = f'''        {TIMER_MARKER}
+        def _qy060_poll_terms(state, selected_filter):
+            rendered = _qy060_render_terms(state, selected_filter)
+            active = not bool((state or {{}}).get("_qy060_term_done"))
+            return (*rendered, gr.update(active=active))
+
+        qy060_term_timer = gr.Timer(value=1.0, active=True)
+        qy060_term_timer.tick(
+            _qy060_poll_terms,
+            [state, qy060_term_filter],
+            [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_term_timer],
+            show_progress="hidden",
+        )
 '''
 
 
@@ -325,6 +364,11 @@ def apply_css(text: str) -> tuple[str, bool]:
 
 def apply_python_hook(text: str) -> tuple[str, bool]:
     if PY_MARKER in text:
+        # Gradio only injects special parameters while scanning positional
+        # parameters.  An earlier PLAN-060 patch put Request after *ui_args,
+        # making the callback silently receive request=None in queue mode.
+        if _TRANSLATE_SIGNATURE_LEGACY in text:
+            return text.replace(_TRANSLATE_SIGNATURE_LEGACY, _TRANSLATE_SIGNATURE_PATCHED, 1), True
         return text, False
     if _TRANSLATE_SIGNATURE in text:
         text = text.replace(_TRANSLATE_SIGNATURE, _TRANSLATE_SIGNATURE_PATCHED, 1)
@@ -371,12 +415,12 @@ def apply_office_hook(text: str) -> tuple[str, bool]:
 
 
 def apply_complete_hook(text: str) -> tuple[str, bool]:
-    if COMPLETE_MARKER in text:
+    early_anchor = "            # _qy_imgtr_post\n"
+    result_anchor = "            result_entry = {\n"
+    if early_anchor not in text or result_anchor not in text:
         return text, False
-    anchor = "            result_entry = {\n"
-    if anchor not in text:
-        return text, False
-    block = f'''            {COMPLETE_MARKER}
+
+    early_block = f'''            {EARLY_COMPLETE_MARKER}
             try:
                 if _qy060_current:
                     from qyunslation.workbench.gui_client import complete_workbench_translation
@@ -391,7 +435,69 @@ def apply_complete_hook(text: str) -> tuple[str, bool]:
                 state["_qy060_term_note"] = "术语候选提取降级；译文已生成，未自动写入共享词库。"
 
 '''
-    return text.replace(anchor, block + anchor, 1), True
+    final_block = f'''            {COMPLETE_MARKER}
+            try:
+                if _qy060_current:
+                    from qyunslation.workbench.gui_client import complete_workbench_translation
+                    _qy060_term_result = await asyncio.to_thread(
+                        complete_workbench_translation,
+                        _qy060_current,
+                        file_path,
+                        _mono or _dual,
+                    )
+                    state["_qy060_term_summaries"][filename] = _qy060_term_result.get("summary", {{}})
+            except Exception:
+                state["_qy060_term_note"] = "术语候选提取降级；译文已生成，未自动写入共享词库。"
+            finally:
+                state["_qy060_term_done"] = True
+
+'''
+
+    changed = False
+    if EARLY_COMPLETE_MARKER not in text:
+        text = text.replace(early_anchor, early_block + early_anchor, 1)
+        changed = True
+
+    if COMPLETE_MARKER not in text:
+        text = text.replace(result_anchor, final_block + result_anchor, 1)
+        changed = True
+    else:
+        old_except = '''            except Exception:
+                state["_qy060_term_note"] = "术语候选提取降级；译文已生成，未自动写入共享词库。"
+
+'''
+        new_except = '''            except Exception:
+                state["_qy060_term_note"] = "术语候选提取降级；译文已生成，未自动写入共享词库。"
+            finally:
+                state["_qy060_term_done"] = True
+
+'''
+        final_start = text.index(COMPLETE_MARKER)
+        before_final = text[:final_start]
+        final_part = text[final_start:]
+        updated_final = final_part
+        if 'state["_qy060_term_done"] = True' not in final_part:
+            updated_final = final_part.replace(old_except, new_except, 1)
+        if updated_final != final_part:
+            text = before_final + updated_final
+            changed = True
+
+        early_start = text.index(EARLY_COMPLETE_MARKER)
+        early_end = text.index(early_anchor, early_start)
+        early_part = text[early_start:early_end]
+        early_without_done = early_part.replace(
+            '''            finally:
+                state["_qy060_term_done"] = True
+
+''',
+            "",
+            1,
+        )
+        if early_without_done != early_part:
+            text = text[:early_start] + early_without_done + text[early_end:]
+            changed = True
+
+    return text, changed
 
 
 def apply_ui(text: str) -> tuple[str, bool]:
@@ -412,16 +518,35 @@ def apply_events(text: str) -> tuple[str, bool]:
     return text.replace(anchor, EVENT_BLOCK + "\n" + anchor, 1), True
 
 
+def apply_timer(text: str) -> tuple[str, bool]:
+    if TIMER_MARKER in text:
+        return text, False
+    anchor = "        _qy_translate_evt.then(_qy060_render_terms, [state, qy060_term_filter], [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context])\n"
+    if anchor not in text:
+        return text, False
+    return text.replace(anchor, TIMER_BLOCK + anchor, 1), True
+
+
 def apply(text: str) -> tuple[str, bool]:
     changed = False
-    for fn in (apply_css, apply_python_hook, apply_office_hook, apply_complete_hook, apply_ui, apply_events):
+    for fn in (apply_css, apply_python_hook, apply_office_hook, apply_complete_hook, apply_ui, apply_events, apply_timer):
         text, current = fn(text)
         changed = changed or current
     return text, changed
 
 
 def verify(text: str) -> int:
-    required = (CSS_MARKER, PY_MARKER, OFFICE_MARKER, COMPLETE_MARKER, UI_MARKER, EVENT_MARKER, "gr.Request")
+    required = (
+        CSS_MARKER,
+        PY_MARKER,
+        OFFICE_MARKER,
+        COMPLETE_MARKER,
+        EARLY_COMPLETE_MARKER,
+        UI_MARKER,
+        EVENT_MARKER,
+        TIMER_MARKER,
+        "gr.Request",
+    )
     missing = [item for item in required if item not in text]
     if missing:
         print(f"ERROR: PLAN-060 patch missing {', '.join(missing)}", file=sys.stderr)

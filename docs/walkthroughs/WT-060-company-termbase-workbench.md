@@ -13,7 +13,7 @@
 | PDF/Office 译前策略注入 | 已实现；补丁及 sidecar 契约测试通过 |
 | PDF/DOCX/PPTX/图片 OCR 证据、表格/脚注、参考文献排除 | 已实现；专项测试通过。独立图片、PDF 图像与 Office 内嵌图片先作受上限保护的 OCR 术语解析，避免图内已确认词遗漏译前硬约束。 |
 | 快速徽标、专业检查器、单项/批量裁决 | 已实现；补丁在实际上游 GUI 源码内存编译通过 |
-| PostgreSQL 迁移、真实浏览器、Caddy 负向验证、泰州 LIVE | 待目标环境执行，不能据此标记完成 |
+| PostgreSQL 迁移、真实浏览器、Caddy 负向验证、泰州 LIVE | PostgreSQL、Caddy 与单篇真实文献工作台已补证；多格式金标与泰州 LIVE 仍需独立验收 |
 
 ## 已执行本地命令
 
@@ -27,7 +27,7 @@
   tests/persist/test_plan058_api.py
 ```
 
-结果：`29 passed`（含对已安装上游 GUI 的内存补丁编译验证）；Alembic 仅报告既有配置弃用警告。`QYUNSLATION_PLAN060_FULL=1 bash scripts/verify-plan-060.sh` 已通过，并联动通过 PLAN-058、050e、057、059；最终全量回归为 `929 passed, 6 skipped`。
+结果：专项范围最新为 `39 passed`（含对已安装上游 GUI 的内存补丁编译验证）；Alembic 仅报告既有配置弃用警告。带实际 Caddy 配置、PostgreSQL 和浏览器证据的 LIVE 门禁为 `SUMMARY: PASS fail=0`，并联动通过 PLAN-058、050e、057、059。
 
 ## 生产部署记录（2026-09-15）
 
@@ -40,10 +40,20 @@
 ## 待补 LIVE 证据
 
 - 迁移 `060a0001` 在 PostgreSQL 成功；两个服务加载相同且未输出的桥接密钥。
-- Caddy 配置不含 `/internal/workbench`，外网请求不可达；sidecar 仍只绑定 loopback。
-- 已登录用户在 320、768、1024、1440 宽度下可上传、翻译、打开徽标和确认候选。
+- Caddy 配置不含 `/internal/workbench`，实际公网请求返回 `404`；sidecar 仍只绑定 loopback。
+- 已登录用户在 320、768、1024、1440 宽度下可上传、翻译、打开徽标和确认候选；另有 1440 宽度真实文献验证确认候选面板可见。
 - 一份 PDF、DOCX（表格与脚注）、PPTX、图片 OCR、双栏文献分别产生候选；参考文献零候选。
 - 普通词在下一文件精确复用且 bge-m3 调用数为零；高风险词仅管理员可终审。
+
+## 阻塞解除记录（2026-09-15）
+
+- Caddy 实际生产配置为 `/home/dev/qyunsgen/config/Caddyfile-production-public`，由容器 `qyunsgen-caddy` 以只读方式挂载；`translate.qyunsgen.com` 仅代理 `/api/v1/*` 到 `127.0.0.1:8010`、`/dl/*` 到 `127.0.0.1:8765`，其余 Gradio 流量到 `127.0.0.1:7860`，没有 `/internal/workbench` 路由。`caddy adapt` 校验通过，内部工作台接口没有被公网代理；侧车仍只监听回环地址。
+- 已定位并修复真实登录身份丢失的根因：Gradio 队列回调只对可注入的定位参数传递 `gr.Request`，原补丁把 `request` 放在 `*ui_args` 后，导致回调静默得到空用户名。现已将 `request` 放在 `*ui_args` 前，并增加旧补丁自动迁移及回归测试。
+- 真实浏览器证据：`/home/dev/tmp-bridge/qy-plan060-browser-authenticated-term-review.json`。测试账号登录成功，正确上传入口与翻译按钮可见；翻译完成后显示 `专业词汇：待确认 17`，不再显示“请登录后使用专业词库”。
+- 真实浏览器面板证据：`/home/dev/tmp-bridge/qy-plan060-browser-term-panel.json`。点击术语徽标后，“保存术语决定”按钮与双语术语面板可见，确认入口已形成；本次样本为 `CM310 Ph 3.pdf`，候选清单为 17 条。
+- 两次浏览器验证仅记录到 `upload_progress` 的预期 `ERR_ABORTED` 以及上游远程 PDF worker 加载警告；未观察到术语桥接业务接口错误。该上游预览警告不应冒充为术语闭环通过证据。
+
+本次已解除“真实文献翻译后无候选清单／提示未登录”和“Caddy 配置无法定位”两个阻塞，但 PLAN-060 仍不得整体标记完成；DOCX/PPTX/图片 OCR/表格脚注、参考文献零候选、管理员流程、泰州 LIVE 与真实金标矩阵仍按门禁逐项补证。
 
 ## 追加验证记录（2026-09-15，PLAN-060 UI/生产收口）
 
@@ -57,7 +67,7 @@
   - 仍存在每个宽度一次的 Gradio/HuggingFace `postMessage` origin warning；未观察到业务接口错误，暂作为上游残留 warning 记录。
 - PLAN-060 LIVE 门禁：
   - `QYUNSLATION_PLAN060_LIVE=1` + 浏览器证据运行后，静态、迁移、桥接变量、浏览器证据均为 `PASS`。
-  - 当前主机未发现可供验证的 Caddy 配置文件或 `caddy.service`，因此“内部接口未被 Caddy 暴露”的负向断言按规则为 `BLOCKED`；最终 `SUMMARY: BLOCKED blocked=1 fail=0`。
+  - 历史记录曾因未定位实际 Caddy 文件而为 `BLOCKED`；现已确认实际配置路径并通过负向断言。最新门禁应使用 `QYUNSLATION_PLAN060_CADDYFILE=/home/dev/qyunsgen/config/Caddyfile-production-public`。
 - 依赖门禁：
   - `QYUNSLATION_PLAN060_FULL=1 bash scripts/verify-plan-060.sh` 通过，联动 PLAN-058、PLAN-050e、PLAN-057、PLAN-059 均为 `PASS`。
 - 生产内网术语闭环证据：`/home/dev/tmp-bridge/qy-plan060-live-term-STAUuN/live-term-closure.json`。

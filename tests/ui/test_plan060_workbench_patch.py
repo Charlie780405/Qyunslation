@@ -29,6 +29,69 @@ def test_plan060_patch_declares_server_side_term_panel_and_callbacks():
     assert "QYUNSLATION_TERM_BRIDGE_SECRET" not in text
     assert "overflow-y: auto" in text
     assert "保存术语决定" in text
+    assert "_qy_060_term_bridge_early_complete" in text
+    assert "_qy_060_term_review_timer" in text
+    assert "link_input,\n    request: gr.Request | None = None,\n    *ui_args" in text
+
+
+def test_plan060_migrates_request_before_varargs_for_gradio_injection():
+    module = _module()
+    source = module.PY_MARKER + "\n" + module._TRANSLATE_SIGNATURE_LEGACY
+
+    patched, changed = module.apply_python_hook(source)
+
+    assert changed is True
+    assert module._TRANSLATE_SIGNATURE_PATCHED in patched
+    assert patched.index("request: gr.Request") < patched.index("*ui_args")
+
+
+def test_plan060_extracts_terms_before_slow_image_postprocessing():
+    module = _module()
+    source = """            # _qy_imgtr_post
+            do_slow_image_postprocessing()
+
+            result_entry = {
+"""
+
+    patched, changed = module.apply_complete_hook(source)
+
+    assert changed is True
+    assert module.EARLY_COMPLETE_MARKER in patched
+    assert patched.index(module.EARLY_COMPLETE_MARKER) < patched.index("# _qy_imgtr_post")
+    assert module.COMPLETE_MARKER in patched
+    assert patched.index("# _qy_imgtr_post") < patched.index(module.COMPLETE_MARKER)
+
+
+def test_plan060_migrates_old_patch_done_flag_to_final_completion_only():
+    module = _module()
+    source = f'''            {module.EARLY_COMPLETE_MARKER}
+            try:
+                pass
+            except Exception:
+                pass
+            finally:
+                state["_qy060_term_done"] = True
+
+            # _qy_imgtr_post
+            do_slow_image_postprocessing()
+
+            {module.COMPLETE_MARKER}
+            try:
+                pass
+            except Exception:
+                state["_qy060_term_note"] = "术语候选提取降级；译文已生成，未自动写入共享词库。"
+
+            result_entry = {{
+'''
+
+    patched, changed = module.apply_complete_hook(source)
+
+    assert changed is True
+    early_start = patched.index(module.EARLY_COMPLETE_MARKER)
+    early_end = patched.index("# _qy_imgtr_post")
+    final_start = patched.index(module.COMPLETE_MARKER)
+    assert 'state["_qy060_term_done"] = True' not in patched[early_start:early_end]
+    assert 'state["_qy060_term_done"] = True' in patched[final_start:]
 
 
 def test_plan060_css_replaces_existing_block_and_stays_idempotent():
