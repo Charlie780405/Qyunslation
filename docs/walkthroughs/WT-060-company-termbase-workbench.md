@@ -44,3 +44,27 @@
 - 已登录用户在 320、768、1024、1440 宽度下可上传、翻译、打开徽标和确认候选。
 - 一份 PDF、DOCX（表格与脚注）、PPTX、图片 OCR、双栏文献分别产生候选；参考文献零候选。
 - 普通词在下一文件精确复用且 bge-m3 调用数为零；高风险词仅管理员可终审。
+
+## 追加验证记录（2026-09-15，PLAN-060 UI/生产收口）
+
+- `main` 已推进并推送至 `4cffa84e2a0915f7cfae0ef2270b7b681b57eb37`，新增浏览器字体别名修复，避免 Gradio 生成 CSS 请求不存在的本地字体资源。
+- `bash scripts/deploy-translate-stack.sh` 已重新部署生产翻译栈：`pdf2zh.service` 与 `qyunslation-office.service` 均为 `active`，sidecar 本地/远端能力指纹一致。
+- 四视宽浏览器验证证据：`/home/dev/tmp-bridge/qy-plan060-browser-after-fonts-7gaQhV/browser-evidence.json`。
+  - 320、768、1024、1440 宽度下 `documentWidth == viewportWidth`。
+  - “就绪”文字可见且为白色高对比色 `rgb(255, 255, 255)`。
+  - 翻译按钮在四个宽度下均可见。
+  - 字体资源 `404` 已清零，HTTP 4xx/5xx 为 `0`。
+  - 仍存在每个宽度一次的 Gradio/HuggingFace `postMessage` origin warning；未观察到业务接口错误，暂作为上游残留 warning 记录。
+- PLAN-060 LIVE 门禁：
+  - `QYUNSLATION_PLAN060_LIVE=1` + 浏览器证据运行后，静态、迁移、桥接变量、浏览器证据均为 `PASS`。
+  - 当前主机未发现可供验证的 Caddy 配置文件或 `caddy.service`，因此“内部接口未被 Caddy 暴露”的负向断言按规则为 `BLOCKED`；最终 `SUMMARY: BLOCKED blocked=1 fail=0`。
+- 依赖门禁：
+  - `QYUNSLATION_PLAN060_FULL=1 bash scripts/verify-plan-060.sh` 通过，联动 PLAN-058、PLAN-050e、PLAN-057、PLAN-059 均为 `PASS`。
+- 生产内网术语闭环证据：`/home/dev/tmp-bridge/qy-plan060-live-term-STAUuN/live-term-closure.json`。
+  - 普通候选初始状态 `pending`、风险 `normal`。
+  - 使用测试账号身份批准后状态为 `approved`。
+  - 下一次译前同一术语精确命中并返回硬约束译法，`semantic_used=false`，证明相同已确认术语复用不依赖 bge-m3。
+- 真实文献 UI 端到端验证仍未通过：
+  - 样本 `CBP-201 Ph 3.pdf` 曾在浏览器中成功上传并启动翻译，但 363.2 秒后停留在 `已处理 图 0/0 · 表 0/0 - 97.3%`。
+  - 日志显示主 PDF 文本翻译已完成，随后图片/OCR 后处理多次触发 QC warning/fail，未进入“翻译完成后展示专业词汇候选清单”的 UI 状态。
+  - 因此“完成一篇真实文献后在界面展示待确认候选列表”仍为 `BLOCKED`，不能标记 PLAN-060 完成。建议后续将术语候选提取前移到文本翻译完成点，或在 manifest 显示无 Figure/Table/OCR occurrence 时跳过不必要图片后处理，避免术语面板被图片流程阻塞。
