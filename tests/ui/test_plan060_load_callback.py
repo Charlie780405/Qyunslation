@@ -39,6 +39,28 @@ def test_canvas_load_callback_is_a_function_not_an_immediately_invoked_expressio
     assert "() => {" in patched
     assert "})();" not in patched
     assert module.MARKER in patched
+
+
+def test_canvas_load_callback_accepts_legacy_function_marker() -> None:
+    module = _load_script_module()
+    source = """        # JavaScript: 动态调整 PDF canvas 缩放，确保完全适配容器高度
+        demo.load(
+            None,
+            None,
+            None,
+            js=\"\"\"
+            () => {
+                // _qy_060_canvas_load_fn
+              window.example = true;
+            }
+            \"\"\"
+        )
+"""
+
+    patched, changed = module.apply(source)
+
+    assert changed is False
+    assert patched == source
     again, changed_again = module.apply(patched)
     assert changed_again is False
     assert again == patched

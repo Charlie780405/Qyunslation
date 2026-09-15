@@ -16,6 +16,7 @@ GUI = Path(
 
 ANCHOR = "# JavaScript: 动态调整 PDF canvas 缩放，确保完全适配容器高度"
 MARKER = "# PLAN-060: canvas load callback must be a Gradio function"
+LEGACY_MARKER = "_qy_060_canvas_load_fn"
 BAD_START = "            (function() {"
 GOOD_START = "            () => {"
 BAD_END = "            })();\n            \"\"\"\n        )"
@@ -30,7 +31,7 @@ def apply(source: str) -> tuple[str, bool]:
 
     head = source[:anchor_at]
     tail = source[anchor_at:]
-    if MARKER in tail:
+    if MARKER in tail or LEGACY_MARKER in tail:
         return source, False
 
     start_at = tail.find(BAD_START)
@@ -61,10 +62,13 @@ def verify(path: Path = GUI) -> bool:
         print("FAIL: canvas callback anchor missing")
         return False
     tail = text[anchor_at:]
-    if MARKER not in tail:
+    if MARKER not in tail and LEGACY_MARKER not in tail:
         print("FAIL: PLAN-060 browser callback marker missing")
         return False
-    marker_tail = tail[tail.find(MARKER) :]
+    marker_at = tail.find(MARKER)
+    legacy_at = tail.find(LEGACY_MARKER)
+    marker_candidates = [pos for pos in (marker_at, legacy_at) if pos >= 0]
+    marker_tail = tail[min(marker_candidates) :]
     if BAD_START in marker_tail or BAD_END in marker_tail:
         print("FAIL: canvas load callback still uses an IIFE")
         return False
