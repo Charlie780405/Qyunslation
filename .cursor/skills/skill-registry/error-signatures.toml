@@ -135,3 +135,66 @@ symptom = "图1/示意图/题注/横轴仍是英文"
 first_check = "题注是否 must_draw；cover<70% 是否跳过；SOURCE_INK_LEFT 是否整图熔断"
 fix = "题注整带擦+必画；残留只丢该框"
 verify = "图1有中文题注；图5横轴有中文；柱上无拼接数字"
+
+[[signature]]
+id = "SIG-TERM-SEED-EMPTY"
+skill = "SK-Q008"
+pattern = "concepts total: 2|MATCH_WINDOW|未可靠对齐|window_cjk"
+symptom = "实际/推荐译法全是占位或乱猜；EASI 仍在待确认"
+first_check = "Concept 库 curated 计数；plan034d-import-csv.py 是否跑过"
+fix = "导入 curated CSV，删除窗口启发式，已入库词写 applied/violation"
+verify = "curated_concepts>=350 且待确认无已入库词"
+
+[[signature]]
+id = "SIG-TERM-SAVE-SWALLOWED"
+skill = "SK-Q011"
+pattern = "请先填写确认译法|保存后输入清空|status still pending"
+symptom = "保存后输入清空、状态仍 pending"
+first_check = "_qy060_table_confirmation 返回值；chosen_target 是否优先 table 输入"
+fix = "空单元格返回 None；chosen_target = table_target or target"
+verify = "填写确认译法后保存成功且状态变为 approved"
+
+[[signature]]
+id = "SIG-TERM-COLUMNS-EMPTY"
+skill = "SK-Q011"
+pattern = "需人工填写|未可靠对齐|暂无 AI 推荐"
+symptom = "实际/推荐译法全是占位"
+first_check = "Concept 库是否已 seed；align_observed 命中层级；QYUNSLATION_TERM_SUGGEST"
+fix = "导入 curated；段落对齐；建议列不得预填窗口猜测"
+verify = "实际译法有值或明确「需人工填写」，推荐列不编造"
+
+[[signature]]
+id = "SIG-TERM-CANDIDATE-NOISE"
+skill = "SK-Q011"
+pattern = "300 mg|Q2W|University|TSARTAI|14/18"
+symptom = "300 mg / n/N / 两字母缩写 / OCR 乱码进候选"
+first_check = "should_exclude_from_termbase 与 rules_version"
+fix = "复用 classify_cell_policy；denylist / term-exclusions.csv"
+verify = "待确认无剂量、比率、机构碎片"
+
+[[signature]]
+id = "SIG-TERM-SCREEN-BLIND"
+skill = "SK-Q011"
+pattern = "SCREEN_GENERIC|screen_origin|SCREEN_BLIND|screen cap"
+symptom = "候选突然很少 / 缩写一个都没进待确认"
+first_check = "screen_generic_ratio、origin=error|cap、provider、QYUNSLATION_TERM_SCREEN"
+fix = "恢复 provider；勿把 SCREEN_GENERIC 高当成干净"
+verify = "screen_error_count=0 且领域缩写能进 screen 池"
+
+[[signature]]
+id = "SIG-GUI-PATCH-STALE"
+skill = "SK-Q011"
+pattern = "already patched|_qy_tbl_progress|0.96 \\+ 0.03"
+symptom = "补丁脚本打印 already patched 但现场行为是旧的"
+first_check = "现场 gui.py 是否含仓库补丁标记清单"
+fix = "upgrade_post_if_stale 按缺标记重打；deploy-translate-stack.sh"
+verify = "现场含 _qy_tbl_progress 与 需人工填写 / 术语未遵循"
+
+[[signature]]
+id = "SIG-RULES-VERSION-DRIFT"
+skill = "SK-Q011"
+pattern = "062-v1|rules_version|fingerprint mismatch"
+symptom = "规则明显改了但台账曲线没断点"
+first_check = "term-candidate-rules.toml 内容哈希 vs term-rules-versions.md"
+fix = "--promote 必须 bump version 并登记 fingerprint"
+verify = "当前 fingerprint 出现在 versions 表且与 version 同行"

@@ -41,5 +41,8 @@
 | **PLAN-058** | [PLAN-058-pharma-termbase-loop](./PLAN-058-pharma-termbase-loop/) | **医药专业术语闭环、预翻译解析与混合检索** |
 | **PLAN-059** | [PLAN-059-translation-fidelity](./PLAN-059-translation-fidelity/) | **医药资料翻译 12 项保真问题与工作台 UI 收口** |
 | **PLAN-060** | [PLAN-060-company-termbase-workbench](./PLAN-060-company-termbase-workbench/) | **公司共享专业词库确认工作台** |
+| **PLAN-061** | [PLAN-061-termbase-workbench-fix](./PLAN-061-termbase-workbench-fix/) | **术语工作台保存/两列/准入规则修复** |
+| **PLAN-062** | [PLAN-062-termbase-evolution](./PLAN-062-termbase-evolution/) | **术语工作台准确度与自动进化（词库 seed / 候选准入 / 段落对齐 / 去重复 / Concept ID / 实时进度）** |
+| **PLAN-063** | [PLAN-063-translation-quality-evolution](./PLAN-063-translation-quality-evolution/) | **规则自动进化与全局质量总纲（原拟 062，依赖 PLAN-062）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。

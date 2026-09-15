@@ -91,7 +91,7 @@ POST_SNIPPET = '''
                 _qy_img_st = {"f": 0.92, "d": "译文插图翻译"}
 
                 def _qy_img_progress(cur, total):
-                    _qy_img_st["f"] = 0.92 + 0.07 * cur / max(total, 1)
+                    _qy_img_st["f"] = 0.92 + 0.04 * cur / max(total, 1)
                     try:
                         from qyunslation.structure.progress import format_from_manifest as _qy_fmt_prog
                         if _qy_manifest is not None:
@@ -100,6 +100,10 @@ POST_SNIPPET = '''
                             _qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"
                     except Exception:
                         _qy_img_st["d"] = f"译文插图翻译 ({cur}/{total})"
+
+                def _qy_tbl_progress(cur, total):
+                    _qy_img_st["f"] = 0.96 + 0.03 * cur / max(total, 1)
+                    _qy_img_st["d"] = f"表格后处理 ({cur}/{total})"
 
                 def _qy_run_imgtr():
                     out_mono, out_dual = _mono, _dual
@@ -136,6 +140,7 @@ POST_SNIPPET = '''
                                 origin=_qy_tbl_origin,
                                 to_lang=str(_qy_to or "简体中文"),
                                 structure_manifest=_qy_manifest,
+                                progress_cb=_qy_tbl_progress,
                             )
                         )
                     if out_dual and out_dual != out_mono:
@@ -147,6 +152,7 @@ POST_SNIPPET = '''
                                 structure_manifest=_qy_manifest,
                                 x_min_frac=None if _qy_alt else 0.5,
                                 page_parity="even" if _qy_alt else None,
+                                progress_cb=_qy_tbl_progress,
                             )
                         )
                     try:
@@ -215,6 +221,7 @@ TABLE_SNIPPET = '''                    from pdf_table_translate import translate
                                 origin=_qy_tbl_origin,
                                 to_lang=str(_qy_to or "简体中文"),
                                 structure_manifest=_qy_manifest,
+                                progress_cb=_qy_tbl_progress,
                             )
                         )
                     if out_dual and out_dual != out_mono:
@@ -226,6 +233,7 @@ TABLE_SNIPPET = '''                    from pdf_table_translate import translate
                                 structure_manifest=_qy_manifest,
                                 x_min_frac=None if _qy_alt else 0.5,
                                 page_parity="even" if _qy_alt else None,
+                                progress_cb=_qy_tbl_progress,
                             )
                         )
                     try:
@@ -276,6 +284,8 @@ def upgrade_post_if_stale(text: str) -> tuple[str, bool]:
         or "译文插图翻译跳过" in text
         or "bind_task_model_trace" not in text
         or "imgtr_origin_crop" not in text
+        or "_qy_tbl_progress" not in text
+        or "0.96 + 0.03" not in text
     )
     if not stale:
         return text, False
@@ -364,6 +374,8 @@ def verify(text: str) -> int:
     need("x_min_frac" in text, "dual right-half filter missing")
     need("imgtr_origin_crop" in text, "imgtr origin crop missing")
     need("format_from_manifest" in text, "semantic progress missing")
+    need("_qy_tbl_progress" in text, "tbltr progress callback missing")
+    need("0.96 + 0.03" in text, "tbltr progress range missing")
     need(
         "do_translate_async_stream(settings, file_path)" in text,
         "stream call missing",

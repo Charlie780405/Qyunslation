@@ -1,0 +1,12 @@
+source,reason,scope,tenant_slug,project_slug,decided_by,candidate_id,decided_at,occurrences,notes
+TARGET,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+DERM,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+ADA,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+ACAD,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+DERMATOL,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+Inc,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+USA,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+MBA,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+PHARMACEUTICAL,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+JAMA,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist
+JID,plan062-manual,global,,,plan062-purge,,2026-09-15,1,PLAN-062 denylist

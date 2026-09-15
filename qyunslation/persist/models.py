@@ -156,6 +156,7 @@ class WorkbenchTranslationRun(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="submitted")
     termbase_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     term_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    excluded_stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     degradation_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False

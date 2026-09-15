@@ -66,7 +66,7 @@ def test_unaligned_code_candidate_does_not_fabricate_a_target_translation():
         {
             "source_term": "ABC-101",
             "observed_target": "",
-            "term_type": "general",
+            "term_type": "code",
             "source_context": "ABC-101 was administered.",
             "target_context": "已给药。",
             "occurrences": [

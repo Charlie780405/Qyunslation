@@ -365,7 +365,7 @@ def decide_candidate(
     if action == "submit_for_admin":
         if candidate.status != "pending":
             raise CandidateConflict(f"candidate is already {candidate.status}")
-    elif candidate.status not in {"pending", "pending_admin"}:
+    elif candidate.status not in {"pending", "pending_admin", "violation"}:
         raise CandidateConflict(f"candidate is already {candidate.status}")
 
     target = (target_term or candidate.suggested_target or candidate.observed_target or "").strip()
@@ -431,3 +431,42 @@ def decide_candidate(
         "candidate": candidate_to_dict(candidate),
         "concept_id": concept.id if concept else None,
     }
+
+
+def record_machine_decision(
+    session: Session,
+    *,
+    candidate: DocumentTermCandidate,
+    actor_sub: str,
+    action: str,
+    note: str | None = None,
+    concept_id: str | None = None,
+) -> TermDecision:
+    """PLAN-063e：机器裁决写 TermDecision，不触发人工 approve 的词库副作用。"""
+    action = (action or "").strip().casefold()
+    from_version = int(candidate.version or 1)
+    candidate.version = from_version + 1
+    candidate.reviewed_by = actor_sub
+    candidate.reviewed_at = _utcnow()
+    candidate.decision_note = note
+    if action == "apply":
+        candidate.status = "applied"
+        if concept_id:
+            candidate.concept_id = concept_id
+    elif action == "reject":
+        candidate.status = "rejected"
+    decision = TermDecision(
+        candidate_id=candidate.id,
+        action=action,
+        actor_sub=actor_sub,
+        source_term=candidate.source_term,
+        target_term=candidate.suggested_target or candidate.observed_target or "",
+        concept_id=concept_id or candidate.concept_id,
+        scope="project",
+        from_version=from_version,
+        to_version=candidate.version,
+        note=note,
+    )
+    session.add(decision)
+    session.flush()
+    return decision

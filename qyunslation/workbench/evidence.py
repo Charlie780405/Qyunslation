@@ -6,21 +6,17 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
+from qyunslation.glossary.candidate_rules import (
+    classify_risk_by_rules,
+    classify_term_type,
+    load_rules,
+    should_exclude_from_termbase,
+)
+
+_SCREEN_ABBREV = re.compile(r"\b[A-Z]{3,}(?:-[A-Z0-9]+)*\b")
+_MORPH_TYPES = frozenset({"drug", "target", "code", "study_id", "medicine"})
+
 _REFERENCE_ROLES = frozenset({"reference", "references", "bibliography", "citation", "preserve"})
-_HIGH_RISK_TYPES = frozenset(
-    {"drug", "biologic", "product", "target", "dose", "organization", "protocol", "study_id"}
-)
-_ABBREVIATION = re.compile(r"\b[A-Z]{2,}(?:-[A-Z0-9]+)*\b")
-_CODE = re.compile(r"\b[A-Z]{2,}[A-Z0-9]*(?:-[A-Z0-9]+)+\b")
-_DOSE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|g|µg|ug|mcg|mL|ml|IU|%)\b", re.I)
-_MEDICINE = re.compile(r"\b[a-z][a-z-]*(?:mab|nib|cept|itis|emia|osis)\b", re.I)
-_DRUG = re.compile(r"\b[a-z][a-z-]*(?:mab|nib|cept)\b", re.I)
-_TARGET = re.compile(r"\b(?:IL-?\d+[A-Za-zαβ]?|PD-?L?1|CD\d+|TNF(?:-?[A-Za-z])?|EGFR|VEGF|JAK\d*)(?![A-Za-z0-9])", re.I)
-_ORGANIZATION = re.compile(
-    r"\b(?:hospital|university|institute|biotech|pharma(?:ceutical)?|inc\.?|ltd\.?|llc|corp\.?)\b|医院|大学|研究所|生物科技|制药|公司",
-    re.I,
-)
-_STUDY_ABBREVIATION = re.compile(r"\b(?:[A-Z]{2,}[A-Za-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z]{2,}\d+[A-Za-z0-9-]*)\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,32 +53,35 @@ class BilingualTermEvidence:
 
 def classify_risk(source_term: str, term_type: str | None = None) -> str:
     """Classify terms that require an administrator before publication."""
-    normalized_type = (term_type or "").strip().casefold()
-    source = (source_term or "").strip()
-    if normalized_type in _HIGH_RISK_TYPES:
-        return "high"
-    if _CODE.search(source) or _DOSE.search(source) or _DRUG.search(source):
-        return "high"
-    if _TARGET.search(source) or _ORGANIZATION.search(source):
-        return "high"
-    if _STUDY_ABBREVIATION.search(source):
-        return "high"
-    if _ABBREVIATION.fullmatch(source) and len(source) >= 3:
-        return "high"
-    if re.search(r"(?:mab|nib|cept)$", source, re.I):
-        return "high"
-    return "normal"
+    return classify_risk_by_rules(source_term, term_type)
 
 
 def _synthetic_terms(source: str) -> Iterable[str]:
-    """Extract only conservative candidates when an adapter lacks term spans."""
+    """Extract only conservative morphological candidates."""
+    rules = load_rules()
     yielded: set[str] = set()
-    for pattern in (_CODE, _DOSE, _ABBREVIATION, _MEDICINE):
-        for match in pattern.finditer(source):
+    for name, pattern in rules.include_patterns:
+        if name not in _MORPH_TYPES:
+            continue
+        for match in pattern.finditer(source or ""):
             value = match.group(0).strip()
-            if value and value not in yielded:
+            excluded, _reason = should_exclude_from_termbase(value, rules=rules)
+            if value and value not in yielded and not excluded:
                 yielded.add(value)
                 yield value
+
+
+def collect_abbrev_candidates(source: str) -> list[str]:
+    """Abbreviation-shaped tokens that need screening, not auto-enqueue."""
+    rules = load_rules()
+    morph = set(_synthetic_terms(source))
+    found: list[str] = []
+    for match in _SCREEN_ABBREV.finditer(source or ""):
+        value = match.group(0).strip()
+        excluded, _reason = should_exclude_from_termbase(value, rules=rules)
+        if value and value not in morph and not excluded and value not in found:
+            found.append(value)
+    return found
 
 
 def extract_term_pairs(evidence: Iterable[BilingualTermEvidence]) -> list[dict]:
@@ -93,17 +92,30 @@ def extract_term_pairs(evidence: Iterable[BilingualTermEvidence]) -> list[dict]:
     strongly-shaped codes and medical terms, and leaves their target empty when
     no reliable span was supplied.
     """
+    rows, _stats = extract_term_pairs_with_stats(evidence)
+    return rows
+
+
+def extract_term_pairs_with_stats(
+    evidence: Iterable[BilingualTermEvidence],
+) -> tuple[list[dict], dict[str, int]]:
     rows: list[dict] = []
+    stats: dict[str, int] = {}
+    rules = load_rules()
     for item in evidence:
         if not item.is_translatable:
             continue
         explicit_source = (item.source_term or "").strip()
         if explicit_source:
+            excluded, reason = should_exclude_from_termbase(explicit_source, rules=rules)
+            if excluded:
+                stats[reason] = stats.get(reason, 0) + 1
+                continue
             rows.append(
                 {
                     "source_term": explicit_source,
                     "observed_target": (item.target_term or item.target_text).strip(),
-                    "term_type": item.term_type or "general",
+                    "term_type": item.term_type or classify_term_type(explicit_source),
                     "source_context": item.source_text[:1000],
                     "target_context": item.target_text[:1000],
                     "occurrences": [item.occurrence()],
@@ -115,10 +127,10 @@ def extract_term_pairs(evidence: Iterable[BilingualTermEvidence]) -> list[dict]:
                 {
                     "source_term": source_term,
                     "observed_target": "",
-                    "term_type": item.term_type or "general",
+                    "term_type": item.term_type or classify_term_type(source_term),
                     "source_context": item.source_text[:1000],
                     "target_context": item.target_text[:1000],
                     "occurrences": [item.occurrence()],
                 }
             )
-    return rows
+    return rows, stats

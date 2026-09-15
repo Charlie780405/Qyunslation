@@ -13,6 +13,8 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | SK-Q007 | translation-content-integrity | active | 本仓 | pitfalls.md |
 | SK-Q008 | translation-pitfall-capture | active | 本仓 | pitfalls.md |
 | SK-Q009 | table-translation-fidelity | active | 本仓 | pitfalls.md |
+| SK-Q010 | qyunslation-ui-ux | active | 本仓 | （规范，无独立 pitfalls） |
+| SK-Q011 | translation-quality-evolution | active | 本仓 | pitfalls.md |
 
 ## 审计
 
@@ -40,3 +42,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-13 | 复活 PLAN-034 医药 MVP 纲领落盘（文档阶段；Skill 待 034d0 实现后沉淀） |
 | 2026-09-13 | PLAN-034d0 术语 SSOT 实现（四层预置 + session 导出 + service 桥接；不新建 Skill） |
 | 2026-09-14 | SK-Q002 孤立数据标记不并框；题注/横轴 must_draw 整带擦除（ljae439 图1/4/5） |
+| 2026-09-15 | 补登 SK-Q010；登记 SK-Q011（PLAN-063） |

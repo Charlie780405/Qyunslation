@@ -89,6 +89,7 @@ def translate_pdf_tables(
     x_min_frac: float | None = None,
     page_parity: str | None = None,
     translator=None,
+    progress_cb=None,
 ) -> Path:
     """在 BabelDOC 译文 PDF 上按 Manifest 单元格重排矢量文字。"""
     import pymupdf
@@ -162,7 +163,12 @@ def translate_pdf_tables(
         changed = False
         touched = False
         failed = False
-        for obj in tables:
+        for index, obj in enumerate(tables, start=1):
+            if progress_cb:
+                try:
+                    progress_cb(index, len(tables))
+                except Exception:
+                    pass
             page_no = int(str(obj.canvas_id).split(":")[-1])
             page_index = page_no - 1
             if page_index < 0 or page_index >= len(doc):

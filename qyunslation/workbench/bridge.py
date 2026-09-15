@@ -29,10 +29,20 @@ from qyunslation.persist.candidate_repo import (
     list_candidates,
 )
 from qyunslation.persist.models import WorkbenchTranslationRun
+from qyunslation.glossary.candidate_rules import should_exclude_from_termbase
+from qyunslation.glossary.term_screen import DECISION_DOMAIN, screen_terms
 from qyunslation.workbench.evidence import (
     BilingualTermEvidence,
     classify_risk,
-    extract_term_pairs,
+    collect_abbrev_candidates,
+    extract_term_pairs_with_stats,
+)
+from qyunslation.workbench.term_align import (
+    MATCH_TERMBASE,
+    prefer_explicit_observation,
+    align_by_paragraph_batch,
+    align_observed,
+    suggest_targets,
 )
 from qyunslation.workbench.security import require_signed_loopback
 
@@ -165,14 +175,19 @@ def _extract_candidates(
     tenant_id: str,
     policy: dict,
     evidence: list[BilingualTermEvidence],
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     job = repo.get_job(session, job_id=run.job_id)
     if job is None:  # database invariant; do not turn it into a 500 leak
         raise HTTPException(status_code=404, detail="workbench job not found")
     candidate_ids: set[str] = set()
+    excluded_stats: dict[str, int] = {}
+    screen_origin: dict[str, int] = {}
     seen_occurrences: set[
         tuple[str, str, int | None, str | None, str | None, int | None, int | None]
     ] = set()
+
+    def note_exclude(reason: str) -> None:
+        excluded_stats[reason] = excluded_stats.get(reason, 0) + 1
 
     def append_candidate(
         *,
@@ -184,7 +199,13 @@ def _extract_candidates(
         confidence: float,
         status: str,
         extracted: dict,
+        allow_excluded: bool = False,
     ) -> None:
+        if not allow_excluded:
+            excluded, reason = should_exclude_from_termbase(source_term)
+            if excluded:
+                note_exclude(reason)
+                return
         occurrence = (extracted.get("occurrences") or [{}])[0]
         key = (
             source_term.casefold(),
@@ -217,10 +238,12 @@ def _extract_candidates(
             termbase_version=run.termbase_version,
             occurrences=extracted["occurrences"],
         )
-        if candidate.status == "pending" and status == "applied":
-            candidate.status = "applied"
+        if candidate.status == "pending" and status in {"applied", "violation"}:
+            candidate.status = status
         candidate_ids.add(candidate.id)
 
+    staged: list[dict] = []
+    screen_jobs: list[tuple[BilingualTermEvidence, str]] = []
     for item in evidence:
         if not item.is_translatable:
             continue
@@ -246,36 +269,113 @@ def _extract_candidates(
                 term_type=str(term.get("term_type") or "general"),
                 match_type="exact",
                 confidence=1.0,
-                status="applied" if applied else "pending",
+                status="applied" if applied else "violation",
                 extracted=context,
+                allow_excluded=True,
             )
-        for extracted in extract_term_pairs([item]):
-            source_term = extracted["source_term"]
-            applied, preferred = _is_applied(policy, item, source_term)
-            observed_target = extracted["observed_target"]
-            match_type = "candidate"
-            status = "pending"
-            suggested_target = None
-            if preferred is not None:
-                match_type = "exact"
-                suggested_target = preferred
-                if applied:
-                    status = "applied"
-                    observed_target = preferred
-            append_candidate(
-                source_term=source_term,
-                observed_target=observed_target,
-                suggested_target=suggested_target,
-                term_type=extracted["term_type"],
-                match_type=match_type,
-                confidence=1.0 if match_type == "exact" else 0.0,
-                status=status,
-                extracted=extracted,
+        extracted_rows, extract_stats = extract_term_pairs_with_stats([item])
+        for reason, count in extract_stats.items():
+            excluded_stats[reason] = excluded_stats.get(reason, 0) + count
+        for source_term in collect_abbrev_candidates(item.source_text):
+            screen_jobs.append((item, source_term))
+        for extracted in extracted_rows:
+            aligned = prefer_explicit_observation(
+                extracted,
+                align_observed(
+                    extracted["source_term"],
+                    source_context=extracted["source_context"],
+                    target_context=extracted["target_context"],
+                    policy=policy,
+                ),
             )
+            staged.append({"item": item, "extracted": extracted, "aligned": aligned})
+    if screen_jobs:
+        verdicts = screen_terms(
+            [term for _item, term in screen_jobs],
+            session=session,
+            tenant_id=tenant_id,
+            project_id=job.project_id,
+            persist=True,
+        )
+        for verdict in verdicts.values():
+            screen_origin[verdict.origin] = screen_origin.get(verdict.origin, 0) + 1
+        for item, source_term in screen_jobs:
+            verdict = verdicts.get(source_term)
+            if verdict is None or verdict.decision != DECISION_DOMAIN:
+                reason = "SCREEN_NOISE" if verdict is not None and verdict.decision == "noise" else "SCREEN_GENERIC"
+                excluded_stats[reason] = excluded_stats.get(reason, 0) + 1
+                continue
+            extracted = {
+                "source_term": source_term,
+                "observed_target": "",
+                "term_type": verdict.term_type,
+                "source_context": item.source_text[:1000],
+                "target_context": item.target_text[:1000],
+                "occurrences": [item.occurrence()],
+            }
+            staged.append(
+                {
+                    "item": item,
+                    "extracted": extracted,
+                    "aligned": prefer_explicit_observation(
+                        extracted,
+                        align_observed(
+                            source_term,
+                            source_context=extracted["source_context"],
+                            target_context=extracted["target_context"],
+                            policy=policy,
+                        ),
+                    ),
+                }
+            )
+    suggestions = align_by_paragraph_batch(staged)
+    suggestions.update(
+        suggest_targets(
+            [row for row in staged if row["extracted"]["source_term"] not in suggestions]
+        )
+    )
+    for row in staged:
+        item = row["item"]
+        extracted = row["extracted"]
+        aligned = suggestions.get(extracted["source_term"], row["aligned"])
+        source_term = extracted["source_term"]
+        applied, preferred = _is_applied(policy, item, source_term)
+        observed_target = aligned.observed_target or extracted["observed_target"]
+        match_type = aligned.match_type
+        status = "pending"
+        suggested_target = aligned.suggested_target
+        confidence = aligned.confidence
+        if preferred is not None:
+            match_type = "exact"
+            suggested_target = preferred
+            confidence = 1.0
+            if applied:
+                status = "applied"
+                observed_target = preferred
+            else:
+                status = "violation"
+        elif aligned.match_type == MATCH_TERMBASE and aligned.observed_target:
+            status = "applied"
+        append_candidate(
+            source_term=source_term,
+            observed_target=observed_target,
+            suggested_target=suggested_target,
+            term_type=extracted["term_type"],
+            match_type=match_type,
+            confidence=confidence,
+            status=status,
+            extracted=extracted,
+        )
     # Reload through the repository to include every idempotently aggregated
     # occurrence, rather than returning the first occurrence only.
     rows = list_candidates(session, tenant_id=tenant_id, job_id=job.id, limit=1000)
-    return [candidate_to_dict(row) for row in rows if row.id in candidate_ids]
+    payload: dict = dict(excluded_stats)
+    payload["screen_origin"] = screen_origin
+    payload["extracted_total"] = sum(excluded_stats.values()) + len(candidate_ids)
+    from qyunslation.glossary.candidate_rules import rules_version
+
+    payload["rules_version"] = rules_version()
+    return [candidate_to_dict(row) for row in rows if row.id in candidate_ids], payload
 
 
 @router.post("/runs/start", status_code=201)
@@ -341,7 +441,7 @@ def complete_run(
     run, tenant, _membership = _run_for_actor(session, run_id=run_id, actor_sub=body.actor_sub)
     evidence = [item.as_evidence() for item in body.evidence]
     policy = run.term_policy or {"schema": "058-term-policy-v1", "terms": []}
-    candidates = _extract_candidates(
+    candidates, excluded = _extract_candidates(
         session,
         run=run,
         tenant_id=tenant.id,
@@ -357,6 +457,18 @@ def complete_run(
         run.status = "review_ready"
         run.degradation_reason = None
     job.status = run.status
+    run.excluded_stats = excluded
+    try:
+        from qyunslation.quality.ledger import record_run
+
+        record_run(
+            session,
+            run=run,
+            excluded_stats=excluded,
+            candidate_summary=_summary(session, run, tenant.id, excluded=excluded),
+        )
+    except Exception:
+        pass
     record_audit(
         session,
         actor_sub=body.actor_sub,
@@ -364,10 +476,20 @@ def complete_run(
         source_sha256=job.source_sha256,
         extra={"run_id": run.id, "candidate_count": len(candidates), "status": run.status},
     )
-    return {"run_id": run.id, "status": run.status, "candidates": candidates, "summary": _summary(session, run, tenant.id)}
+    return {
+        "run_id": run.id,
+        "status": run.status,
+        "candidates": candidates,
+        "summary": _summary(session, run, tenant.id, excluded=excluded),
+    }
 
 
-def _summary(session: Session, run: WorkbenchTranslationRun, tenant_id: str) -> dict:
+def _summary(
+    session: Session,
+    run: WorkbenchTranslationRun,
+    tenant_id: str,
+    excluded: dict[str, int] | None = None,
+) -> dict:
     rows = list_candidates(session, tenant_id=tenant_id, job_id=run.job_id, limit=1000)
     counts: dict[str, int] = {}
     for row in rows:
@@ -389,7 +511,41 @@ def _summary(session: Session, run: WorkbenchTranslationRun, tenant_id: str) -> 
         "applied": counts.get("applied", 0),
         "approved": counts.get("approved", 0),
         "rejected": counts.get("rejected", 0),
+        "violation": counts.get("violation", 0),
         "formal_gate": {"passed": not high_unresolved, "blocking_candidate_ids": high_unresolved},
+        "excluded": excluded or {},
+    }
+
+
+class ConceptSearchBody(BaseModel):
+    actor_sub: str = Field(min_length=1, max_length=256)
+    query: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/concepts/search")
+def search_concepts(body: ConceptSearchBody, session: Session = Depends(get_db)) -> dict:
+    tenant, _membership = _tenant_context(session, body.actor_sub)
+    project = repo.get_or_create_company_termbase_project(session, tenant_id=tenant.id)
+    matches = resolve_runtime_terms(
+        session,
+        tenant_id=tenant.id,
+        project_id=project.id,
+        text=body.query,
+        src_lang="en",
+        tgt_lang="zh",
+    )
+    return {
+        "matches": [
+            {
+                "concept_id": match.concept_id,
+                "source_term": match.source_term,
+                "preferred_target": match.target_term,
+                "layer": match.layer,
+                "match_type": match.match_type,
+                "hard_constraint": match.match_type in {"exact", "alias"},
+            }
+            for match in matches[:20]
+        ]
     }
 
 
@@ -475,7 +631,11 @@ def batch_decide_terms(run_id: str, body: BatchDecisionBody, session: Session = 
         candidate = get_candidate(session, candidate_id=item.candidate_id, tenant_id=tenant.id, job_id=run.job_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="term candidate not found")
-        if candidate.risk.casefold() in _HIGH_RISK or candidate.match_type not in {"exact", "alias"}:
+        if (
+            candidate.status == "violation"
+            or candidate.risk.casefold() in _HIGH_RISK
+            or candidate.match_type not in {"exact", "alias"}
+        ):
             raise HTTPException(status_code=400, detail="candidate is not eligible for batch approval")
         decided.append(
             _decide(
