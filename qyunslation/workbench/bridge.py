@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from qyunslation.api.v1 import get_db
@@ -23,6 +24,7 @@ from qyunslation.persist.audit import record_audit
 from qyunslation.persist.candidate_repo import (
     CandidateConflict,
     candidate_to_dict,
+    collapse_decided_source_rows,
     decide_candidate,
     decide_same_source_siblings,
     enqueue_candidate,
@@ -550,11 +552,43 @@ def search_concepts(body: ConceptSearchBody, session: Session = Depends(get_db))
     }
 
 
+@router.get("/runs/latest")
+def get_latest_run(actor_sub: str, session: Session = Depends(get_db)) -> dict:
+    """登录/重启后恢复最近一次可审校任务，避免「已处理」因 Gradio 状态丢失而显示为零。"""
+    tenant, membership = _tenant_context(session, actor_sub)
+    stmt = (
+        select(WorkbenchTranslationRun)
+        .where(
+            WorkbenchTranslationRun.tenant_id == tenant.id,
+            WorkbenchTranslationRun.status.in_(("review_ready", "extraction_degraded")),
+        )
+        .order_by(WorkbenchTranslationRun.created_at.desc())
+        .limit(1)
+    )
+    if membership.role not in _ADMIN_ROLES:
+        stmt = stmt.where(WorkbenchTranslationRun.actor_sub == actor_sub)
+    run = session.scalars(stmt).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="workbench run not found")
+    job = repo.get_job(session, job_id=run.job_id)
+    return {
+        "run_id": run.id,
+        "job_id": run.job_id,
+        "project_id": job.project_id if job is not None else None,
+        "status": run.status,
+        "termbase_version": run.termbase_version,
+        "summary": _summary(session, run, tenant.id),
+    }
+
+
 @router.get("/runs/{run_id}/term-review")
 def get_term_review(run_id: str, actor_sub: str, session: Session = Depends(get_db)) -> dict:
     run, tenant, _membership = _run_for_actor(session, run_id=run_id, actor_sub=actor_sub)
     rows = list_candidates(session, tenant_id=tenant.id, job_id=run.job_id, limit=200)
-    return {"summary": _summary(session, run, tenant.id), "candidates": [candidate_to_dict(row) for row in rows]}
+    return {
+        "summary": _summary(session, run, tenant.id),
+        "candidates": collapse_decided_source_rows([candidate_to_dict(row) for row in rows]),
+    }
 
 
 def _decide(

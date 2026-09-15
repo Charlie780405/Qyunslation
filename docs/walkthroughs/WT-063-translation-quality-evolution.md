@@ -9,6 +9,7 @@
 | 机器裁决入 `TermDecision` | purge 改走 `decide_candidate`；现场回填 `plan062-purge` **165** 行 |
 | `term-exclusions.csv` + `063-v1` | fingerprint `45b0012ae64d` 已登记 |
 | `063-v2` 注册号 + 保存清待确认 | fingerprint `030eeb2b21e2`：NCT/ChiCTR 等排除；高风险「不译/拒绝」免管理员；同 job 同 `source_norm` 副本一并落决定 |
+| 已处理为空（会话丢失） | 入库未断：现场最新任务 3 条 `approved` 已写 Concept。重启后 Gradio 无 run，列表显示「尚无可审校术语」。现用 `/runs/latest` 按登录用户恢复最近审校任务 |
 | `--screen-pending` | 只读提案：`EASI-50`/`EASI-90` → EASI 别名；`anti-tralokinumab` → tralokinumab |
 | `excluded_stats` 迁移 | 生产库 `alembic upgrade 063a0001` 已执行 |
 | ledger `SCREEN_BLIND` | `origin=error` 或 generic 占比过高即失明 |

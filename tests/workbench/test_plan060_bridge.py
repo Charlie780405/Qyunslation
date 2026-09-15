@@ -37,7 +37,7 @@ def _request(client, method: str, path: str, body: dict, *, nonce: str = "nonce-
     raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     headers = sign_bridge_request(
         method=method,
-        path=path,
+        path=path.partition("?")[0],
         body=raw,
         secret="test-bridge-secret",
         nonce=nonce,
@@ -448,3 +448,81 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
         nonce="batch-exact-060",
     )
     assert batched.status_code == 400, batched.text
+
+
+def test_latest_run_restores_processed_candidates(client):
+    empty = _request(
+        client,
+        "GET",
+        "/internal/workbench/v1/runs/latest?actor_sub=reviewer-1",
+        {},
+        nonce="latest-empty-060",
+    )
+    assert empty.status_code == 404
+
+    started = _start(client, source_text="The primary endpoint is evaluated.", nonce="latest-start-060")
+    translating = _request(
+        client,
+        "GET",
+        "/internal/workbench/v1/runs/latest?actor_sub=reviewer-1",
+        {},
+        nonce="latest-translating-060",
+    )
+    assert translating.status_code == 404
+
+    completed = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{started['run_id']}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "The primary endpoint is evaluated.",
+                    "target_text": "主要终点评估",
+                    "source_term": "primary endpoint",
+                    "target_term": "主要终点评估",
+                    "role": "body",
+                    "page_no": 1,
+                    "block_id": "p1-b1",
+                }
+            ],
+        },
+        nonce="latest-complete-060",
+    )
+    assert completed.status_code == 200, completed.text
+    candidate = completed.json()["candidates"][0]
+    decided = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{started['run_id']}/terms/{candidate['id']}/decision",
+        {
+            "actor_sub": "reviewer-1",
+            "action": "approve",
+            "expected_version": candidate["version"],
+            "target_term": "主要终点评估",
+        },
+        nonce="latest-approve-060",
+    )
+    assert decided.status_code == 200, decided.text
+
+    latest = _request(
+        client,
+        "GET",
+        "/internal/workbench/v1/runs/latest?actor_sub=reviewer-1",
+        {},
+        nonce="latest-ready-060",
+    )
+    assert latest.status_code == 200, latest.text
+    payload = latest.json()
+    assert payload["run_id"] == started["run_id"]
+    assert payload["summary"]["approved"] >= 1
+
+    other = _request(
+        client,
+        "GET",
+        "/internal/workbench/v1/runs/latest?actor_sub=reviewer-2",
+        {},
+        nonce="latest-other-060",
+    )
+    assert other.status_code == 404

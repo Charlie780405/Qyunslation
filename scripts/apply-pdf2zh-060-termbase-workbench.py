@@ -198,6 +198,25 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             runs = (state or {{}}).get("_qy060_runs") or {{}}
             return list(runs.values())[-1] if runs else None
 
+        def _qy060_ensure_run(state, request=None):
+            run = _qy060_current_run(state)
+            if run:
+                return run
+            actor = str(getattr(request, "username", "") or "").strip() if request is not None else ""
+            actor = actor or str((state or {{}}).get("_qy060_actor_sub") or "").strip()
+            if not actor:
+                return None
+            try:
+                from qyunslation.workbench.gui_client import restore_latest_workbench_run
+                restored = restore_latest_workbench_run(actor)
+            except Exception:
+                return None
+            if restored and isinstance(state, dict):
+                state.setdefault("_qy060_runs", {{}})
+                state["_qy060_runs"]["_restored"] = restored
+                state["_qy060_actor_sub"] = actor
+            return restored
+
         _QY060_PLACEHOLDERS = frozenset({{"未可靠对齐", "需人工填写", "暂无 AI 推荐"}})
 
         def _qy060_filter_status(label):
@@ -206,10 +225,23 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         def _qy060_rows_for_filter(rows, selected_filter):
             status = _qy060_filter_status(selected_filter)
             if selected_filter == "已处理":
-                return [row for row in rows if row.get("status") in {{"approved", "rejected"}}]
-            if status:
-                return [row for row in rows if row.get("status") == status]
-            return list(rows)
+                filtered = [row for row in rows if row.get("status") in {{"approved", "rejected"}}]
+            elif status:
+                filtered = [row for row in rows if row.get("status") == status]
+            else:
+                filtered = list(rows)
+            if selected_filter in {{"已处理", "已应用"}} or status == "approved":
+                seen = {{}}
+                unique = []
+                for row in filtered:
+                    key = (row.get("source_norm") or row.get("source_term") or "").strip().casefold()
+                    if key and key in seen:
+                        continue
+                    if key:
+                        seen[key] = True
+                    unique.append(row)
+                return unique
+            return filtered
 
         def _qy060_confirm_default(row):
             match = (row or {{}}).get("match_type")
@@ -245,16 +277,16 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             value = str(values[3] or "").strip()
             return None if not value or value in _QY060_PLACEHOLDERS else value
 
-        def _qy060_render_terms(state, selected_filter, keep_selection=None):
+        def _qy060_render_terms(state, selected_filter, request: gr.Request | None = None, keep_selection=None):
             from qyunslation.workbench.gui_client import get_workbench_term_review
-            run = _qy060_current_run(state)
+            run = _qy060_ensure_run(state, request)
             note = (state or {{}}).get("_qy060_term_note", "")
             if not run:
                 return (
-                    gr.update(value=note or "专业词汇：本次不可用", visible=bool(note)),
+                    gr.update(value=note or "专业词汇：登录后可恢复最近审校", visible=True),
                     gr.update(value=[]),
                     gr.update(choices=[], value=None),
-                    gr.update(value=note or "尚无可审校术语。"),
+                    gr.update(value=note or "尚无可审校术语。登录后将恢复最近一次翻译的已处理/待确认记录；新文档需先完成翻译。"),
                     gr.update(value=""),
                     gr.update(value=""),
                     gr.update(value=""),
@@ -456,8 +488,8 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         qy060_decide.click(_qy060_decide_term, [state, qy060_candidate_id, qy060_action, qy060_target, qy060_concept, qy060_note, qy060_term_filter, qy060_term_table], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
         qy060_batch_exact.click(_qy060_batch_confirm_exact, [state, qy060_term_filter], [qy060_decision_status, qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target])
         {TIMER_MARKER}
-        def _qy060_poll_terms(state, selected_filter, candidate_id):
-            rendered = _qy060_render_terms(state, selected_filter, keep_selection=candidate_id)
+        def _qy060_poll_terms(state, selected_filter, candidate_id, request: gr.Request | None = None):
+            rendered = _qy060_render_terms(state, selected_filter, request, keep_selection=candidate_id)
             active = not bool((state or {{}}).get("_qy060_term_done"))
             return (*rendered[:6], gr.update(active=active))
 
@@ -472,8 +504,8 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
 '''
 
 TIMER_BLOCK = f'''        {TIMER_MARKER}
-        def _qy060_poll_terms(state, selected_filter, candidate_id):
-            rendered = _qy060_render_terms(state, selected_filter, keep_selection=candidate_id)
+        def _qy060_poll_terms(state, selected_filter, candidate_id, request: gr.Request | None = None):
+            rendered = _qy060_render_terms(state, selected_filter, request, keep_selection=candidate_id)
             active = not bool((state or {{}}).get("_qy060_term_done"))
             return (*rendered[:6], gr.update(active=active))
 

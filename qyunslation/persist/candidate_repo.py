@@ -83,6 +83,21 @@ def candidate_to_dict(
     return result
 
 
+def collapse_decided_source_rows(rows: list[dict]) -> list[dict]:
+    """已批准/已拒绝列表同一规范化源词只保留一行，避免实际译法不同造成重复。"""
+    seen: set[str] = set()
+    collapsed: list[dict] = []
+    for row in rows:
+        status = str(row.get("status") or "")
+        key = str(row.get("source_norm") or row.get("source_term") or "").strip().casefold()
+        if status in {"approved", "rejected"} and key:
+            if key in seen:
+                continue
+            seen.add(key)
+        collapsed.append(row)
+    return collapsed
+
+
 def enqueue_candidate(
     session: Session,
     *,

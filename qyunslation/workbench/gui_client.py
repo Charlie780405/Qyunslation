@@ -665,6 +665,33 @@ def complete_workbench_translation(run: dict[str, Any], source_path: str | Path,
     )
 
 
+def restore_latest_workbench_run(actor_sub: str) -> dict[str, Any] | None:
+    """Reload the actor's latest reviewable run after Gradio state is wiped."""
+    actor = (actor_sub or "").strip()
+    if not actor:
+        return None
+    try:
+        payload = _bridge_request(
+            "GET",
+            f"/internal/workbench/v1/runs/latest?actor_sub={actor}",
+            {},
+        )
+    except WorkbenchTermBridgeUnavailable as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+    run_id = payload.get("run_id")
+    if not run_id:
+        return None
+    return {
+        "run_id": run_id,
+        "job_id": payload.get("job_id"),
+        "actor_sub": actor,
+        "policy": payload.get("policy") or {},
+        "restored": True,
+    }
+
+
 def search_workbench_concepts(run: dict[str, Any], source_term: str) -> list[dict[str, Any]]:
     payload = _bridge_request(
         "POST",

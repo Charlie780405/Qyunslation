@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from qyunslation.persist.candidate_repo import (
+    collapse_decided_source_rows,
     decide_candidate,
     decide_same_source_siblings,
     enqueue_candidate,
@@ -113,6 +114,14 @@ def test_same_source_siblings_leave_pending_together():
         session.flush()
         assert first.status == "approved"
         assert second.status == "approved"
+        collapsed = collapse_decided_source_rows(
+            [
+                {"source_norm": "arthritis", "source_term": "arthritis", "status": "approved", "id": "a"},
+                {"source_norm": "arthritis", "source_term": "arthritis", "status": "approved", "id": "b"},
+                {"source_norm": "dermatitis", "source_term": "dermatitis", "status": "pending", "id": "c"},
+            ]
+        )
+        assert [row["id"] for row in collapsed] == ["a", "c"]
     finally:
         session.close()
         reset_engine()

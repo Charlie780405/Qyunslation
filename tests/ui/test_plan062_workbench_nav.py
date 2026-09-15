@@ -14,3 +14,8 @@ def test_patch_advances_to_next_term_and_exposes_concept_picker():
     assert "search_workbench_concepts" in text
     assert "需人工填写" in text
     assert "_qy060_confirm_default" in text
+    assert "restore_latest_workbench_run" in text
+    assert "_qy060_ensure_run" in text
+    assert "登录后将恢复最近一次翻译" in text
+    assert 'selected_filter in {{"已处理", "已应用"}}' in text
+    assert "source_norm" in text
