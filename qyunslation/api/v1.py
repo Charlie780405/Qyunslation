@@ -501,9 +501,6 @@ def search_terms_api(
         identity,
         session,
     )
-    if exact["matches"]:
-        exact["semantic_suggestions"] = []
-        return exact
     from qyunslation.persist.term_embedding_repo import semantic_search_concept_terms
 
     suggestions = semantic_search_concept_terms(

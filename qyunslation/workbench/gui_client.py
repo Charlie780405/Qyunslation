@@ -54,6 +54,17 @@ def _cell_term_pair(source_text: str, target_text: str) -> tuple[str | None, str
 class WorkbenchTermBridgeUnavailable(RuntimeError):
     """The translator remains available, but term review cannot be trusted."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        detail: str | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
+
 
 def _bridge_base_url() -> str:
     return (os.environ.get(BRIDGE_URL_ENV) or _DEFAULT_BRIDGE_URL).rstrip("/")
@@ -214,6 +225,18 @@ def _bridge_request(method: str, path: str, body: dict[str, Any]) -> dict[str, A
         )
         response.raise_for_status()
         payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        detail = None
+        try:
+            body = exc.response.json()
+            detail = body.get("detail") if isinstance(body, dict) else None
+        except ValueError:
+            detail = None
+        raise WorkbenchTermBridgeUnavailable(
+            "专业词库暂不可用",
+            status_code=exc.response.status_code,
+            detail=str(detail) if detail is not None else None,
+        ) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise WorkbenchTermBridgeUnavailable("专业词库暂不可用") from exc
     if not isinstance(payload, dict):
@@ -640,6 +663,16 @@ def complete_workbench_translation(run: dict[str, Any], source_path: str | Path,
             "degradation_reason": reason,
         },
     )
+
+
+def search_workbench_concepts(run: dict[str, Any], source_term: str) -> list[dict[str, Any]]:
+    payload = _bridge_request(
+        "POST",
+        "/internal/workbench/v1/concepts/search",
+        {"actor_sub": run["actor_sub"], "query": (source_term or "").strip() or "term"},
+    )
+    matches = payload.get("matches")
+    return matches if isinstance(matches, list) else []
 
 
 def get_workbench_term_review(run: dict[str, Any]) -> dict[str, Any]:

@@ -22,6 +22,7 @@ def client(monkeypatch):
     monkeypatch.setenv("QYUNSLATION_DATABASE_URL", "sqlite+pysqlite:///:memory:")
     monkeypatch.setenv("QYUNSLATION_TERM_BRIDGE_SECRET", "test-bridge-secret")
     monkeypatch.setenv("QYUNSLATION_WORKBENCH_TENANT", "qyuns-test")
+    monkeypatch.setenv("QYUNSLATION_TERM_SUGGEST", "0")
     engine = init_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     app = FastAPI()
@@ -138,6 +139,7 @@ def test_normal_confirmation_enters_company_library_and_reuses_next_file(client)
         nonce="complete-normal-060",
     )
     assert completed.status_code == 200, completed.text
+    assert "excluded" in completed.json()["summary"]
     candidate = completed.json()["candidates"][0]
     assert candidate["status"] == "pending"
 
@@ -388,7 +390,7 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
     )
     exact = completed_again.json()["candidates"][0]
     assert exact["match_type"] == "exact"
-    assert exact["status"] == "pending"
+    assert exact["status"] == "violation"
     batched = _request(
         client,
         "POST",
@@ -406,5 +408,4 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
         },
         nonce="batch-exact-060",
     )
-    assert batched.status_code == 200, batched.text
-    assert batched.json()["count"] == 1
+    assert batched.status_code == 400, batched.text

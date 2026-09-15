@@ -15,6 +15,27 @@ def format_semantic_progress(
     )
 
 
+def format_from_execution(manifest) -> str | None:
+    objects = list(getattr(manifest, "objects", None) or [])
+    if not objects:
+        return None
+    figures = [obj for obj in objects if str(getattr(obj, "type", "")).endswith("FIGURE") or str(getattr(getattr(obj, "type", None), "name", "")).casefold() == "figure"]
+    tables = [obj for obj in objects if str(getattr(getattr(obj, "type", None), "name", "")).casefold() == "table"]
+    if not figures and not tables:
+        return None
+
+    def _done(items) -> int:
+        count = 0
+        for obj in items:
+            raw = getattr(obj, "execution_status", None)
+            name = str(getattr(raw, "name", raw) or "").casefold()
+            if name and name not in {"pending", "executionstatus.pending"}:
+                count += 1
+        return count
+
+    return format_semantic_progress(_done(figures), len(figures), _done(tables), len(tables))
+
+
 def format_from_manifest(manifest, cur: int, total: int) -> str:
     fig_n = int(getattr(getattr(manifest, "summary", None), "figure_count", 0) or 0)
     tab_n = int(getattr(getattr(manifest, "summary", None), "table_count", 0) or 0)

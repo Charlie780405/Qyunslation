@@ -1,0 +1,42 @@
+# PLAN-063：术语候选准入规则。改 version 必须 bump 并登记 fingerprint。
+version = "063-v1"
+
+[thresholds]
+min_source_chars = 3
+max_source_chars = 64
+min_abbrev_chars = 3
+min_drug_chars = 6
+
+[exclude]
+# 数字/单位/剂量缩写委托 table_cell_policy.classify_cell_policy == PRESERVE
+delegate_cell_preserve = true
+patterns = [
+  '^\d+\s*/\s*\d+$',
+  '^[ivxlcdm]+$',
+  '^(?:page|fig|figure|table|appendix|section)\s*\d+$',
+]
+denylist = [
+  "OR", "RR", "HR", "CI", "SD", "SE", "SEM", "IQR", "NA", "NS",
+  "vs", "vs.", "et al", "i.e", "e.g", "TTT",
+  "THE", "AND", "FOR", "ARE", "WAS", "NOT", "ALL", "BUT", "CAN",
+  "MAY", "HAS", "HAD", "THIS", "THAT", "WITH", "FROM", "INTO",
+  "NOVEMBER", "UNIVERSITY", "HOSPITAL", "PHARMA",
+]
+
+[include]
+# 最短 6 字，避免 numab 这类断词碎片
+drug = '\b[a-z][a-z-]{3,}(?:mab|nib|cept)\b'
+target = '\b(?:IL-?\d+[A-Za-zαβ]?|PD-?L?1|CD\d+|TNF(?:-?[A-Za-z])?|EGFR|VEGF|JAK\d*)(?![A-Za-z0-9])'
+code = '\b[A-Z]{2,}[A-Z0-9]*(?:-[A-Z0-9]+)+\b'
+medicine = '\b[a-z][a-z-]*(?:itis|emia|osis|pathy)\b'
+study_id = '\b(?:[A-Z]{2,}\d+[A-Za-z0-9-]*)\b'
+
+[risk]
+high_types = ["drug", "biologic", "product", "target", "dose", "organization", "protocol", "study_id", "scale"]
+abbreviation_is_high = true
+
+[screen]
+enable_llm = true
+max_per_doc = 40
+decisions_csv = "glossaries/term-screen-decisions.csv"
+prompt = "glossaries/prompts/term-screen.zh.md"

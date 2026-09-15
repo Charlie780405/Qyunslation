@@ -498,7 +498,7 @@ def translate_pdf_images(
             occ_map = filtered
         # 唯一 xref 列表
         xrefs = sorted(occ_map.keys())
-        total_steps = len(xrefs) + max(1, len(doc))
+        total_steps = len(xrefs) * 2 + max(1, len(doc))
         step = 0
 
         # —— 策略 A：位图 ——
@@ -556,6 +556,12 @@ def translate_pdf_images(
                 work_png,
                 to_lang,
             )
+            step += 1
+            if progress_cb:
+                try:
+                    progress_cb(step, total_steps)
+                except Exception:
+                    pass
             new_png, n, qc = _upsample_if_below_target(
                 policy, png, best["w"], best["h"], to_lang, new_png, n, qc
             )
@@ -747,6 +753,12 @@ def translate_pdf_images(
                     png, float(rect.width), float(rect.height)
                 )
                 new_png, n, qc = _translate_via_local(work_png, to_lang)
+                step += 1
+                if progress_cb:
+                    try:
+                        progress_cb(step, total_steps)
+                    except Exception:
+                        pass
                 new_png, n, qc = _upsample_if_below_target(
                     policy, png, float(rect.width), float(rect.height), to_lang, new_png, n, qc
                 )
