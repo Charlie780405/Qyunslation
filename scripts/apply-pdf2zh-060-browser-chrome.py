@@ -6,12 +6,17 @@ from __future__ import annotations
 
 import argparse
 import py_compile
+import shutil
 from pathlib import Path
 
 
 GUI = Path(
     "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/"
     "pdf2zh_next/gui.py"
+)
+GRADIO_FONT_ROOT = Path(
+    "/home/dev/.local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages/"
+    "gradio/templates/frontend/static/fonts"
 )
 
 ANCHOR = "# JavaScript: 动态调整 PDF canvas 缩放，确保完全适配容器高度"
@@ -21,6 +26,16 @@ BAD_START = "            (function() {"
 GOOD_START = "            () => {"
 BAD_END = "            })();\n            \"\"\"\n        )"
 GOOD_END = "            }\n            \"\"\"\n        )"
+FONT_ALIASES = (
+    ("IBMPlexSans", "IBMPlexSans-Regular.woff2", "ui-sans-serif", "ui-sans-serif-Regular.woff2"),
+    ("IBMPlexSans", "IBMPlexSans-Bold.woff2", "ui-sans-serif", "ui-sans-serif-Bold.woff2"),
+    ("IBMPlexSans", "IBMPlexSans-Regular.woff2", "system-ui", "system-ui-Regular.woff2"),
+    ("IBMPlexSans", "IBMPlexSans-Bold.woff2", "system-ui", "system-ui-Bold.woff2"),
+    ("IBMPlexMono", "IBMPlexMono-Regular.woff2", "ui-monospace", "ui-monospace-Regular.woff2"),
+    ("IBMPlexMono", "IBMPlexMono-Bold.woff2", "ui-monospace", "ui-monospace-Bold.woff2"),
+    ("IBMPlexMono", "IBMPlexMono-Regular.woff2", "Consolas", "Consolas-Regular.woff2"),
+    ("IBMPlexMono", "IBMPlexMono-Bold.woff2", "Consolas", "Consolas-Bold.woff2"),
+)
 
 
 def apply(source: str) -> tuple[str, bool]:
@@ -50,6 +65,24 @@ def apply(source: str) -> tuple[str, bool]:
         + suffix
     )
     return head + patched_tail, True
+
+
+def ensure_font_aliases(font_root: Path = GRADIO_FONT_ROOT) -> tuple[int, list[str]]:
+    """Create local font aliases requested by Gradio's generated CSS."""
+    created = 0
+    warnings: list[str] = []
+    for src_family, src_name, dst_family, dst_name in FONT_ALIASES:
+        source = font_root / src_family / src_name
+        target = font_root / dst_family / dst_name
+        if target.is_file():
+            continue
+        if not source.is_file():
+            warnings.append(f"missing font source: {source}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        created += 1
+    return created, warnings
 
 
 def verify(path: Path = GUI) -> bool:
@@ -100,6 +133,11 @@ def main() -> int:
         print("patched: PLAN-060 browser callback")
     else:
         print("unchanged: PLAN-060 browser callback")
+    created, warnings = ensure_font_aliases()
+    if created:
+        print(f"patched: PLAN-060 browser font aliases={created}")
+    for warning in warnings:
+        print(f"WARNING: {warning}")
     return 0 if verify(args.path) else 2
 
 

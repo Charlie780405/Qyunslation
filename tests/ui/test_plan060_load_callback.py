@@ -64,3 +64,27 @@ def test_canvas_load_callback_accepts_legacy_function_marker() -> None:
     again, changed_again = module.apply(patched)
     assert changed_again is False
     assert again == patched
+
+
+def test_browser_font_aliases_are_created_from_existing_gradio_fonts(tmp_path) -> None:
+    module = _load_script_module()
+    for family, regular, bold in (
+        ("IBMPlexSans", "IBMPlexSans-Regular.woff2", "IBMPlexSans-Bold.woff2"),
+        ("IBMPlexMono", "IBMPlexMono-Regular.woff2", "IBMPlexMono-Bold.woff2"),
+    ):
+        folder = tmp_path / family
+        folder.mkdir()
+        (folder / regular).write_bytes(f"{family}-regular".encode())
+        (folder / bold).write_bytes(f"{family}-bold".encode())
+
+    created, warnings = module.ensure_font_aliases(tmp_path)
+
+    assert created == 8
+    assert warnings == []
+    assert (tmp_path / "ui-sans-serif" / "ui-sans-serif-Regular.woff2").is_file()
+    assert (tmp_path / "system-ui" / "system-ui-Bold.woff2").is_file()
+    assert (tmp_path / "ui-monospace" / "ui-monospace-Regular.woff2").is_file()
+    assert (tmp_path / "Consolas" / "Consolas-Bold.woff2").is_file()
+    again_created, again_warnings = module.ensure_font_aliases(tmp_path)
+    assert again_created == 0
+    assert again_warnings == []
