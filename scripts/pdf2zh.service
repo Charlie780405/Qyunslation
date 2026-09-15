@@ -45,6 +45,7 @@ ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-047c-no
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-042b-short-label.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-050-workbench.py
 ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-060-termbase-workbench.py
+ExecStartPre=/usr/bin/python3 /home/dev/qyunslation/scripts/apply-pdf2zh-060-browser-chrome.py
 ExecStart=/home/dev/.local/bin/pdf2zh_next --gui --server-port 7860 --ui-lang zh --config-file /home/dev/pdf2zh/config.toml --disable-config-auto-save --disable-gui-sensitive-input --enabled-services Ollama
 Restart=on-failure
 RestartSec=5

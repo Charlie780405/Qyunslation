@@ -191,9 +191,9 @@ color:#334155;font-size:.88rem}
 <p class="sub">请登录后继续。服务重启后若无法操作，请重新登录。</p>
 __AUTH_MSG_BLOCK__
 <label for="u">用户名</label>
-<input id="u" name="username" required autofocus/>
+<input id="u" name="username" autocomplete="username" required autofocus/>
 <label for="p">密码</label>
-<input id="p" name="password" type="password" required/>
+<input id="p" name="password" type="password" autocomplete="current-password" required/>
 <button type="submit">登录</button>
 <p id="err"></p>
 </form>
@@ -221,10 +221,26 @@ document.getElementById('f').addEventListener('submit', async function (e) {
 """
 
 
+def _refresh_short_login_html(text: str) -> tuple[str, bool]:
+    """Already-patched routes still need HTML refreshes (autocomplete, copy)."""
+    new_assign = f"_QY_SHORT_LOGIN_HTML = {SHORT_LOGIN_HTML!r}"
+    start = text.find("_QY_SHORT_LOGIN_HTML = ")
+    if start < 0:
+        return text, False
+    end = text.find("\n", start)
+    old = text[start:] if end < 0 else text[start:end]
+    if old == new_assign:
+        return text, False
+    if end < 0:
+        return text[:start] + new_assign, True
+    return text[:start] + new_assign + text[end:], True
+
+
 def patch_short_login_page(text: str) -> tuple[str, bool]:
     """未登录 GET / 返回短登录页，不再吐整棵 Gradio 壳。"""
+    text, refreshed = _refresh_short_login_html(text)
     if SHORT_LOGIN_MARKER in text and "_QY_SHORT_LOGIN_HTML" in text:
-        return text, False
+        return text, refreshed
 
     old_else = '''            else:
                 config = {

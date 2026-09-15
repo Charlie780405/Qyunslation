@@ -8,6 +8,7 @@ header, or secret in ``head=``/browser JavaScript.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -32,6 +33,29 @@ CSS_BLOCK = r'''
       border-radius: 8px !important;
       font-weight: 600 !important;
     }
+    /* PLAN-015 锁一屏；检查器/术语表高于视口时必须自滚，否则「保存」被裁切。 */
+    .qy-050-inspector, .qy-050-help {
+      position: fixed !important;
+      top: calc(var(--qy-appbar-h, 48px) + 8px) !important;
+      left: 16px !important;
+      right: 16px !important;
+      z-index: 90 !important;
+      max-height: calc(100vh - var(--qy-appbar-h, 48px) - 24px) !important;
+      overflow-x: hidden !important;
+      overflow-y: auto !important;
+      overscroll-behavior: contain !important;
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18) !important;
+    }
+    .qy-050-inspector .wrap,
+    .qy-050-inspector .contain,
+    .qy-050-inspector .form,
+    .qy-050-help .wrap,
+    .qy-050-help .contain,
+    .qy-050-help .form {
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+    }
     .qy-050-inspector .table-wrap,
     .qy-050-inspector .dataframe-wrap {
       max-width: 100% !important;
@@ -39,7 +63,10 @@ CSS_BLOCK = r'''
     }
     @media (max-width: 767px) {
       .qy-060-term-badge { width: calc(100% - 32px) !important; }
-      .qy-050-inspector { margin-left: 8px !important; margin-right: 8px !important; }
+      .qy-050-inspector, .qy-050-help {
+        left: 8px !important;
+        right: 8px !important;
+      }
     }
 '''
 
@@ -281,12 +308,19 @@ def _replace_once(text: str, old: str, new: str, *, marker: str) -> tuple[str, b
 
 
 def apply_css(text: str) -> tuple[str, bool]:
-    if CSS_MARKER in text:
-        return text, False
+    block = CSS_BLOCK.strip("\n") + "\n"
+    css_re = re.compile(
+        r"(?:(?<=\n)|^)    /\* _qy_060_term_review_css \*/\n.*?(?=\n    /\* _qy_050_workbench_css \*/)",
+        re.S,
+    )
+    match = css_re.search(text)
+    if match:
+        updated = text[: match.start()] + block + text[match.end() :]
+        return updated, updated != text
     anchor = "    /* _qy_050_workbench_css */\n"
     if anchor not in text:
         return text, False
-    return text.replace(anchor, CSS_BLOCK + "\n" + anchor, 1), True
+    return text.replace(anchor, block + anchor, 1), True
 
 
 def apply_python_hook(text: str) -> tuple[str, bool]:

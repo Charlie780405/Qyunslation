@@ -33,8 +33,13 @@
 | 27 | `apply-pdf2zh-preview-dpi.py` | 预览 DPI |
 | 28 | `apply-pdf2zh-fidelity-033h.py` | 033h 保真 |
 | 29 | `apply-pdf2zh-045c-sanitize.py` | **045c** IL span/id 消毒 |
-| 30 | `apply-pdf2zh-042b-short-label.py` | **042b** 短标签/固定字段译前直替 |
-| 31 | `apply-pdf2zh-050-workbench.py` | **050** 工作台壳层/检查器/响应式 |
+| 30 | `apply-pdf2zh-046b-para-merge.py` | **046b** |
+| 31 | `apply-pdf2zh-047d-para-layout.py` | **047d** |
+| 32 | `apply-pdf2zh-047c-no-drop.py` | **047c** |
+| 33 | `apply-pdf2zh-042b-short-label.py` | **042b** 短标签/固定字段译前直替 |
+| 34 | `apply-pdf2zh-050-workbench.py` | **050** 工作台壳层/检查器/响应式 |
+| 35 | `apply-pdf2zh-060-termbase-workbench.py` | **060** 术语审校面板 |
+| 36 | `apply-pdf2zh-060-browser-chrome.py` | **060** Gradio `js=` 必须是函数 |
 
 部署前自检：
 

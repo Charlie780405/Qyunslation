@@ -43,6 +43,7 @@ for required in \
   "$ROOT/qyunslation/workbench/bridge.py" \
   "$ROOT/qyunslation/workbench/gui_client.py" \
   "$ROOT/scripts/apply-pdf2zh-060-termbase-workbench.py" \
+  "$ROOT/scripts/apply-pdf2zh-060-browser-chrome.py" \
   "$ROOT/scripts/manage-term-admin.py"; do
   [[ -f "$required" ]] && pass "static $(basename "$required")" || fail "missing $required"
 done
@@ -51,13 +52,15 @@ grep -q 'PLAN-060-company-termbase-workbench' "$ROOT/docs/plans/README.md" \
   && pass "plans index PLAN-060" || fail "plans index missing PLAN-060"
 grep -q 'apply-pdf2zh-060-termbase-workbench.py' "$ROOT/scripts/pdf2zh.service" \
   && pass "pdf2zh service runs PLAN-060 patch" || fail "pdf2zh service missing PLAN-060 patch"
+grep -q 'apply-pdf2zh-060-browser-chrome.py' "$ROOT/scripts/pdf2zh.service" \
+  && pass "pdf2zh service runs PLAN-060 browser-chrome patch" || fail "pdf2zh service missing PLAN-060 browser-chrome"
 if grep -q 'QYUNSLATION_TERM_BRIDGE_SECRET' "$ROOT/scripts/apply-pdf2zh-060-termbase-workbench.py"; then
   fail "GUI patch must not expose bridge secret"
 else
   pass "GUI patch contains no bridge secret"
 fi
 
-if "$PY" -m compileall -q qyunslation/workbench scripts/apply-pdf2zh-060-termbase-workbench.py scripts/manage-term-admin.py; then
+if "$PY" -m compileall -q qyunslation/workbench scripts/apply-pdf2zh-060-termbase-workbench.py scripts/apply-pdf2zh-060-browser-chrome.py scripts/manage-term-admin.py; then
   pass "PLAN-060 modules compile"
 else
   fail "PLAN-060 modules compile"
@@ -67,6 +70,9 @@ if "$PY" -m pytest -q --no-cov \
   tests/workbench/test_plan060_bridge.py \
   tests/workbench/test_plan060_evidence.py \
   tests/ui/test_plan060_workbench_patch.py \
+  tests/ui/test_plan060_load_callback.py \
+  tests/ui/test_plan060_browser_js.py \
+  tests/ui/test_plan060_login_shell.py \
   tests/persist/test_plan060_migration.py \
   tests/persist/test_plan058_candidate.py \
   tests/persist/test_plan058_api.py \

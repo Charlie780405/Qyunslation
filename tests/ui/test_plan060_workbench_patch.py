@@ -27,6 +27,20 @@ def test_plan060_patch_declares_server_side_term_panel_and_callbacks():
     assert "prepare_workbench_translation" in text
     assert "complete_workbench_translation" in text
     assert "QYUNSLATION_TERM_BRIDGE_SECRET" not in text
+    assert "overflow-y: auto" in text
+    assert "保存术语决定" in text
+
+
+def test_plan060_css_replaces_existing_block_and_stays_idempotent():
+    module = _module()
+    source = "    /* _qy_060_term_review_css */\n    .old {}\n    /* _qy_050_workbench_css */\n"
+    patched, changed = module.apply_css(source)
+    assert changed is True
+    assert "overflow-y: auto" in patched
+    assert ".old {}" not in patched
+    again, changed_again = module.apply_css(patched)
+    assert changed_again is False
+    assert again == patched
 
 
 def test_plan060_patch_is_idempotent_on_supported_gui_anchors():
