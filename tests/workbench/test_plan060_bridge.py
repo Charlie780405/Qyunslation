@@ -208,6 +208,45 @@ def test_high_risk_term_requires_admin_final_review(client):
     )
     assert direct.status_code == 403
 
+    identity = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/terms/{candidate['id']}/decision",
+        {
+            "actor_sub": "reviewer-1",
+            "action": "do_not_translate",
+            "expected_version": 1,
+        },
+        nonce="dnt-high-060",
+    )
+    assert identity.status_code == 200, identity.text
+    assert identity.json()["candidate"]["status"] == "approved"
+
+    started_again = _start(client, source_text="ABC-102 was administered.", nonce="start-high-dnt-060")
+    run_id = started_again["run_id"]
+    completed_again = _request(
+        client,
+        "POST",
+        f"/internal/workbench/v1/runs/{run_id}/complete",
+        {
+            "actor_sub": "reviewer-1",
+            "evidence": [
+                {
+                    "source_text": "ABC-102",
+                    "target_text": "ABC-102",
+                    "source_term": "ABC-102",
+                    "target_term": "ABC-102",
+                    "role": "body",
+                    "page_no": 1,
+                    "block_id": "p1-b2",
+                }
+            ]
+        },
+        nonce="complete-high-dnt-060",
+    )
+    candidate = completed_again.json()["candidates"][0]
+    assert candidate["risk"] == "high"
+
     submitted = _request(
         client,
         "POST",
@@ -234,7 +273,7 @@ def test_high_risk_term_requires_admin_final_review(client):
             "actor_sub": "reviewer-1",
             "action": "approve",
             "expected_version": 2,
-            "target_term": "ABC-101",
+            "target_term": "ABC-102",
         },
         nonce="final-high-060",
     )

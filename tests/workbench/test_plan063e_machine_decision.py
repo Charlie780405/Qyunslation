@@ -6,7 +6,11 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from qyunslation.persist.candidate_repo import enqueue_candidate
+from qyunslation.persist.candidate_repo import (
+    decide_candidate,
+    decide_same_source_siblings,
+    enqueue_candidate,
+)
 from qyunslation.persist.db import init_engine, reset_engine
 from qyunslation.persist.models import Base, Job, Project, Tenant, TermDecision
 
@@ -55,6 +59,60 @@ def test_backfill_is_idempotent_and_does_not_change_status():
         rows = list(session.scalars(select(TermDecision)).all())
         assert len(rows) == 1
         assert rows[0].actor_sub == "plan062-purge"
+    finally:
+        session.close()
+        reset_engine()
+
+
+def test_same_source_siblings_leave_pending_together():
+    reset_engine()
+    engine = init_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    from qyunslation.persist.db import SessionLocal
+
+    session = SessionLocal()
+    try:
+        tenant = Tenant(slug="t063sib", name="T")
+        session.add(tenant)
+        session.flush()
+        project = Project(tenant_id=tenant.id, slug="p", name="P")
+        session.add(project)
+        session.flush()
+        job = Job(project_id=project.id, source_sha256="g" * 64, status="completed")
+        session.add(job)
+        session.flush()
+        first = enqueue_candidate(
+            session,
+            job=job,
+            tenant_id=tenant.id,
+            project_id=project.id,
+            source_term="dermatitis",
+            observed_target="",
+        )
+        second = enqueue_candidate(
+            session,
+            job=job,
+            tenant_id=tenant.id,
+            project_id=project.id,
+            source_term="Dermatitis",
+            observed_target="皮炎",
+        )
+        decide_candidate(
+            session,
+            candidate=first,
+            actor_sub="reviewer",
+            action="do_not_translate",
+            expected_version=first.version,
+        )
+        decide_same_source_siblings(
+            session,
+            candidate=first,
+            actor_sub="reviewer",
+            action="do_not_translate",
+        )
+        session.flush()
+        assert first.status == "approved"
+        assert second.status == "approved"
     finally:
         session.close()
         reset_engine()

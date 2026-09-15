@@ -24,6 +24,7 @@ from qyunslation.persist.candidate_repo import (
     CandidateConflict,
     candidate_to_dict,
     decide_candidate,
+    decide_same_source_siblings,
     enqueue_candidate,
     get_candidate,
     list_candidates,
@@ -574,7 +575,11 @@ def _decide(
     if body.action == "submit_for_admin":
         if not high_risk:
             raise HTTPException(status_code=400, detail="only high-risk candidates require administrator review")
-    elif (high_risk or candidate.status == "pending_admin") and not is_admin:
+    elif (
+        body.action not in {"do_not_translate", "reject"}
+        and (high_risk or candidate.status == "pending_admin")
+        and not is_admin
+    ):
         raise HTTPException(status_code=403, detail="term_admin role required for high-risk term")
     try:
         result = decide_candidate(
@@ -594,6 +599,15 @@ def _decide(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    decide_same_source_siblings(
+        session,
+        candidate=candidate,
+        actor_sub=actor_sub,
+        action=body.action,
+        target_term=body.target_term,
+        concept_id=result.get("concept_id") or body.concept_id,
+        note=body.note,
+    )
     job = repo.get_job(session, job_id=run.job_id)
     assert job is not None
     record_audit(

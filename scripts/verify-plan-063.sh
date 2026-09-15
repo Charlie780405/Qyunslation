@@ -46,8 +46,8 @@ head -n 1 "$ROOT/glossaries/term-exclusions.csv" | grep -q 'source,reason,scope'
 
 grep -q 'PLAN-063-translation-quality-evolution' "$ROOT/docs/plans/README.md" \
   && pass "plans index PLAN-063" || fail "plans index missing PLAN-063"
-grep -q 'version = "063-v1"' "$ROOT/glossaries/term-candidate-rules.toml" \
-  && pass "rules version 063-v1" || fail "rules version is not 063-v1"
+grep -Eq 'version = "063-v[0-9]+"' "$ROOT/glossaries/term-candidate-rules.toml" \
+  && pass "rules version 063" || fail "rules version missing"
 
 SIG="$ROOT/.cursor/skills/skill-registry/error-signatures.toml"
 for id in SIG-TERM-SAVE-SWALLOWED SIG-TERM-COLUMNS-EMPTY SIG-TERM-CANDIDATE-NOISE \

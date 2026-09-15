@@ -433,6 +433,43 @@ def decide_candidate(
     }
 
 
+def decide_same_source_siblings(
+    session: Session,
+    *,
+    candidate: DocumentTermCandidate,
+    actor_sub: str,
+    action: str,
+    target_term: str | None = None,
+    concept_id: str | None = None,
+    note: str | None = None,
+) -> int:
+    """同一 job 里相同 source_norm 的待处理行跟主决定走，避免保存后列表里还剩副本。"""
+    if action not in {"approve", "reject", "do_not_translate", "merge"}:
+        return 0
+    siblings = session.scalars(
+        select(DocumentTermCandidate).where(
+            DocumentTermCandidate.job_id == candidate.job_id,
+            DocumentTermCandidate.source_norm == candidate.source_norm,
+            DocumentTermCandidate.id != candidate.id,
+            DocumentTermCandidate.status.in_(("pending", "pending_admin", "violation")),
+        )
+    ).all()
+    applied = 0
+    for sibling in siblings:
+        decide_candidate(
+            session,
+            candidate=sibling,
+            actor_sub=actor_sub,
+            action=action,
+            expected_version=sibling.version,
+            target_term=target_term,
+            concept_id=concept_id,
+            note=note,
+        )
+        applied += 1
+    return applied
+
+
 def record_machine_decision(
     session: Session,
     *,

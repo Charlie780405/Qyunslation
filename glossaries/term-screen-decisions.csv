@@ -1,1 +1,5 @@
 source,decision,term_type,reason,model,ts,prompt_version
+ISABIAL,generic,general,无法确认为皮肤科或自免临床试验领域的特定药物、靶点或方案代号，按规则归为通用词/潜在噪声。,llm,2026-09-15T14:35:38.984758+00:00,062-v1
+ECZTEND,domain_term,protocol,符合特应性皮炎（Eczema）临床试验项目或方案的专有命名模式，属领域内试验标识。,llm,2026-09-15T14:35:38.984758+00:00,062-v1
+SPARC,generic,general,为广泛使用的生物学蛋白通用缩写，非本领域特指靶点或药物，按规则归为通用词。,llm,2026-09-15T14:35:38.984758+00:00,062-v1
+CONSORT,generic,general,临床试验报告通用规范缩写，属临床研究通用指南而非皮肤科/自免专属术语。,llm,2026-09-15T14:35:38.984758+00:00,062-v1

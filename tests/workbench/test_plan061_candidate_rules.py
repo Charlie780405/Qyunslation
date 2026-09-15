@@ -15,7 +15,7 @@ from qyunslation.workbench.evidence import BilingualTermEvidence, classify_risk,
 
 
 def test_rules_version_matches_toml():
-    assert rules_version() == "063-v1"
+    assert rules_version() == "063-v2"
 
 
 def test_numeric_dose_and_ratio_tokens_are_excluded():
@@ -36,6 +36,8 @@ def test_numeric_dose_and_ratio_tokens_are_excluded():
         "AD": EXCLUDE_TOO_SHORT,
         "TTT": EXCLUDE_DENYLIST,
         "Page 3": EXCLUDE_PATTERN,  # junk 兜底亦可，但规则文件应先命中 PATTERN
+        "NCT03131648": EXCLUDE_PATTERN,
+        "ChiCTR2100041234": EXCLUDE_PATTERN,
     }
     for source, reason in cases.items():
         excluded, got = should_exclude_from_termbase(source)
@@ -70,3 +72,17 @@ def test_synthetic_extraction_drops_dose_and_keeps_drug():
     sources = {row["source_term"] for row in rows}
     assert "tralokinumab" in sources
     assert not {"300 mg", "Q2W", "14/18"} & sources
+
+
+def test_registry_ids_are_not_extracted():
+    rows = extract_term_pairs(
+        [
+            BilingualTermEvidence(
+                source_text="Registered as NCT03131648 and ChiCTR2100041234.",
+                target_text="登记号 NCT03131648 与 ChiCTR2100041234。",
+            )
+        ]
+    )
+    sources = {row["source_term"] for row in rows}
+    assert "NCT03131648" not in sources
+    assert "ChiCTR2100041234" not in sources

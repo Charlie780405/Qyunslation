@@ -1,5 +1,5 @@
 # PLAN-063：术语候选准入规则。改 version 必须 bump 并登记 fingerprint。
-version = "063-v1"
+version = "063-v2"
 
 [thresholds]
 min_source_chars = 3
@@ -14,6 +14,8 @@ patterns = [
   '^\d+\s*/\s*\d+$',
   '^[ivxlcdm]+$',
   '^(?:page|fig|figure|table|appendix|section)\s*\d+$',
+  '^(?:NCT|ChiCTR|ISRCTN|DRKS|ACTRN|CTRI|jRCT|JPRN|EUCTR|CTR|TCTR|KCT|NTR|IRCT|PACTR|UMIN)\s*[-/]?\d[\dA-Za-z-]*$',
+  '^\d{4}-\d{6}-\d{2}$',
 ]
 denylist = [
   "OR", "RR", "HR", "CI", "SD", "SE", "SEM", "IQR", "NA", "NS",
