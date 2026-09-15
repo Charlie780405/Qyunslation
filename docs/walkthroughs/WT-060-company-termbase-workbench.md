@@ -87,3 +87,10 @@
 - 打开面板后默认选中第一条候选并回填三类字段；保存成功后重新加载候选列表、显示下一条候选，避免停留在空白确认页。
 - 真实浏览器字段验证证据：`/home/dev/tmp-bridge/qy-plan060-browser-confirmed-column.json`；登录、上传、翻译完成、术语面板、三列默认值及确认译法可编辑均已观测。浏览器验证中保留的 PDF worker 远程模块警告属于预览依赖，不影响术语桥接请求。
 - 本次只收口确认字段交互；多格式金标、参考文献零候选、表格/脚注完整证据、泰州 LIVE 和四视宽回归仍须按 PLAN-060 门禁补齐，不能据此标记计划整体完成。
+
+## 追加发布记录（2026-09-15）
+
+- 已从提交 `88c951e723deb84095295647dda15cf85616ed5e` 部署生产，执行 `scripts/deploy-translate-stack.sh` 成功。
+- `pdf2zh.service` 与 `qyunslation-office.service` 均为 `active`；sidecar 健康检查 HTTP 200，部署前后代码指纹均为 `7542777de0fd`。
+- 本地 GUI、`translate.qyunsgen.com` 及生产 API 烟囱检查均返回 HTTP 200；远程 `origin/main` 与本地提交一致。
+- 未跟踪的本地 `.cursor/mcp.json` 未参与提交或部署。
