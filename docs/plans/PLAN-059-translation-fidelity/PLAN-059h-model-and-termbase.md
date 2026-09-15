@@ -1,6 +1,6 @@
 # PLAN-059h：模型路由、术语策略与运行时证据
 
-> 父计划：[PLAN-059](./README.md)  
+> 父计划：[PLAN-059](./README.md)
 > 状态：实施中（配置 trace 已接入；泰州 LIVE 待探针）
 > 依赖：059a、PLAN-058
 

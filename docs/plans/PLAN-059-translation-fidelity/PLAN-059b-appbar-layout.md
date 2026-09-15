@@ -1,6 +1,6 @@
 # PLAN-059b：Banner 布局与上传后主操作收口
 
-> 父计划：[PLAN-059](./README.md)  
+> 父计划：[PLAN-059](./README.md)
 > 状态：已实施（静态门禁通过；真实浏览器 smoke 待补）
 > 依赖：059a；上一修复：`3cce0ac`
 

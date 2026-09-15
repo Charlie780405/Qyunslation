@@ -1,6 +1,6 @@
 # WT-059：医药资料翻译 12 项保真问题与 UI 收口
 
-> 对应计划：[PLAN-059](../plans/PLAN-059-translation-fidelity/README.md)  
+> 对应计划：[PLAN-059](../plans/PLAN-059-translation-fidelity/README.md)
 > 状态：**实施中：生产 smoke 已通过，真实金标/LIVE/浏览器证据待补**
 > 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-059-translation-fidelity`
 

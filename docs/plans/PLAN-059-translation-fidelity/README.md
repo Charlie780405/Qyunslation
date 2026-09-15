@@ -1,10 +1,10 @@
 # PLAN-059：医药资料翻译 12 项保真问题与工作台 UI 收口
 
 > 状态：**实施中：本地保真门禁与生产基础 smoke 通过，LIVE/浏览器/真实金标待验证**
-> 日期：2026-09-14  
-> 前置：PLAN-028/033/041/045/050/058；最近 UI 修复提交 `3cce0ac`  具体复现见用户提供的截图  
-> 目标分支：`codex/plan-059-translation-fidelity`  
-> Cursor 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-059-translation-fidelity`  
+> 日期：2026-09-14
+> 前置：PLAN-028/033/041/045/050/058；最近 UI 修复提交 `3cce0ac`。具体复现见用户提供的截图。
+> 目标分支：`codex/plan-059-translation-fidelity`
+> Cursor 工作树：`/home/dev/.cursor/worktrees/qyunslation/plan-059-translation-fidelity`
 > 证据文件：`docs/walkthroughs/WT-059-translation-fidelity.md`
 
 ## 一、目标
