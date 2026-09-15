@@ -29,6 +29,14 @@
 
 结果：`29 passed`（含对已安装上游 GUI 的内存补丁编译验证）；Alembic 仅报告既有配置弃用警告。`QYUNSLATION_PLAN060_FULL=1 bash scripts/verify-plan-060.sh` 已通过，并联动通过 PLAN-058、050e、057、059；最终全量回归为 `929 passed, 6 skipped`。
 
+## 生产部署记录（2026-09-15）
+
+- 已将 `main` 精确推进至 `f26fbbad39359a768249b6ea5abd2123782c048e` 并推送至 `origin/main`。
+- PostgreSQL 已执行 `060a0001` 迁移；桥接密钥、工作台租户和管理员令牌仅写入受保护的部署环境文件，未进入源码、补丁、日志或 Git。
+- 公共 Caddy 配置不含 `/internal/workbench` 路由并通过配置校验。真实侧车仍仅监听回环地址：未签名本地请求返回 `401`，公网同一路径返回 `404`。
+- `pdf2zh.service` 与 `qyunslation-office.service` 已重启且均为 `active`；翻译栈部署指纹一致。
+- `QYUNSLATION_PLAN060_LIVE=1 bash scripts/verify-plan-060.sh`：静态、专项测试、迁移、Caddy 负向验证和部署变量均为 `PASS`；四视宽浏览器证据缺失，结果为 `SUMMARY: BLOCKED`（`blocked=1`、`fail=0`）。因此功能已部署，但 PLAN-060 不得标记完成。
+
 ## 待补 LIVE 证据
 
 - 迁移 `060a0001` 在 PostgreSQL 成功；两个服务加载相同且未输出的桥接密钥。
