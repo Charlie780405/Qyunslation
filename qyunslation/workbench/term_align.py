@@ -15,6 +15,9 @@ MATCH_VERBATIM = "verbatim"
 MATCH_LLM = "llm"
 MATCH_NONE = "none"
 MATCH_CANDIDATE = "candidate"
+MATCH_ALIAS = "alias"
+MATCH_SEMANTIC = "semantic"
+LEXICON_MATCHES = frozenset({MATCH_TERMBASE, MATCH_ALIAS, MATCH_SEMANTIC, "exact"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,22 @@ def _preferred_target(source_term: str, policy: dict | None) -> str | None:
         configured = str(term.get("source_term") or "").strip()
         preferred = str(term.get("preferred_target") or "").strip()
         if configured.casefold() == source and preferred:
+            return preferred
+    return None
+
+
+def _stem_preferred(source_term: str, policy: dict | None) -> str | None:
+    from qyunslation.glossary.term_morphology import morphology_stem
+
+    stem = morphology_stem(source_term)
+    if not stem:
+        return None
+    for term in (policy or {}).get("terms") or ():
+        if not term.get("hard_constraint"):
+            continue
+        configured = str(term.get("source_term") or "").strip()
+        preferred = str(term.get("preferred_target") or "").strip()
+        if preferred and morphology_stem(configured) == stem:
             return preferred
     return None
 
@@ -174,6 +193,123 @@ def _parse_json_array(text: str) -> list[dict[str, Any]]:
 
 def _needs_suggestion(aligned: AlignedTerm) -> bool:
     return aligned.match_type == MATCH_NONE and not aligned.suggested_target
+
+
+def suggest_from_termbase(
+    rows: Iterable[dict[str, Any] | AlignedTerm],
+    *,
+    policy: dict | None = None,
+    session: Any | None = None,
+    tenant_id: str | None = None,
+    project_id: str | None = None,
+    src_lang: str = "en",
+    tgt_lang: str = "zh",
+) -> dict[str, AlignedTerm]:
+    """词库精确 / 词干 alias / 语义软建议；不调用 LLM。"""
+    from qyunslation.glossary.governance import normalize_source
+    from qyunslation.glossary.term_morphology import morphology_stem
+
+    staged: list[AlignedTerm] = []
+    for row in rows:
+        if isinstance(row, AlignedTerm):
+            aligned = row
+        else:
+            aligned = row.get("aligned")
+            if not isinstance(aligned, AlignedTerm):
+                continue
+        if not _needs_suggestion(aligned):
+            if aligned.match_type in LEXICON_MATCHES and aligned.suggested_target:
+                staged.append(aligned)
+            continue
+        staged.append(aligned)
+    if not staged:
+        return {}
+
+    records: list[Any] = []
+    if session is not None and tenant_id:
+        try:
+            from qyunslation.glossary.termbase import list_runtime_terms
+
+            records = list_runtime_terms(
+                session,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+            )
+        except Exception:
+            records = []
+    by_norm: dict[str, Any] = {}
+    by_stem: dict[str, Any] = {}
+    for record in records:
+        source = str(getattr(record, "source_term", "") or "").strip()
+        target = str(getattr(record, "target_term", "") or "").strip()
+        if not source or not target:
+            continue
+        by_norm.setdefault(normalize_source(source), record)
+        by_stem.setdefault(morphology_stem(source), record)
+
+    found: dict[str, AlignedTerm] = {}
+    unresolved: list[AlignedTerm] = []
+    for aligned in staged:
+        source = aligned.source_term
+        if aligned.match_type in LEXICON_MATCHES and aligned.suggested_target:
+            found[source] = aligned
+            continue
+        preferred = _preferred_target(source, policy)
+        if preferred:
+            found[source] = AlignedTerm(source, aligned.observed_target, preferred, MATCH_TERMBASE, 1.0)
+            continue
+        record = by_norm.get(normalize_source(source))
+        if record is not None:
+            found[source] = AlignedTerm(
+                source, aligned.observed_target, record.target_term, MATCH_TERMBASE, 0.98
+            )
+            continue
+        stem = morphology_stem(source)
+        record = by_stem.get(stem) if stem else None
+        if record is not None:
+            found[source] = AlignedTerm(
+                source, aligned.observed_target, record.target_term, MATCH_ALIAS, 0.92
+            )
+            continue
+        preferred = _stem_preferred(source, policy)
+        if preferred:
+            found[source] = AlignedTerm(source, aligned.observed_target, preferred, MATCH_ALIAS, 0.9)
+            continue
+        unresolved.append(aligned)
+
+    if unresolved and session is not None and tenant_id:
+        try:
+            from qyunslation.persist.term_embedding_repo import semantic_search_concept_terms
+
+            for aligned in unresolved:
+                hits = semantic_search_concept_terms(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    query=aligned.source_term,
+                    src_lang=src_lang,
+                    tgt_lang=tgt_lang,
+                    limit=1,
+                    threshold=0.88,
+                )
+                if not hits:
+                    continue
+                hit = hits[0]
+                target = str(hit.get("target_term") or "").strip()
+                if not target:
+                    continue
+                found[aligned.source_term] = AlignedTerm(
+                    aligned.source_term,
+                    aligned.observed_target,
+                    target,
+                    MATCH_SEMANTIC,
+                    float(hit.get("score") or 0.88),
+                )
+        except Exception:
+            pass
+    return found
 
 
 def suggest_targets(

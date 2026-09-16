@@ -6,10 +6,17 @@ import json
 from datetime import datetime, timezone
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.glossary.governance import normalize_lang, normalize_source
+from qyunslation.glossary.term_morphology import (
+    EMPTY_REJECTED_INDEX,
+    RejectedIndex,
+    build_rejected_index,
+    has_prefix,
+    morphology_stem,
+)
 from qyunslation.persist.models import (
     Concept,
     ConceptTerm,
@@ -96,6 +103,68 @@ def collapse_decided_source_rows(rows: list[dict]) -> list[dict]:
             seen.add(key)
         collapsed.append(row)
     return collapsed
+
+
+def sort_review_candidates(rows: list[dict]) -> list[dict]:
+    """待确认优先看高频新词；高风险靠后。"""
+
+    def rank(row: dict) -> tuple[int, int, int]:
+        occ = len(row.get("occurrences") or [])
+        match = str(row.get("match_type") or "").casefold()
+        known = 1 if match in {"exact", "alias", "termbase"} else 0
+        high = 1 if str(row.get("risk") or "").casefold() in {"high", "critical"} else 0
+        return (high, known, -occ)
+
+    return sorted(rows, key=rank)
+
+
+def load_rejected_suppress_index(
+    session: Session, *, tenant_id: str, project_id: str | None = None
+) -> RejectedIndex:
+    """读取本租户/项目下人工拒绝与不译的源词，供抽取时压制。"""
+    stmt = (
+        select(TermDecision.source_term)
+        .join(DocumentTermCandidate)
+        .where(TermDecision.action.in_(("reject", "do_not_translate")))
+        .where(DocumentTermCandidate.tenant_id == tenant_id)
+    )
+    if project_id:
+        stmt = stmt.where(
+            or_(
+                TermDecision.scope.in_(("org", "global")),
+                DocumentTermCandidate.project_id == project_id,
+            )
+        )
+    sources = [str(item or "").strip() for item in session.scalars(stmt).all() if item]
+    if not sources:
+        return EMPTY_REJECTED_INDEX
+    return build_rejected_index(sources)
+
+
+def find_concept_by_source_norm(
+    session: Session,
+    *,
+    tenant_id: str,
+    project_id: str | None,
+    source_norm: str,
+    src_lang: str = "en",
+) -> Concept | None:
+    """按规范化源词查找已 curated 的 Concept。"""
+    normalized = normalize_source(source_norm)
+    if not normalized:
+        return None
+    lang = normalize_lang(src_lang) or "en"
+    stmt = (
+        select(Concept)
+        .join(ConceptTerm)
+        .where(Concept.status == "curated")
+        .where(or_(Concept.tenant_id.is_(None), Concept.tenant_id == tenant_id))
+        .where(or_(Concept.project_id.is_(None), Concept.project_id == project_id))
+        .where(ConceptTerm.normalized_text == normalized)
+        .where(ConceptTerm.lang == lang)
+        .options(selectinload(Concept.terms))
+    )
+    return session.scalars(stmt).first()
 
 
 def enqueue_candidate(
@@ -385,6 +454,23 @@ def decide_candidate(
 
     target = (target_term or candidate.suggested_target or candidate.observed_target or "").strip()
     concept: Concept | None = None
+    extra_aliases = [str(item).strip() for item in (aliases or ()) if str(item).strip()]
+    resolved_concept_id = (concept_id or "").strip() or None
+    if (
+        action == "approve"
+        and not resolved_concept_id
+        and has_prefix(candidate.source_term)
+    ):
+        stem_concept = find_concept_by_source_norm(
+            session,
+            tenant_id=candidate.tenant_id,
+            project_id=candidate.project_id,
+            source_norm=morphology_stem(candidate.source_term),
+            src_lang=candidate.src_lang,
+        )
+        if stem_concept is not None:
+            resolved_concept_id = stem_concept.id
+            extra_aliases.append(candidate.source_term)
     if action == "submit_for_admin":
         candidate.status = "pending_admin"
     elif action in {"approve", "do_not_translate"}:
@@ -397,8 +483,8 @@ def decide_candidate(
             actor_sub=actor_sub,
             scope=scope,
             do_not_translate=action == "do_not_translate",
-            concept_id=concept_id,
-            aliases=aliases,
+            concept_id=resolved_concept_id,
+            aliases=extra_aliases,
             abbreviations=abbreviations,
         )
         candidate.status = "approved"

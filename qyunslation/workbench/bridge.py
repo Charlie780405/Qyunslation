@@ -30,9 +30,12 @@ from qyunslation.persist.candidate_repo import (
     enqueue_candidate,
     get_candidate,
     list_candidates,
+    load_rejected_suppress_index,
+    sort_review_candidates,
 )
 from qyunslation.persist.models import WorkbenchTranslationRun
-from qyunslation.glossary.candidate_rules import should_exclude_from_termbase
+from qyunslation.glossary.candidate_rules import EXCLUDE_REJECTED, should_exclude_from_termbase
+from qyunslation.glossary.term_morphology import is_rejected_source
 from qyunslation.glossary.term_screen import DECISION_DOMAIN, screen_terms
 from qyunslation.workbench.evidence import (
     BilingualTermEvidence,
@@ -45,6 +48,7 @@ from qyunslation.workbench.term_align import (
     prefer_explicit_observation,
     align_by_paragraph_batch,
     align_observed,
+    suggest_from_termbase,
     suggest_targets,
 )
 from qyunslation.workbench.security import require_signed_loopback
@@ -108,7 +112,7 @@ class DecisionBody(BaseModel):
 
 class BatchDecisionItem(BaseModel):
     candidate_id: str = Field(min_length=1, max_length=36)
-    action: Literal["approve"]
+    action: Literal["approve", "reject", "do_not_translate"]
     expected_version: int = Field(ge=1)
     target_term: str | None = Field(default=None, max_length=512)
     concept_id: str | None = Field(default=None, max_length=36)
@@ -185,6 +189,9 @@ def _extract_candidates(
     candidate_ids: set[str] = set()
     excluded_stats: dict[str, int] = {}
     screen_origin: dict[str, int] = {}
+    rejected_index = load_rejected_suppress_index(
+        session, tenant_id=tenant_id, project_id=job.project_id
+    )
     seen_occurrences: set[
         tuple[str, str, int | None, str | None, str | None, int | None, int | None]
     ] = set()
@@ -208,6 +215,9 @@ def _extract_candidates(
             excluded, reason = should_exclude_from_termbase(source_term)
             if excluded:
                 note_exclude(reason)
+                return
+            if is_rejected_source(source_term, rejected_index):
+                note_exclude(EXCLUDE_REJECTED)
                 return
         occurrence = (extracted.get("occurrences") or [{}])[0]
         key = (
@@ -282,6 +292,9 @@ def _extract_candidates(
         for source_term in collect_abbrev_candidates(item.source_text):
             screen_jobs.append((item, source_term))
         for extracted in extracted_rows:
+            if is_rejected_source(extracted["source_term"], rejected_index):
+                note_exclude(EXCLUDE_REJECTED)
+                continue
             aligned = prefer_explicit_observation(
                 extracted,
                 align_observed(
@@ -308,6 +321,9 @@ def _extract_candidates(
                 reason = "SCREEN_NOISE" if verdict is not None and verdict.decision == "noise" else "SCREEN_GENERIC"
                 excluded_stats[reason] = excluded_stats.get(reason, 0) + 1
                 continue
+            if is_rejected_source(source_term, rejected_index):
+                note_exclude(EXCLUDE_REJECTED)
+                continue
             extracted = {
                 "source_term": source_term,
                 "observed_target": "",
@@ -331,10 +347,20 @@ def _extract_candidates(
                     ),
                 }
             )
-    suggestions = align_by_paragraph_batch(staged)
+    suggestions = suggest_from_termbase(
+        staged,
+        policy=policy,
+        session=session,
+        tenant_id=tenant_id,
+        project_id=job.project_id,
+        src_lang=str((job.provenance or {}).get("src_lang") or "en"),
+        tgt_lang=str((job.provenance or {}).get("tgt_lang") or "zh"),
+    )
+    remaining = [row for row in staged if row["extracted"]["source_term"] not in suggestions]
+    suggestions.update(align_by_paragraph_batch(remaining))
     suggestions.update(
         suggest_targets(
-            [row for row in staged if row["extracted"]["source_term"] not in suggestions]
+            [row for row in remaining if row["extracted"]["source_term"] not in suggestions]
         )
     )
     for row in staged:
@@ -587,7 +613,9 @@ def get_term_review(run_id: str, actor_sub: str, session: Session = Depends(get_
     rows = list_candidates(session, tenant_id=tenant.id, job_id=run.job_id, limit=200)
     return {
         "summary": _summary(session, run, tenant.id),
-        "candidates": collapse_decided_source_rows([candidate_to_dict(row) for row in rows]),
+        "candidates": sort_review_candidates(
+            collapse_decided_source_rows([candidate_to_dict(row) for row in rows])
+        ),
     }
 
 
@@ -679,12 +707,17 @@ def batch_decide_terms(run_id: str, body: BatchDecisionBody, session: Session = 
         candidate = get_candidate(session, candidate_id=item.candidate_id, tenant_id=tenant.id, job_id=run.job_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="term candidate not found")
-        if (
-            candidate.status == "violation"
-            or candidate.risk.casefold() in _HIGH_RISK
-            or candidate.match_type not in {"exact", "alias"}
-        ):
-            raise HTTPException(status_code=400, detail="candidate is not eligible for batch approval")
+        if item.action in {"reject", "do_not_translate"}:
+            if candidate.status not in {"pending", "pending_admin"}:
+                raise HTTPException(status_code=400, detail="candidate is not eligible for batch reject")
+        else:
+            target = (item.target_term or candidate.suggested_target or candidate.observed_target or "").strip()
+            if (
+                candidate.status not in {"pending", "pending_admin"}
+                or candidate.risk.casefold() in _HIGH_RISK
+                or not target
+            ):
+                raise HTTPException(status_code=400, detail="candidate is not eligible for batch approval")
         decided.append(
             _decide(
                 session,

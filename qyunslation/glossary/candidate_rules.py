@@ -23,6 +23,7 @@ EXCLUDE_TOO_SHORT = "TOO_SHORT"
 EXCLUDE_TOO_LONG = "TOO_LONG"
 EXCLUDE_JUNK = "JUNK"
 EXCLUDE_FRAGMENT = "FRAGMENT"
+EXCLUDE_REJECTED = "REJECTED"
 _DRUG_FRAGMENT = re.compile(r"^[a-z]{1,3}(?:mab|nib|cept)$", re.I)
 _ORG_HINT = re.compile(
     r"\b(?:hospital|university|institute|biotech|pharma(?:ceutical)?)\b",
