@@ -308,7 +308,7 @@ def test_high_risk_term_requires_admin_final_review(client):
     assert reused_complete.json()["summary"]["formal_gate"]["passed"] is True
 
 
-def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exact(client):
+def test_repeated_occurrences_are_aggregated_and_batch_blocks_violation(client):
     first = _start(client, source_text="The primary endpoint was met twice.")
     run_id = first["run_id"]
 
@@ -374,8 +374,8 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
     assert repeated.status_code == 200, repeated.text
     assert len(repeated.json()["candidates"][0]["occurrences"]) == 2
 
-    # It is still an unknown candidate: batch confirmation cannot launder it.
-    rejected = _request(
+    # PLAN-064：勾选后的一键入库允许自选 pending（有译法、非高风险），不再要求 exact/alias。
+    selected = _request(
         client,
         "POST",
         f"/internal/workbench/v1/runs/{run_id}/terms/batch-decision",
@@ -392,23 +392,10 @@ def test_repeated_occurrences_are_aggregated_and_batch_only_accepts_low_risk_exa
         },
         nonce="batch-reject-060",
     )
-    assert rejected.status_code == 400
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["decided"][0]["candidate"]["status"] == "approved"
 
-    # Confirm it once; the following run resolves it deterministically and is
-    # then eligible for the narrow exact-match batch path.
-    approved = _request(
-        client,
-        "POST",
-        f"/internal/workbench/v1/runs/{run_id}/terms/{rows[0]['id']}/decision",
-        {
-            "actor_sub": "reviewer-1",
-            "action": "approve",
-            "expected_version": rows[0]["version"],
-            "target_term": "主要终点评估",
-        },
-        nonce="aggregate-approve-060",
-    )
-    assert approved.status_code == 200, approved.text
+    # 下一篇若未遵循词库，violation 仍不能一键入库。
     second = _start(client, source_text="The primary endpoint was met again.", nonce="exact-batch-start-060")
     completed_again = _request(
         client,
