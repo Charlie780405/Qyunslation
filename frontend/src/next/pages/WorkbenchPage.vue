@@ -56,10 +56,10 @@
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
             <span class="qy-status-badge" :class="preflight.state === 'ready' ? 'is-ready' : 'is-pending'">{{ preflight.state === 'ready' ? '预检通过' : '需要处理' }}</span>
-            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready'" @click="startTranslation">
+            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready' || activeRun?.preflight_id === preflight.id" @click="startTranslation">
               <ArrowPathIcon v-if="startingRun" class="qy-spin" aria-hidden="true" />
               <PlayIcon v-else aria-hidden="true" />
-              {{ startingRun ? '正在创建任务…' : '确认并开始翻译' }}
+              {{ startingRun ? '正在创建任务…' : activeRun?.preflight_id === preflight.id ? '翻译进行中' : '确认并开始翻译' }}
             </button>
           </div>
           <div class="qy-panel-actions">
@@ -289,7 +289,7 @@ async function startPreflight() {
 }
 
 async function startTranslation() {
-  if (!preflight.value || preflight.value.state !== 'ready') return;
+  if (!preflight.value || preflight.value.state !== 'ready' || activeRun.value?.preflight_id === preflight.value.id) return;
   startingRun.value = true;
   uploadError.value = false;
   try {
