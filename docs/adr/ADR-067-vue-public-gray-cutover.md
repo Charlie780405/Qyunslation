@@ -15,4 +15,8 @@ PLAN-066 已在 sidecar 中提供 Vue 工作台、BFF 会话和 TranslationRun�
 - 需要维护 `/home/dev/qyunsgen` 中的独立 Caddy 配置变更和回滚备份。
 - 需要在受保护环境注入 client ID 与 BFF session key。
 - 旧 Gradio、PDF 服务、归档和下载模块在证据证明不再使用前继续保留。
+
+## 执行结果（2026-09-30）
+
+上述灰度和验收门槛已完成。公网根路径现重定向到 Vue `/next/`，`office.qyunsgen.com` 仅作旧链接兼容重定向；`pdf2zh.service` 已在完整自动化、真实 TranslationRun、Caddy 回滚和 archive watcher 验证后执行 `disable --now`。Python 包、配置、补丁、历史产物和归档 watcher 未删除，仍可按 PLAN-067h 备份恢复。
 - 任何安全或数据完整性回归均可通过移除灰度路由回退，不删除新任务数据。

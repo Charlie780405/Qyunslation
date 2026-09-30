@@ -24,6 +24,8 @@
 
 本切片没有执行 stop、disable、uninstall 或删除。真实 TranslationRun 和归档 watcher 已通过，但人工浏览器视觉证据、根入口切换和回滚演练仍需在 067h 逐步完成；归档 watcher 继续保留。
 
+067h 已完成后续动作：根路径已切到 Vue，旧域名只做兼容重定向，Caddy 不再代理 7860；`pdf2zh.service` 已 `disable --now`，但包、配置、历史产物和回滚备份仍保留。
+
 ## 缺口传递到后续
 
 - 067h 必须提供完整自动化回归、真实 Vue 翻译闭环、Caddy 回滚演练和旧产物下载证据；24 小时指标作为补充而非硬门槛。

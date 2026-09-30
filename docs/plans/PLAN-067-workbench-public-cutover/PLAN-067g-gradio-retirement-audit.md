@@ -1,6 +1,6 @@
 # PLAN-067g：Gradio 退役与冗余模块审计
 
-状态：**进行中 · 只读审计完成，等待完整验收和受控切换证据**
+状态：**已完成 · 退役前审计、切换和可逆停用均已通过**
 
 ## 目标
 
@@ -34,3 +34,4 @@
 - 已在受保护的 `/home/dev/pdf2zh/office.env` 增加绝对 CLI 路径并重启 sidecar；配置备份为 `office.env.plan067e.runner.*.bak`。正在重新执行真实 PDF 闭环，成功前禁止 Gradio 退役。
 - 重新执行已完成：真实 `page1.pdf` 通过公网 OIDC 试点会话完成上传、预检、TranslationRun 成功和 2 个产物下载；CSRF logout/会话撤销也通过。
 - 归档 watcher 修复已完成：`minio>=7.2.15` 已写入 `pyproject.toml/uv.lock`，受保护 `.venv` 实际安装 `7.2.20`；MinIO health=200，watcher 重启后 `active/running`、`NRestarts=0`，日志确认归档和向量索引完成。
+- 067h 已完成正式入口切换和回滚演练；Caddy 不再代理 7860，`pdf2zh.service` 以 `disable --now` 可逆停用，Python 包、配置、补丁、历史产物和归档职责全部保留。
