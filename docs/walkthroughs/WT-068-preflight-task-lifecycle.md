@@ -2,7 +2,7 @@
 
 ## 发布范围
 
-- 提交：`9c90742`（PLAN-068 实现）。
+- 提交：`9c90742`（PLAN-068 实现），`5cc7046`（幂等键编码修复）。
 - 数据库迁移：`068f0001`，已在生产数据库执行到 head。
 - 发布方式：重启 `qyunslation-office.service`；未修改 Caddy 路由，也未触碰 Gradio/pdf2zh 服务。
 
@@ -28,6 +28,11 @@
 - 活动任务只能取消，服务端拒绝直接删除或归档活动任务。
 - 删除会清理授权 artifact；没有其它 generation 引用时才清理预检暂存文件。
 
+### 翻译启动错误修复
+
+- 生产截图中的 `Failed to construct 'Headers': String contains non ISO-8859-1 code point.` 根因是把“简体中文”和中文文档类型直接拼入 `Idempotency-Key` 请求头。
+- 工作台现在对幂等键的每个配置片段执行 `encodeURIComponent`，保持幂等语义，同时确保浏览器 `Headers` 接收的值为 ASCII。
+
 ## 自动化与生产验证
 
 - `npm --prefix frontend run type-check`：PASS。
@@ -38,6 +43,7 @@
 - 本机 `/api/v1/health`：`{"schema":"034h","db":"ok"}`。
 - 公网 `/next/login`：200；`/api/v1/health`：200；未认证 `/api/v1/me`：401。
 - 公网新 bundle 包含“源语言”“目标语言”“上传中”“显示已归档”等功能标记；Logo 静态资源仍为 200。
+- 修复部署后公网新 bundle 包含 `encodeURIComponent`；公网 `/next/login`：200，`/api/v1/health`：200，未认证 `/api/v1/me`：401；本机 sidecar health：`{"schema":"034h","db":"ok"}`。
 
 ## 未执行项
 
