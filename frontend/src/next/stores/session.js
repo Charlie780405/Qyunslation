@@ -24,7 +24,16 @@ export const useSessionStore = defineStore('next-session', () => {
   }
 
   async function beginLogin() {
-    const returnTo = `${window.location.pathname}${window.location.search}`;
+    const current = new URL(window.location.href);
+    const requestedReturnTo = current.searchParams.get('return_to');
+    // The login route is public and therefore does not run the authenticated
+    // guard after the callback. Never send OIDC back to /next/login or the
+    // successful session appears to return to the initial screen forever.
+    const returnTo = requestedReturnTo && requestedReturnTo.startsWith('/next/') && requestedReturnTo !== '/next/login'
+      ? requestedReturnTo
+      : current.pathname === '/next/login'
+        ? '/next/workbench'
+        : `${current.pathname}${current.search}`;
     const response = await fetch(`/auth/login?format=json&return_to=${encodeURIComponent(returnTo)}`, {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },

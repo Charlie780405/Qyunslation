@@ -29,6 +29,14 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert "workbench_v2" in login
 
 
+def test_login_callback_does_not_return_to_public_login_route():
+    session = (FRONTEND / "src/next/stores/session.js").read_text(encoding="utf-8")
+
+    assert "current.pathname === '/next/login'" in session
+    assert "'/next/workbench'" in session
+    assert "requestedReturnTo" in session
+
+
 def test_fastapi_keeps_legacy_root_and_adds_next_surface():
     app = (ROOT / "qyunslation/app.py").read_text(encoding="utf-8")
     assert 'async def main_page()' in app
