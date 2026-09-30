@@ -146,3 +146,92 @@ def test_completed_runner_outputs_are_copied_and_downloaded_by_opaque_artifact_i
     assert downloaded.content == b"translated clinical text"
     assert downloaded.headers["x-content-type-options"] == "nosniff"
     assert client.get(artifact["download_url"], headers={"X-Dev-User": "other", "X-Dev-Tenant": "other"}).status_code == 404
+
+
+def test_translation_run_language_snapshot_and_lifecycle_crud(client):
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=headers(),
+        data={"source_language": "English", "target_language": "简体中文"},
+        files={"file": ("protocol.txt", b"clinical text", "text/plain")},
+    ).json()
+    created = client.post(
+        "/api/v1/translation-runs",
+        headers=headers(),
+        json={
+            "preflight_id": preflight["id"],
+            "source_language": "English",
+            "target_language": "简体中文",
+            "display_name": "PIND response review",
+        },
+    )
+    assert created.status_code == 201
+    run = created.json()
+    assert run["source_language"] == "English"
+    assert run["target_language"] == "简体中文"
+    assert run["display_name"] == "PIND response review"
+    assert run["archived"] is False
+
+    updated = client.patch(
+        f"/api/v1/translation-runs/{run['id']}",
+        headers=headers(),
+        json={"display_name": "FDA response review", "archived": True},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["display_name"] == "FDA response review"
+    assert updated.json()["archived"] is True
+    assert client.get("/api/v1/translation-runs", headers=headers()).json()["items"] == []
+    assert client.get(
+        "/api/v1/translation-runs?include_archived=true", headers=headers()
+    ).json()["items"][0]["archived"] is True
+
+    restored = client.post(
+        f"/api/v1/translation-runs/{run['id']}/restore", headers=headers()
+    )
+    assert restored.status_code == 200
+    assert restored.json()["archived"] is False
+
+    deleted = client.delete(f"/api/v1/translation-runs/{run['id']}", headers=headers())
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/translation-runs/{run['id']}", headers=headers()).status_code == 404
+
+
+def test_translation_run_rejects_same_source_and_target_language(client):
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=headers(),
+        data={"source_language": "English", "target_language": "简体中文"},
+        files={"file": ("protocol.txt", b"different text", "text/plain")},
+    ).json()
+    response = client.post(
+        "/api/v1/translation-runs",
+        headers=headers(),
+        json={
+            "preflight_id": preflight["id"],
+            "source_language": "English",
+            "target_language": "English",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_translation_run_cannot_be_deleted_while_active(client, monkeypatch):
+    from qyunslation.api import v1 as api_v1_module
+
+    async def leave_running(*, run, preflight, target_language):
+        run.status = "translating"
+        run.stage = "text"
+
+    monkeypatch.setattr(api_v1_module, "_launch_translation_run", leave_running)
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=headers(),
+        files={"file": ("active.txt", b"active clinical text", "text/plain")},
+    ).json()
+    created = client.post(
+        "/api/v1/translation-runs",
+        headers=headers(),
+        json={"preflight_id": preflight["id"]},
+    ).json()
+    response = client.delete(f"/api/v1/translation-runs/{created['id']}", headers=headers())
+    assert response.status_code == 409

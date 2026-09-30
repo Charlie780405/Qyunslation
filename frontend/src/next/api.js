@@ -40,19 +40,60 @@ export async function apiRequest(path, options = {}) {
 
 export const api = {
   me: () => apiRequest(`${API_PREFIX}/me`),
-  listRuns: () => apiRequest(`${API_PREFIX}/translation-runs`),
+  listRuns: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`${API_PREFIX}/translation-runs${query ? `?${query}` : ''}`);
+  },
   getRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`),
+  patchRun: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }),
+  restoreRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' }),
+  deleteRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   cancelRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
   retryRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
   listTerms: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);
   },
-  uploadPreflight: (file, fields = {}) => {
+  uploadPreflight: (file, fields = {}, onProgress = null) => {
     const body = new FormData();
     body.append('file', file);
     Object.entries(fields).forEach(([key, value]) => body.append(key, String(value)));
-    return apiRequest(`${API_PREFIX}/preflights`, { method: 'POST', body });
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('POST', `${API_PREFIX}/preflights`);
+      request.withCredentials = true;
+      const token = csrfToken();
+      if (token) request.setRequestHeader('X-CSRF-Token', token);
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable && typeof onProgress === 'function') {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      };
+      request.onload = () => {
+        const contentType = request.getResponseHeader('content-type') || '';
+        let payload = request.responseText;
+        if (contentType.includes('application/json')) {
+          try { payload = JSON.parse(request.responseText); } catch { /* fall through */ }
+        }
+        if (request.status >= 200 && request.status < 300) {
+          resolve(payload);
+          return;
+        }
+        const detail = typeof payload === 'object' && payload
+          ? payload.message || payload.detail || payload.code
+          : payload;
+        const error = new Error(detail || `请求失败（${request.status}）`);
+        error.status = request.status;
+        error.payload = payload;
+        reject(error);
+      };
+      request.onerror = () => reject(new Error('网络连接失败，请重试'));
+      request.onabort = () => reject(new Error('上传已取消'));
+      request.send(body);
+    });
   },
   createTranslationRun: (payload, idempotencyKey) => apiRequest(`${API_PREFIX}/translation-runs`, {
     method: 'POST',

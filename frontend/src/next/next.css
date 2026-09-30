@@ -77,6 +77,8 @@
 .qy-dropzone > svg { width: 32px; height: 32px; color: var(--qy-interactive); }
 .qy-dropzone strong { color: var(--qy-text-primary); font-size: 14px; }
 .qy-dropzone span { font-size: 12px; }
+.qy-language-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 4px; }
+.qy-language-fields .qy-field { margin-bottom: 0; }
 .qy-panel-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
 .qy-inline-hint { color: var(--qy-text-secondary); font-size: 12px; }
 .qy-callout { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 11px 12px; border: 1px solid; border-radius: var(--qy-radius-control); font-size: 13px; }
@@ -91,6 +93,8 @@
 .qy-task-list { display: grid; gap: 8px; }
 .qy-task-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); }
 .qy-task-row > svg { width: 18px; color: var(--qy-text-secondary); }
+.qy-task-toolbar { display: flex; align-items: center; gap: 8px; }
+.qy-task-toolbar .qy-check-field { min-height: 32px; color: var(--qy-text-secondary); font-size: 12px; white-space: nowrap; }
 .qy-task-file-icon { display: grid; place-items: center; width: 36px; height: 36px; color: var(--qy-primary); background: #EAF1F3; border-radius: 5px; }
 .qy-task-file-icon svg { width: 19px; }
 .qy-task-details { flex: 1; min-width: 0; }
@@ -102,6 +106,8 @@
 .qy-task-artifacts a { color: var(--qy-interactive); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
 .qy-task-actions { display: flex; align-items: center; gap: 3px; }
 .qy-task-actions > svg { width: 18px; color: var(--qy-text-secondary); }
+.qy-danger-link { color: var(--qy-danger); }
+.qy-danger-link:hover { color: #8E1C15; background: #FFF1F0; }
 .qy-empty-state, .qy-detail-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 210px; color: var(--qy-text-secondary); text-align: center; }
 .qy-empty-state svg, .qy-detail-placeholder svg { width: 32px; height: 32px; color: #8FA6AF; margin-bottom: 3px; }
 .qy-empty-state strong, .qy-detail-placeholder strong { color: var(--qy-text-primary); }
@@ -219,5 +225,5 @@
 
 @media (max-width: 1100px) { .qy-sidebar { width: 200px; } .qy-main-content { padding: 30px 24px 52px; } .qy-workbench-grid, .qy-term-layout { grid-template-columns: minmax(0, 1fr) 290px; } }
 @media (max-width: 860px) { .qy-sidebar { display: none; } .qy-main-content { padding: 26px 20px 80px; } .qy-mobile-nav { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(3, 1fr); min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: rgba(255,255,255,.97); border-top: 1px solid var(--qy-border); } .qy-mobile-nav-item { display: grid; place-items: center; align-content: center; gap: 2px; color: var(--qy-text-secondary); text-decoration: none; font-size: 11px; } .qy-mobile-nav-item svg { width: 20px; height: 20px; } .qy-mobile-nav-item.router-link-active { color: var(--qy-primary); font-weight: 700; } .qy-workbench-grid, .qy-term-layout { grid-template-columns: 1fr; } .qy-term-detail { order: -1; } .qy-detail-placeholder { min-height: 160px; } .qy-settings-layout { grid-template-columns: 1fr; } .qy-settings-nav { display: flex; overflow-x: auto; } .qy-settings-nav button { flex: 0 0 auto; } .qy-settings-nav button svg:last-child { display: none; } }
-@media (max-width: 640px) { .qy-topbar { height: 58px; padding: 0 16px; } .qy-brand small { display: none; } .qy-main-content { padding: 22px 14px 84px; } .qy-page-head { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; } .qy-page-head-actions, .qy-page-head-actions > * { width: 100%; } .qy-page-head-actions > * { justify-content: center; } .qy-upload-panel, .qy-task-panel, .qy-side-card, .qy-settings-card, .qy-settings-section { padding: 18px; } .qy-term-toolbar { flex-wrap: wrap; } .qy-search-field { flex-basis: 100%; } .qy-term-toolbar > select { flex: 1; } .qy-policy-list > div { grid-template-columns: 1fr; gap: 3px; } .qy-login-page { display: block; background: var(--qy-paper); } .qy-login-panel { width: 100%; min-height: 100vh; padding: 42px 24px; } .qy-login-brand { margin-bottom: 42px; } .qy-login-aside { display: none; } }
+@media (max-width: 640px) { .qy-topbar { height: 58px; padding: 0 16px; } .qy-brand small { display: none; } .qy-main-content { padding: 22px 14px 84px; } .qy-page-head { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; } .qy-page-head-actions, .qy-page-head-actions > * { width: 100%; } .qy-page-head-actions > * { justify-content: center; } .qy-upload-panel, .qy-task-panel, .qy-side-card, .qy-settings-card, .qy-settings-section { padding: 18px; } .qy-language-fields { grid-template-columns: 1fr; gap: 8px; } .qy-task-toolbar { flex-wrap: wrap; justify-content: flex-end; } .qy-task-row { align-items: flex-start; } .qy-task-actions { flex-wrap: wrap; justify-content: flex-end; } .qy-term-toolbar { flex-wrap: wrap; } .qy-search-field { flex-basis: 100%; } .qy-term-toolbar > select { flex: 1; } .qy-policy-list > div { grid-template-columns: 1fr; gap: 3px; } .qy-login-page { display: block; background: var(--qy-paper); } .qy-login-panel { width: 100%; min-height: 100vh; padding: 42px 24px; } .qy-login-brand { margin-bottom: 42px; } .qy-login-aside { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }

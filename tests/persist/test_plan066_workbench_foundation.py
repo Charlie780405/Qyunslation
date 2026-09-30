@@ -57,6 +57,33 @@ def test_preflight_rejects_unsupported_format(client):
     assert response.status_code == 415
 
 
+def test_preflight_reuses_same_tenant_upload_by_sha256(client):
+    first = client.post(
+        "/api/v1/preflights",
+        headers=headers(),
+        files={"file": ("protocol.txt", b"clinical text", "text/plain")},
+    )
+    assert first.status_code == 201
+    assert first.json()["reused"] is False
+
+    second = client.post(
+        "/api/v1/preflights",
+        headers=headers(),
+        files={"file": ("renamed-protocol.txt", b"clinical text", "text/plain")},
+    )
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["reused"] is True
+
+    other_tenant = client.post(
+        "/api/v1/preflights",
+        headers={"X-Dev-User": "other", "X-Dev-Tenant": "other-tenant"},
+        files={"file": ("protocol.txt", b"clinical text", "text/plain")},
+    )
+    assert other_tenant.status_code == 201
+    assert other_tenant.json()["id"] != first.json()["id"]
+
+
 def test_preferences_are_allowlisted_and_persisted(client):
     response = client.put(
         "/api/v1/preferences",

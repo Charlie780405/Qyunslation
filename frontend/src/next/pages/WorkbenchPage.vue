@@ -20,6 +20,11 @@
             <div><span class="qy-step-index">01</span><div><h2>上传文档</h2><p>先做结构预检，再决定是否开始翻译。</p></div></div>
             <span class="qy-panel-status">尚未开始</span>
           </div>
+          <div class="qy-language-fields" aria-label="翻译语言">
+            <label class="qy-field"><span>源语言</span><select v-model="settings.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
+            <label class="qy-field"><span>目标语言</span><select v-model="settings.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
+          </div>
+          <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
           <label class="qy-dropzone" :class="{ 'is-selected': selectedFile }" for="workbench-file">
             <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" accept=".pdf,.docx,.pptx,.txt,.md" @change="selectFile" />
             <DocumentArrowUpIcon aria-hidden="true" />
@@ -42,7 +47,7 @@
             <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight">
               <ArrowPathIcon v-if="uploading" class="qy-spin" aria-hidden="true" />
               <MagnifyingGlassIcon v-else aria-hidden="true" />
-              {{ uploading ? '正在预检…' : '开始预检' }}
+              {{ uploading ? (uploadProgress < 100 ? `上传中 ${uploadProgress}%` : '正在检查文件…') : '开始预检' }}
             </button>
             <span class="qy-inline-hint">不会自动开始翻译</span>
           </div>
@@ -51,14 +56,17 @@
         <div class="qy-panel qy-task-panel">
           <div class="qy-panel-heading">
             <div><span class="qy-step-index qy-step-muted">02</span><div><h2>最近任务</h2><p>离开页面后，任务仍会在服务端继续运行。</p></div></div>
-            <button class="qy-link-button" type="button" @click="refreshRuns">刷新</button>
+            <div class="qy-task-toolbar">
+              <label class="qy-check-field"><input v-model="showArchived" type="checkbox" /><span>显示已归档</span></label>
+              <button class="qy-link-button" type="button" @click="refreshRuns">刷新</button>
+            </div>
           </div>
           <div v-if="runs.length" class="qy-task-list">
             <article v-for="run in runs" :key="run.id" class="qy-task-row">
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
               <div class="qy-task-details">
-                <strong>{{ run.filename || run.file_name || '未命名文档' }}</strong>
-                <span>{{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template></span>
+                <strong>{{ run.display_name || run.filename || run.file_name || '未命名文档' }}</strong>
+                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template></span>
                 <div v-if="run.progress !== null && run.progress !== undefined" class="qy-task-progress" aria-hidden="true"><span :style="{ width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
                 <div v-if="run.artifacts?.length" class="qy-task-artifacts">
                   <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
@@ -67,6 +75,10 @@
               <div class="qy-task-actions">
                 <button v-if="isActive(run)" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
                 <button v-else-if="canRetry(run)" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
+                <button v-if="run.archived" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
+                <button v-else-if="isTerminal(run)" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
+                <button v-if="isTerminal(run)" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
+                <button class="qy-link-button" type="button" @click="renameRun(run)">重命名</button>
                 <ChevronRightIcon aria-hidden="true" />
               </div>
             </article>
@@ -93,7 +105,6 @@
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
           <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
-          <label class="qy-field"><span>语言方向</span><select v-model="settings.direction"><option>English → 简体中文</option><option>简体中文 → English</option></select></label>
           <label class="qy-field"><span>文档类型</span><select v-model="settings.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
           <label class="qy-check-field"><input v-model="settings.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
         </div>
@@ -103,7 +114,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
 import {
@@ -124,15 +135,20 @@ const fileInput = ref(null);
 const uploadMessage = ref('');
 const uploadError = ref(false);
 const uploading = ref(false);
+const uploadProgress = ref(0);
 const showAdvanced = ref(false);
 const runs = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
-const settings = reactive({ direction: 'English → 简体中文', profile: '临床研究文档', bilingual: true });
+const showArchived = ref(false);
+const settings = reactive({ sourceLanguage: 'English', targetLanguage: '简体中文', profile: '临床研究文档', bilingual: true });
 let pollTimer;
 let pollRequest = 0;
 
 const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
+const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
+const languages = ['English', '简体中文'];
+const languageError = computed(() => settings.sourceLanguage === settings.targetLanguage ? '源语言和目标语言不能相同。' : '');
 
 function statusLabel(status) {
   return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成' })[status] || '待处理';
@@ -146,12 +162,18 @@ function isActive(run) {
   return activeStatuses.has(run.status);
 }
 
+function isTerminal(run) {
+  return terminalStatuses.has(run.status);
+}
+
 function canRetry(run) {
   return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
 }
 
 function selectFile(event) {
   selectedFile.value = event.target.files?.[0] || null;
+  preflight.value = null;
+  uploadProgress.value = 0;
   uploadMessage.value = selectedFile.value ? '文件已选择，点击“开始预检”查看结构和风险。' : '';
   uploadError.value = false;
 }
@@ -165,19 +187,34 @@ function formatSize(bytes) {
 
 async function startPreflight() {
   if (!selectedFile.value) return;
+  if (languageError.value) {
+    uploadError.value = true;
+    uploadMessage.value = languageError.value;
+    return;
+  }
   uploading.value = true;
+  uploadProgress.value = 0;
   uploadError.value = false;
   uploadMessage.value = '';
   try {
-    preflight.value = await api.uploadPreflight(selectedFile.value, { direction: settings.direction, profile: settings.profile });
+    preflight.value = await api.uploadPreflight(
+      selectedFile.value,
+      {
+        source_language: settings.sourceLanguage,
+        target_language: settings.targetLanguage,
+        profile: settings.profile,
+      },
+      (progress) => { uploadProgress.value = progress; },
+    );
     uploadMessage.value = preflight.value.state === 'ready'
-      ? '预检已完成。请确认参数后再开始翻译。'
+      ? (preflight.value.reused ? '已复用相同文件的预检结果，请确认参数后开始翻译。' : '预检已完成。请确认参数后再开始翻译。')
       : '预检发现风险，请先处理阻断项。';
   } catch (error) {
     uploadError.value = true;
     uploadMessage.value = error.status === 404 ? '预检服务正在接入，当前仅完成工作台界面预览。' : error.message;
   } finally {
     uploading.value = false;
+    uploadProgress.value = 100;
   }
 }
 
@@ -186,10 +223,11 @@ async function startTranslation() {
   startingRun.value = true;
   uploadError.value = false;
   try {
-    const key = `preflight:${preflight.value.id}:${settings.direction}:${settings.profile}:${settings.bilingual}`;
+    const key = `preflight:${preflight.value.id}:${settings.sourceLanguage}:${settings.targetLanguage}:${settings.profile}:${settings.bilingual}`;
     await api.createTranslationRun({
       preflight_id: preflight.value.id,
-      direction: settings.direction,
+      source_language: settings.sourceLanguage,
+      target_language: settings.targetLanguage,
       profile: settings.profile,
       bilingual: settings.bilingual,
     }, key);
@@ -206,7 +244,7 @@ async function startTranslation() {
 async function refreshRuns() {
   const requestId = ++pollRequest;
   try {
-    const response = await api.listRuns();
+    const response = await api.listRuns({ include_archived: showArchived.value ? 'true' : 'false' });
     if (requestId !== pollRequest) return;
     runs.value = Array.isArray(response) ? response : response.items || [];
   } catch {
@@ -239,6 +277,50 @@ async function retryRun(run) {
   }
 }
 
+async function archiveRun(run) {
+  try {
+    await api.patchRun(run.id, { archived: true });
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '归档任务失败';
+  }
+}
+
+async function restoreRun(run) {
+  try {
+    await api.restoreRun(run.id);
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '恢复任务失败';
+  }
+}
+
+async function renameRun(run) {
+  const nextName = window.prompt('输入任务名称', run.display_name || run.filename || '');
+  if (nextName === null || nextName.trim() === (run.display_name || '')) return;
+  try {
+    await api.patchRun(run.id, { display_name: nextName.trim() });
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '重命名任务失败';
+  }
+}
+
+async function deleteRun(run) {
+  if (!window.confirm(`确定删除任务“${run.display_name || run.filename || '未命名文档'}”吗？此操作不可恢复。`)) return;
+  try {
+    await api.deleteRun(run.id);
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '删除任务失败';
+  }
+}
+
 onMounted(refreshRuns);
+watch(showArchived, refreshRuns);
 onUnmounted(() => window.clearTimeout(pollTimer));
 </script>

@@ -51,10 +51,21 @@ PREF_DEFAULTS = {
 }
 PREFLIGHT_ALLOWED_EXTENSIONS = frozenset({".pdf", ".docx", ".pptx", ".txt", ".md", ".png", ".jpg", ".jpeg"})
 PREFLIGHT_TTL_HOURS = 24
+SUPPORTED_LANGUAGES = frozenset({"English", "简体中文"})
+SUPPORTED_DIRECTIONS = {
+    "English → 简体中文": ("English", "简体中文"),
+    "简体中文 → English": ("简体中文", "English"),
+}
 
 
-async def _read_upload_limited(upload: UploadFile) -> bytes:
-    """Read uploads in chunks without importing the heavyweight translation server."""
+async def _stream_upload_limited(upload: UploadFile, target: Path) -> tuple[str, int]:
+    """Stream an upload to a private temporary path while hashing it once.
+
+    The previous implementation built a second in-memory copy of every upload
+    before writing it to disk.  Large PDFs therefore paid both a memory and a
+    disk pass.  This helper keeps the bounded read contract while making the
+    temporary file the only full-size copy.
+    """
     raw_limit = (os.environ.get("QYUNSLATION_MAX_UPLOAD_BYTES") or "").strip()
     try:
         limit = int(raw_limit) if raw_limit else DEFAULT_MAX_UPLOAD_BYTES
@@ -62,16 +73,29 @@ async def _read_upload_limited(upload: UploadFile) -> bytes:
         raise HTTPException(status_code=500, detail="invalid upload limit configuration") from exc
     if limit <= 0:
         raise HTTPException(status_code=500, detail="invalid upload limit configuration")
-    chunks: list[bytes] = []
     total = 0
-    while True:
-        chunk = await upload.read(min(1024 * 1024, limit - total + 1))
-        if not chunk:
-            return b"".join(chunks)
-        total += len(chunk)
-        if total > limit:
-            raise HTTPException(status_code=413, detail="uploaded file exceeds configured limit")
-        chunks.append(chunk)
+    digest = hashlib.sha256()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target.open("wb") as handle:
+            while True:
+                chunk = await upload.read(min(1024 * 1024, limit - total + 1))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(status_code=413, detail="uploaded file exceeds configured limit")
+                digest.update(chunk)
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return digest.hexdigest(), total
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -239,6 +263,32 @@ def _preflight_path(record: PreflightRecord) -> Path:
     return path
 
 
+def _normalize_language_pair(
+    source_language: str | None,
+    target_language: str | None,
+    direction: str | None,
+) -> tuple[str, str, str]:
+    """Return one canonical language pair while retaining direction compatibility."""
+    source = (source_language or "").strip()
+    target = (target_language or "").strip()
+    if source or target:
+        if not source or not target:
+            raise HTTPException(status_code=422, detail="source_language and target_language are required together")
+        if source not in SUPPORTED_LANGUAGES or target not in SUPPORTED_LANGUAGES:
+            raise HTTPException(status_code=422, detail="unsupported language")
+        if source == target:
+            raise HTTPException(status_code=422, detail="source and target language must differ")
+        canonical = next(
+            name for name, pair in SUPPORTED_DIRECTIONS.items() if pair == (source, target)
+        )
+        return source, target, canonical
+    canonical = (direction or "English → 简体中文").strip()
+    pair = SUPPORTED_DIRECTIONS.get(canonical)
+    if pair is None:
+        raise HTTPException(status_code=422, detail="unsupported language direction")
+    return pair[0], pair[1], canonical
+
+
 def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
     expires_at = record.expires_at
     if expires_at.tzinfo is None:
@@ -246,6 +296,7 @@ def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     expired = expires_at <= datetime.now(timezone.utc)
     metadata = dict(record.metadata_json or {})
+    recommended = dict(metadata.get("recommended", {}))
     return {
         "id": record.id,
         "state": "expired" if expired else record.status,
@@ -256,7 +307,10 @@ def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
         "manifest_summary": metadata.get("manifest_summary", {}),
         "capabilities": metadata.get("capabilities", {}),
         "issues": metadata.get("issues", []),
-        "recommended": metadata.get("recommended", {}),
+        "recommended": recommended,
+        "source_language": recommended.get("source_language"),
+        "target_language": recommended.get("target_language"),
+        "reused": False,
         "expires_at": expires_at.isoformat(),
         "created_at": record.created_at.isoformat(),
     }
@@ -267,6 +321,8 @@ async def create_preflight(
     file: UploadFile = File(...),
     direction: str = Form("English → 简体中文"),
     profile: str = Form("临床研究文档"),
+    source_language: str | None = Form(default=None),
+    target_language: str | None = Form(default=None),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -279,30 +335,61 @@ async def create_preflight(
         raise HTTPException(status_code=415, detail="unsupported document format")
     if len(filename) > 256:
         raise HTTPException(status_code=400, detail="filename is too long")
-    if not direction.strip() or len(direction) > 64:
-        raise HTTPException(status_code=400, detail="invalid language direction")
+    source_language, target_language, direction = _normalize_language_pair(
+        source_language, target_language, direction
+    )
     if not profile.strip() or len(profile) > 128:
         raise HTTPException(status_code=400, detail="invalid document profile")
-
-    try:
-        content = await _read_upload_limited(file)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="upload could not be read") from exc
-    if not content:
-        raise HTTPException(status_code=400, detail="uploaded file is empty")
 
     tenant = _tenant_bundle(session, identity)
     record_id = str(uuid.uuid4())
     relative_key = f"{tenant.id}/{record_id}{suffix}"
-    target = (_preflight_root() / relative_key).resolve()
     root = _preflight_root().resolve()
-    if root not in target.parents:
+    target = (root / relative_key).resolve()
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.upload")
+    if root not in target.parents or root not in temporary.parents:
         raise HTTPException(status_code=500, detail="invalid upload destination")
+    try:
+        digest, size_bytes = await _stream_upload_limited(file, temporary)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="upload could not be read") from exc
+    if size_bytes <= 0:
+        temporary.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+
+    now = datetime.now(timezone.utc)
+    existing_rows = list(
+        session.scalars(
+            select(PreflightRecord).where(
+                PreflightRecord.tenant_id == tenant.id,
+                PreflightRecord.actor_sub == identity.user_sub,
+                PreflightRecord.source_sha256 == digest,
+                PreflightRecord.status == "ready",
+            )
+        )
+    )
+    for existing in existing_rows:
+        expires_at = existing.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        existing_path = _preflight_path(existing)
+        try:
+            existing_size = existing_path.stat().st_size if existing_path.is_file() else None
+        except OSError:
+            existing_size = None
+        if expires_at > now and existing_size == size_bytes:
+            temporary.unlink(missing_ok=True)
+            reused = _preflight_dict(existing)
+            reused["storage_key"] = existing.storage_key
+            reused["reused"] = True
+            reused["source_language"] = source_language
+            reused["target_language"] = target_language
+            return reused
+
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
-    digest = hashlib.sha256(content).hexdigest()
+    os.replace(temporary, target)
     mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     issues: list[dict[str, str]] = []
     if suffix in {".png", ".jpg", ".jpeg"}:
@@ -314,14 +401,19 @@ async def create_preflight(
         source_filename=filename,
         source_format=suffix.removeprefix(".").lower(),
         source_sha256=digest,
-        size_bytes=len(content),
+        size_bytes=size_bytes,
         status="ready",
         metadata_json={
             "mime": mime,
             "manifest_summary": {"pages": None, "objects": None, "scan_detected": suffix in {".png", ".jpg", ".jpeg"}},
             "capabilities": {"source_read_only": True, "bilingual_output": True, "formal_export": False},
             "issues": issues,
-            "recommended": {"direction": direction.strip(), "profile": profile.strip()},
+            "recommended": {
+                "direction": direction,
+                "profile": profile.strip(),
+                "source_language": source_language,
+                "target_language": target_language,
+            },
         },
         storage_key=relative_key,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=PREFLIGHT_TTL_HOURS),
@@ -367,9 +459,17 @@ def delete_preflight(
 
 class TranslationRunCreateBody(BaseModel):
     preflight_id: str = Field(min_length=1, max_length=36)
-    direction: str = Field(default="English → 简体中文", min_length=1, max_length=64)
+    direction: str | None = Field(default="English → 简体中文", max_length=64)
+    source_language: str | None = Field(default=None, max_length=32)
+    target_language: str | None = Field(default=None, max_length=32)
     profile: str = Field(default="临床研究文档", min_length=1, max_length=128)
     bilingual: bool = True
+    display_name: str | None = Field(default=None, max_length=256)
+
+
+class TranslationRunPatchBody(BaseModel):
+    display_name: str | None = Field(default=None, max_length=256)
+    archived: bool | None = None
 
 
 _RUN_TERMINAL = frozenset({"succeeded", "failed", "cancelled", "blocked", "degraded"})
@@ -576,6 +676,10 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
     """Project the durable ledger plus current legacy-service state."""
     _refresh_translation_run(session, run)
     preflight = session.get(PreflightRecord, run.preflight_id)
+    settings = dict(run.settings_snapshot or {})
+    source_language, target_language, _ = _normalize_language_pair(
+        settings.get("source_language"), settings.get("target_language"), run.direction
+    )
     artifacts = list(
         session.scalars(
             select(TranslationArtifact)
@@ -594,8 +698,13 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "filename": preflight.source_filename if preflight else None,
         "format": preflight.source_format if preflight else None,
         "direction": run.direction,
+        "source_language": source_language,
+        "target_language": target_language,
         "profile": run.profile,
-        "settings": run.settings_snapshot or {},
+        "settings": settings,
+        "display_name": run.display_name,
+        "archived": run.archived_at is not None,
+        "archived_at": run.archived_at.isoformat() if run.archived_at else None,
         "status": run.status,
         "stage": run.stage,
         "progress": run.progress,
@@ -721,7 +830,9 @@ async def create_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    target_language = _run_target_language(body.direction)
+    source_language, target_language, direction = _normalize_language_pair(
+        body.source_language, body.target_language, body.direction
+    )
     tenant = _tenant_bundle(session, identity)
     preflight = session.get(PreflightRecord, body.preflight_id)
     if preflight is None or preflight.tenant_id != tenant.id:
@@ -748,10 +859,13 @@ async def create_translation_run(
         tenant_id=tenant.id,
         actor_sub=identity.user_sub,
         idempotency_key_hash=key_hash,
-        direction=body.direction,
+        direction=direction,
         profile=body.profile,
+        display_name=(body.display_name or "").strip() or None,
         settings_snapshot={
-            "direction": body.direction,
+            "direction": direction,
+            "source_language": source_language,
+            "target_language": target_language,
             "profile": body.profile,
             "bilingual": body.bilingual,
         },
@@ -771,6 +885,8 @@ async def create_translation_run(
 @router.get("/translation-runs")
 def list_translation_runs(
     status: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    page_size: int = Query(default=100, ge=1, le=100),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -778,9 +894,11 @@ def list_translation_runs(
     stmt = select(TranslationRunRecord).where(TranslationRunRecord.tenant_id == tenant.id)
     if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         stmt = stmt.where(TranslationRunRecord.actor_sub == identity.user_sub)
+    if not include_archived:
+        stmt = stmt.where(TranslationRunRecord.archived_at.is_(None))
     if status:
         stmt = stmt.where(TranslationRunRecord.status == status)
-    stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(100)
+    stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(page_size)
     rows = list(session.scalars(stmt))
     return {"items": [_translation_run_dict(session, row) for row in rows]}
 
@@ -792,6 +910,106 @@ def get_translation_run(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return _translation_run_dict(session, _run_owned(session, run_id=run_id, identity=identity))
+
+
+@router.patch("/translation-runs/{run_id}")
+def patch_translation_run(
+    run_id: str,
+    body: TranslationRunPatchBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    changes: dict[str, Any] = {}
+    if body.display_name is not None:
+        clean_name = body.display_name.strip()
+        run.display_name = clean_name or None
+        changes["display_name"] = bool(clean_name)
+    if body.archived is not None:
+        if body.archived and run.status not in _RUN_TERMINAL:
+            raise HTTPException(status_code=409, detail="only terminal translation runs can be archived")
+        if body.archived:
+            run.archived_at = datetime.now(timezone.utc)
+            run.archived_by = identity.user_sub
+        else:
+            run.archived_at = None
+            run.archived_by = None
+        changes["archived"] = body.archived
+    if changes:
+        record_audit(
+            session,
+            actor_sub=identity.user_sub,
+            action="translation_run.update",
+            extra={"run_id": run.id, "changes": changes},
+        )
+    return _translation_run_dict(session, run)
+
+
+@router.post("/translation-runs/{run_id}/restore")
+def restore_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    run.archived_at = None
+    run.archived_by = None
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.restore",
+        extra={"run_id": run.id},
+    )
+    return _translation_run_dict(session, run)
+
+
+@router.delete("/translation-runs/{run_id}", status_code=204)
+def delete_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> Response:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if run.status not in _RUN_TERMINAL:
+        raise HTTPException(status_code=409, detail="only terminal translation runs can be deleted")
+
+    artifacts = list(
+        session.scalars(
+            select(TranslationArtifact).where(
+                TranslationArtifact.run_id == run.id,
+                TranslationArtifact.tenant_id == run.tenant_id,
+            )
+        )
+    )
+    for artifact in artifacts:
+        path = _artifact_path(artifact)
+        if path.is_file():
+            path.unlink()
+        session.delete(artifact)
+
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    sibling = session.scalar(
+        select(TranslationRunRecord.id)
+        .where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.id != run.id,
+        )
+        .limit(1)
+    )
+    if preflight is not None and sibling is None:
+        path = _preflight_path(preflight)
+        if path.is_file():
+            path.unlink()
+        session.delete(preflight)
+    session.delete(run)
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.delete",
+        extra={"run_id": run_id},
+    )
+    return Response(status_code=204)
 
 
 @router.get("/translation-runs/{run_id}/artifacts")
@@ -908,6 +1126,7 @@ async def retry_translation_run(
         generation=next_generation,
         direction=run.direction,
         profile=run.profile,
+        display_name=run.display_name,
         settings_snapshot=dict(run.settings_snapshot or {}),
         status="queued",
         stage="validation",

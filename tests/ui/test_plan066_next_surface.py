@@ -17,6 +17,8 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     router = (FRONTEND / "src/next/router.js").read_text(encoding="utf-8")
     session = (FRONTEND / "src/next/stores/session.js").read_text(encoding="utf-8")
     login = (FRONTEND / "src/next/pages/LoginPage.vue").read_text(encoding="utf-8")
+    workbench = (FRONTEND / "src/next/pages/WorkbenchPage.vue").read_text(encoding="utf-8")
+    api = (FRONTEND / "src/next/api.js").read_text(encoding="utf-8")
     settings = (FRONTEND / "src/components/settings/SettingsPanel.vue").read_text(encoding="utf-8")
     styles = (FRONTEND / "src/next/next.css").read_text(encoding="utf-8")
 
@@ -31,6 +33,11 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert '/app-assets/qyunslation-mark.png' in shell
     assert '/app-assets/qyunslation-mark.png' in login
     assert '/static/qyunslation-logo.png' in settings
+    assert 'settings.sourceLanguage' in workbench
+    assert 'settings.targetLanguage' in workbench
+    assert 'showArchived' in workbench
+    assert 'patchRun' in api
+    assert 'deleteRun' in api
     assert (ROOT / 'qyunslation/static/qyunslation-logo.png').exists()
     assert (ROOT / 'qyunslation/static/qyunslation-mark.png').exists()
 
