@@ -21,7 +21,8 @@ def test_empty_table_cell_does_not_override_textbox():
     assert "return None if not value or value in _QY060_PLACEHOLDERS else value" in text
     assert 'chosen_target = (table_target or "").strip() or (target or "").strip()' in text
     assert "该术语属高风险类别，需管理员复核后才能入库。" in text
-    assert "已批准入库。下一篇登录翻译将自动使用该确认译法。" in text
+    assert "已批准入库。" in text
+    assert "下一篇登录翻译将自动使用该确认译法。" in text
 
 
 def test_timer_outputs_exclude_confirmation_box():

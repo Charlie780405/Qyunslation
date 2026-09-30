@@ -118,19 +118,37 @@ CSS_BLOCK = """
     .qy-col-mid > .pdf-preview-fixed:not(.hidden):has(canvas),
     .qy-col-mid > .pdf-preview-fixed:not(.hidden):has(iframe),
     .qy-col-mid > .pdf-preview-fixed:not(.hidden):has(embed),
+    .qy-col-mid > .pdf-preview-fixed:not(.hidden):has(object),
     .qy-col-mid > .qy-html-preview-wrap:not(.hidden),
     .qy-col-right > .pdf-preview-fixed:not(.hidden):has(canvas),
     .qy-col-right > .pdf-preview-fixed:not(.hidden):has(iframe),
     .qy-col-right > .pdf-preview-fixed:not(.hidden):has(embed),
+    .qy-col-right > .pdf-preview-fixed:not(.hidden):has(object),
     .qy-col-right > .qy-html-preview-wrap:not(.hidden) {
         flex: 1 1 auto !important;
-        min-height: 0 !important;
+        min-height: min(70vh, 720px) !important;
         height: auto !important;
         max-height: none !important;
         border: 1px solid #e2e8f0 !important;
         border-radius: 10px !important;
         overflow: auto !important;
         order: unset !important;
+    }
+    .qy-preview-src iframe,
+    .qy-preview-src embed,
+    .qy-preview-src object,
+    .qy-preview-src canvas,
+    .qy-preview-dst iframe,
+    .qy-preview-dst embed,
+    .qy-preview-dst object,
+    .qy-preview-dst canvas,
+    .qy-col-mid .qy-viewer-host,
+    .qy-col-right .qy-viewer-host,
+    .qy-col-mid .qy-viewer-inner,
+    .qy-col-right .qy-viewer-inner {
+        width: 100% !important;
+        min-height: min(70vh, 720px) !important;
+        height: 100% !important;
     }
     .qy-col-mid::after,
     .qy-col-right::after {
@@ -511,6 +529,7 @@ def verify(text: str) -> int:
     polish_i = text.find(CSS_MARKER)
     need(dual_i >= 0 and polish_i > dual_i, "polish css must follow dual css")
     need("show_progress_on=[qy_progress_slot]" in text, "progress bind missing")
+    need("min-height: min(70vh, 720px)" in text, "preview pane min-height missing")
     need("_qy_page_sync_blocks" in text or "_qy_page_sync" in text, "page sync js missing")
     try:
         compile(text, str(GUI), "exec")

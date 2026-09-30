@@ -25,7 +25,8 @@ def test_reuse_copy_says_approve_then_next_file():
     text = PATCH060.read_text(encoding="utf-8")
     assert "列表是候选" in text
     assert "下一篇登录翻译将自动使用确认译法" in text
-    assert "已批准入库。下一篇登录翻译将自动使用该确认译法。" in text
+    assert "已批准入库。" in text
+    assert "下一篇登录翻译将自动使用该确认译法。" in text
 
 
 def test_js_drawer_hidden_and_escape_clicks_close():

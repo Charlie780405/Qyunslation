@@ -28,6 +28,7 @@ def test_plan060_patch_declares_server_side_term_panel_and_callbacks():
     assert "complete_workbench_translation" in text
     assert "QYUNSLATION_TERM_BRIDGE_SECRET" not in text
     assert "overflow-y: auto" in text
+    assert "max-height: min(32vh, 280px)" in text
     assert "保存术语决定" in text
     assert "_qy_060_term_bridge_early_complete" in text
     assert "_qy_060_term_review_timer" in text

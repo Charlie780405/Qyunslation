@@ -58,7 +58,7 @@ MID_RIGHT_NEW = '''                        # _qy_dual_preview
                             preview_src = PDF(
                                 label=None,
                                 show_label=False,
-                                visible=True,
+                                visible=False,
                                 elem_classes=["pdf-preview-fixed", "qy-preview-src"],
                             )
                             preview_src_html = gr.HTML(
@@ -72,7 +72,7 @@ MID_RIGHT_NEW = '''                        # _qy_dual_preview
                             preview = PDF(
                                 label=None,
                                 show_label=False,
-                                visible=True,
+                                visible=False,
                                 elem_classes=["pdf-preview-fixed", "qy-preview-dst"],
                             )
                             # _qy_office_preview
@@ -287,6 +287,40 @@ def apply_skeleton(text: str) -> tuple[str, bool]:
     if MARKER not in text or "preview_src = PDF" not in text:
         text2, ok = _replace_once(text, RIGHT_OLD, MID_RIGHT_NEW, "mid/right columns")
         text, changed = text2, changed or ok
+    # 空 PDF() 必须隐藏，否则白壳盖住「上传后预览」占位且 iframe 高度塌成 0。
+    for old_vis, new_vis in (
+        (
+            '                            preview_src = PDF(\n'
+            '                                label=None,\n'
+            '                                show_label=False,\n'
+            '                                visible=True,\n'
+            '                                elem_classes=["pdf-preview-fixed", "qy-preview-src"],\n'
+            '                            )',
+            '                            preview_src = PDF(\n'
+            '                                label=None,\n'
+            '                                show_label=False,\n'
+            '                                visible=False,\n'
+            '                                elem_classes=["pdf-preview-fixed", "qy-preview-src"],\n'
+            '                            )',
+        ),
+        (
+            '                            preview = PDF(\n'
+            '                                label=None,\n'
+            '                                show_label=False,\n'
+            '                                visible=True,\n'
+            '                                elem_classes=["pdf-preview-fixed", "qy-preview-dst"],\n'
+            '                            )',
+            '                            preview = PDF(\n'
+            '                                label=None,\n'
+            '                                show_label=False,\n'
+            '                                visible=False,\n'
+            '                                elem_classes=["pdf-preview-fixed", "qy-preview-dst"],\n'
+            '                            )',
+        ),
+    ):
+        if old_vis in text:
+            text = text.replace(old_vis, new_vis, 1)
+            changed = True
 
     # Remove ## File(s) title
     file_title = '                            gr.Markdown(_("## File(s)"), elem_classes=["tab-title"])\n'
@@ -786,6 +820,11 @@ def verify(text: str) -> int:
     need('scale=4, elem_classes=["qy-col-mid"]' in text, "mid scale missing")
     need('scale=4, elem_classes=["qy-col-right"]' in text, "right scale!=4")
     need(text.count("preview_src = PDF") == 1, f"preview_src defs={text.count('preview_src = PDF')}")
+    need(
+        'preview_src = PDF(\n                                label=None,\n                                show_label=False,\n                                visible=False,'
+        in text,
+        "empty source PDF must stay hidden",
+    )
     need(text.count("qy_progress_slot = gr.HTML") == 1, "qy_progress_slot missing")
     need("show_progress_on=[qy_progress_slot]" in text, "progress bind wrong")
     need(PAYLOAD_MARKER in text, "dual payload missing")

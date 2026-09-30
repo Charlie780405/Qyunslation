@@ -45,27 +45,57 @@ CSS_BLOCK = r'''
       top: calc(var(--qy-appbar-h, 48px) + 8px) !important;
       left: 16px !important;
       right: 16px !important;
-      z-index: 90 !important;
+      z-index: 200 !important;
       max-height: calc(100vh - var(--qy-appbar-h, 48px) - 24px) !important;
       overflow-x: hidden !important;
       overflow-y: auto !important;
       overscroll-behavior: contain !important;
+      -webkit-overflow-scrolling: touch !important;
+      padding-bottom: 24px !important;
       box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18) !important;
     }
-    .qy-050-inspector .wrap,
-    .qy-050-inspector .contain,
-    .qy-050-inspector .form,
-    .qy-050-help .wrap,
-    .qy-050-help .contain,
-    .qy-050-help .form {
-      height: auto !important;
+    .qy-050-inspector.hidden,
+    .qy-050-help.hidden {
+      display: none !important;
+      pointer-events: none !important;
+    }
+    .qy-050-inspector:not(#qy050-inspector) > .wrap,
+    .qy-050-inspector:not(#qy050-inspector) > .contain,
+    .qy-050-help > .wrap,
+    .qy-050-help > .contain {
+      height: max-content !important;
       max-height: none !important;
+      min-height: 0 !important;
       overflow: visible !important;
     }
+    #qy060-term-table,
+    #qy060-term-table .table-wrap,
+    #qy060-term-table .dataframe-wrap,
     .qy-050-inspector .table-wrap,
     .qy-050-inspector .dataframe-wrap {
       max-width: 100% !important;
-      overflow-x: auto !important;
+      max-height: min(32vh, 280px) !important;
+      overflow: auto !important;
+    }
+    #qy060-picked {
+      max-height: min(18vh, 160px) !important;
+      overflow-y: auto !important;
+    }
+    #qy060-batch-row {
+      position: sticky !important;
+      bottom: 0 !important;
+      z-index: 3 !important;
+      background: #ffffff !important;
+      padding: 8px 0 !important;
+    }
+    #qy060-decision-status {
+      min-height: 2.5em;
+      padding: 8px 12px !important;
+      margin: 8px 0 12px !important;
+      border-radius: 8px !important;
+      background: #eef4ff !important;
+      color: #1e3a5f !important;
+      font-weight: 600 !important;
     }
     @media (max-width: 767px) {
       .qy-060-term-badge { width: calc(100% - 32px) !important; }
@@ -172,6 +202,10 @@ UI_BLOCK = f'''        {UI_MARKER}
                 value="待确认",
                 label="筛选",
             )
+            qy060_decision_status = gr.Markdown(
+                "勾选后点「一键入库」。普通术语会从「待确认」消失并进入「已批准」；高风险（药名/靶点/方案号）需逐条批准。",
+                elem_id="qy060-decision-status",
+            )
             qy060_term_table = gr.Dataframe(
                 headers=["源词", "实际译法", "推荐译法", "确认译法", "风险", "类型", "次数", "状态"],
                 datatype=["str", "str", "str", "str", "str", "str", "number", "str"],
@@ -180,10 +214,17 @@ UI_BLOCK = f'''        {UI_MARKER}
                 interactive=True,
                 static_columns=[0, 1, 2, 4, 5, 6, 7],
                 col_count=(8, "fixed"),
+                max_height="28vh",
                 label="术语候选",
+                elem_id="qy060-term-table",
             )
-            qy060_picked = gr.CheckboxGroup(choices=[], label="勾选后可一键入库或拒绝", value=[])
-            with gr.Row():
+            qy060_picked = gr.CheckboxGroup(
+                choices=[],
+                label="勾选后可一键入库或拒绝",
+                value=[],
+                elem_id="qy060-picked",
+            )
+            with gr.Row(elem_id="qy060-batch-row"):
                 qy060_batch_approve = gr.Button("一键入库", variant="primary", size="sm")
                 qy060_batch_reject = gr.Button("一键拒绝", size="sm")
                 qy060_close = gr.Button("关闭", size="sm")
@@ -205,7 +246,6 @@ UI_BLOCK = f'''        {UI_MARKER}
                     qy060_approve = gr.Button("批准入库", variant="primary")
                     qy060_reject = gr.Button("拒绝入库")
                     qy060_decide = gr.Button("保存术语决定", size="sm")
-            qy060_decision_status = gr.Markdown("")
 '''
 
 EVENT_BLOCK = f'''        {EVENT_MARKER}
@@ -465,7 +505,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             from qyunslation.workbench.gui_client import decide_workbench_term, get_workbench_term_review
             run = _qy060_current_run(state)
             if not run or not candidate_id:
-                return gr.update(value="请先选择术语。"), *_qy060_render_terms(state, selected_filter)
+                return gr.update(value="请先选择术语。"), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
             actions = {{"批准": "approve", "批准入库": "approve", "编辑后批准": "approve", "关联已有词条": "merge", "不译": "do_not_translate", "拒绝": "reject", "拒绝入库": "reject", "提交管理员复核": "submit_for_admin"}}
             try:
                 review = get_workbench_term_review(run)
@@ -475,7 +515,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                 if chosen_target in _QY060_PLACEHOLDERS:
                     chosen_target = ""
                 if actions[label] in {{"approve", "merge"}} and not chosen_target:
-                    return gr.update(value="请先填写确认译法，再保存术语决定。"), *_qy060_render_terms(state, selected_filter)
+                    return gr.update(value="请先填写确认译法，再保存术语决定。"), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
                 decide_workbench_term(run, candidate_id, {{"action": actions[label], "expected_version": row["version"], "target_term": chosen_target or None, "concept_id": concept_id or None, "note": note or None}})
             except Exception as exc:
                 code = getattr(exc, "status_code", None)
@@ -486,22 +526,29 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                     400: f"保存被拒绝：{{getattr(exc, 'detail', None) or '请检查确认译法或 Concept ID'}}。",
                     503: "专业词库服务不可用；译文未受影响。",
                 }}.get(code, f"保存失败（{{code or type(exc).__name__}}）。")
-                return gr.update(value=detail), *_qy060_render_terms(state, selected_filter)
+                return gr.update(value=detail), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
             leftover = []
             try:
                 leftover = _qy060_rows_for_filter(get_workbench_term_review(run)["candidates"], selected_filter)
             except Exception:
                 leftover = []
-            rendered = _qy060_render_terms(state, selected_filter)
+            next_filter = selected_filter
+            if actions[label] in {{"approve", "merge", "do_not_translate"}}:
+                next_filter = "已批准"
+            elif actions[label] == "reject":
+                next_filter = "已拒绝"
+            elif actions[label] == "submit_for_admin":
+                next_filter = "待管理员"
+            rendered = _qy060_render_terms(state, next_filter)
             if actions[label] == "reject":
-                saved = "已拒绝，后续不再推荐同形近义。"
+                saved = "已拒绝，后续不再推荐同形近义。已切到「已拒绝」可核对。"
             elif actions[label] in {{"approve", "merge", "do_not_translate"}}:
-                saved = "已批准入库。下一篇登录翻译将自动使用该确认译法。"
+                saved = "已批准入库。已从「待确认」移到「已批准」，请在下方列表核对；下一篇登录翻译将自动使用该确认译法。"
             else:
                 saved = "术语决定已保存，已返回列表。"
             if not leftover and selected_filter == "待确认":
-                saved = "术语决定已保存。本次待确认术语已全部处理。"
-            return gr.update(value=saved), *rendered
+                saved = "术语决定已保存。本次待确认术语已全部处理；已切到「已批准」可核对。"
+            return gr.update(value=saved), gr.update(value=next_filter), *rendered
 
         def _qy060_approve_term(state, candidate_id, target, concept_id, note, selected_filter, table_data):
             return _qy060_decide_term(state, candidate_id, "批准入库", target, concept_id, note, selected_filter, table_data)
@@ -518,14 +565,40 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                 *rendered,
             )
 
+        def _qy060_batch_feedback(action, result, decisions, by_id, skipped_risk, skipped_target):
+            names = []
+            for item in decisions:
+                row = by_id.get(item.get("candidate_id") or "")
+                term = (row or {{}}).get("source_term") or ""
+                if term:
+                    names.append(term)
+            preview = "、".join(names[:6])
+            if len(names) > 6:
+                preview += " 等"
+            extra = []
+            if skipped_risk:
+                extra.append(f"高风险已跳过 {{skipped_risk}} 条，请逐条批准或提交管理员")
+            if skipped_target:
+                extra.append(f"缺译法 {{skipped_target}} 条")
+            extra_txt = (" " + "；".join(extra) + "。") if extra else ""
+            count = result.get("count", 0)
+            pending = (result.get("summary") or {{}}).get("pending")
+            leftover = f" 还剩 {{pending}} 条待确认。" if pending else ""
+            if action == "approve":
+                core = f"已入库 {{count}} 条"
+                if preview:
+                    core += f"（{{preview}}）"
+                return core + "。已从「待确认」移到「已批准」，请在下方列表核对；下一篇登录翻译将自动使用。" + extra_txt + leftover
+            return f"已拒绝 {{count}} 条。已切到「已拒绝」可核对。" + extra_txt
+
         def _qy060_batch_selected(state, selected_filter, picked, table_data, action):
             from qyunslation.workbench.gui_client import batch_decide_workbench_terms, get_workbench_term_review
             run = _qy060_current_run(state)
             if not run:
-                return gr.update(value="本次没有可确认的专业词汇。"), *_qy060_render_terms(state, selected_filter)
+                return gr.update(value="本次没有可确认的专业词汇。"), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
             ids = [item for item in (picked or []) if item]
             if not ids:
-                return gr.update(value="请先勾选术语。"), *_qy060_render_terms(state, selected_filter)
+                return gr.update(value="请先勾选术语。若上一批已从「待确认」消失，请切到「已批准」核对是否已入库。"), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
             try:
                 review = get_workbench_term_review(run)
                 by_id = {{row["id"]: row for row in review.get("candidates", []) if row.get("id")}}
@@ -551,18 +624,19 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                     else:
                         decisions.append({{"candidate_id": row["id"], "action": "reject", "expected_version": row["version"]}})
                 if not decisions:
-                    return gr.update(value="勾选项中没有可执行的术语。"), *_qy060_render_terms(state, selected_filter)
+                    if skipped_risk:
+                        msg = f"勾选的 {{skipped_risk}} 条均为高风险（药名/靶点/方案号等），一键入库不会收录。请逐条点「批准入库」或提交管理员。"
+                    elif skipped_target:
+                        msg = f"勾选的术语缺少确认译法（{{skipped_target}} 条），无法入库。"
+                    else:
+                        msg = "勾选项中没有可执行的术语。若上一批已从「待确认」消失，请切到「已批准」核对是否已入库。"
+                    return gr.update(value=msg), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
                 result = batch_decide_workbench_terms(run, decisions)
             except Exception:
-                return gr.update(value="批量操作失败：请刷新后重试。"), *_qy060_render_terms(state, selected_filter)
-            extra = []
-            if skipped_risk:
-                extra.append(f"跳过高风险 {{skipped_risk}}")
-            if skipped_target:
-                extra.append(f"缺译法 {{skipped_target}}")
-            suffix = f"（{{'，'.join(extra)}}）" if extra else ""
-            verb = "已入库，下一篇登录翻译将自动使用。" if action == "approve" else "已拒绝"
-            return gr.update(value=f"{{verb}} {{result.get('count', 0)}} 条。{{suffix}}"), *_qy060_render_terms(state, selected_filter)
+                return gr.update(value="批量操作失败：请刷新后重试。"), gr.update(value=selected_filter), *_qy060_render_terms(state, selected_filter)
+            next_filter = "已批准" if action == "approve" else "已拒绝"
+            msg = _qy060_batch_feedback(action, result, decisions, by_id, skipped_risk, skipped_target)
+            return gr.update(value=msg), gr.update(value=next_filter), *_qy060_render_terms(state, next_filter)
 
         def _qy060_batch_approve(state, selected_filter, picked, table_data):
             return _qy060_batch_selected(state, selected_filter, picked, table_data, "approve")
@@ -571,7 +645,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             return _qy060_batch_selected(state, selected_filter, picked, table_data, "reject")
 
         _QY060_LIST_OUT = [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target, qy060_picked, qy060_detail]
-        _QY060_DECIDE_OUT = [qy060_decision_status] + _QY060_LIST_OUT
+        _QY060_DECIDE_OUT = [qy060_decision_status, qy060_term_filter] + _QY060_LIST_OUT
         _QY060_CLOSE_OUT = [qy060_decision_status, qy_insp_on, qy_inspector] + _QY060_LIST_OUT
         qy060_term_badge.click(_qy050_flip_insp, [qy_insp_on], [qy_insp_on, qy_inspector])
         qy060_term_filter.change(_qy060_render_terms, [state, qy060_term_filter], _QY060_LIST_OUT)
