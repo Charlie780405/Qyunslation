@@ -77,8 +77,11 @@ def test_plan066_migration_creates_new_tables(tmp_path, monkeypatch):
     command.upgrade(Config("alembic.ini"), "head")
     inspector = inspect(create_engine(f"sqlite:///{database}"))
     tables = set(inspector.get_table_names())
-    assert {"web_preference", "preflight_record"}.issubset(tables)
+    assert {"web_preference", "preflight_record", "oidc_login_state", "web_session", "translation_run_record"}.issubset(tables)
     command.downgrade(Config("alembic.ini"), "063a0001")
     downgraded = set(inspect(create_engine(f"sqlite:///{database}")).get_table_names())
     assert "web_preference" not in downgraded
     assert "preflight_record" not in downgraded
+    assert "oidc_login_state" not in downgraded
+    assert "web_session" not in downgraded
+    assert "translation_run_record" not in downgraded

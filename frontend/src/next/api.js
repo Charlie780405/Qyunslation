@@ -1,7 +1,13 @@
 const API_PREFIX = '/api/v1';
 
 function csrfToken() {
-  return window.__QY_CSRF_TOKEN__ || document.querySelector('meta[name="csrf-token"]')?.content || '';
+  if (window.__QY_CSRF_TOKEN__) return window.__QY_CSRF_TOKEN__;
+  const meta = document.querySelector('meta[name="csrf-token"]')?.content;
+  if (meta) return meta;
+  const cookie = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith('qyunslation_csrf='));
+  return cookie ? decodeURIComponent(cookie.slice('qyunslation_csrf='.length)) : '';
 }
 
 export async function apiRequest(path, options = {}) {
@@ -45,6 +51,11 @@ export const api = {
     Object.entries(fields).forEach(([key, value]) => body.append(key, String(value)));
     return apiRequest(`${API_PREFIX}/preflights`, { method: 'POST', body });
   },
+  createTranslationRun: (payload, idempotencyKey) => apiRequest(`${API_PREFIX}/translation-runs`, {
+    method: 'POST',
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+    body: JSON.stringify(payload),
+  }),
   savePreferences: (preferences) => apiRequest(`${API_PREFIX}/preferences`, {
     method: 'PUT',
     body: JSON.stringify(preferences),

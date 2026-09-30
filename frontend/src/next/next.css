@@ -83,6 +83,11 @@
 .qy-callout svg { flex: 0 0 auto; width: 17px; height: 17px; }
 .qy-callout-info { color: var(--qy-interactive); border-color: #B5D6E0; background: #F0F8FA; }
 .qy-callout-warning { color: var(--qy-warning); border-color: #E9C99A; background: #FFF8EC; }
+.qy-preflight-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid #C8DEC2; border-radius: var(--qy-radius-control); background: #F7FBF5; }
+.qy-preflight-card strong, .qy-preflight-card span { display: block; }
+.qy-preflight-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qy-preflight-card > div > span { margin-top: 3px; color: var(--qy-text-secondary); font-size: 12px; }
+.qy-preflight-card .qy-primary-button { min-height: 40px; }
 .qy-task-list { display: grid; gap: 8px; }
 .qy-task-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); }
 .qy-task-row > svg { width: 18px; color: var(--qy-text-secondary); }
@@ -139,6 +144,7 @@
 .qy-status-badge svg { width: 13px; height: 13px; }
 .qy-status-badge.is-approved { color: var(--qy-success); background: #EDF6EA; }
 .qy-status-badge.is-pending { color: var(--qy-warning); background: #FFF6E7; }
+.qy-status-badge.is-ready { color: var(--qy-success); background: #EDF6EA; }
 .qy-risk-high { color: var(--qy-danger); font-weight: 700; }
 .qy-risk-normal { color: var(--qy-text-secondary); }
 .qy-term-empty { min-height: 420px; padding: 32px; }

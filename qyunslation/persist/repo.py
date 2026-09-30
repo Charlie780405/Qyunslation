@@ -32,6 +32,12 @@ def ensure_membership(
         )
     )
     if row is not None:
+        # Provider roles are authoritative only when they grant an explicit
+        # elevated role; an absent/default role must not downgrade a local
+        # administrator membership.
+        if role != "member" and row.role == "member":
+            row.role = role
+            session.flush()
         return row
     row = UserMembership(tenant_id=tenant_id, user_sub=user_sub, role=role)
     session.add(row)

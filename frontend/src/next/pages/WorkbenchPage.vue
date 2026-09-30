@@ -29,6 +29,15 @@
           <div v-if="uploadMessage" class="qy-callout" :class="uploadError ? 'qy-callout-warning' : 'qy-callout-info'" role="status">
             <InformationCircleIcon aria-hidden="true" /><span>{{ uploadMessage }}</span>
           </div>
+          <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
+            <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
+            <span class="qy-status-badge" :class="preflight.state === 'ready' ? 'is-ready' : 'is-pending'">{{ preflight.state === 'ready' ? '预检通过' : '需要处理' }}</span>
+            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready'" @click="startTranslation">
+              <ArrowPathIcon v-if="startingRun" class="qy-spin" aria-hidden="true" />
+              <PlayIcon v-else aria-hidden="true" />
+              {{ startingRun ? '正在创建任务…' : '确认并开始翻译' }}
+            </button>
+          </div>
           <div class="qy-panel-actions">
             <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight">
               <ArrowPathIcon v-if="uploading" class="qy-spin" aria-hidden="true" />
@@ -96,6 +105,7 @@ import {
   InformationCircleIcon,
   LockClosedIcon,
   MagnifyingGlassIcon,
+  PlayIcon,
 } from '@heroicons/vue/24/outline';
 
 const selectedFile = ref(null);
@@ -105,6 +115,8 @@ const uploadError = ref(false);
 const uploading = ref(false);
 const showAdvanced = ref(false);
 const runs = ref([]);
+const preflight = ref(null);
+const startingRun = ref(false);
 const settings = reactive({ direction: 'English → 简体中文', profile: '临床研究文档', bilingual: true });
 
 function selectFile(event) {
@@ -126,13 +138,37 @@ async function startPreflight() {
   uploadError.value = false;
   uploadMessage.value = '';
   try {
-    await api.uploadPreflight(selectedFile.value, { direction: settings.direction, profile: settings.profile });
-    uploadMessage.value = '预检已提交，完成后会生成任务确认卡片。';
+    preflight.value = await api.uploadPreflight(selectedFile.value, { direction: settings.direction, profile: settings.profile });
+    uploadMessage.value = preflight.value.state === 'ready'
+      ? '预检已完成。请确认参数后再开始翻译。'
+      : '预检发现风险，请先处理阻断项。';
   } catch (error) {
     uploadError.value = true;
     uploadMessage.value = error.status === 404 ? '预检服务正在接入，当前仅完成工作台界面预览。' : error.message;
   } finally {
     uploading.value = false;
+  }
+}
+
+async function startTranslation() {
+  if (!preflight.value || preflight.value.state !== 'ready') return;
+  startingRun.value = true;
+  uploadError.value = false;
+  try {
+    const key = `preflight:${preflight.value.id}:${settings.direction}:${settings.profile}:${settings.bilingual}`;
+    await api.createTranslationRun({
+      preflight_id: preflight.value.id,
+      direction: settings.direction,
+      profile: settings.profile,
+      bilingual: settings.bilingual,
+    }, key);
+    uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '翻译任务创建失败';
+  } finally {
+    startingRun.value = false;
   }
 }
 

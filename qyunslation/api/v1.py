@@ -11,8 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from qyunslation.persist import repo
@@ -25,8 +26,9 @@ from qyunslation.persist.db import (
     ping_db,
     reset_engine,
 )
-from qyunslation.persist.identity import IdentityContext, resolve_identity
-from qyunslation.persist.models import PreflightRecord, WebPreference
+from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
+from qyunslation.persist.models import PreflightRecord, TranslationRunRecord, WebPreference
+from qyunslation.core.schemas import AutoWorkflowParams
 from qyunslation.structure.ingest import DEFAULT_MAX_UPLOAD_BYTES
 
 PREF_ALLOWED_KEYS = frozenset(
@@ -133,6 +135,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def require_identity(request: Request) -> IdentityContext:
+    require_csrf(request)
     return resolve_identity(request)
 
 
@@ -175,11 +178,14 @@ def api_me(
     """Return the authenticated principal without exposing bearer credentials."""
     tenant = _tenant_bundle(session, identity)
     membership = repo.ensure_membership(
-        session, tenant_id=tenant.id, user_sub=identity.user_sub
+        session,
+        tenant_id=tenant.id,
+        user_sub=identity.user_sub,
+        role=_identity_role(identity),
     )
     return {
         "sub": identity.user_sub,
-        "display_name": identity.user_sub,
+        "display_name": identity.display_name or identity.user_sub,
         "tenant_id": tenant.id,
         "tenant_slug": tenant.slug,
         "roles": [membership.role],
@@ -189,6 +195,24 @@ def api_me(
             "can_manage_policy": membership.role in {"admin", "owner"},
         },
     }
+
+
+def _identity_role(identity: IdentityContext) -> str:
+    """Map provider roles to the existing persistence role vocabulary."""
+    mapping = {
+        "translator": "member",
+        "reviewer": "reviewer",
+        "termbase_admin": "term_admin",
+        "system_admin": "admin",
+        "owner": "owner",
+        "admin": "admin",
+        "term_admin": "term_admin",
+    }
+    for role in identity.roles:
+        mapped = mapping.get(role.strip().lower())
+        if mapped:
+            return mapped
+    return "member"
 
 
 def _preflight_root() -> Path:
@@ -329,6 +353,297 @@ def delete_preflight(
         path.unlink()
     session.delete(record)
     return Response(status_code=204)
+
+
+class TranslationRunCreateBody(BaseModel):
+    preflight_id: str = Field(min_length=1, max_length=36)
+    direction: str = Field(default="English → 简体中文", min_length=1, max_length=64)
+    profile: str = Field(default="临床研究文档", min_length=1, max_length=128)
+    bilingual: bool = True
+
+
+_RUN_TERMINAL = frozenset({"succeeded", "failed", "cancelled", "blocked", "degraded"})
+
+
+def _run_target_language(direction: str) -> str:
+    if direction == "English → 简体中文":
+        return "简体中文"
+    if direction == "简体中文 → English":
+        return "English"
+    raise HTTPException(status_code=400, detail="unsupported language direction")
+
+
+def _run_stage_from_task(task_state: dict[str, Any]) -> str:
+    message = str(task_state.get("status_message") or "").casefold()
+    if task_state.get("download_ready"):
+        return "export"
+    if any(token in message for token in ("解析", "结构", "ingest", "ocr")):
+        return "structure"
+    if any(token in message for token in ("版式", "渲染", "render")):
+        return "layout"
+    if any(token in message for token in ("qa", "质量", "术语")):
+        return "qa"
+    return "text"
+
+
+def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
+    """Project the durable ledger plus current legacy-service state."""
+    if run.external_task_id:
+        try:
+            from qyunslation.server import get_translation_service
+
+            task_state = get_translation_service().get_task_state(run.external_task_id)
+        except Exception:
+            task_state = None
+        if task_state:
+            if task_state.get("error_flag"):
+                run.status = "failed"
+                run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
+                run.stage = "qa"
+            elif task_state.get("download_ready"):
+                run.status = "succeeded"
+                run.stage = "export"
+                run.progress = 100
+                run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            elif task_state.get("is_processing"):
+                run.status = "translating"
+                run.stage = _run_stage_from_task(task_state)
+                progress = task_state.get("progress_percent")
+                run.progress = int(progress) if isinstance(progress, (int, float)) else None
+            run.updated_at = datetime.now(timezone.utc)
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    return {
+        "id": run.id,
+        "project_id": None,
+        "preflight_id": run.preflight_id,
+        "generation": run.generation,
+        "filename": preflight.source_filename if preflight else None,
+        "format": preflight.source_format if preflight else None,
+        "direction": run.direction,
+        "profile": run.profile,
+        "settings": run.settings_snapshot or {},
+        "status": run.status,
+        "stage": run.stage,
+        "progress": run.progress,
+        "manifest_version": run.manifest_version,
+        "qa_summary": run.qa_summary or {},
+        "term_summary": run.term_summary or {},
+        "degradation_reason": run.degradation_reason,
+        "external_task_id": run.external_task_id,
+        "created_at": run.created_at.isoformat(),
+        "updated_at": run.updated_at.isoformat(),
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+    }
+
+
+def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> TranslationRunRecord:
+    tenant = _tenant_bundle(session, identity)
+    run = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.id == run_id,
+            TranslationRunRecord.tenant_id == tenant.id,
+        )
+    )
+    if run is None or (run.actor_sub != identity.user_sub and _identity_role(identity) not in {"admin", "owner"}):
+        raise HTTPException(status_code=404, detail="translation run not found")
+    return run
+
+
+async def _start_legacy_translation(
+    *,
+    service: Any,
+    task_id: str,
+    payload: AutoWorkflowParams,
+    content: bytes,
+    filename: str,
+    declared_mime: str,
+) -> dict[str, Any]:
+    return await service.start_translation(
+        task_id=task_id,
+        payload=payload,
+        file_contents=content,
+        original_filename=filename,
+        declared_mime=declared_mime,
+    )
+
+
+async def _launch_translation_run(
+    *, run: TranslationRunRecord, preflight: PreflightRecord, target_language: str
+) -> None:
+    """Launch the shared non-Gradio service and persist an honest state."""
+    try:
+        from qyunslation.server import get_translation_service
+
+        service = get_translation_service()
+        if service.main_event_loop is None:
+            raise RuntimeError("translation service is not initialized")
+        content_path = _preflight_path(preflight)
+        content = content_path.read_bytes()
+        task_id = uuid.uuid4().hex[:16]
+        payload = AutoWorkflowParams(workflow_type="auto", to_lang=target_language)
+        result = await _start_legacy_translation(
+            service=service,
+            task_id=task_id,
+            payload=payload,
+            content=content,
+            filename=preflight.source_filename,
+            declared_mime=str(
+                (preflight.metadata_json or {}).get("mime") or "application/octet-stream"
+            ),
+        )
+        run.external_task_id = str(result.get("task_id") or task_id)
+        run.status = "translating"
+        run.stage = "structure"
+        run.started_at = datetime.now(timezone.utc)
+    except Exception:
+        run.status = "blocked"
+        run.stage = "validation"
+        run.degradation_reason = "translation runner unavailable"
+
+
+@router.post("/translation-runs", status_code=201)
+async def create_translation_run(
+    body: TranslationRunCreateBody,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    target_language = _run_target_language(body.direction)
+    tenant = _tenant_bundle(session, identity)
+    preflight = session.get(PreflightRecord, body.preflight_id)
+    if preflight is None or preflight.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    if preflight.actor_sub != identity.user_sub and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    state = _preflight_dict(preflight)
+    if state["state"] != "ready":
+        raise HTTPException(status_code=409, detail="preflight is not ready")
+    key = (idempotency_key or f"preflight:{preflight.id}").strip()
+    if not key or len(key) > 256:
+        raise HTTPException(status_code=400, detail="invalid Idempotency-Key")
+    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    existing = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.tenant_id == tenant.id,
+            TranslationRunRecord.idempotency_key_hash == key_hash,
+        )
+    )
+    if existing is not None:
+        return _translation_run_dict(session, existing)
+    run = TranslationRunRecord(
+        preflight_id=preflight.id,
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        idempotency_key_hash=key_hash,
+        direction=body.direction,
+        profile=body.profile,
+        settings_snapshot={
+            "direction": body.direction,
+            "profile": body.profile,
+            "bilingual": body.bilingual,
+        },
+        status="queued",
+        stage="validation",
+        term_summary={"status": "snapshot_pending"},
+        qa_summary={"blocker": 0, "warning": 0, "info": 0},
+    )
+    session.add(run)
+    session.flush()
+    await _launch_translation_run(
+        run=run, preflight=preflight, target_language=target_language
+    )
+    return _translation_run_dict(session, run)
+
+
+@router.get("/translation-runs")
+def list_translation_runs(
+    status: str | None = Query(default=None),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    stmt = select(TranslationRunRecord).where(TranslationRunRecord.tenant_id == tenant.id)
+    if status:
+        stmt = stmt.where(TranslationRunRecord.status == status)
+    stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(100)
+    rows = list(session.scalars(stmt))
+    return {"items": [_translation_run_dict(session, row) for row in rows]}
+
+
+@router.get("/translation-runs/{run_id}")
+def get_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _translation_run_dict(session, _run_owned(session, run_id=run_id, identity=identity))
+
+
+@router.post("/translation-runs/{run_id}/cancel")
+async def cancel_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if run.status in _RUN_TERMINAL:
+        return _translation_run_dict(session, run)
+    if run.external_task_id:
+        try:
+            from qyunslation.server import get_translation_service
+
+            get_translation_service().cancel_task(run.external_task_id)
+        except Exception:
+            pass
+    run.status = "cancelled"
+    run.stage = "qa"
+    run.progress = run.progress if run.progress is not None else None
+    return _translation_run_dict(session, run)
+
+
+@router.post("/translation-runs/{run_id}/retry", status_code=201)
+async def retry_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
+        raise HTTPException(status_code=409, detail="preflight is not ready")
+    next_generation = run.generation + 1
+    existing = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.generation == next_generation,
+        )
+    )
+    if existing is not None:
+        return _translation_run_dict(session, existing)
+    key = hashlib.sha256(f"retry:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
+    retry = TranslationRunRecord(
+        preflight_id=run.preflight_id,
+        tenant_id=run.tenant_id,
+        actor_sub=identity.user_sub,
+        idempotency_key_hash=hashlib.sha256(key.encode("utf-8")).hexdigest(),
+        generation=next_generation,
+        direction=run.direction,
+        profile=run.profile,
+        settings_snapshot=dict(run.settings_snapshot or {}),
+        status="queued",
+        stage="validation",
+        term_summary=dict(run.term_summary or {}),
+        qa_summary={"blocker": 0, "warning": 0, "info": 0},
+    )
+    session.add(retry)
+    session.flush()
+    await _launch_translation_run(
+        run=retry,
+        preflight=preflight,
+        target_language=_run_target_language(retry.direction),
+    )
+    return _translation_run_dict(session, retry)
 
 
 class PreferencesBody(BaseModel):

@@ -1165,39 +1165,6 @@ async def service_flat_translate(
 # ===================================================================
 
 
-@app.get("/auth/login", include_in_schema=False)
-async def auth_login(
-    request: Request,
-    return_to: str = Query("/next/workbench"),
-    format: str = Query("redirect"),
-):
-    """BFF login contract placeholder; the OIDC provider is configured per deployment."""
-    safe_return_to = return_to if return_to.startswith("/") else "/next/workbench"
-    issuer = (os.environ.get("QYUNSLATION_OIDC_ISSUER") or "").strip()
-    if not issuer:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "code": "SSO_NOT_CONFIGURED",
-                "message": "公司身份服务尚未配置，请联系系统管理员。",
-                "return_to": safe_return_to,
-            },
-        )
-    # Do not guess provider endpoints or store tokens in the browser. The full
-    # BFF flow is added in PLAN-066c once provider metadata and session storage
-    # are provisioned for the deployment.
-    return JSONResponse(
-        status_code=501,
-        content={"code": "SSO_BFF_PENDING", "message": "SSO 登录服务正在部署。"},
-    )
-
-
-@app.post("/auth/logout", include_in_schema=False)
-async def auth_logout():
-    """Idempotent logout endpoint for the new client surface."""
-    return Response(status_code=204)
-
-
 @app.get("/next", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/next/{path:path}", response_class=HTMLResponse, include_in_schema=False)
 async def next_app_page(path: str = ""):
@@ -1260,6 +1227,14 @@ async def redoc_html():
 
 
 app.include_router(service_router)
+
+# PLAN-066c：浏览器只走服务端 OIDC BFF 会话；机器 Bearer 调用保持不变。
+try:
+    from qyunslation.auth.bff import router as auth_bff_router
+
+    app.include_router(auth_bff_router)
+except Exception as e:  # 认证配置在运行时校验，不影响 legacy service 启动
+    logging.getLogger(__name__).warning("BFF auth load failed (service still up): %s", e)
 
 # PLAN-034c：/api/v1 骨架（与 /service 并存）
 try:

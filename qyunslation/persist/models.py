@@ -54,6 +54,57 @@ class EmbeddingVector(TypeDecorator):
         return dialect.type_descriptor(JSON())
 
 
+class OidcLoginState(Base):
+    """Short-lived server-side state for an OIDC authorization request.
+
+    The browser only receives the opaque ``state`` value.  The PKCE verifier,
+    nonce and return path stay in the database so they are never exposed to
+    JavaScript or copied into a client-managed token.
+    """
+
+    __tablename__ = "oidc_login_state"
+    __table_args__ = (Index("ix_oidc_login_state_expires", "expires_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    code_verifier: Mapped[str] = mapped_column(String(256), nullable=False)
+    nonce: Mapped[str] = mapped_column(String(256), nullable=False)
+    return_to: Mapped[str] = mapped_column(String(512), nullable=False, default="/next/workbench")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class WebSession(Base):
+    """Opaque BFF browser session; no access/refresh token reaches the client."""
+
+    __tablename__ = "web_session"
+    __table_args__ = (
+        Index("ix_web_session_hash", "session_hash", unique=True),
+        Index("ix_web_session_expires", "expires_at"),
+        Index("ix_web_session_user", "tenant_slug", "user_sub"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    user_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    roles: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Encrypted provider token set.  It is nullable for deployments that use
+    # userinfo-only sessions and do not need downstream provider calls yet.
+    token_blob: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class WebPreference(Base):
     """PLAN-066: non-sensitive per-user workbench preferences."""
 
@@ -105,6 +156,48 @@ class PreflightRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class TranslationRunRecord(Base):
+    """PLAN-066e: durable web-facing translation run ledger."""
+
+    __tablename__ = "translation_run_record"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "idempotency_key_hash", name="uq_translation_run_idempotency"),
+        UniqueConstraint("preflight_id", "generation", name="uq_translation_run_generation"),
+        Index("ix_translation_run_tenant_created", "tenant_id", "created_at"),
+        Index("ix_translation_run_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    preflight_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("preflight_record.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    idempotency_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    direction: Mapped[str] = mapped_column(String(64), nullable=False)
+    profile: Mapped[str] = mapped_column(String(128), nullable=False)
+    settings_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default="validation")
+    progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    external_task_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    manifest_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    qa_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    term_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    degradation_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Tenant(Base):

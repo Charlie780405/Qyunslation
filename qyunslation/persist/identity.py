@@ -3,24 +3,34 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import hmac
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
 import jwt
 from fastapi import HTTPException, Request
 from jwt import PyJWKClient
+from sqlalchemy import select
 
 OIDC_ISSUER_ENV = "QYUNSLATION_OIDC_ISSUER"
 OIDC_AUDIENCE_ENV = "QYUNSLATION_OIDC_AUDIENCE"
 OIDC_JWKS_URL_ENV = "QYUNSLATION_OIDC_JWKS_URL"
 OIDC_TENANT_CLAIM_ENV = "QYUNSLATION_OIDC_TENANT_CLAIM"
+WEB_SESSION_COOKIE = "qyunslation_session"
+CSRF_COOKIE = "qyunslation_csrf"
+SESSION_IDLE_MINUTES_ENV = "QYUNSLATION_SESSION_IDLE_MINUTES"
 
 
 @dataclass(frozen=True)
 class IdentityContext:
     tenant_slug: str
     user_sub: str
+    display_name: str | None = None
+    roles: tuple[str, ...] = ()
+    auth_method: str = "bearer"
 
 
 class IdentityAdapter(Protocol):
@@ -38,6 +48,14 @@ def _is_production() -> bool:
 def _dev_bypass_enabled() -> bool:
     flag = (os.environ.get("QYUNSLATION_DEV_AUTH_BYPASS") or "").strip()
     return flag in {"1", "true", "TRUE", "yes", "YES"}
+
+
+def _session_idle_minutes() -> float:
+    try:
+        value = float((os.environ.get(SESSION_IDLE_MINUTES_ENV) or "60").strip())
+    except ValueError:
+        value = 60.0
+    return max(value, 1.0)
 
 
 class DevBypassAdapter:
@@ -143,8 +161,59 @@ class OidcAdapter:
         return IdentityContext(tenant_slug=tenant, user_sub=sub)
 
 
+def _resolve_web_session(request: Request) -> IdentityContext | None:
+    """Resolve an opaque BFF cookie without ever accepting client claims."""
+    raw = (request.cookies.get(WEB_SESSION_COOKIE) or "").strip()
+    if not raw:
+        return None
+    from qyunslation.persist import db as persist_db
+    from qyunslation.persist.models import WebSession
+
+    if persist_db.SessionLocal is None:
+        raise HTTPException(status_code=503, detail="web session store unavailable")
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    with persist_db.SessionLocal() as session:
+        row = session.scalar(select(WebSession).where(WebSession.session_hash == digest))
+        if row is None or row.revoked_at is not None:
+            return None
+        expires_at = row.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=now.tzinfo)
+        idle_cutoff = now.timestamp() - (_session_idle_minutes() * 60)
+        last_seen = row.last_seen_at
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=now.tzinfo)
+        if expires_at <= now or last_seen.timestamp() < idle_cutoff:
+            return None
+        row.last_seen_at = now
+        session.commit()
+        return IdentityContext(
+            tenant_slug=row.tenant_slug,
+            user_sub=row.user_sub,
+            display_name=row.display_name,
+            roles=tuple(str(item) for item in (row.roles or []) if str(item).strip()),
+            auth_method="bff_session",
+        )
+
+
+def require_csrf(request: Request) -> None:
+    """Require the double-submit CSRF token for cookie-authenticated writes."""
+    if request.method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    if not request.cookies.get(WEB_SESSION_COOKIE):
+        return
+    cookie = (request.cookies.get(CSRF_COOKIE) or "").strip()
+    header = (request.headers.get("X-CSRF-Token") or "").strip()
+    if not cookie or not header or not hmac.compare_digest(cookie, header):
+        raise HTTPException(status_code=403, detail="CSRF token required")
+
+
 def resolve_identity(request: Request) -> IdentityContext:
     """production 强制 OIDC；非 production 且 bypass → Dev；否则 OIDC。"""
+    session_identity = _resolve_web_session(request)
+    if session_identity is not None:
+        return session_identity
     if _is_production():
         if _dev_bypass_enabled():
             # 显式拒绝：即使开了 bypass 也不走 Dev
