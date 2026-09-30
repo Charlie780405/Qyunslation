@@ -6,6 +6,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SIDECAR_URL="${QYUNSLATION_OFFICE_URL:-http://127.0.0.1:8010}"
 IMG="$ROOT/qyunslation/extensions/image_translate.py"
+OFFICE_ENV="${QYUNSLATION_OFFICE_ENV:-/home/dev/pdf2zh/office.env}"
+if [[ -z "${QYUNSLATION_API_TOKEN:-}${DOCUTRANSLATE_API_TOKEN:-}${API_TOKEN:-}" && -f "$OFFICE_ENV" ]]; then
+  QYUNSLATION_API_TOKEN="$(python3 - <<PY
+from pathlib import Path
+wanted = ("QYUNSLATION_API_TOKEN", "DOCUTRANSLATE_API_TOKEN", "API_TOKEN")
+for line in Path("$OFFICE_ENV").read_text(encoding="utf-8").splitlines():
+    raw = line.strip()
+    if not raw or raw.startswith("#") or "=" not in raw:
+        continue
+    key, value = raw.split("=", 1)
+    if key in wanted and value.strip():
+        print(value.strip().strip("\"'"))
+        break
+PY
+)"
+  export QYUNSLATION_API_TOKEN
+fi
 
 echo "== restart pdf2zh.service + qyunslation-office.service =="
 systemctl --user restart pdf2zh.service qyunslation-office.service
@@ -13,7 +30,11 @@ systemctl --user restart pdf2zh.service qyunslation-office.service
 echo "== wait for sidecar health =="
 ok=0
 for i in $(seq 1 40); do
-  if curl -sf "$SIDECAR_URL/service/image-translate-health" >/tmp/qy-sidecar-health.json 2>/dev/null; then
+  health_headers=()
+  if [[ -n "${QYUNSLATION_API_TOKEN:-}${DOCUTRANSLATE_API_TOKEN:-}${API_TOKEN:-}" ]]; then
+    health_headers=(-H "Authorization: Bearer ${QYUNSLATION_API_TOKEN:-${DOCUTRANSLATE_API_TOKEN:-${API_TOKEN:-}}}")
+  fi
+  if curl -sf "${health_headers[@]}" "$SIDECAR_URL/service/image-translate-health" >/tmp/qy-sidecar-health.json 2>/dev/null; then
     ok=1
     break
   fi

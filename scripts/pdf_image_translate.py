@@ -29,6 +29,17 @@ PDF_IMAGE_OVERLAY = os.environ.get("QYUNSLATION_PDF_IMAGE_OVERLAY", "1").lower()
 SIDECAR_URL = os.environ.get("QYUNSLATION_OFFICE_URL", "http://127.0.0.1:8010")
 
 
+def _sidecar_headers() -> dict[str, str]:
+    """Loopback /service/* requires Bearer when QYUNSLATION_API_TOKEN is set."""
+    token = (
+        os.environ.get("QYUNSLATION_API_TOKEN")
+        or os.environ.get("DOCUTRANSLATE_API_TOKEN")
+        or os.environ.get("API_TOKEN")
+        or ""
+    ).strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 @dataclass
 class PdfImgManifest:
     source: str
@@ -174,7 +185,11 @@ def assert_sidecar_in_sync() -> None:
     try:
         import requests
 
-        r = requests.get(f"{SIDECAR_URL}/service/image-translate-health", timeout=5)
+        r = requests.get(
+            f"{SIDECAR_URL}/service/image-translate-health",
+            headers=_sidecar_headers(),
+            timeout=5,
+        )
         if r.status_code != 200:
             raise RuntimeError(f"health HTTP {r.status_code}")
         remote = (r.json() or {}).get("code_fingerprint") or ""
@@ -243,6 +258,7 @@ def _translate_via_local(png_bytes: bytes, to_lang: str) -> tuple[bytes, int, di
             f"{SIDECAR_URL}/service/image-translate",
             files={"file": ("img.png", png_bytes, "image/png")},
             data={"to_lang": to_lang},
+            headers=_sidecar_headers(),
             timeout=300,
         )
         if r.status_code == 200 and r.content:
