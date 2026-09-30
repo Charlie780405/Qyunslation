@@ -508,6 +508,43 @@ def _materialize_artifacts(
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> None:
     if not run.external_task_id:
         return
+    # PDF runs are owned by the durable non-GUI runner.  Consult its atomic
+    # state file before the legacy in-memory adapter so a process restart does
+    # not make the web ledger appear to lose the task.
+    try:
+        from qyunslation.workbench.runner import get_pdf2zh_task_state
+
+        runner_state = get_pdf2zh_task_state(run.external_task_id)
+    except Exception:
+        runner_state = None
+    if runner_state:
+        status = str(runner_state.get("status") or "degraded")
+        if status == "succeeded":
+            run.status = "succeeded"
+            run.stage = "export"
+            run.progress = 100
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            _materialize_artifacts(session, run=run, task_state=runner_state)
+        elif status in {"failed", "degraded"}:
+            run.status = status
+            run.stage = str(runner_state.get("stage") or "qa")
+            run.progress = runner_state.get("progress_percent")
+            run.degradation_reason = str(
+                runner_state.get("status_message") or "translation runner failed"
+            )[:512]
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        elif status == "cancelled":
+            run.status = "cancelled"
+            run.stage = "qa"
+            run.progress = runner_state.get("progress_percent")
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        else:
+            run.status = "translating"
+            run.stage = str(runner_state.get("stage") or "structure")
+            progress = runner_state.get("progress_percent")
+            run.progress = int(progress) if isinstance(progress, (int, float)) else None
+        run.updated_at = datetime.now(timezone.utc)
+        return
     try:
         from qyunslation.server import get_translation_service
 
@@ -611,7 +648,41 @@ async def _start_legacy_translation(
 async def _launch_translation_run(
     *, run: TranslationRunRecord, preflight: PreflightRecord, target_language: str
 ) -> None:
-    """Launch the shared non-Gradio service and persist an honest state."""
+    """Launch the appropriate non-GUI runner and persist an honest state.
+
+    PDF is deliberately routed through the independent ``pdf2zh_next`` CLI.
+    Other formats continue to use the extracted application service during the
+    migration, so the old Office/image path and the new ledger share one
+    boundary without making the Vue UI depend on Gradio DOM or events.
+    """
+    if preflight.source_format.casefold() == "pdf" and (
+        (os.environ.get("QYUNSLATION_PDF_RUNNER") or "cli").strip().casefold() != "legacy"
+    ):
+        try:
+            from qyunslation.workbench.runner import get_pdf2zh_runner
+
+            content_path = _preflight_path(preflight)
+            launch = await get_pdf2zh_runner().start(
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                generation=run.generation,
+                input_path=content_path,
+                direction=run.direction,
+                original_filename=preflight.source_filename,
+                settings=run.settings_snapshot,
+            )
+            run.external_task_id = launch.task_id
+            run.status = "translating"
+            run.stage = "structure"
+            run.started_at = datetime.now(timezone.utc)
+            return
+        except Exception:
+            # Do not fall back to the legacy PDF/Gradio route.  A missing CLI
+            # is an honest blocked run and can be retried after deployment.
+            run.status = "blocked"
+            run.stage = "validation"
+            run.degradation_reason = "translation runner unavailable"
+            return
     try:
         from qyunslation.server import get_translation_service
 
@@ -786,9 +857,17 @@ async def cancel_translation_run(
         return _translation_run_dict(session, run)
     if run.external_task_id:
         try:
-            from qyunslation.server import get_translation_service
+            from qyunslation.workbench.runner import (
+                cancel_pdf2zh_task,
+                is_pdf2zh_task,
+            )
 
-            get_translation_service().cancel_task(run.external_task_id)
+            if is_pdf2zh_task(run.external_task_id):
+                await cancel_pdf2zh_task(run.external_task_id)
+            else:
+                from qyunslation.server import get_translation_service
+
+                get_translation_service().cancel_task(run.external_task_id)
         except Exception as exc:
             raise HTTPException(status_code=409, detail="translation runner could not cancel the task") from exc
     run.status = "cancelled"

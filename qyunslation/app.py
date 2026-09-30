@@ -104,6 +104,18 @@ async def lifespan(app: FastAPI):
     translation_service.initialize(httpx_client, app.state.main_event_loop)
     translation_service.clear_all()
 
+    # PLAN-066e: reconnect durable PDF runner state before serving API reads.
+    # Existing non-PDF TranslationService tasks remain intentionally ephemeral;
+    # only the independent CLI runner is reconciled across process restarts.
+    try:
+        from qyunslation.workbench.runner import reconcile_pdf2zh_runners
+
+        reconciled = await reconcile_pdf2zh_runners()
+        if reconciled:
+            global_logger.info("Reconciled %s durable PDF translation runner(s)", reconciled)
+    except Exception as exc:
+        global_logger.warning("PDF translation runner reconcile failed: %s", exc)
+
     configure_runtime_logging()
     # PLAN-023: 确保 image_translate 等模块 logger 能进 journalctl
     if not logging.root.handlers:

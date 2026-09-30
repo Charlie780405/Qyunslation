@@ -1,6 +1,6 @@
 # PLAN-066：Qyunslation 临床翻译工作台 UI/UX v2
 
-状态：**进行中 · 基础壳、BFF 会话与 TranslationRun 台账切片已落地**
+状态：**进行中 · Vue 基础壳、BFF 会话、TranslationRun 台账与 PDF 独立 runner 切片已落地**
 
 ## 已完成
 
@@ -12,6 +12,8 @@
 - `066c0001` 提供 OIDC Authorization Code + PKCE BFF：state、PKCE verifier 和 nonce 服务端存储，浏览器只持有 HttpOnly 随机会话 ID；写请求启用双提交 CSRF，退出会立即撤销会话。
 - `066e0001` 提供 TranslationRun 持久化台账、租户隔离、幂等创建、状态查询、取消和 generation 重试；已接入现有非 Gradio TranslationService，未初始化 runner 时明确落为 `blocked`，不伪造已开始翻译。
 - `066e0002` 增加租户隔离的 TranslationArtifact 元数据和授权下载；任务状态读取会同步外部执行器并复制已完成产物，Vue 工作台对活动任务 2 秒轮询、终态降频，并显示可下载产物。
+- PDF TranslationRun 已接入独立 `pdf2zh_next` 非 GUI CLI：进程组、0600 日志、原子状态文件、受控 SIGTERM/SIGKILL 取消、输出发现和启动时 reconcile 均不依赖 Gradio DOM、事件队列或浏览器自动化。
+- runner 只把已验证的 `Progress: 0..1`/百分比日志映射为进度；无法确认时保留 `null`，不伪造百分比。产物必须位于租户/任务/generation 私有目录后才进入授权 Artifact 投影。
 - 预检确认卡片已接入 Vue 工作台；用户明确点击“确认并开始翻译”后才创建 TranslationRun。
 
 ## 当前入口
@@ -22,7 +24,7 @@
 
 ## 后续切片
 
-1. 将 TranslationService 完整抽为独立 runner：Manifest、状态文件、取消/重启 reconcile、PDF `pdf2zh_next` CLI 和可恢复的真实进度。
+1. 将 Office/图片 TranslationService 逻辑提取为同一应用服务，并补齐 Manifest 与重启后的可恢复状态投影。
 2. 接入 Manifest 文档画布、对象修订、QA blocker 和正式导出门禁。
 3. 补齐词库分页、版本、候选审核和工作台术语命中联动。
 4. 执行浏览器断点、无障碍、性能、Caddy 灰度和 `/legacy` 回滚验收。
