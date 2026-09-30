@@ -23,7 +23,7 @@
 
 ## 验证证据
 
-- 提交：`66b5eba`（产品 Logo 替换）、`05987e2`（通过 `/app-assets` 提供新 Vue 资源）。
+- 提交：`66b5eba`（产品 Logo 替换）、`05987e2`（通过 `/app-assets` 提供新 Vue 资源）、`9f95acc`（刷新 PWA Logo 缓存壳）。
 - `npm --prefix frontend run type-check`：PASS。
 - `npm --prefix frontend run build`：PASS；仅保留已有大 chunk warning。
 - `.venv/bin/python -m pytest -q tests/ui -o addopts=''`：49 passed。
