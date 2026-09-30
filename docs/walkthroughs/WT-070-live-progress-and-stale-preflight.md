@@ -16,13 +16,14 @@
 
 ## 证据
 
-- Commit：`bce4fdb feat: surface live translation progress`
+- Commits：`bce4fdb feat: surface live translation progress`、`ea49614 fix: prevent duplicate active translation starts`
 - 推送：`origin/main` 成功。
 - 前端：`npm --prefix frontend run type-check` 通过；`npm --prefix frontend run build` 通过。
 - 重点测试：17 passed。
 - PLAN-066 相关回归：176 passed，8 个既有 Alembic deprecation warnings。
 - 部署后：`qyunslation-office.service` active；本地 `/api/v1/health` 返回 `db: ok`；公网 `/next/workbench` 和 `/api/v1/health` 返回 200；未认证 `/api/v1/me` 返回 401。
 - 公网静态资源已包含 `翻译实时进度`、`progress_message`、`is-indeterminate` 和 `预检记录已失效`。
+- 追加部署后，当前预检对应的活动任务按钮显示“翻译进行中”并禁用，防止重复创建。
 
 ## 验收边界
 
