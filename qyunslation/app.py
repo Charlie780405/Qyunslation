@@ -166,6 +166,14 @@ Qyunslation（荃信翻译）后端服务 API，提供文档翻译、状态查�
 service_router = APIRouter(prefix="/service", tags=["Service API"])
 STATIC_DIR = resource_path("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# PLAN-066: the Vue workbench is built into an isolated directory. Keeping this
+# namespace separate means the legacy root and its Gradio assets remain intact.
+NEXT_APP_DIR = Path(STATIC_DIR) / "app"
+app.mount(
+    "/app-assets",
+    StaticFiles(directory=NEXT_APP_DIR, check_dir=False),
+    name="app-assets",
+)
 
 
 @app.middleware("http")
@@ -1155,6 +1163,49 @@ async def service_flat_translate(
 # ===================================================================
 # --- Static pages and docs ---
 # ===================================================================
+
+
+@app.get("/auth/login", include_in_schema=False)
+async def auth_login(
+    request: Request,
+    return_to: str = Query("/next/workbench"),
+    format: str = Query("redirect"),
+):
+    """BFF login contract placeholder; the OIDC provider is configured per deployment."""
+    safe_return_to = return_to if return_to.startswith("/") else "/next/workbench"
+    issuer = (os.environ.get("QYUNSLATION_OIDC_ISSUER") or "").strip()
+    if not issuer:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": "SSO_NOT_CONFIGURED",
+                "message": "公司身份服务尚未配置，请联系系统管理员。",
+                "return_to": safe_return_to,
+            },
+        )
+    # Do not guess provider endpoints or store tokens in the browser. The full
+    # BFF flow is added in PLAN-066c once provider metadata and session storage
+    # are provisioned for the deployment.
+    return JSONResponse(
+        status_code=501,
+        content={"code": "SSO_BFF_PENDING", "message": "SSO 登录服务正在部署。"},
+    )
+
+
+@app.post("/auth/logout", include_in_schema=False)
+async def auth_logout():
+    """Idempotent logout endpoint for the new client surface."""
+    return Response(status_code=204)
+
+
+@app.get("/next", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/next/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def next_app_page(path: str = ""):
+    """Serve the Vue workbench SPA while leaving the legacy root untouched."""
+    index_path = NEXT_APP_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="next workbench is not built")
+    return FileResponse(index_path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

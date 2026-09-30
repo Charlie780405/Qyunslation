@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2020",
+    "jsx": "preserve",
+    "strict": false,
+    "skipLibCheck": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src/next/**/*.js", "src/next/**/*.vue"]
+}

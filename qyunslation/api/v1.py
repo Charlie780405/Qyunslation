@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
+import mimetypes
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Generator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -21,6 +26,43 @@ from qyunslation.persist.db import (
     reset_engine,
 )
 from qyunslation.persist.identity import IdentityContext, resolve_identity
+from qyunslation.persist.models import PreflightRecord, WebPreference
+from qyunslation.structure.ingest import DEFAULT_MAX_UPLOAD_BYTES
+
+PREF_ALLOWED_KEYS = frozenset(
+    {"direction", "profile", "bilingual", "density", "reduceMotion", "largeText"}
+)
+PREF_DEFAULTS = {
+    "direction": "English → 简体中文",
+    "profile": "临床研究文档",
+    "bilingual": True,
+    "density": "comfortable",
+    "reduceMotion": False,
+    "largeText": False,
+}
+PREFLIGHT_ALLOWED_EXTENSIONS = frozenset({".pdf", ".docx", ".pptx", ".txt", ".md", ".png", ".jpg", ".jpeg"})
+PREFLIGHT_TTL_HOURS = 24
+
+
+async def _read_upload_limited(upload: UploadFile) -> bytes:
+    """Read uploads in chunks without importing the heavyweight translation server."""
+    raw_limit = (os.environ.get("QYUNSLATION_MAX_UPLOAD_BYTES") or "").strip()
+    try:
+        limit = int(raw_limit) if raw_limit else DEFAULT_MAX_UPLOAD_BYTES
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="invalid upload limit configuration") from exc
+    if limit <= 0:
+        raise HTTPException(status_code=500, detail="invalid upload limit configuration")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(min(1024 * 1024, limit - total + 1))
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="uploaded file exceeds configured limit")
+        chunks.append(chunk)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -123,6 +165,220 @@ def api_health(request: Request) -> dict[str, Any]:
     body["database_url_set"] = bool(get_database_url())
     body["env"] = os.environ.get("QYUNSLATION_ENV") or "development"
     return body
+
+
+@router.get("/me")
+def api_me(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Return the authenticated principal without exposing bearer credentials."""
+    tenant = _tenant_bundle(session, identity)
+    membership = repo.ensure_membership(
+        session, tenant_id=tenant.id, user_sub=identity.user_sub
+    )
+    return {
+        "sub": identity.user_sub,
+        "display_name": identity.user_sub,
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "roles": [membership.role],
+        "capabilities": {
+            "can_review": membership.role in {"reviewer", "term_admin", "admin", "owner"},
+            "can_manage_terms": membership.role in {"term_admin", "admin", "owner"},
+            "can_manage_policy": membership.role in {"admin", "owner"},
+        },
+    }
+
+
+def _preflight_root() -> Path:
+    raw = (os.environ.get("QYUNSLATION_PREFLIGHT_ROOT") or "var/preflights").strip()
+    root = Path(raw)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return root
+
+
+def _preflight_path(record: PreflightRecord) -> Path:
+    root = _preflight_root().resolve()
+    path = (root / record.storage_key).resolve()
+    if root not in path.parents:
+        raise HTTPException(status_code=500, detail="invalid preflight storage key")
+    return path
+
+
+def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
+    expires_at = record.expires_at
+    if expires_at.tzinfo is None:
+        # SQLite returns timezone-aware columns as naive values.
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    expired = expires_at <= datetime.now(timezone.utc)
+    metadata = dict(record.metadata_json or {})
+    return {
+        "id": record.id,
+        "state": "expired" if expired else record.status,
+        "filename": record.source_filename,
+        "format": record.source_format,
+        "size_bytes": record.size_bytes,
+        "sha256": record.source_sha256,
+        "manifest_summary": metadata.get("manifest_summary", {}),
+        "capabilities": metadata.get("capabilities", {}),
+        "issues": metadata.get("issues", []),
+        "recommended": metadata.get("recommended", {}),
+        "expires_at": expires_at.isoformat(),
+        "created_at": record.created_at.isoformat(),
+    }
+
+
+@router.post("/preflights", status_code=201)
+async def create_preflight(
+    file: UploadFile = File(...),
+    direction: str = Form("English → 简体中文"),
+    profile: str = Form("临床研究文档"),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Store a bounded upload and return a reviewable preflight; never starts translation."""
+    filename = Path(file.filename or "uploaded_file").name.strip()
+    if not filename or filename in {".", ".."}:
+        raise HTTPException(status_code=400, detail="filename is required")
+    suffix = Path(filename).suffix.casefold()
+    if suffix not in PREFLIGHT_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="unsupported document format")
+    if len(filename) > 256:
+        raise HTTPException(status_code=400, detail="filename is too long")
+    if not direction.strip() or len(direction) > 64:
+        raise HTTPException(status_code=400, detail="invalid language direction")
+    if not profile.strip() or len(profile) > 128:
+        raise HTTPException(status_code=400, detail="invalid document profile")
+
+    try:
+        content = await _read_upload_limited(file)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="upload could not be read") from exc
+    if not content:
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+
+    tenant = _tenant_bundle(session, identity)
+    record_id = str(uuid.uuid4())
+    relative_key = f"{tenant.id}/{record_id}{suffix}"
+    target = (_preflight_root() / relative_key).resolve()
+    root = _preflight_root().resolve()
+    if root not in target.parents:
+        raise HTTPException(status_code=500, detail="invalid upload destination")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    issues: list[dict[str, str]] = []
+    if suffix in {".png", ".jpg", ".jpeg"}:
+        issues.append({"severity": "warning", "code": "IMAGE_DOCUMENT", "message": "图片文档将在翻译前执行 OCR。"})
+    record = PreflightRecord(
+        id=record_id,
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        source_filename=filename,
+        source_format=suffix.removeprefix(".").lower(),
+        source_sha256=digest,
+        size_bytes=len(content),
+        status="ready",
+        metadata_json={
+            "mime": mime,
+            "manifest_summary": {"pages": None, "objects": None, "scan_detected": suffix in {".png", ".jpg", ".jpeg"}},
+            "capabilities": {"source_read_only": True, "bilingual_output": True, "formal_export": False},
+            "issues": issues,
+            "recommended": {"direction": direction.strip(), "profile": profile.strip()},
+        },
+        storage_key=relative_key,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=PREFLIGHT_TTL_HOURS),
+    )
+    session.add(record)
+    session.flush()
+    record_dict = _preflight_dict(record)
+    record_dict["storage_key"] = record.storage_key
+    return record_dict
+
+
+@router.get("/preflights/{preflight_id}")
+def get_preflight(
+    preflight_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    record = session.get(PreflightRecord, preflight_id)
+    if record is None or record.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    return _preflight_dict(record)
+
+
+@router.delete("/preflights/{preflight_id}", status_code=204)
+def delete_preflight(
+    preflight_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> Response:
+    tenant = _tenant_bundle(session, identity)
+    record = session.get(PreflightRecord, preflight_id)
+    if record is None or record.tenant_id != tenant.id or record.actor_sub != identity.user_sub:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    path = _preflight_path(record)
+    if path.is_file():
+        path.unlink()
+    session.delete(record)
+    return Response(status_code=204)
+
+
+class PreferencesBody(BaseModel):
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+def _safe_preferences(raw: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(PREF_DEFAULTS)
+    for key, value in (raw or {}).items():
+        if key in PREF_ALLOWED_KEYS:
+            merged[key] = value
+    if merged["direction"] not in {"English → 简体中文", "简体中文 → English"}:
+        merged["direction"] = PREF_DEFAULTS["direction"]
+    if merged["profile"] not in {"临床研究文档", "监管申报材料", "通用医药文档"}:
+        merged["profile"] = PREF_DEFAULTS["profile"]
+    if merged["density"] not in {"comfortable", "compact"}:
+        merged["density"] = PREF_DEFAULTS["density"]
+    for key in ("bilingual", "reduceMotion", "largeText"):
+        if not isinstance(merged[key], bool):
+            merged[key] = bool(merged[key])
+    return merged
+
+
+@router.get("/preferences")
+def get_preferences(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    row = session.query(WebPreference).filter_by(tenant_id=tenant.id, user_sub=identity.user_sub).first()
+    return {"preferences": _safe_preferences(row.preferences if row else None), "source": "personal"}
+
+
+@router.put("/preferences")
+def put_preferences(
+    body: PreferencesBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    clean = _safe_preferences(body.preferences)
+    row = session.query(WebPreference).filter_by(tenant_id=tenant.id, user_sub=identity.user_sub).first()
+    if row is None:
+        row = WebPreference(tenant_id=tenant.id, user_sub=identity.user_sub, preferences=clean)
+        session.add(row)
+    else:
+        row.preferences = clean
+    session.flush()
+    record_audit(session, actor_sub=identity.user_sub, action="web.preference.update", extra={"keys": sorted(clean)})
+    return {"preferences": clean, "source": "personal"}
 
 
 @router.get("/projects")

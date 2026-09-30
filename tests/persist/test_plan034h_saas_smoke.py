@@ -61,6 +61,19 @@ def test_health_shows_config_to_authenticated(client):
     assert "env" in authed.json()
 
 
+def test_me_returns_authenticated_principal_without_credentials(client):
+    response = client.get(
+        "/api/v1/me",
+        headers={"X-Dev-User": "smoke", "X-Dev-Tenant": "pilot"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sub"] == "smoke"
+    assert body["tenant_slug"] == "pilot"
+    assert "roles" in body
+    assert "api_key" not in body
+
+
 def test_saas_smoke_health_project_review(client):
     headers = {"X-Dev-User": "smoke", "X-Dev-Tenant": "pilot"}
     health = client.get("/api/v1/health", headers=headers)

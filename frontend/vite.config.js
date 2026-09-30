@@ -3,7 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import legacy from '@vitejs/plugin-legacy'
 
 export default defineConfig({
-  base: '/static/',
+  // PLAN-066: keep the new workbench assets isolated from the legacy Vue/Gradio surface.
+  base: '/app-assets/',
   plugins: [
     vue({
       template: {
@@ -19,8 +20,9 @@ export default defineConfig({
     })
   ],
   build: {
-    outDir: '../qyunslation/static',
-    emptyOutDir: false,
+    outDir: '../qyunslation/static/app',
+    // The isolated app directory contains only generated Vue artifacts.
+    emptyOutDir: true,
     cssMinify: false
   }
 })

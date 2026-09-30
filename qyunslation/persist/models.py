@@ -54,6 +54,59 @@ class EmbeddingVector(TypeDecorator):
         return dialect.type_descriptor(JSON())
 
 
+class WebPreference(Base):
+    """PLAN-066: non-sensitive per-user workbench preferences."""
+
+    __tablename__ = "web_preference"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_sub", name="uq_web_preference_tenant_user"),
+        Index("ix_web_preference_tenant_user", "tenant_id", "user_sub"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    user_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    preferences: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class PreflightRecord(Base):
+    """PLAN-066: tenant-scoped upload preflight; translation starts separately."""
+
+    __tablename__ = "preflight_record"
+    __table_args__ = (
+        Index("ix_preflight_record_tenant_created", "tenant_id", "created_at"),
+        Index("ix_preflight_record_tenant_sha", "tenant_id", "source_sha256"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_format: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class Tenant(Base):
     __tablename__ = "tenant"
 
