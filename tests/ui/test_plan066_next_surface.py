@@ -38,6 +38,10 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert 'function buildIdempotencyKey()' in workbench
     assert 'encodeURIComponent' in workbench
     assert 'showArchived' in workbench
+    assert 'progress_message' in workbench
+    assert 'activeRun' in workbench
+    assert 'is-indeterminate' in workbench
+    assert 'preflight not found' in workbench
     assert 'patchRun' in api
     assert 'deleteRun' in api
     assert (ROOT / 'qyunslation/static/qyunslation-logo.png').exists()

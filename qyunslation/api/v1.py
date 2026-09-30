@@ -606,9 +606,9 @@ def _materialize_artifacts(
     session.flush()
 
 
-def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> None:
+def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
     if not run.external_task_id:
-        return
+        return None
     # PDF runs are owned by the durable non-GUI runner.  Consult its atomic
     # state file before the legacy in-memory adapter so a process restart does
     # not make the web ledger appear to lose the task.
@@ -619,6 +619,7 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> Non
     except Exception:
         runner_state = None
     if runner_state:
+        progress_message = runner_state.get("progress_message")
         status = str(runner_state.get("status") or "degraded")
         if status == "succeeded":
             run.status = "succeeded"
@@ -640,12 +641,12 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> Non
             run.progress = runner_state.get("progress_percent")
             run.completed_at = run.completed_at or datetime.now(timezone.utc)
         else:
-            run.status = "translating"
+            run.status = status if status in {"queued", "scanning", "translating", "rendering"} else "translating"
             run.stage = str(runner_state.get("stage") or "structure")
             progress = runner_state.get("progress_percent")
             run.progress = int(progress) if isinstance(progress, (int, float)) else None
         run.updated_at = datetime.now(timezone.utc)
-        return
+        return str(progress_message) if progress_message else None
     try:
         from qyunslation.server import get_translation_service
 
@@ -653,7 +654,8 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> Non
     except Exception:
         task_state = None
     if not task_state:
-        return
+        return None
+    progress_message = task_state.get("progress_message") or task_state.get("status_message")
     if task_state.get("error_flag"):
         run.status = "failed"
         run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
@@ -670,11 +672,12 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> Non
         progress = task_state.get("progress_percent")
         run.progress = int(progress) if isinstance(progress, (int, float)) else None
     run.updated_at = datetime.now(timezone.utc)
+    return str(progress_message) if progress_message else None
 
 
 def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
     """Project the durable ledger plus current legacy-service state."""
-    _refresh_translation_run(session, run)
+    progress_message = _refresh_translation_run(session, run)
     preflight = session.get(PreflightRecord, run.preflight_id)
     settings = dict(run.settings_snapshot or {})
     source_language, target_language, _ = _normalize_language_pair(
@@ -708,6 +711,9 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "status": run.status,
         "stage": run.stage,
         "progress": run.progress,
+        "progress_message": progress_message or (
+            run.degradation_reason if run.status in {"failed", "degraded"} else None
+        ),
         "manifest_version": run.manifest_version,
         "qa_summary": run.qa_summary or {},
         "term_summary": run.term_summary or {},

@@ -34,6 +34,25 @@
           <div v-if="uploadMessage" class="qy-callout" :class="uploadError ? 'qy-callout-warning' : 'qy-callout-info'" role="status">
             <InformationCircleIcon aria-hidden="true" /><span>{{ uploadMessage }}</span>
           </div>
+          <div v-if="activeRun" class="qy-live-progress" role="status" aria-live="polite">
+            <div class="qy-live-progress-heading">
+              <div class="qy-live-progress-title"><span class="qy-live-indicator" aria-hidden="true"></span><strong>翻译实时进度</strong></div>
+              <span>{{ statusLabel(activeRun.status) }}</span>
+            </div>
+            <div class="qy-live-progress-meta"><strong>{{ activeRun.progress_message || stageMessage(activeRun) }}</strong><span>{{ progressText(activeRun) }}</span></div>
+            <div
+              class="qy-task-progress qy-live-progress-bar"
+              :class="{ 'is-indeterminate': activeRun.progress === null || activeRun.progress === undefined }"
+              role="progressbar"
+              :aria-valuemin="0"
+              :aria-valuemax="100"
+              :aria-valuenow="activeRun.progress === null || activeRun.progress === undefined ? undefined : activeRun.progress"
+              :aria-valuetext="progressText(activeRun)"
+            ><span :style="activeRun.progress === null || activeRun.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, activeRun.progress))}%` }"></span></div>
+            <ol class="qy-live-stage-list" aria-label="翻译阶段">
+              <li v-for="stage in progressStages" :key="stage.key" :class="stageClass(stage.key, activeRun)"><span>{{ stage.number }}</span><strong>{{ stage.label }}</strong></li>
+            </ol>
+          </div>
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
             <span class="qy-status-badge" :class="preflight.state === 'ready' ? 'is-ready' : 'is-pending'">{{ preflight.state === 'ready' ? '预检通过' : '需要处理' }}</span>
@@ -67,7 +86,8 @@
               <div class="qy-task-details">
                 <strong>{{ run.display_name || run.filename || run.file_name || '未命名文档' }}</strong>
                 <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template></span>
-                <div v-if="run.progress !== null && run.progress !== undefined" class="qy-task-progress" aria-hidden="true"><span :style="{ width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
+                <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ run.progress_message || stageMessage(run) }}</span><span>{{ progressText(run) }}</span></div>
+                <div v-if="isActive(run)" class="qy-task-progress" :class="{ 'is-indeterminate': run.progress === null || run.progress === undefined }" role="progressbar" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="run.progress === null || run.progress === undefined ? undefined : run.progress" :aria-valuetext="progressText(run)"><span :style="run.progress === null || run.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
                 <div v-if="run.artifacts?.length" class="qy-task-artifacts">
                   <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
                 </div>
@@ -96,11 +116,11 @@
           <span class="qy-eyebrow">TASK FLOW</span>
           <h2>一次任务，五个可复核阶段</h2>
           <ol class="qy-flow-list">
-            <li class="is-current"><span>01</span><div><strong>文件预检</strong><small>识别格式、页数与风险</small></div></li>
-            <li><span>02</span><div><strong>翻译处理</strong><small>按文档对象保留结构</small></div></li>
-            <li><span>03</span><div><strong>QA 与术语</strong><small>发现高风险不一致</small></div></li>
-            <li><span>04</span><div><strong>人工复核</strong><small>只编辑译文版本</small></div></li>
-            <li><span>05</span><div><strong>受控导出</strong><small>通过门禁后生成正式稿</small></div></li>
+            <li :class="stageClass('validation', activeRun)"><span>01</span><div><strong>文件预检</strong><small>识别格式、页数与风险</small></div></li>
+            <li :class="stageClass('text', activeRun)"><span>02</span><div><strong>翻译处理</strong><small>按文档对象保留结构</small></div></li>
+            <li :class="stageClass('qa', activeRun)"><span>03</span><div><strong>QA 与术语</strong><small>发现高风险不一致</small></div></li>
+            <li :class="stageClass('review', activeRun)"><span>04</span><div><strong>人工复核</strong><small>只编辑译文版本</small></div></li>
+            <li :class="stageClass('export', activeRun)"><span>05</span><div><strong>受控导出</strong><small>通过门禁后生成正式稿</small></div></li>
           </ol>
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
@@ -146,8 +166,16 @@ let pollTimer;
 let pollRequest = 0;
 
 const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
-const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
+const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
+const progressStages = [
+  { key: 'validation', number: '01', label: '预检' },
+  { key: 'text', number: '02', label: '翻译' },
+  { key: 'qa', number: '03', label: 'QA' },
+  { key: 'review', number: '04', label: '复核' },
+  { key: 'export', number: '05', label: '导出' },
+];
+const activeRun = computed(() => runs.value.find(isActive) || null);
 const languageError = computed(() => settings.sourceLanguage === settings.targetLanguage ? '源语言和目标语言不能相同。' : '');
 
 // HTTP field values are restricted to ISO-8859-1 by the browser Headers API.
@@ -169,7 +197,7 @@ function statusLabel(status) {
 }
 
 function stageLabel(stage) {
-  return ({ validation: '预检', structure: '结构', text: '正文', table_figure: '表格与图注', layout: '版式', qa: 'QA', export: '导出' })[stage] || '处理中';
+  return ({ validation: '预检', structure: '结构', text: '正文', table_figure: '表格与图注', layout: '版式', rendering: '版式', qa: 'QA', review: '复核', export: '导出' })[stage] || '处理中';
 }
 
 function isActive(run) {
@@ -182,6 +210,34 @@ function isTerminal(run) {
 
 function canRetry(run) {
   return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
+}
+
+function stageBucket(stage) {
+  if (stage === 'validation') return 'validation';
+  if (['structure', 'text', 'table_figure', 'layout', 'rendering'].includes(stage)) return 'text';
+  if (stage === 'qa') return 'qa';
+  if (stage === 'review' || stage === 'review_ready') return 'review';
+  if (stage === 'export') return 'export';
+  return 'validation';
+}
+
+function stageClass(stage, run) {
+  if (!run) return stage === 'validation' ? 'is-current' : '';
+  const order = ['validation', 'text', 'qa', 'review', 'export'];
+  const current = order.indexOf(stageBucket(run.stage));
+  const index = order.indexOf(stage);
+  if (current < 0 || index < 0) return '';
+  if (index < current || run.status === 'succeeded' && index < order.length) return 'is-complete';
+  if (index === current) return 'is-current';
+  return '';
+}
+
+function stageMessage(run) {
+  return ({ validation: '正在准备任务', structure: '正在分析文档结构', text: '正在翻译正文', table_figure: '正在处理表格与图注', layout: '正在渲染版式', rendering: '正在渲染版式', qa: '正在执行 QA 检查', review: '等待人工复核', export: '正在导出结果' })[run?.stage] || '正在处理任务';
+}
+
+function progressText(run) {
+  return run?.progress === null || run?.progress === undefined ? '处理中，进度计算中' : `${run.progress}%`;
 }
 
 function selectFile(event) {
@@ -249,7 +305,12 @@ async function startTranslation() {
     await refreshRuns();
   } catch (error) {
     uploadError.value = true;
-    uploadMessage.value = error.message || '翻译任务创建失败';
+    if (error.status === 404 && String(error.message || '').toLowerCase().includes('preflight not found')) {
+      preflight.value = null;
+      uploadMessage.value = '预检记录已失效，请重新点击“开始预检”后再翻译。';
+    } else {
+      uploadMessage.value = error.message || '翻译任务创建失败';
+    }
   } finally {
     startingRun.value = false;
   }
@@ -327,6 +388,12 @@ async function deleteRun(run) {
   if (!window.confirm(`确定删除任务“${run.display_name || run.filename || '未命名文档'}”吗？此操作不可恢复。`)) return;
   try {
     await api.deleteRun(run.id);
+    const deletedSelectedPreflight = preflight.value?.id === run.preflight_id;
+    if (deletedSelectedPreflight) {
+      preflight.value = null;
+      uploadError.value = false;
+      uploadMessage.value = '任务已删除，原预检记录也已清理。请重新开始预检。';
+    }
     await refreshRuns();
   } catch (error) {
     uploadError.value = true;

@@ -47,6 +47,7 @@ def test_translation_run_is_durable_and_idempotent_when_runner_is_unavailable(cl
     assert first.status_code == 201
     assert first.json()["status"] == "blocked"
     assert first.json()["degradation_reason"] == "translation runner unavailable"
+    assert "progress_message" in first.json()
     second = client.post(
         "/api/v1/translation-runs",
         headers={**headers(), "Idempotency-Key": "run-once"},

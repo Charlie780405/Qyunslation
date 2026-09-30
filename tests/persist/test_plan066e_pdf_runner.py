@@ -68,7 +68,7 @@ def test_pdf_translation_run_uses_cli_state_and_authorized_artifact(client):
     assert created.status_code == 201
     body = created.json()
     assert body["external_task_id"].startswith("pdf2zh:")
-    assert body["status"] in {"translating", "succeeded"}
+    assert body["status"] in {"scanning", "translating", "rendering", "succeeded"}
 
     final = body
     for _ in range(30):

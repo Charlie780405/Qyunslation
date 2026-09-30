@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from qyunslation.workbench.runner import Pdf2zhRunner, build_pdf2zh_command
+from qyunslation.workbench.runner import (
+    Pdf2zhRunner,
+    _progress_message_from_line,
+    build_pdf2zh_command,
+)
 
 
 def _fake_cli(path: Path, *, delay: float = 0.0) -> None:
@@ -73,6 +77,16 @@ def test_pdf_runner_env_exposes_package_parent_to_cli_workers():
     assert package_parent in env["PYTHONPATH"].split(os.pathsep)
 
 
+def test_runner_extracts_human_readable_live_progress_from_cli_output():
+    assert _progress_message_from_line(
+        "Translate Paragraphs (1/1) ━━━━━ 126/… 0:00:… 0:00:…"
+    ) == "正在翻译段落"
+    assert _progress_message_from_line(
+        "Typesetting (1/1) ━━━━━ 18/18 0:00:… 0:00:…"
+    ) == "正在处理版式"
+    assert _progress_message_from_line("INFO: unrelated diagnostic") is None
+
+
 @pytest.mark.asyncio
 async def test_runner_writes_atomic_state_and_discovers_outputs(tmp_path: Path, monkeypatch):
     cli = tmp_path / "fake-pdf2zh"
@@ -107,6 +121,7 @@ async def test_runner_writes_atomic_state_and_discovers_outputs(tmp_path: Path, 
     assert state["status"] == "succeeded"
     assert state["download_ready"] is True
     assert state["progress_percent"] == 100
+    assert state["progress_message"] == "正在导出结果"
     assert state["downloadable_files"]["pdf"]["filename"] == "source_dual.pdf"
     assert not runtime_config.exists()
 

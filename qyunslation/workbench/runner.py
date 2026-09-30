@@ -28,6 +28,23 @@ TERMINAL = frozenset({"succeeded", "failed", "cancelled", "degraded"})
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PROGRESS_RE = re.compile(r"\bProgress:\s*(?P<value>0(?:\.\d+)?|1(?:\.0+)?)\s*,\s*(?P<label>.*)$")
 _PERCENT_RE = re.compile(r"\b(?P<value>\d{1,3}(?:\.\d+)?)%\b")
+_LIVE_PROGRESS_LABELS: tuple[tuple[str, str], ...] = (
+    ("translate paragraphs", "正在翻译段落"),
+    ("parse pdf and create intermediate representation", "正在解析 PDF 结构"),
+    ("detectscannedfile", "正在检测扫描件"),
+    ("parse page layout", "正在分析页面版式"),
+    ("parse paragraphs", "正在提取段落"),
+    ("parse formulas and styles", "正在解析公式与样式"),
+    ("typesetting", "正在处理版式"),
+    ("add fonts", "正在嵌入字体"),
+    ("generate drawing instructions", "正在生成绘图指令"),
+    ("subset font", "正在优化字体"),
+    ("save pdf", "正在保存 PDF"),
+    ("export", "正在导出结果"),
+    ("parse", "正在解析文档"),
+    ("translate", "正在翻译正文"),
+    ("render", "正在渲染文档"),
+)
 
 
 class RunnerError(RuntimeError):
@@ -267,6 +284,12 @@ def _runner_process_matches(pid: int) -> bool:
 
 def _stage_for_label(label: str) -> str:
     lowered = label.casefold()
+    if any(token in lowered for token in ("parse page layout", "parse paragraphs", "parse formulas")):
+        return "structure"
+    if "save pdf" in lowered or "export" in lowered:
+        return "export"
+    if "detectscannedfile" in lowered:
+        return "structure"
     if any(token in lowered for token in ("scan", "ocr", "parse", "structure", "layout analysis")):
         return "structure"
     if any(token in lowered for token in ("render", "typeset", "layout", "export")):
@@ -276,6 +299,26 @@ def _stage_for_label(label: str) -> str:
     if any(token in lowered for token in ("qa", "quality", "term")):
         return "qa"
     return "translating"
+
+
+def _progress_message_from_line(line: str) -> str | None:
+    """Map trusted CLI progress labels to concise user-facing Chinese text.
+
+    Rich redraws its progress bars as terminal lines such as ``Translate
+    Paragraphs (1/1)``.  Those lines do not always contain a reliable global
+    percentage, so we expose the current operation separately and let the UI
+    render an indeterminate bar instead of inventing a percentage.
+    """
+    lowered = " ".join(str(line).casefold().split())
+    progress_match = _PROGRESS_RE.search(line)
+    if progress_match:
+        lowered = progress_match.group("label").casefold().strip()
+    for label, message in _LIVE_PROGRESS_LABELS:
+        if label in lowered:
+            return message
+    if "scanned pdf detected" in lowered or "ocr" in lowered:
+        return "正在准备 OCR 文字层"
+    return None
 
 
 def _parse_progress(line: str) -> tuple[int | None, str | None]:
@@ -370,6 +413,7 @@ class Pdf2zhRunner:
             "is_processing": status in NON_TERMINAL,
             "error_flag": status in {"failed", "degraded"},
             "status_message": state.get("reason") or status,
+            "progress_message": state.get("progress_message"),
             "downloadable_files": outputs,
             "attachment_files": {},
             "runner_state_path": str(run_dir / "state.json"),
@@ -429,6 +473,7 @@ class Pdf2zhRunner:
             "status": "queued",
             "stage": "validation",
             "progress": None,
+            "progress_message": "正在准备翻译",
             "pid": None,
             "command": [str(item) for item in command if not str(item).startswith("--")],
             "source_filename": Path(original_filename).name[:256],
@@ -506,6 +551,7 @@ class Pdf2zhRunner:
             stage="structure",
             progress=None,
             reason="PDF 扫描件未生成产物，正在补充 OCR 文字层",
+            progress_message="正在补充 OCR 文字层",
         )
         ocr_source = run_dir / "input.hpd-ocr.pdf"
         try:
@@ -563,6 +609,7 @@ class Pdf2zhRunner:
             pid=process.pid,
             command=[str(item) for item in retry_command if not str(item).startswith("--")],
             reason="已生成 OCR 文字层，正在重新翻译",
+            progress_message="已生成 OCR 文字层，正在重新翻译",
         )
         return True, state, None
 
@@ -602,13 +649,17 @@ class Pdf2zhRunner:
                             continue
                         last_reason = _safe_reason(line, last_reason)
                         progress, stage = _parse_progress(line)
-                        if progress is not None or stage is not None:
+                        progress_message = _progress_message_from_line(line)
+                        if progress_message and stage is None:
+                            stage = _stage_for_label(line)
+                        if progress is not None or stage is not None or progress_message:
                             state = self._write_state(
                                 state_path,
                                 state,
-                                status="rendering" if stage == "rendering" else "translating",
+                                status="rendering" if stage in {"rendering", "export"} else "translating",
                                 progress=progress if progress is not None else state.get("progress"),
                                 stage=stage or state.get("stage") or "translating",
+                                progress_message=progress_message or state.get("progress_message"),
                             )
                 returncode = await managed.process.wait()
                 # Cancellation is written by the API task while this watcher
@@ -627,6 +678,7 @@ class Pdf2zhRunner:
                         progress=100,
                         outputs=outputs,
                         reason=None,
+                        progress_message=state.get("progress_message") or "翻译完成",
                         finished_at=_utc_now(),
                     )
                     break
@@ -652,6 +704,7 @@ class Pdf2zhRunner:
                     status="failed",
                     stage="qa",
                     progress=state.get("progress"),
+                    progress_message=state.get("progress_message") or "翻译失败",
                     reason=last_reason or (
                         "pdf2zh_next completed without output artifacts"
                         if returncode == 0
