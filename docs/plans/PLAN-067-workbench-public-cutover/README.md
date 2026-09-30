@@ -38,7 +38,7 @@
 ## 当前缺口与观察门槛
 
 - 仍需人工浏览器视觉、跨租户界面和至少一个真实 Vue 翻译任务的操作证据。
-- `office-archive-watch.service` 因受保护虚拟环境缺少 `minio` 持续 crash-loop；不能卸载，需独立修复切片。
+- `office-archive-watch.service` 曾因受保护虚拟环境缺少 `minio` crash-loop；已补齐锁定依赖并恢复 active，仍不得视为冗余模块。
 - 在根入口切换前必须完成旧任务/下载、PDF 归档 watcher 和 Caddy 回滚验证；服务停用与删除仍需单独证据，不与路由切换混为一步。
 
 ## 完成与回滚原则
