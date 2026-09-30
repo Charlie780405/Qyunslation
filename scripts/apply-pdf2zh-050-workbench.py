@@ -162,6 +162,9 @@ CSS_BLOCK = r"""
       color: var(--qy-color-text);
       font-family: system-ui, sans-serif;
     }
+    #qy050-inspector[data-open="false"] {
+      display: none !important;
+    }
     /* PLAN-057: hide duplicate language row (qy_dir is SSOT for users) */
     .qy-col-left .lang-row {
       display: none !important;
@@ -394,7 +397,11 @@ JS_BLOCK = r"""
       if (window.__qy050Keys) return;
       window.__qy050Keys = true;
       document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') toggleInspector(false);
+        if (e.key === 'Escape') {
+          toggleInspector(false);
+          var close = document.querySelector('#qy060-insp-close button, button#qy060-insp-close');
+          if (close) close.click();
+        }
         if (e.altKey && e.key === '1') { e.preventDefault(); setCanvas('src'); }
         if (e.altKey && e.key === '2') { e.preventDefault(); setCanvas('dst'); }
         if (e.altKey && e.key === 'i') { e.preventDefault(); toggleInspector(); }

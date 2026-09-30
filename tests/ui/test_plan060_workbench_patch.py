@@ -43,10 +43,14 @@ def test_plan060_patch_declares_server_side_term_panel_and_callbacks():
     assert "_qy060_table_confirmation" in text
     assert "_qy060_select_table_row" in text
     assert "_qy060_table_input" in text
-    assert "已返回列表" in text
+    assert "已关闭" in text
     assert "批准入库" in text
     assert "拒绝入库" in text
-    assert "关闭 / 返回列表" in text
+    assert 'gr.Button("关闭"' in text
+    assert "_qy060_close_inspector" in text
+    assert 'visible=False' in text
+    assert '#qy050-inspector[data-open="false"]' in text
+    assert ".qy-050-inspector:not(#qy050-inspector)" in text
     assert "qy060_term_table.input" in text
 
 

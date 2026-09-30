@@ -35,8 +35,12 @@ CSS_BLOCK = r'''
       border-radius: 8px !important;
       font-weight: 600 !important;
     }
-    /* PLAN-015 锁一屏；检查器/术语表高于视口时必须自滚，否则「保存」被裁切。 */
-    .qy-050-inspector, .qy-050-help {
+    /* JS 抽屉默认隐藏；关闭只改 data-open，必须靠 CSS 真正消失。 */
+    #qy050-inspector[data-open="false"] {
+      display: none !important;
+    }
+    /* PLAN-015 锁一屏；只铺 Gradio 检查器，不要让 JS 空抽屉占满视口。 */
+    .qy-050-inspector:not(#qy050-inspector), .qy-050-help {
       position: fixed !important;
       top: calc(var(--qy-appbar-h, 48px) + 8px) !important;
       left: 16px !important;
@@ -65,7 +69,7 @@ CSS_BLOCK = r'''
     }
     @media (max-width: 767px) {
       .qy-060-term-badge { width: calc(100% - 32px) !important; }
-      .qy-050-inspector, .qy-050-help {
+      .qy-050-inspector:not(#qy050-inspector), .qy-050-help {
         left: 8px !important;
         right: 8px !important;
       }
@@ -159,7 +163,10 @@ UI_BLOCK = f'''        {UI_MARKER}
             elem_classes=["qy-060-term-badge"],
         )
         with qy_inspector:
-            gr.Markdown("### 专业词汇")
+            with gr.Row():
+                gr.Markdown("### 专业词汇")
+                qy060_close_top = gr.Button("关闭", size="sm", elem_id="qy060-insp-close")
+            gr.Markdown("列表是候选。点「批准入库」或「一键入库」后才进公司库；下一篇登录翻译将自动使用确认译法。")
             qy060_term_filter = gr.Dropdown(
                 choices=["待确认", "待管理员", "已批准", "术语未遵循", "已拒绝"],
                 value="待确认",
@@ -179,7 +186,7 @@ UI_BLOCK = f'''        {UI_MARKER}
             with gr.Row():
                 qy060_batch_approve = gr.Button("一键入库", variant="primary", size="sm")
                 qy060_batch_reject = gr.Button("一键拒绝", size="sm")
-                qy060_close = gr.Button("关闭 / 返回列表", size="sm")
+                qy060_close = gr.Button("关闭", size="sm")
             qy060_candidate_id = gr.Dropdown(choices=[], label="待审术语", visible=False)
             with gr.Group(visible=False) as qy060_detail:
                 qy060_context = gr.Markdown("翻译完成后可查看页码、表格或 OCR 定位。")
@@ -318,7 +325,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
                     gr.update(value=note or "专业词汇：登录后可恢复最近审校", visible=True),
                     gr.update(value=[]),
                     gr.update(choices=[], value=None),
-                    gr.update(value=note or "尚无可审校术语。登录后将恢复最近一次翻译的已批准/待确认记录；新文档需先完成翻译。"),
+                    gr.update(value=note or "尚无可审校术语。列表是候选，点「批准入库」或「一键入库」后才进公司库；下一篇登录翻译将自动使用确认译法。"),
                     *empty_detail[1:],
                 )
             try:
@@ -489,7 +496,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             if actions[label] == "reject":
                 saved = "已拒绝，后续不再推荐同形近义。"
             elif actions[label] in {{"approve", "merge", "do_not_translate"}}:
-                saved = "已批准，已返回列表。"
+                saved = "已批准入库。下一篇登录翻译将自动使用该确认译法。"
             else:
                 saved = "术语决定已保存，已返回列表。"
             if not leftover and selected_filter == "待确认":
@@ -502,8 +509,14 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         def _qy060_reject_term(state, candidate_id, target, concept_id, note, selected_filter, table_data):
             return _qy060_decide_term(state, candidate_id, "拒绝入库", target, concept_id, note, selected_filter, table_data)
 
-        def _qy060_close_detail(state, selected_filter):
-            return gr.update(value="已返回列表。"), *_qy060_render_terms(state, selected_filter)
+        def _qy060_close_inspector(state, selected_filter):
+            rendered = _qy060_render_terms(state, selected_filter)
+            return (
+                gr.update(value="已关闭。列表是候选；批准入库后下一篇登录翻译将自动使用确认译法。"),
+                False,
+                gr.update(visible=False),
+                *rendered,
+            )
 
         def _qy060_batch_selected(state, selected_filter, picked, table_data, action):
             from qyunslation.workbench.gui_client import batch_decide_workbench_terms, get_workbench_term_review
@@ -548,7 +561,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
             if skipped_target:
                 extra.append(f"缺译法 {{skipped_target}}")
             suffix = f"（{{'，'.join(extra)}}）" if extra else ""
-            verb = "已入库" if action == "approve" else "已拒绝"
+            verb = "已入库，下一篇登录翻译将自动使用。" if action == "approve" else "已拒绝"
             return gr.update(value=f"{{verb}} {{result.get('count', 0)}} 条。{{suffix}}"), *_qy060_render_terms(state, selected_filter)
 
         def _qy060_batch_approve(state, selected_filter, picked, table_data):
@@ -559,6 +572,7 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
 
         _QY060_LIST_OUT = [qy060_term_badge, qy060_term_table, qy060_candidate_id, qy060_context, qy060_actual, qy060_recommended, qy060_target, qy060_picked, qy060_detail]
         _QY060_DECIDE_OUT = [qy060_decision_status] + _QY060_LIST_OUT
+        _QY060_CLOSE_OUT = [qy060_decision_status, qy_insp_on, qy_inspector] + _QY060_LIST_OUT
         qy060_term_badge.click(_qy050_flip_insp, [qy_insp_on], [qy_insp_on, qy_inspector])
         qy060_term_filter.change(_qy060_render_terms, [state, qy060_term_filter], _QY060_LIST_OUT)
         qy060_candidate_id.change(_qy060_select_term, [state, qy060_candidate_id], [qy060_context, qy060_actual, qy060_recommended, qy060_target, qy060_concept, qy060_detail])
@@ -567,7 +581,8 @@ EVENT_BLOCK = f'''        {EVENT_MARKER}
         qy060_decide.click(_qy060_decide_term, [state, qy060_candidate_id, qy060_action, qy060_target, qy060_concept, qy060_note, qy060_term_filter, qy060_term_table], _QY060_DECIDE_OUT)
         qy060_approve.click(_qy060_approve_term, [state, qy060_candidate_id, qy060_target, qy060_concept, qy060_note, qy060_term_filter, qy060_term_table], _QY060_DECIDE_OUT)
         qy060_reject.click(_qy060_reject_term, [state, qy060_candidate_id, qy060_target, qy060_concept, qy060_note, qy060_term_filter, qy060_term_table], _QY060_DECIDE_OUT)
-        qy060_close.click(_qy060_close_detail, [state, qy060_term_filter], _QY060_DECIDE_OUT)
+        qy060_close.click(_qy060_close_inspector, [state, qy060_term_filter], _QY060_CLOSE_OUT)
+        qy060_close_top.click(_qy060_close_inspector, [state, qy060_term_filter], _QY060_CLOSE_OUT)
         qy060_batch_approve.click(_qy060_batch_approve, [state, qy060_term_filter, qy060_picked, qy060_term_table], _QY060_DECIDE_OUT)
         qy060_batch_reject.click(_qy060_batch_reject, [state, qy060_term_filter, qy060_picked, qy060_term_table], _QY060_DECIDE_OUT)
         {TIMER_MARKER}
