@@ -30,4 +30,3 @@
 2. `inject-plan-067c-bff-env.py --apply` 成功且 sidecar 已重启。
 3. 真实试点账号完成登录、回调、`/api/v1/me`、登出和 CSRF 验收。
 4. 浏览器未看到 token，Cookie 属性和跨租户拒绝均有证据。
-

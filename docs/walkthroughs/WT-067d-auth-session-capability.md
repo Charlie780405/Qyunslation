@@ -8,6 +8,7 @@
 - `/api/v1/me` 增加服务端生成的 `capabilities.workbench_v2`。
 - Vue session store 增加 capability 查询；路由拒绝无 capability 用户，登录页显示中文无权限提示。
 - Authentik provider 脚本增加 `roles` scope mapping：试点组成员才获得 `workbench_v2`。
+- 已在本地 Authentik 执行幂等校正：roles mapping 存在，provider 共 5 个 scope mapping，strict callback 仍为 `/auth/callback`。
 
 ## 自动化结果
 
@@ -28,4 +29,3 @@ npm --prefix frontend run build       PASS（有既有大 chunk warning）
 - 尚未执行真实浏览器 OIDC callback、`/api/v1/me`、登出和 CSRF 证据。
 
 因此本子计划只能标记“代码完成、生产验收未完成”，不得进入 Vue 公网灰度。
-
