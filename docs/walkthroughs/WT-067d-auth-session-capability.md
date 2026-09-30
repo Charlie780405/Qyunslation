@@ -22,10 +22,17 @@ npm --prefix frontend run type-check  PASS
 npm --prefix frontend run build       PASS（有既有大 chunk warning）
 ```
 
-## 生产缺口
+## 生产与本机预检结果
 
-- `auth.qyunsgen.com` 仍未解析，067b 门禁为 BLOCKED。
-- 067c 尚未 apply，`office.env` 未写入 client ID/session key，sidecar 未因本切片重启。
-- 尚未执行真实浏览器 OIDC callback、`/api/v1/me`、登出和 CSRF 证据。
+- 067b 已重跑并通过：`SUMMARY: PASS fail=0 blocked=0`。
+- 067c 已 apply；`office.env` 和 0600 备份权限正确，未在证据中记录 secret；sidecar 已重启并为 `active`。
+- 本机 `/auth/login?format=json` 返回 Authentik authorize URL，scope 含 `roles`，redirect URI 为 `/auth/callback`。
+- 本机 `/api/v1/health` 返回 200；未认证 `/api/v1/me` 返回 401。
+- 合成 cookie 的 logout 请求缺失 CSRF 返回 403，匹配 CSRF 返回 204；未触碰真实会话。
 
-因此本子计划只能标记“代码完成、生产验收未完成”，不得进入 Vue 公网灰度。
+## 剩余生产缺口
+
+- 尚未经过 Caddy 将 `/next`、`/auth`、`/api/v1` 灰度到 sidecar。
+- 尚未使用真实试点账号完成浏览器 OIDC callback、`/api/v1/me` capability、cookie 属性、登出和跨租户拒绝证据。
+
+因此本子计划标记为“代码与 sidecar 预检完成、真实浏览器验收待 067e 灰度路由”。
