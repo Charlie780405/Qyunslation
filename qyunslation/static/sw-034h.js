@@ -1,10 +1,10 @@
 /* PLAN-034h：最小 Service Worker — 仅缓存壳，不离线翻译 */
-const CACHE = "qyunslation-034h-shell-v1";
+const CACHE = "qyunslation-034h-shell-v2";
 const PRECACHE = [
   "/static/review.html",
   "/static/manifest.webmanifest",
   "/static/sw-034h.js",
-  "/static/favicon.ico",
+  "/static/qyunslation-mark.png",
 ];
 
 self.addEventListener("install", (event) => {
