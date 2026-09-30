@@ -46,6 +46,7 @@ def test_login_uses_server_state_and_pkce(client, monkeypatch):
     query = parse_qs(urlparse(location).query)
     assert query["code_challenge_method"] == ["S256"]
     assert query["redirect_uri"][0].endswith("/auth/callback")
+    assert "tenant" in query["scope"][0].split()
     assert "roles" in query["scope"][0].split()
     assert response.json()["return_to"] == "/next/workbench"
     state = query["state"][0]

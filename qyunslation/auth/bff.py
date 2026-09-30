@@ -315,7 +315,9 @@ async def auth_login(
             "client_id": _client_id(),
             "response_type": "code",
             "redirect_uri": _redirect_uri(request),
-            "scope": "openid profile email roles",
+            # Tenant is a required server-side identity claim; roles carries
+            # the independent Vue capability without granting tenant access.
+            "scope": "openid profile email tenant roles",
             "state": state,
             "nonce": nonce,
             "code_challenge": _pkce_challenge(verifier),
