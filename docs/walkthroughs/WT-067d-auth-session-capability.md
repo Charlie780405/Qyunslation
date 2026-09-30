@@ -32,6 +32,7 @@ npm --prefix frontend run build       PASS（有既有大 chunk warning）
 - 真实公网 OIDC 客户端流程已通过：试点账号登录 → Authentik callback 302 → BFF session；`/api/v1/me` 返回 200 且 `workbench_v2=true`。
 - 实际 BFF cookie 仅报告属性：`qyunslation_session` 为 Secure/HttpOnly/SameSite=Lax，`qyunslation_csrf` 为 Secure/非 HttpOnly/SameSite=Lax；未输出值。
 - 真实会话 logout 无 CSRF 返回 403，带匹配 CSRF 返回 204，之后 `/api/v1/me` 返回 401。
+- 发送伪造 `X-Tenant`/`X-User-Sub` 请求头后，`/api/v1/me` 仍返回认证会话的 `pilot` tenant 和同一 subject；租户与用户未从请求头覆盖。
 
 ## 剩余生产缺口
 
