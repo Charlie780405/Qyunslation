@@ -150,6 +150,20 @@ const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'blocked',
 const languages = ['English', '简体中文'];
 const languageError = computed(() => settings.sourceLanguage === settings.targetLanguage ? '源语言和目标语言不能相同。' : '');
 
+// HTTP field values are restricted to ISO-8859-1 by the browser Headers API.
+// Encode each segment so localized settings remain safe and deterministic as
+// an Idempotency-Key while still distinguishing every task configuration.
+function buildIdempotencyKey() {
+  return [
+    'preflight',
+    preflight.value?.id,
+    settings.sourceLanguage,
+    settings.targetLanguage,
+    settings.profile,
+    settings.bilingual ? '1' : '0',
+  ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
+}
+
 function statusLabel(status) {
   return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成' })[status] || '待处理';
 }
@@ -223,7 +237,7 @@ async function startTranslation() {
   startingRun.value = true;
   uploadError.value = false;
   try {
-    const key = `preflight:${preflight.value.id}:${settings.sourceLanguage}:${settings.targetLanguage}:${settings.profile}:${settings.bilingual}`;
+    const key = buildIdempotencyKey();
     await api.createTranslationRun({
       preflight_id: preflight.value.id,
       source_language: settings.sourceLanguage,

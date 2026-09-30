@@ -35,6 +35,8 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert '/static/qyunslation-logo.png' in settings
     assert 'settings.sourceLanguage' in workbench
     assert 'settings.targetLanguage' in workbench
+    assert 'function buildIdempotencyKey()' in workbench
+    assert 'encodeURIComponent' in workbench
     assert 'showArchived' in workbench
     assert 'patchRun' in api
     assert 'deleteRun' in api
