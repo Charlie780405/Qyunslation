@@ -28,8 +28,8 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert "workbench_v2" in router
     assert "hasCapability" in session
     assert "workbench_v2" in login
-    assert '/static/qyunslation-mark.png' in shell
-    assert '/static/qyunslation-mark.png' in login
+    assert '/app-assets/qyunslation-mark.png' in shell
+    assert '/app-assets/qyunslation-mark.png' in login
     assert '/static/qyunslation-logo.png' in settings
     assert (ROOT / 'qyunslation/static/qyunslation-logo.png').exists()
     assert (ROOT / 'qyunslation/static/qyunslation-mark.png').exists()

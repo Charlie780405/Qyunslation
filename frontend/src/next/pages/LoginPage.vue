@@ -2,7 +2,7 @@
   <main class="qy-login-page">
     <section class="qy-login-panel" aria-labelledby="login-title">
       <div class="qy-login-brand">
-        <img src="/static/qyunslation-mark.png" alt="Qyunslation" class="qy-login-logo" />
+        <img src="/app-assets/qyunslation-mark.png" alt="Qyunslation" class="qy-login-logo" />
         <span class="qy-eyebrow">QYUNSLATION WORKSPACE</span>
       </div>
       <h1 id="login-title">进入临床翻译工作台</h1>
