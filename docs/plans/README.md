@@ -44,5 +44,6 @@
 | **PLAN-061** | [PLAN-061-termbase-workbench-fix](./PLAN-061-termbase-workbench-fix/) | **术语工作台保存/两列/准入规则修复** |
 | **PLAN-062** | [PLAN-062-termbase-evolution](./PLAN-062-termbase-evolution/) | **术语工作台准确度与自动进化（词库 seed / 候选准入 / 段落对齐 / 去重复 / Concept ID / 实时进度）** |
 | **PLAN-063** | [PLAN-063-translation-quality-evolution](./PLAN-063-translation-quality-evolution/) | **规则自动进化与全局质量总纲（原拟 062，依赖 PLAN-062）** |
+| **PLAN-065** | [PLAN-065-inspector-close-reuse](./PLAN-065-inspector-close-reuse/) | **专业词汇检查器关闭与入库复用说明** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。

@@ -7,7 +7,7 @@ PATCH = Path(__file__).resolve().parents[2] / "scripts" / "apply-pdf2zh-060-term
 
 def test_patch_advances_to_next_term_and_exposes_concept_picker():
     text = PATCH.read_text(encoding="utf-8")
-    assert "已返回列表" in text
+    assert "已返回列表" in text or "已关闭" in text
     assert "本次待确认术语已全部处理" in text
     assert 'choices=["待确认", "待管理员", "已批准", "术语未遵循", "已拒绝"]' in text
     assert "gr.Dropdown(choices=[], allow_custom_value=True" in text
@@ -16,7 +16,7 @@ def test_patch_advances_to_next_term_and_exposes_concept_picker():
     assert "_qy060_confirm_default" in text
     assert "restore_latest_workbench_run" in text
     assert "_qy060_ensure_run" in text
-    assert "登录后将恢复最近一次翻译" in text
+    assert "下一篇登录翻译将自动使用确认译法" in text
     assert 'selected_filter in {{"已批准", "已拒绝"}}' in text
     assert "source_norm" in text
     assert "一键入库" in text
