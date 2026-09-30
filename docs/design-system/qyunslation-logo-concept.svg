@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300" role="img" aria-labelledby="title desc">
+  <title id="title">Qyunslation logo concept</title>
+  <desc id="desc">A folded clinical document containing two translation arrows and molecular nodes, paired with the Qyunslation wordmark.</desc>
+  <defs>
+    <style>
+      .primary { fill: #005076; }
+      .primary-dark { fill: #003B57; }
+      .interactive { fill: #0A6F92; }
+      .green { fill: #81BB39; }
+      .wordmark { fill: #17222B; font: 700 68px Inter, "Segoe UI", "Noto Sans SC", sans-serif; letter-spacing: -2px; }
+      .submark { fill: #5E6B73; font: 500 16px Inter, "Segoe UI", "Noto Sans SC", sans-serif; letter-spacing: 3px; }
+    </style>
+  </defs>
+
+  <!-- Primary lockup: the page silhouette also reads as a restrained Q. -->
+  <g transform="translate(36 36)">
+    <path class="primary" d="M78 0h154l64 64v154c0 30.928-25.072 56-56 56H78c-30.928 0-56-25.072-56-56V56C22 25.072 47.072 0 78 0Z"/>
+    <path class="primary-dark" d="M232 0v54c0 16.569 13.431 30 30 30h34Z"/>
+    <path fill="#fff" d="M111 72h70c45.84 0 83 37.16 83 83s-37.16 83-83 83h-70c-45.84 0-83-37.16-83-83s37.16-83 83-83Zm0 28c-30.375 0-55 24.625-55 55s24.625 55 55 55h59c30.375 0 55-24.625 55-55s-24.625-55-55-55h-59Z"/>
+    <!-- Bidirectional translation bridge. -->
+    <path class="interactive" d="M71 129h75v-19l34 34-34 34v-19H71z"/>
+    <path class="green" d="M226 167h-75v19l-34-34 34-34v19h75z"/>
+    <!-- Clinical evidence / terminology graph. -->
+    <path class="primary" d="m214 143 25-25 7 7-25 25zM214 175l7 7 25 25-7 7-25-25z"/>
+    <circle class="green" cx="250" cy="122" r="12"/>
+    <circle class="interactive" cx="250" cy="198" r="12"/>
+    <!-- Q tail: a traceable continuation rather than a decorative swoosh. -->
+    <path class="green" d="m187 209 18-18 54 54-18 18z"/>
+  </g>
+
+  <g transform="translate(380 112)">
+    <text class="wordmark" x="0" y="68">Qyunslation</text>
+    <text class="submark" x="4" y="104">CLINICAL TRANSLATION WORKSPACE</text>
+  </g>
+
+  <!-- Compact mark for favicon and 16–24px navigation use. -->
+  <g transform="translate(820 36) scale(.64)">
+    <path class="primary" d="M78 0h154l64 64v154c0 30.928-25.072 56-56 56H78c-30.928 0-56-25.072-56-56V56C22 25.072 47.072 0 78 0Z"/>
+    <path class="primary-dark" d="M232 0v54c0 16.569 13.431 30 30 30h34Z"/>
+    <path fill="#fff" d="M111 72h70c45.84 0 83 37.16 83 83s-37.16 83-83 83h-70c-45.84 0-83-37.16-83-83s37.16-83 83-83Zm0 28c-30.375 0-55 24.625-55 55s24.625 55 55 55h59c30.375 0 55-24.625 55-55s-24.625-55-55-55h-59Z"/>
+    <path class="interactive" d="M71 129h75v-19l34 34-34 34v-19H71z"/>
+    <path class="green" d="M226 167h-75v19l-34-34 34-34v19h75z"/>
+    <path class="green" d="m187 209 18-18 54 54-18 18z"/>
+  </g>
+</svg>
