@@ -14,6 +14,7 @@ BOOT_TOKEN="$(grep -E '^AUTHENTIK_BOOTSTRAP_TOKEN=' "$ENV_FILE" | head -1 | cut 
 CLIENT_SECRET="$(grep -E '^QYUNSLATION_OIDC_CLIENT_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 [[ -n "$BOOT_TOKEN" && -n "$CLIENT_SECRET" ]] || { echo "FAIL: bootstrap/client secret empty" >&2; exit 1; }
 AUTH_H=("Authorization: Bearer ${BOOT_TOKEN}" "Content-Type: application/json")
+REDIRECT_URI="${QYUNSLATION_OIDC_REDIRECT_URI:-https://translate.qyunsgen.com/auth/callback}"
 
 echo "== 等待 Authentik ready"
 for _ in $(seq 1 40); do
@@ -68,7 +69,7 @@ for x in json.load(sys.stdin).get("results",[]):
     print(x["pk"]); break
 ' || true)"
 
-PROV_BODY="$(MAPS="$MAPS" AUTH_FLOW="$AUTH_FLOW" INV_FLOW="$INV_FLOW" CERT="$CERT" CLIENT_SECRET="$CLIENT_SECRET" python3 - <<'PY'
+PROV_BODY="$(MAPS="$MAPS" AUTH_FLOW="$AUTH_FLOW" INV_FLOW="$INV_FLOW" CERT="$CERT" CLIENT_SECRET="$CLIENT_SECRET" REDIRECT_URI="$REDIRECT_URI" python3 - <<'PY'
 import json, os
 print(json.dumps({
   "name": "qyunslation",
@@ -77,7 +78,7 @@ print(json.dumps({
   "client_type": "confidential",
   "client_id": "qyunslation",
   "client_secret": os.environ["CLIENT_SECRET"],
-  "redirect_uris": [{"url": "https://translate.qyunsgen.com/oauth2/callback", "matching_mode": "strict"}],
+  "redirect_uris": [{"url": os.environ["REDIRECT_URI"], "matching_mode": "strict"}],
   "access_code_validity": "minutes=1",
   "access_token_validity": "hours=1",
   "refresh_token_validity": "days=30",
