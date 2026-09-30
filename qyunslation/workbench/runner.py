@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import signal
+import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -88,6 +89,43 @@ def _config_file() -> Path | None:
         return None
     path = Path(configured).expanduser().resolve()
     return path if path.is_file() else None
+
+
+def _runner_env() -> dict[str, str]:
+    """Give the isolated CLI the repository package roots it imports at render time."""
+    env = os.environ.copy()
+    roots = [Path(__file__).resolve().parents[3], Path(__file__).resolve().parents[2]]
+    current = [item for item in (env.get("PYTHONPATH") or "").split(os.pathsep) if item]
+    merged: list[str] = []
+    for item in [*(str(root) for root in roots), *current]:
+        if item not in merged:
+            merged.append(item)
+    env["PYTHONPATH"] = os.pathsep.join(merged)
+    return env
+
+
+def _pdf_needs_hpd(path: Path) -> bool:
+    """Use the existing HPD detector without making OCR part of preflight."""
+    try:
+        if "/home/dev/pdf2zh" not in sys.path:
+            sys.path.insert(0, "/home/dev/pdf2zh")
+        from hpd_ocr import pdf_needs_hpd
+
+        return bool(pdf_needs_hpd(path))
+    except Exception:
+        # The CLI remains the primary path.  If the optional HPD service or
+        # its dependencies are unavailable, let the normal runner report the
+        # original failure instead of failing task creation synchronously.
+        return False
+
+
+def _ocr_pdf_with_hpd(source: Path, destination: Path) -> Path:
+    """Materialize a searchable PDF through the existing HPD OCR bridge."""
+    if "/home/dev/pdf2zh" not in sys.path:
+        sys.path.insert(0, "/home/dev/pdf2zh")
+    from hpd_ocr import ocr_pdf_with_hpd
+
+    return Path(ocr_pdf_with_hpd(source, destination))
 
 
 def _prepare_runtime_config(base: Path | None, run_dir: Path) -> Path | None:
@@ -177,6 +215,8 @@ def build_pdf2zh_command(
         command.append("--auto-enable-ocr-workaround")
     if options.get("ocr_workaround") is True:
         command.append("--ocr-workaround")
+    if options.get("disable_rich_text_translate") is True:
+        command.append("--disable-rich-text-translate")
     command.append(str(input_path))
     return command
 
@@ -409,6 +449,7 @@ class Pdf2zhRunner:
                 cwd=str(run_dir),
                 stdout=log_handle,
                 stderr=asyncio.subprocess.STDOUT,
+                env=_runner_env(),
                 start_new_session=True,
             )
         except Exception:
@@ -428,79 +469,197 @@ class Pdf2zhRunner:
         )
         managed = _ManagedProcess(process=process, log_handle=log_handle, state_path=state_path, task_id=task_id)
         self._processes[task_id] = managed
-        self._watchers[task_id] = asyncio.create_task(self._monitor(managed, state, run_dir))
+        self._watchers[task_id] = asyncio.create_task(
+            self._monitor(
+                managed,
+                state,
+                run_dir,
+                source=source,
+                direction=direction,
+                settings=dict(settings or {}),
+                executable=executable,
+                config_file=runtime_config,
+            )
+        )
         return RunnerLaunch(task_id=task_id, state_path=state_path, output_dir=output_dir)
 
-    async def _monitor(self, managed: _ManagedProcess, state: dict[str, Any], run_dir: Path) -> None:
+    async def _retry_scanned_pdf_with_hpd(
+        self,
+        managed: _ManagedProcess,
+        state: dict[str, Any],
+        run_dir: Path,
+        *,
+        source: Path,
+        direction: str,
+        settings: dict[str, Any],
+        executable: str,
+        config_file: Path | None,
+    ) -> tuple[bool, dict[str, Any], str | None]:
+        """Retry an empty CLI result through the existing searchable-PDF path."""
+        if settings.get("auto_ocr_workaround", True) is not True or not _pdf_needs_hpd(source):
+            return False, state, None
+
+        state = self._write_state(
+            managed.state_path,
+            state,
+            status="scanning",
+            stage="structure",
+            progress=None,
+            reason="PDF 扫描件未生成产物，正在补充 OCR 文字层",
+        )
+        ocr_source = run_dir / "input.hpd-ocr.pdf"
+        try:
+            await asyncio.to_thread(_ocr_pdf_with_hpd, source, ocr_source)
+            if not ocr_source.is_file() or _pdf_needs_hpd(ocr_source):
+                raise RunnerError("HPD OCR produced no searchable text layer")
+        except Exception as exc:
+            return False, state, f"scanned PDF OCR preprocessing failed: {_safe_reason(exc, 'unknown error')}"
+
+        latest = _read_json(managed.state_path) or state
+        if latest.get("status") == "cancelled":
+            return False, latest, "translation cancelled by user"
+
+        output_dir = run_dir / "output"
+        for child in output_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        retry_settings = dict(settings)
+        retry_settings.update(
+            {
+                "auto_ocr_workaround": False,
+                "scan_strategy": "skip-detection",
+                "ocr_workaround": True,
+                "disable_rich_text_translate": True,
+            }
+        )
+        retry_command = build_pdf2zh_command(
+            executable=executable,
+            input_path=ocr_source,
+            output_dir=output_dir,
+            direction=direction,
+            settings=retry_settings,
+            config_file=config_file,
+        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *retry_command,
+                cwd=str(run_dir),
+                stdout=managed.log_handle,
+                stderr=asyncio.subprocess.STDOUT,
+                env=_runner_env(),
+                start_new_session=True,
+            )
+        except Exception as exc:
+            return False, state, f"scanned PDF retry could not start: {_safe_reason(exc, 'unknown error')}"
+        managed.process = process
+        state = self._write_state(
+            managed.state_path,
+            state,
+            status="scanning",
+            stage="structure",
+            progress=None,
+            pid=process.pid,
+            command=[str(item) for item in retry_command if not str(item).startswith("--")],
+            reason="已生成 OCR 文字层，正在重新翻译",
+        )
+        return True, state, None
+
+    async def _monitor(
+        self,
+        managed: _ManagedProcess,
+        state: dict[str, Any],
+        run_dir: Path,
+        *,
+        source: Path,
+        direction: str,
+        settings: dict[str, Any],
+        executable: str,
+        config_file: Path | None,
+    ) -> None:
         state_path = managed.state_path
         log_path = run_dir / "runner.log"
-        offset = 0
-        last_reason = ""
+        attempted_hpd = False
         try:
-            while managed.process.returncode is None:
-                await asyncio.sleep(0.5)
-                try:
-                    with log_path.open("rb") as handle:
-                        handle.seek(offset)
-                        chunk = handle.read()
-                        offset = handle.tell()
-                except OSError:
-                    chunk = b""
-                if not chunk:
-                    continue
-                for raw_line in chunk.decode("utf-8", errors="replace").splitlines():
-                    line = raw_line.strip()
-                    if not line:
+            while True:
+                offset = log_path.stat().st_size if log_path.exists() else 0
+                last_reason = ""
+                while managed.process.returncode is None:
+                    await asyncio.sleep(0.5)
+                    try:
+                        with log_path.open("rb") as handle:
+                            handle.seek(offset)
+                            chunk = handle.read()
+                            offset = handle.tell()
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
                         continue
-                    last_reason = _safe_reason(line, last_reason)
-                    progress, stage = _parse_progress(line)
-                    if progress is not None or stage is not None:
-                        state = self._write_state(
-                            state_path,
-                            state,
-                            status="rendering" if stage == "rendering" else "translating",
-                            progress=progress if progress is not None else state.get("progress"),
-                            stage=stage or state.get("stage") or "translating",
-                        )
-            returncode = await managed.process.wait()
-            # Cancellation is written by the API task while this watcher is
-            # waiting for the process group to exit; reload the atomic state so
-            # a clean SIGTERM cannot be overwritten by a success inference.
-            latest = _read_json(state_path) or state
-            status = str(latest.get("status") or "translating")
-            if status == "cancelled":
-                return
-            outputs = self._discover_outputs(run_dir / "output")
-            if returncode == 0 and outputs:
-                state = self._write_state(
-                    state_path,
-                    state,
-                    status="succeeded",
-                    stage="export",
-                    progress=100,
-                    outputs=outputs,
-                    reason=None,
-                    finished_at=_utc_now(),
-                )
-            elif returncode == 0:
+                    for raw_line in chunk.decode("utf-8", errors="replace").splitlines():
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        last_reason = _safe_reason(line, last_reason)
+                        progress, stage = _parse_progress(line)
+                        if progress is not None or stage is not None:
+                            state = self._write_state(
+                                state_path,
+                                state,
+                                status="rendering" if stage == "rendering" else "translating",
+                                progress=progress if progress is not None else state.get("progress"),
+                                stage=stage or state.get("stage") or "translating",
+                            )
+                returncode = await managed.process.wait()
+                # Cancellation is written by the API task while this watcher
+                # is waiting for the process group to exit; reload the atomic
+                # state so a clean SIGTERM cannot be overwritten.
+                latest = _read_json(state_path) or state
+                if latest.get("status") == "cancelled":
+                    return
+                outputs = self._discover_outputs(run_dir / "output")
+                if returncode == 0 and outputs:
+                    self._write_state(
+                        state_path,
+                        state,
+                        status="succeeded",
+                        stage="export",
+                        progress=100,
+                        outputs=outputs,
+                        reason=None,
+                        finished_at=_utc_now(),
+                    )
+                    break
+                if not outputs and not attempted_hpd:
+                    attempted_hpd = True
+                    started, state, retry_reason = await self._retry_scanned_pdf_with_hpd(
+                        managed,
+                        state,
+                        run_dir,
+                        source=source,
+                        direction=direction,
+                        settings=settings,
+                        executable=executable,
+                        config_file=config_file,
+                    )
+                    if started:
+                        continue
+                    if retry_reason:
+                        last_reason = retry_reason
                 self._write_state(
                     state_path,
                     state,
                     status="failed",
                     stage="qa",
                     progress=state.get("progress"),
-                    reason="pdf2zh_next completed without output artifacts",
+                    reason=last_reason or (
+                        "pdf2zh_next completed without output artifacts"
+                        if returncode == 0
+                        else f"pdf2zh_next exited with code {returncode}"
+                    ),
                     finished_at=_utc_now(),
                 )
-            else:
-                self._write_state(
-                    state_path,
-                    state,
-                    status="failed",
-                    stage="qa",
-                    reason=_safe_reason(last_reason, f"pdf2zh_next exited with code {returncode}"),
-                    finished_at=_utc_now(),
-                )
+                break
         finally:
             managed.log_handle.close()
             self._processes.pop(managed.task_id, None)

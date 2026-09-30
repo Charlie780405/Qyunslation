@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -30,6 +31,25 @@ print('Progress: 1.0, export', flush=True)
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def _fake_scan_then_ocr_cli(path: Path) -> None:
+    path.write_text(
+        """#!/usr/bin/env python3
+import pathlib, sys
+args = sys.argv[1:]
+out = pathlib.Path(args[args.index('--output') + 1])
+src = pathlib.Path(args[-1])
+if not src.name.endswith('.hpd-ocr.pdf'):
+    print('Progress: 1.0, scan failed without output', flush=True)
+    raise SystemExit(0)
+out.mkdir(parents=True, exist_ok=True)
+(out / (src.stem + '_dual.pdf')).write_bytes(b'%PDF fake OCR output')
+print('Progress: 1.0, export', flush=True)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def test_pdf2zh_command_uses_cli_flags_without_credentials(tmp_path: Path):
     command = build_pdf2zh_command(
         executable="pdf2zh_next",
@@ -43,6 +63,14 @@ def test_pdf2zh_command_uses_cli_flags_without_credentials(tmp_path: Path):
     assert "--auto-enable-ocr-workaround" in command
     assert "do-not-copy" not in command
     assert "--api-key" not in command
+
+
+def test_pdf_runner_env_exposes_package_parent_to_cli_workers():
+    import qyunslation.workbench.runner as runner_module
+
+    env = runner_module._runner_env()
+    package_parent = str(Path(runner_module.__file__).resolve().parents[3])
+    assert package_parent in env["PYTHONPATH"].split(os.pathsep)
 
 
 @pytest.mark.asyncio
@@ -112,6 +140,49 @@ async def test_runner_cancel_terminates_process_group_and_persists_reason(tmp_pa
     assert state is not None
     assert state["status"] == "cancelled"
     assert "cancelled" in state["status_message"]
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_empty_scanned_pdf_with_hpd_ocr(tmp_path: Path, monkeypatch):
+    cli = tmp_path / "fake-pdf2zh"
+    _fake_scan_then_ocr_cli(cli)
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.7 scanned")
+    runner = Pdf2zhRunner(tmp_path / "runs")
+    monkeypatch.setenv("QYUNSLATION_PDF2ZH_CLI", str(cli))
+
+    import qyunslation.workbench.runner as runner_module
+
+    monkeypatch.setattr(
+        runner_module,
+        "_pdf_needs_hpd",
+        lambda path: not path.name.endswith(".hpd-ocr.pdf"),
+        raising=False,
+    )
+
+    def fake_ocr(_src: Path, dest: Path, **_kwargs):
+        dest.write_bytes(b"%PDF-1.7 OCR text layer")
+        return dest
+
+    monkeypatch.setattr(runner_module, "_ocr_pdf_with_hpd", fake_ocr, raising=False)
+    launch = await runner.start(
+        tenant_id="tenant-1",
+        run_id="run-scanned",
+        generation=1,
+        input_path=source,
+        direction="English → 简体中文",
+        original_filename="source.pdf",
+    )
+    state = None
+    for _ in range(40):
+        state = runner.read_task_state(launch.task_id)
+        if state and state["status"] in {"succeeded", "failed"}:
+            break
+        await asyncio.sleep(0.05)
+    assert state is not None
+    assert state["status"] == "succeeded"
+    assert state["download_ready"] is True
+    assert state["downloadable_files"]["pdf"]["filename"].endswith("_dual.pdf")
 
 
 @pytest.mark.asyncio
