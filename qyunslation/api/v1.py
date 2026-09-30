@@ -6,12 +6,14 @@ import os
 import re
 import hashlib
 import mimetypes
+import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,7 +29,12 @@ from qyunslation.persist.db import (
     reset_engine,
 )
 from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
-from qyunslation.persist.models import PreflightRecord, TranslationRunRecord, WebPreference
+from qyunslation.persist.models import (
+    PreflightRecord,
+    TranslationArtifact,
+    TranslationRunRecord,
+    WebPreference,
+)
 from qyunslation.core.schemas import AutoWorkflowParams
 from qyunslation.structure.ingest import DEFAULT_MAX_UPLOAD_BYTES
 
@@ -335,6 +342,8 @@ def get_preflight(
     record = session.get(PreflightRecord, preflight_id)
     if record is None or record.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="preflight not found")
+    if record.actor_sub != identity.user_sub and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=404, detail="preflight not found")
     return _preflight_dict(record)
 
 
@@ -386,32 +395,159 @@ def _run_stage_from_task(task_state: dict[str, Any]) -> str:
     return "text"
 
 
+def _artifact_root() -> Path:
+    raw = (os.environ.get("QYUNSLATION_ARTIFACT_ROOT") or "var/artifacts").strip()
+    root = Path(raw)
+    return root if root.is_absolute() else Path.cwd() / root
+
+
+def _artifact_path(artifact: TranslationArtifact) -> Path:
+    root = _artifact_root().resolve()
+    path = (root / artifact.storage_key).resolve()
+    if root not in path.parents:
+        raise HTTPException(status_code=500, detail="invalid artifact storage key")
+    return path
+
+
+def _sha256_file(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _artifact_dict(artifact: TranslationArtifact, run_id: str) -> dict[str, Any]:
+    return {
+        "id": artifact.id,
+        "run_id": run_id,
+        "kind": artifact.kind,
+        "file_type": artifact.file_type,
+        "filename": artifact.filename,
+        "media_type": artifact.media_type,
+        "size_bytes": artifact.size_bytes,
+        "sha256": artifact.sha256,
+        "formal_export": artifact.formal_export,
+        "created_at": artifact.created_at.isoformat(),
+        "download_url": f"/api/v1/translation-runs/{run_id}/artifacts/{artifact.id}",
+    }
+
+
+def _materialize_artifacts(
+    session: Session, *, run: TranslationRunRecord, task_state: dict[str, Any]
+) -> None:
+    """Copy trusted runner outputs into an opaque, tenant-scoped artifact root."""
+    outputs: list[tuple[str, str, str, bool]] = []
+    for file_type, meta in (task_state.get("downloadable_files") or {}).items():
+        if isinstance(meta, dict):
+            outputs.append(("formal", str(file_type), str(meta.get("path") or ""), True))
+    for identifier, meta in (task_state.get("attachment_files") or {}).items():
+        if isinstance(meta, dict):
+            outputs.append(("attachment", str(identifier), str(meta.get("path") or ""), False))
+    for kind, key, source_raw, formal in outputs:
+        source = Path(source_raw)
+        if not source.is_file():
+            continue
+        artifact_key = f"{kind}:{key}"[:128]
+        existing = session.scalar(
+            select(TranslationArtifact).where(
+                TranslationArtifact.run_id == run.id,
+                TranslationArtifact.artifact_key == artifact_key,
+            )
+        )
+        if existing is not None:
+            continue
+        filename = Path(str((task_state.get("original_filename") or source.name))).name
+        meta = (
+            (task_state.get("downloadable_files") or {}).get(key)
+            if kind == "formal"
+            else (task_state.get("attachment_files") or {}).get(key)
+        ) or {}
+        filename = Path(str(meta.get("filename") or filename)).name
+        if not filename or filename in {".", ".."}:
+            filename = f"{key}.bin"
+        artifact_id = str(uuid.uuid4())
+        suffix = Path(filename).suffix[:24]
+        storage_key = f"{run.tenant_id}/{run.id}/{artifact_id}{suffix}"
+        target = (_artifact_root() / storage_key).resolve()
+        root = _artifact_root().resolve()
+        if root not in target.parents:
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            sha256, size = _sha256_file(target)
+        except (OSError, ValueError):
+            if target.is_file():
+                target.unlink()
+            continue
+        session.add(
+            TranslationArtifact(
+                id=artifact_id,
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                artifact_key=artifact_key,
+                kind=kind,
+                file_type=key,
+                filename=filename[:256],
+                media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                storage_key=storage_key,
+                size_bytes=size,
+                sha256=sha256,
+                formal_export=formal,
+            )
+        )
+    session.flush()
+
+
+def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> None:
+    if not run.external_task_id:
+        return
+    try:
+        from qyunslation.server import get_translation_service
+
+        task_state = get_translation_service().get_task_state(run.external_task_id)
+    except Exception:
+        task_state = None
+    if not task_state:
+        return
+    if task_state.get("error_flag"):
+        run.status = "failed"
+        run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
+        run.stage = "qa"
+    elif task_state.get("download_ready"):
+        run.status = "succeeded"
+        run.stage = "export"
+        run.progress = 100
+        run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        _materialize_artifacts(session, run=run, task_state=task_state)
+    elif task_state.get("is_processing"):
+        run.status = "translating"
+        run.stage = _run_stage_from_task(task_state)
+        progress = task_state.get("progress_percent")
+        run.progress = int(progress) if isinstance(progress, (int, float)) else None
+    run.updated_at = datetime.now(timezone.utc)
+
+
 def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
     """Project the durable ledger plus current legacy-service state."""
-    if run.external_task_id:
-        try:
-            from qyunslation.server import get_translation_service
-
-            task_state = get_translation_service().get_task_state(run.external_task_id)
-        except Exception:
-            task_state = None
-        if task_state:
-            if task_state.get("error_flag"):
-                run.status = "failed"
-                run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
-                run.stage = "qa"
-            elif task_state.get("download_ready"):
-                run.status = "succeeded"
-                run.stage = "export"
-                run.progress = 100
-                run.completed_at = run.completed_at or datetime.now(timezone.utc)
-            elif task_state.get("is_processing"):
-                run.status = "translating"
-                run.stage = _run_stage_from_task(task_state)
-                progress = task_state.get("progress_percent")
-                run.progress = int(progress) if isinstance(progress, (int, float)) else None
-            run.updated_at = datetime.now(timezone.utc)
+    _refresh_translation_run(session, run)
     preflight = session.get(PreflightRecord, run.preflight_id)
+    artifacts = list(
+        session.scalars(
+            select(TranslationArtifact)
+            .where(
+                TranslationArtifact.run_id == run.id,
+                TranslationArtifact.tenant_id == run.tenant_id,
+            )
+            .order_by(TranslationArtifact.created_at)
+        )
+    )
     return {
         "id": run.id,
         "project_id": None,
@@ -428,6 +564,7 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "manifest_version": run.manifest_version,
         "qa_summary": run.qa_summary or {},
         "term_summary": run.term_summary or {},
+        "artifacts": [_artifact_dict(item, run.id) for item in artifacts],
         "degradation_reason": run.degradation_reason,
         "external_task_id": run.external_task_id,
         "created_at": run.created_at.isoformat(),
@@ -445,7 +582,10 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
             TranslationRunRecord.tenant_id == tenant.id,
         )
     )
-    if run is None or (run.actor_sub != identity.user_sub and _identity_role(identity) not in {"admin", "owner"}):
+    if run is None or (
+        run.actor_sub != identity.user_sub
+        and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}
+    ):
         raise HTTPException(status_code=404, detail="translation run not found")
     return run
 
@@ -564,6 +704,8 @@ def list_translation_runs(
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
     stmt = select(TranslationRunRecord).where(TranslationRunRecord.tenant_id == tenant.id)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        stmt = stmt.where(TranslationRunRecord.actor_sub == identity.user_sub)
     if status:
         stmt = stmt.where(TranslationRunRecord.status == status)
     stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(100)
@@ -580,6 +722,58 @@ def get_translation_run(
     return _translation_run_dict(session, _run_owned(session, run_id=run_id, identity=identity))
 
 
+@router.get("/translation-runs/{run_id}/artifacts")
+def list_translation_artifacts(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    rows = list(
+        session.scalars(
+            select(TranslationArtifact)
+            .where(
+                TranslationArtifact.run_id == run.id,
+                TranslationArtifact.tenant_id == run.tenant_id,
+            )
+            .order_by(TranslationArtifact.created_at)
+        )
+    )
+    return {"items": [_artifact_dict(row, run.id) for row in rows]}
+
+
+@router.get("/translation-runs/{run_id}/artifacts/{artifact_id}")
+def download_translation_artifact(
+    run_id: str,
+    artifact_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+):
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    artifact = session.scalar(
+        select(TranslationArtifact).where(
+            TranslationArtifact.id == artifact_id,
+            TranslationArtifact.run_id == run.id,
+            TranslationArtifact.tenant_id == run.tenant_id,
+        )
+    )
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="translation artifact not found")
+    if artifact.formal_export and run.status != "succeeded":
+        raise HTTPException(status_code=409, detail="formal export is not ready")
+    path = _artifact_path(artifact)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="translation artifact is no longer available")
+    return FileResponse(
+        path=path,
+        media_type=artifact.media_type,
+        filename=artifact.filename,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.post("/translation-runs/{run_id}/cancel")
 async def cancel_translation_run(
     run_id: str,
@@ -587,6 +781,7 @@ async def cancel_translation_run(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
     if run.status in _RUN_TERMINAL:
         return _translation_run_dict(session, run)
     if run.external_task_id:
@@ -594,8 +789,8 @@ async def cancel_translation_run(
             from qyunslation.server import get_translation_service
 
             get_translation_service().cancel_task(run.external_task_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail="translation runner could not cancel the task") from exc
     run.status = "cancelled"
     run.stage = "qa"
     run.progress = run.progress if run.progress is not None else None
@@ -609,6 +804,9 @@ async def retry_translation_run(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if run.status not in _RUN_TERMINAL:
+        raise HTTPException(status_code=409, detail="only terminal translation runs can be retried")
     preflight = session.get(PreflightRecord, run.preflight_id)
     if preflight is None or _preflight_dict(preflight)["state"] != "ready":
         raise HTTPException(status_code=409, detail="preflight is not ready")

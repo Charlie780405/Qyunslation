@@ -56,8 +56,19 @@
           <div v-if="runs.length" class="qy-task-list">
             <article v-for="run in runs" :key="run.id" class="qy-task-row">
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
-              <div class="qy-task-details"><strong>{{ run.filename || run.file_name || '未命名文档' }}</strong><span>{{ run.status || '待处理' }} · {{ run.updated_at || '刚刚' }}</span></div>
-              <ChevronRightIcon aria-hidden="true" />
+              <div class="qy-task-details">
+                <strong>{{ run.filename || run.file_name || '未命名文档' }}</strong>
+                <span>{{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template></span>
+                <div v-if="run.progress !== null && run.progress !== undefined" class="qy-task-progress" aria-hidden="true"><span :style="{ width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
+                <div v-if="run.artifacts?.length" class="qy-task-artifacts">
+                  <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
+                </div>
+              </div>
+              <div class="qy-task-actions">
+                <button v-if="isActive(run)" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
+                <button v-else-if="canRetry(run)" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
+                <ChevronRightIcon aria-hidden="true" />
+              </div>
             </article>
           </div>
           <div v-else class="qy-empty-state">
@@ -92,7 +103,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, onUnmounted, reactive, ref } from 'vue';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
 import {
@@ -118,6 +129,26 @@ const runs = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
 const settings = reactive({ direction: 'English → 简体中文', profile: '临床研究文档', bilingual: true });
+let pollTimer;
+let pollRequest = 0;
+
+const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
+
+function statusLabel(status) {
+  return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成' })[status] || '待处理';
+}
+
+function stageLabel(stage) {
+  return ({ validation: '预检', structure: '结构', text: '正文', table_figure: '表格与图注', layout: '版式', qa: 'QA', export: '导出' })[stage] || '处理中';
+}
+
+function isActive(run) {
+  return activeStatuses.has(run.status);
+}
+
+function canRetry(run) {
+  return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
+}
 
 function selectFile(event) {
   selectedFile.value = event.target.files?.[0] || null;
@@ -173,13 +204,41 @@ async function startTranslation() {
 }
 
 async function refreshRuns() {
+  const requestId = ++pollRequest;
   try {
     const response = await api.listRuns();
+    if (requestId !== pollRequest) return;
     runs.value = Array.isArray(response) ? response : response.items || [];
   } catch {
-    runs.value = [];
+    if (requestId === pollRequest && !runs.value.length) runs.value = [];
+  } finally {
+    if (requestId !== pollRequest) return;
+    window.clearTimeout(pollTimer);
+    const active = runs.value.some(isActive);
+    pollTimer = window.setTimeout(refreshRuns, active ? 2000 : 10000);
+  }
+}
+
+async function cancelRun(run) {
+  try {
+    await api.cancelRun(run.id);
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '取消任务失败';
+  }
+}
+
+async function retryRun(run) {
+  try {
+    await api.retryRun(run.id);
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '重试任务失败';
   }
 }
 
 onMounted(refreshRuns);
+onUnmounted(() => window.clearTimeout(pollTimer));
 </script>

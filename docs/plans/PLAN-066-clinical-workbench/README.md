@@ -11,6 +11,7 @@
 - 预检执行大小限制、扩展名白名单、SHA-256、租户隔离和 24 小时暂存 TTL；预检不会自动启动翻译。
 - `066c0001` 提供 OIDC Authorization Code + PKCE BFF：state、PKCE verifier 和 nonce 服务端存储，浏览器只持有 HttpOnly 随机会话 ID；写请求启用双提交 CSRF，退出会立即撤销会话。
 - `066e0001` 提供 TranslationRun 持久化台账、租户隔离、幂等创建、状态查询、取消和 generation 重试；已接入现有非 Gradio TranslationService，未初始化 runner 时明确落为 `blocked`，不伪造已开始翻译。
+- `066e0002` 增加租户隔离的 TranslationArtifact 元数据和授权下载；任务状态读取会同步外部执行器并复制已完成产物，Vue 工作台对活动任务 2 秒轮询、终态降频，并显示可下载产物。
 - 预检确认卡片已接入 Vue 工作台；用户明确点击“确认并开始翻译”后才创建 TranslationRun。
 
 ## 当前入口
@@ -21,11 +22,10 @@
 
 ## 后续切片
 
-1. 将 TranslationService 完整抽为独立 runner：Manifest、状态文件、取消/重启 reconcile、PDF `pdf2zh_next` CLI 和受控产物下载。
-2. 接入 TranslationRun 轮询 generation 防串线、Artifact API 和真实进度/阶段映射。
-3. 接入 Manifest 文档画布、对象修订、QA blocker 和正式导出门禁。
-4. 补齐词库分页、版本、候选审核和工作台术语命中联动。
-5. 执行浏览器断点、无障碍、性能、Caddy 灰度和 `/legacy` 回滚验收。
+1. 将 TranslationService 完整抽为独立 runner：Manifest、状态文件、取消/重启 reconcile、PDF `pdf2zh_next` CLI 和可恢复的真实进度。
+2. 接入 Manifest 文档画布、对象修订、QA blocker 和正式导出门禁。
+3. 补齐词库分页、版本、候选审核和工作台术语命中联动。
+4. 执行浏览器断点、无障碍、性能、Caddy 灰度和 `/legacy` 回滚验收。
 
 ## 验证
 

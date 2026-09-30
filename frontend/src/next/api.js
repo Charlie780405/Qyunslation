@@ -41,6 +41,9 @@ export async function apiRequest(path, options = {}) {
 export const api = {
   me: () => apiRequest(`${API_PREFIX}/me`),
   listRuns: () => apiRequest(`${API_PREFIX}/translation-runs`),
+  getRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`),
+  cancelRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
+  retryRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
   listTerms: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);
