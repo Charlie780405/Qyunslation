@@ -5,7 +5,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${QYUNSLATION_VERIFY_PY:-$ROOT/.venv/bin/python}"
-PDF2ZH_PY="${QYUNSLATION_PATCH_PY:-/usr/bin/python3}"
+# The fidelity checker imports qyunslation.structure.plan033_final.  Use the
+# same project interpreter as the rest of this gate unless an operator
+# explicitly supplies a patch/runtime interpreter.
+PDF2ZH_PY="${QYUNSLATION_PATCH_PY:-$PY}"
 TEST_TIMEOUT_SECONDS="${QYUNSLATION_VERIFY_TIMEOUT_SECONDS:-900}"
 STAGE_DIR="$(mktemp -d)"
 FAILURES=0
