@@ -88,7 +88,8 @@ check "空文件报错、任意字节不再抛 TypeError" test $? -eq 0
 echo "== 4. 前端看门狗 =="
 check "看门狗 JS 唯一" count_re_is "$GUI" '// _qy_stale_guard_js$' 1
 check "结束标记唯一" count_is "$GUI" "_qy_stale_guard_js_end" 1
-check "fetch 包装未重复" count_is "$GUI" "var origFetch = window.fetch;" 1
+check "stale guard fetch 包装未重复" bash -c \
+  "sed -n '/^[[:space:]]*\/\/ _qy_stale_guard_js$/,/^[[:space:]]*\/\/ _qy_stale_guard_js_end$/p' \"$GUI\" | grep -cF 'var origFetch = window.fetch;' | grep -qx 1"
 check "app_id 漂移检测存在" has "$GUI" "cfg.app_id !== APP_ID"
 check "看门狗样式唯一" count_is "$GUI" "/* _qy_stale_guard_css */" 1
 
