@@ -176,7 +176,9 @@ def _verify_id_token(
             signing_key.key,
             algorithms=["RS256", "ES256"],
             audience=_client_id(),
-            issuer=_issuer(),
+            # Authentik's discovery document is the canonical issuer source;
+            # preserve its trailing slash for exact OIDC `iss` validation.
+            issuer=metadata.get("issuer") or _issuer(),
             options={"require": ["exp", "sub", "nonce"]},
         )
     except Exception as exc:

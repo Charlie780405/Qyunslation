@@ -137,3 +137,33 @@ def test_logout_rejects_missing_csrf_for_cookie_session(client, monkeypatch):
     client.cookies.set("qyunslation_csrf", "expected")
     response = client.post("/auth/logout")
     assert response.status_code == 403
+
+
+def test_id_token_uses_discovery_issuer_with_trailing_slash(monkeypatch):
+    seen: dict[str, str] = {}
+
+    class _Key:
+        key = object()
+
+    class _Client:
+        def get_signing_key_from_jwt(self, _token):
+            return _Key()
+
+    def decode(_token, _key, *, algorithms, audience, issuer, options):
+        seen["issuer"] = issuer
+        return {"sub": "user-1", "nonce": "nonce"}
+
+    monkeypatch.setenv("QYUNSLATION_OIDC_ISSUER", "https://issuer.example")
+    monkeypatch.setattr(bff, "PyJWKClient", lambda *_args, **_kwargs: _Client())
+    monkeypatch.setattr(bff.jwt, "decode", decode)
+
+    bff._verify_id_token(
+        "id-token",
+        {
+            "jwks_uri": "https://issuer.example/jwks",
+            "issuer": "https://issuer.example/application/o/qyunslation/",
+        },
+        expected_nonce="nonce",
+    )
+
+    assert seen["issuer"] == "https://issuer.example/application/o/qyunslation/"
