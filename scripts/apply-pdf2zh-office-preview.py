@@ -110,7 +110,11 @@ def _qy_preview_payload(path_str: str | None) -> tuple:
         )
     suf = path.suffix.lower()
     if suf == ".pdf":
-        return _qy_show_pdf(str(path)), gr.update(value="", visible=False)
+        body = (
+            f'<iframe src="{_qy_file_url(path)}" title="{_html_escape(path.name)}"'
+            ' style="width:100%;min-height:70vh;height:70vh;border:0;"></iframe>'
+        )
+        return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)
     # 优先旁路 html（office-route 下载的 sidecar 预览）
     for cand in (
         path.with_suffix(".html"),

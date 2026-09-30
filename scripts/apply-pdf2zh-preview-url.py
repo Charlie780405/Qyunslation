@@ -91,6 +91,17 @@ DOCX_NEW = """        elif suf in {".docx", ".doc"}:
             if not body.strip():
                 body = "<p>（未能从 Word 提取预览内容，请直接下载）</p>\""""
 
+PDF_OLD = '''    if suf == ".pdf":
+        return _qy_show_pdf(str(path)), gr.update(value="", visible=False)'''
+
+PDF_NEW = '''    if suf == ".pdf":
+        # Gradio PDF() 上传后常只剩工具栏、页面高度为 0。与图片一样走静态路由。
+        body = (
+            f'<iframe src="{_qy_file_url(path)}" title="{_html_escape(path.name)}"'
+            ' style="width:100%;min-height:70vh;height:70vh;border:0;"></iframe>'
+        )
+        return _qy_hide_pdf(), gr.update(value=_qy_wrap_preview_html(body, path.name), visible=True)'''
+
 
 def apply(text: str) -> tuple[str, bool]:
     changed = False
@@ -102,7 +113,7 @@ def apply(text: str) -> tuple[str, bool]:
             text = text.replace(ANCHOR, HELPER.lstrip("\n") + ANCHOR, 1)
             changed = True
 
-    for old, new in ((IMG_OLD, IMG_NEW), (DOCX_OLD, DOCX_NEW)):
+    for old, new in ((IMG_OLD, IMG_NEW), (DOCX_OLD, DOCX_NEW), (PDF_OLD, PDF_NEW)):
         if old in text:
             text = text.replace(old, new, 1)
             changed = True
@@ -131,6 +142,8 @@ def verify(text: str) -> int:
     )
     need(IMG_NEW in text, "image preview not switched to file url")
     need(DOCX_NEW in text, "docx preview not externalizing data uris")
+    need(PDF_OLD not in text, "pdf preview still uses Gradio PDF() shell")
+    need("_qy_file_url(path)}" in text and "iframe src=" in text, "pdf preview not switched to file url iframe")
     need(
         text.find("def _qy_file_url(") < text.find("def _qy_preview_payload("),
         "helper must be defined before _qy_preview_payload",

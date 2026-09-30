@@ -28,6 +28,8 @@ check "helper _qy_file_url 唯一" count_is "$GUI" "def _qy_file_url(" 1
 check "data URI 外置函数唯一" count_is "$GUI" "def _qy_externalize_data_uris(" 1
 check "图片分支不再 b64encode" hasnt "$GUI" 'b64 = base64.b64encode(path.read_bytes())'
 check "图片分支引用 _qy_file_url" has "$GUI" 'f'"'"'<img src="{_qy_file_url(path)}"'
+check "PDF 预览走 file url iframe" has "$GUI" 'f'"'"'<iframe src="{_qy_file_url(path)}"'
+check "PDF 不再交给 Gradio PDF() 空壳" hasnt "$GUI" 'return _qy_show_pdf(str(path)), gr.update(value="", visible=False)'
 check "DOCX 预览外置 data URI" has "$GUI" "_qy_externalize_data_uris(_qy_docx_to_html(path)"
 
 echo "== 2. 预览载荷实测 =="
