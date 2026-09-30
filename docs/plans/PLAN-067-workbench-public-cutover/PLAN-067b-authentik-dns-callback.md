@@ -1,6 +1,6 @@
 # PLAN-067b：Authentik 应用、DNS 与回调契约
 
-状态：**进行中 · provider 回调修复已提交；公网 DNS/Caddy 仍阻断**
+状态：**局部完成 · provider 已校正；公网 DNS/Caddy 仍阻断**
 
 ## 目标
 
@@ -35,3 +35,5 @@
 - 当前 `auth.qyunsgen.com` 无 DNS 解析。
 - 当前 qyunsgen Caddy 文件尚无 Authentik 站点块。
 - 当前 `office.env` 尚无 BFF client ID/session key；这属于 067c，不在本子计划中提前注入。
+
+因此本地 provider 契约已满足，但整个子计划尚不能关闭；公网 DNS/Caddy 完成后必须重新执行 discovery、JWKS 和 TLS 验证。
