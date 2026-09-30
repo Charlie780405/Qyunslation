@@ -26,4 +26,3 @@
 - `uv run pytest -q tests/scripts/test_plan067c_bff_env.py -o addopts=''`
 - `python scripts/inject-plan-067c-bff-env.py --env-file <temp> --authentik-env <temp> --apply --skip-dns` 仅用于隔离测试。
 - 生产执行后检查服务状态、`/api/v1/health`、`/auth/login?format=json` 和日志脱敏。
-
