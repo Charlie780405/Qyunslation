@@ -16,10 +16,12 @@ uv run pytest -q tests/scripts/test_plan067c_bff_env.py -o addopts=''
 2 passed
 ```
 
-生产预检结果：
+生产预检结果（截至最近一次复核）：
 
 ```text
 BLOCKED: public Authentik host does not resolve: auth.qyunsgen.com
+
+补充证据：Cloudflare 权威服务器及 `1.1.1.1`、`8.8.8.8` 已返回 A 记录；该门禁使用生产主机的系统解析路径，而其上游 `108.61.10.10` 仍返回 NXDOMAIN。因此这不是跳过门禁的理由，sidecar 实际回调路径仍可能无法解析 issuer。
 ```
 
 因此本切片没有写入 `/home/dev/pdf2zh/office.env`，没有重启 `qyunslation-office.service`，没有伪造 sidecar 登录闭环完成。

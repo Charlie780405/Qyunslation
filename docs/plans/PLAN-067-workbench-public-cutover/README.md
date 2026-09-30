@@ -23,7 +23,7 @@
 | 子计划 | 内容 | 依赖 | 当前状态 |
 |---|---|---|---|
 | 067a | 运行时基线、设计输入与切换契约 | 无 | **已完成** |
-| 067b | Authentik 应用、DNS、回调契约 | 067a | **进行中 · 本地 provider 可校正；公网 DNS/Caddy 待外部配置** |
+| 067b | Authentik 应用、DNS、回调契约 | 067a | **进行中 · provider/Caddy 已通过；生产主机 resolver 仍缓存 NXDOMAIN** |
 | 067c | 密钥注入与 sidecar 会话配置 | 067b | **已实现注入器；等待 DNS 后执行生产 apply/restart** |
 | 067d | 登录、回调、`/api/v1/me`、登出、CSRF 验收 | 067c | **代码门禁已实现；等待公网 DNS、067c apply 和真实浏览器验收** |
 | 067e | Caddy 灰度路由 | 067d | 待执行 |
@@ -38,7 +38,7 @@
 ## 当前硬阻断
 
 - `/home/dev/pdf2zh/office.env` 尚缺 `QYUNSLATION_OIDC_CLIENT_ID` 与 `QYUNSLATION_SESSION_KEY`。
-- `auth.qyunsgen.com` 当前不能从主机解析。
+- `auth.qyunsgen.com` 的 Cloudflare 权威与公共递归已返回 A 记录，但生产主机上游 `108.61.10.10` 仍返回 NXDOMAIN；必须等其负缓存刷新或由主机运维切换到可用的受控 resolver。
 - 生产 Caddy 尚无 Authentik 站点及 `/next`、`/app-assets`、`/auth`、`/api/v1` 路由。
 - PLAN-054 的旧脚本仍使用 `/oauth2/callback`，必须与 BFF `/auth/callback` 对齐后才能切换。
 - `office-archive-watch.service` 因缺少 `minio` Python 依赖持续自动重启；它是故障服务，不是已证实的冗余服务。
