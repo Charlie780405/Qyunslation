@@ -868,6 +868,7 @@ async def create_translation_run(
             "target_language": target_language,
             "profile": body.profile,
             "bilingual": body.bilingual,
+            "auto_ocr_workaround": True,
         },
         status="queued",
         stage="validation",

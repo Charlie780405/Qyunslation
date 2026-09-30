@@ -40,6 +40,7 @@ def test_pdf2zh_command_uses_cli_flags_without_credentials(tmp_path: Path):
     )
     assert command[-1].endswith("source.pdf")
     assert "--lang-in" in command and command[command.index("--lang-in") + 1] == "en"
+    assert "--auto-enable-ocr-workaround" in command
     assert "do-not-copy" not in command
     assert "--api-key" not in command
 

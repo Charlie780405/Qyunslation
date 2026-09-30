@@ -169,6 +169,12 @@ def build_pdf2zh_command(
         command.extend(["--glossaries", glossary.strip()])
     if options.get("scan_strategy") == "skip-detection":
         command.append("--skip-scanned-detection")
+    elif options.get("auto_ocr_workaround", True) is True:
+        # Scanned-heavy PDFs otherwise exit 0 after reporting a BabelDOC
+        # translation error, leaving the output directory empty and making
+        # the durable run appear as a QA/artefact-gate failure.  Let the CLI
+        # decide when OCR is actually needed; text PDFs keep the normal path.
+        command.append("--auto-enable-ocr-workaround")
     if options.get("ocr_workaround") is True:
         command.append("--ocr-workaround")
     command.append(str(input_path))
