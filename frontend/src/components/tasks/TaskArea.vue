@@ -46,7 +46,7 @@
         </div>
         <div id="task-container">
             <div v-if="tasks.length === 0" class="flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 mt-5">
-                <img src="/static/favicon.ico" alt="LOGO" style="width:10%;min-width: 55px; height: auto;">
+                <img src="/static/qyunslation-mark.png" alt="Qyunslation" style="width:10%;min-width: 55px; height: auto;">
                 <p class="mt-3">{{ t('noTaskPlaceholder') }}</p>
             </div>
             <TaskCard

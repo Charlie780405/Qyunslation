@@ -10,9 +10,9 @@
   "lang": "zh-CN",
   "icons": [
     {
-      "src": "/static/favicon.ico",
-      "sizes": "48x48",
-      "type": "image/x-icon",
+      "src": "/static/qyunslation-mark.png",
+      "sizes": "any",
+      "type": "image/png",
       "purpose": "any"
     }
   ]

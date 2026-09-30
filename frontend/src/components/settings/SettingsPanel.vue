@@ -2,7 +2,7 @@
     <div class="settings-panel">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="d-flex align-items-center">
-                <img src="/static/quanxin-logo.svg" alt="荃信翻译 Qyunslation" class="me-3" style="height: 36px;" :title="t('pageTitle')" />
+                <img src="/static/qyunslation-logo.png" alt="Qyunslation" class="me-3" style="height: 36px;" :title="t('pageTitle')" />
                 <div class="btn-group">
                     <button type="button" class="btn btn-sm btn-outline-info" @click="showTutorial = true">
                         <Heroicon name="QuestionMarkCircleIcon" class="w-4 h-4 me-1" solid />

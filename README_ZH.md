@@ -1,5 +1,5 @@
 <p align="center">
-<img src="./qyunslation/static/quanxin-logo.svg" alt="荃信" width="220">
+<img src="./qyunslation/static/qyunslation-logo.png" alt="Qyunslation" width="220">
 </p>
 
 <h1 align="center">Qyunslation</h1>

@@ -17,6 +17,7 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     router = (FRONTEND / "src/next/router.js").read_text(encoding="utf-8")
     session = (FRONTEND / "src/next/stores/session.js").read_text(encoding="utf-8")
     login = (FRONTEND / "src/next/pages/LoginPage.vue").read_text(encoding="utf-8")
+    settings = (FRONTEND / "src/components/settings/SettingsPanel.vue").read_text(encoding="utf-8")
     styles = (FRONTEND / "src/next/next.css").read_text(encoding="utf-8")
 
     for route in ("/login", "/workbench", "/termbase", "/settings"):
@@ -27,6 +28,11 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert "workbench_v2" in router
     assert "hasCapability" in session
     assert "workbench_v2" in login
+    assert '/static/qyunslation-mark.png' in shell
+    assert '/static/qyunslation-mark.png' in login
+    assert '/static/qyunslation-logo.png' in settings
+    assert (ROOT / 'qyunslation/static/qyunslation-logo.png').exists()
+    assert (ROOT / 'qyunslation/static/qyunslation-mark.png').exists()
 
 
 def test_login_callback_does_not_return_to_public_login_route():

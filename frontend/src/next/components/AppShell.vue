@@ -2,7 +2,7 @@
   <div class="qy-app-shell">
     <header class="qy-topbar">
       <RouterLink class="qy-brand" to="/workbench" aria-label="返回翻译工作台">
-        <img src="/static/quanxin-logo.svg" alt="" class="qy-brand-mark" />
+        <img src="/static/qyunslation-mark.png" alt="" class="qy-brand-mark" />
         <span><strong>Qyunslation</strong><small>临床翻译工作台</small></span>
       </RouterLink>
       <div class="qy-topbar-actions">
