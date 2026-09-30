@@ -15,6 +15,7 @@
 | 本地 Authentik health | PASS | `127.0.0.1:9000` ready/live 可达 |
 | Authentik provider/application 校正 | PASS | 精确提交 `a78dac6` 后执行幂等脚本，provider/application 均更新 |
 | provider 正式回调 | PASS | API 返回 strict URI `https://translate.qyunsgen.com/auth/callback` |
+| Authentik 试点组 | PASS | 已创建 `qyunslation-vue-beta`，非 superuser；成员与 capability 映射留待 067d |
 | `auth.qyunsgen.com` DNS | BLOCKED | 当前主机解析为空，curl 返回 DNS error |
 | 公网 discovery/JWKS | BLOCKED | DNS 未就绪，不能验证公网 issuer |
 | Caddy Authentik 站点 | PASS（本机 resolve） | qyunsgen `main` 已推送 `fd26ce62`；Caddy reload、`--resolve` health 200、discovery issuer/JWKS 通过 |
