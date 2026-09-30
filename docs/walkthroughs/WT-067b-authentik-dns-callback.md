@@ -17,7 +17,7 @@
 | provider 正式回调 | PASS | API 返回 strict URI `https://translate.qyunsgen.com/auth/callback` |
 | `auth.qyunsgen.com` DNS | BLOCKED | 当前主机解析为空，curl 返回 DNS error |
 | 公网 discovery/JWKS | BLOCKED | DNS 未就绪，不能验证公网 issuer |
-| Caddy Authentik 站点 | BLOCKED | qyunsgen 配置尚无 auth 站点 |
+| Caddy Authentik 站点 | PASS（本机 resolve） | qyunsgen `main` 已推送 `fd26ce62`；Caddy reload、`--resolve` health 200、discovery issuer/JWKS 通过 |
 | client ID/session key | DEFERRED | PLAN-067c 受保护配置注入 |
 
 ## 不得推进的缺口
