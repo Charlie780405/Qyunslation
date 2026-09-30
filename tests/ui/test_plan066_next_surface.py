@@ -15,6 +15,8 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     app = (FRONTEND / "src/next/AppNext.vue").read_text(encoding="utf-8")
     shell = (FRONTEND / "src/next/components/AppShell.vue").read_text(encoding="utf-8")
     router = (FRONTEND / "src/next/router.js").read_text(encoding="utf-8")
+    session = (FRONTEND / "src/next/stores/session.js").read_text(encoding="utf-8")
+    login = (FRONTEND / "src/next/pages/LoginPage.vue").read_text(encoding="utf-8")
     styles = (FRONTEND / "src/next/next.css").read_text(encoding="utf-8")
 
     for route in ("/login", "/workbench", "/termbase", "/settings"):
@@ -22,6 +24,9 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert "Qyunslation" in shell
     assert "--qy-primary: #005076" in styles
     assert "--qy-brand-green: #81BB39" in styles
+    assert "workbench_v2" in router
+    assert "hasCapability" in session
+    assert "workbench_v2" in login
 
 
 def test_fastapi_keeps_legacy_root_and_adds_next_surface():

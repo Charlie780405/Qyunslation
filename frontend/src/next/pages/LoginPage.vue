@@ -42,7 +42,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRoute } from 'vue-router';
 import { useSessionStore } from '../stores/session.js';
 import {
   ArrowRightIcon,
@@ -53,7 +53,12 @@ import {
 } from '@heroicons/vue/24/outline';
 
 const session = useSessionStore();
-const message = ref('');
+const route = useRoute();
+const message = ref(
+  route.query.denied === 'workbench_v2'
+    ? '当前账号尚未加入 Vue 工作台试点组，请联系系统管理员。'
+    : '',
+);
 
 async function login() {
   message.value = '';

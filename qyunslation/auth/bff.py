@@ -192,7 +192,18 @@ def _roles_from_claims(claims: dict) -> list[str]:
         raw = [raw]
     if not isinstance(raw, list):
         return []
-    allowed = {"translator", "reviewer", "termbase_admin", "system_admin", "admin", "owner"}
+    allowed = {
+        "translator",
+        "reviewer",
+        "termbase_admin",
+        "system_admin",
+        "admin",
+        "owner",
+        # Authentik maps the qyunslation-vue-beta group to this capability.
+        # It is retained in the server-side session roles but is not a
+        # persistence role and therefore cannot grant tenant permissions.
+        "workbench_v2",
+    }
     return sorted({str(item).strip() for item in raw if str(item).strip() in allowed})
 
 
@@ -304,7 +315,7 @@ async def auth_login(
             "client_id": _client_id(),
             "response_type": "code",
             "redirect_uri": _redirect_uri(request),
-            "scope": "openid profile email",
+            "scope": "openid profile email roles",
             "state": state,
             "nonce": nonce,
             "code_challenge": _pkce_challenge(verifier),

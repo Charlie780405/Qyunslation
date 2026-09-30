@@ -9,6 +9,7 @@ export const useSessionStore = defineStore('next-session', () => {
 
   const isAuthenticated = computed(() => state.value === 'authenticated');
   const isPreview = computed(() => !isAuthenticated.value && import.meta.env.DEV);
+  const hasCapability = (name) => Boolean(user.value?.capabilities?.[name]);
 
   async function load() {
     if (state.value !== 'unknown') return user.value;
@@ -43,5 +44,5 @@ export const useSessionStore = defineStore('next-session', () => {
     state.value = 'anonymous';
   }
 
-  return { user, state, error, isAuthenticated, isPreview, load, beginLogin, logout };
+  return { user, state, error, isAuthenticated, isPreview, hasCapability, load, beginLogin, logout };
 });

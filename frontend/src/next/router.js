@@ -26,6 +26,9 @@ router.beforeEach(async (to) => {
   if (session.state === 'anonymous' && !session.isPreview) {
     return { name: 'login', query: { return_to: to.fullPath } };
   }
+  if (!session.isPreview && !session.hasCapability('workbench_v2')) {
+    return { name: 'login', query: { denied: 'workbench_v2' } };
+  }
   return true;
 });
 

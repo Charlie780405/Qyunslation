@@ -52,9 +52,31 @@ PY
 fi
 echo "SCOPE_PK=$SCOPE_PK AUTH_FLOW=$AUTH_FLOW CERT=$CERT"
 
+# workbench capability scope（幂等）：仅由 Authentik 试点组授予，浏览器不能伪造。
+ROLES_SCOPE_PK="$(api_get "$AK_URL/api/v3/propertymappings/provider/scope/?search=roles" | python3 -c '
+import json,sys
+for x in json.load(sys.stdin).get("results",[]):
+  if x.get("scope_name")=="roles" and x.get("managed")=="goauthentik.io/qyunslation/scope-roles":
+    print(x["pk"]); break
+' || true)"
+if [[ -z "$ROLES_SCOPE_PK" ]]; then
+  ROLES_SCOPE_PK="$(api_json -X POST "$AK_URL/api/v3/propertymappings/provider/scope/" -d "$(python3 - <<'PY'
+import json
+print(json.dumps({
+  "name": "qyunslation OAuth Mapping: roles",
+  "scope_name": "roles",
+  "description": "Server-side roles and Vue workbench capability",
+  "expression": "roles = request.user.attributes.get('roles', [])\nif isinstance(roles, str):\n    roles = [roles]\nelse:\n    roles = list(roles or [])\nif request.user.groups.filter(name='qyunslation-vue-beta').exists():\n    roles.append('workbench_v2')\nreturn {'roles': sorted(set(str(item).strip() for item in roles if str(item).strip()))}",
+  "managed": "goauthentik.io/qyunslation/scope-roles",
+}))
+PY
+)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pk"])')"
+fi
+echo "ROLES_SCOPE_PK=$ROLES_SCOPE_PK"
+
 MAPS="$(api_get "$AK_URL/api/v3/propertymappings/provider/scope/?page_size=50" | python3 -c '
 import json,sys
-want={"openid","email","profile","tenant"}
+want={"openid","email","profile","tenant","roles"}
 ids=[]
 for x in json.load(sys.stdin)["results"]:
   if x.get("scope_name") in want:

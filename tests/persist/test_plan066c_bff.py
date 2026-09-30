@@ -46,6 +46,7 @@ def test_login_uses_server_state_and_pkce(client, monkeypatch):
     query = parse_qs(urlparse(location).query)
     assert query["code_challenge_method"] == ["S256"]
     assert query["redirect_uri"][0].endswith("/auth/callback")
+    assert "roles" in query["scope"][0].split()
     assert response.json()["return_to"] == "/next/workbench"
     state = query["state"][0]
     from qyunslation.persist import db
@@ -74,7 +75,12 @@ def test_callback_issues_opaque_session_and_logout_revokes_it(client, monkeypatc
 
     async def userinfo(metadata, access_token):
         assert access_token == "opaque-access"
-        return {"sub": "user-1", "tenant": "acme", "name": "Alice", "roles": ["reviewer"]}
+        return {
+            "sub": "user-1",
+            "tenant": "acme",
+            "name": "Alice",
+            "roles": ["reviewer", "workbench_v2"],
+        }
 
     monkeypatch.setattr(bff, "_discover", discover)
     monkeypatch.setattr(bff, "_token_exchange", exchange)
@@ -97,6 +103,7 @@ def test_callback_issues_opaque_session_and_logout_revokes_it(client, monkeypatc
     assert me.status_code == 200
     assert me.json()["display_name"] == "Alice"
     assert me.json()["roles"] == ["reviewer"]
+    assert me.json()["capabilities"]["workbench_v2"] is True
     csrf = client.cookies.get("qyunslation_csrf")
     assert client.put("/api/v1/preferences", json={"preferences": {"density": "compact"}}).status_code == 403
     assert client.put(
@@ -112,7 +119,7 @@ def test_callback_issues_opaque_session_and_logout_revokes_it(client, monkeypatc
         assert row is not None
         assert row.user_sub == "user-1"
         assert row.tenant_slug == "acme"
-        assert row.roles == ["reviewer"]
+        assert row.roles == ["reviewer", "workbench_v2"]
         assert row.token_blob and "opaque-access" not in row.token_blob
 
     logout = client.post("/auth/logout", headers={"X-CSRF-Token": csrf})

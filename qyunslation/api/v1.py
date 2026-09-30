@@ -200,6 +200,7 @@ def api_me(
             "can_review": membership.role in {"reviewer", "term_admin", "admin", "owner"},
             "can_manage_terms": membership.role in {"term_admin", "admin", "owner"},
             "can_manage_policy": membership.role in {"admin", "owner"},
+            "workbench_v2": "workbench_v2" in identity.roles,
         },
     }
 
