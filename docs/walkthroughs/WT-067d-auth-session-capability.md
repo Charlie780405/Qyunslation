@@ -29,10 +29,12 @@ npm --prefix frontend run build       PASS（有既有大 chunk warning）
 - 本机 `/auth/login?format=json` 返回 Authentik authorize URL，scope 含 `roles`，redirect URI 为 `/auth/callback`。
 - 本机 `/api/v1/health` 返回 200；未认证 `/api/v1/me` 返回 401。
 - 合成 cookie 的 logout 请求缺失 CSRF 返回 403，匹配 CSRF 返回 204；未触碰真实会话。
+- 真实公网 OIDC 客户端流程已通过：试点账号登录 → Authentik callback 302 → BFF session；`/api/v1/me` 返回 200 且 `workbench_v2=true`。
+- 实际 BFF cookie 仅报告属性：`qyunslation_session` 为 Secure/HttpOnly/SameSite=Lax，`qyunslation_csrf` 为 Secure/非 HttpOnly/SameSite=Lax；未输出值。
+- 真实会话 logout 无 CSRF 返回 403，带匹配 CSRF 返回 204，之后 `/api/v1/me` 返回 401。
 
 ## 剩余生产缺口
 
-- 尚未经过 Caddy 将 `/next`、`/auth`、`/api/v1` 灰度到 sidecar。
-- 尚未使用真实试点账号完成浏览器 OIDC callback、`/api/v1/me` capability、cookie 属性、登出和跨租户拒绝证据。
+- 自动化真实公网授权路径已完成上述 callback、capability、cookie、logout 验收；仍需人工浏览器确认页面渲染、路由守卫提示和跨租户拒绝界面。
 
 因此本子计划标记为“代码与 sidecar 预检完成、真实浏览器验收待 067e 灰度路由”。
