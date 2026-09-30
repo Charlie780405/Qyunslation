@@ -66,7 +66,7 @@ print(json.dumps({
   "name": "qyunslation OAuth Mapping: roles",
   "scope_name": "roles",
   "description": "Server-side roles and Vue workbench capability",
-  "expression": "roles = request.user.attributes.get('roles', [])\nif isinstance(roles, str):\n    roles = [roles]\nelse:\n    roles = list(roles or [])\nif request.user.groups.filter(name='qyunslation-vue-beta').exists():\n    roles.append('workbench_v2')\nreturn {'roles': sorted(set(str(item).strip() for item in roles if str(item).strip()))}",
+  "expression": "roles = request.user.attributes.get('roles', [])\nif isinstance(roles, str):\n    roles = [roles]\nelse:\n    roles = list(roles or [])\nif request.user.ak_groups.filter(name='qyunslation-vue-beta').exists():\n    roles.append('workbench_v2')\nreturn {'roles': sorted(set(str(item).strip() for item in roles if str(item).strip()))}",
   "managed": "goauthentik.io/qyunslation/scope-roles",
 }))
 PY
