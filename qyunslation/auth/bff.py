@@ -38,6 +38,7 @@ OIDC_ISSUER_ENV = "QYUNSLATION_OIDC_ISSUER"
 OIDC_CLIENT_ID_ENV = "QYUNSLATION_OIDC_CLIENT_ID"
 OIDC_CLIENT_SECRET_ENV = "QYUNSLATION_OIDC_CLIENT_SECRET"
 OIDC_REDIRECT_URI_ENV = "QYUNSLATION_OIDC_REDIRECT_URI"
+OIDC_JWKS_URL_ENV = "QYUNSLATION_OIDC_JWKS_URL"
 OIDC_TENANT_CLAIM_ENV = "QYUNSLATION_OIDC_TENANT_CLAIM"
 SESSION_KEY_ENV = "QYUNSLATION_SESSION_KEY"
 SESSION_IDLE_MINUTES_ENV = "QYUNSLATION_SESSION_IDLE_MINUTES"
@@ -79,6 +80,13 @@ def _issuer() -> str:
 
 def _client_id() -> str:
     return (os.environ.get(OIDC_CLIENT_ID_ENV) or "").strip()
+
+
+def _jwks_url(metadata: dict[str, str]) -> str:
+    # Prefer the protected server-side JWKS path.  The public issuer may be
+    # behind a CDN/WAF that rejects non-browser urllib clients; discovery is
+    # still used for issuer and token endpoints.
+    return (os.environ.get(OIDC_JWKS_URL_ENV) or "").strip() or metadata.get("jwks_uri", "")
 
 
 def _session_key() -> str:
@@ -166,7 +174,7 @@ def _verify_id_token(
     *,
     expected_nonce: str,
 ) -> dict:
-    jwks_uri = metadata.get("jwks_uri")
+    jwks_uri = _jwks_url(metadata)
     if not jwks_uri:
         raise HTTPException(status_code=502, detail="身份服务缺少 JWKS 配置")
     try:

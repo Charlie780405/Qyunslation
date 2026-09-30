@@ -154,7 +154,13 @@ def test_id_token_uses_discovery_issuer_with_trailing_slash(monkeypatch):
         return {"sub": "user-1", "nonce": "nonce"}
 
     monkeypatch.setenv("QYUNSLATION_OIDC_ISSUER", "https://issuer.example")
-    monkeypatch.setattr(bff, "PyJWKClient", lambda *_args, **_kwargs: _Client())
+    monkeypatch.setenv("QYUNSLATION_OIDC_JWKS_URL", "http://127.0.0.1:9000/jwks")
+
+    def make_client(url, **_kwargs):
+        seen["jwks_url"] = url
+        return _Client()
+
+    monkeypatch.setattr(bff, "PyJWKClient", make_client)
     monkeypatch.setattr(bff.jwt, "decode", decode)
 
     bff._verify_id_token(
@@ -167,3 +173,4 @@ def test_id_token_uses_discovery_issuer_with_trailing_slash(monkeypatch):
     )
 
     assert seen["issuer"] == "https://issuer.example/application/o/qyunslation/"
+    assert seen["jwks_url"] == "http://127.0.0.1:9000/jwks"
