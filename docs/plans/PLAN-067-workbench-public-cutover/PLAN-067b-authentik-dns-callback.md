@@ -15,6 +15,7 @@
 5. 建立 Authentik 试点组 `qyunslation-vue-beta`，后续由 BFF 映射 `workbench_v2` capability；不在浏览器信任组名。
 6. 在 qyunsgen Caddy 中准备 `auth.qyunsgen.com` → `127.0.0.1:9000`，保留 `X-Forwarded-Proto=https`，不暴露 9000。
 7. 在 DNS 控制面增加 `auth.qyunsgen.com`，并验证公网 discovery/JWKS/TLS。
+8. 使用 `scripts/verify-plan-067b.sh` 固化本地 provider、试点组、Caddy、DNS 和公网 JWKS 门禁。
 
 ## 安全边界
 

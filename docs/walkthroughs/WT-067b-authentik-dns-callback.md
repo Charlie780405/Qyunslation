@@ -7,6 +7,7 @@
 - 将 `scripts/plan054-apply-blueprint.sh` 的 provider 回调默认值改为 BFF 正式回调 `/auth/callback`。
 - 保留受保护环境变量 `QYUNSLATION_OIDC_REDIRECT_URI` 作为显式覆盖，不打印任何 secret。
 - 已核对本地 Authentik server ready endpoint 可用。
+- 新增 `scripts/verify-plan-067b.sh`，可在 DNS 修复后重复执行并区分 FAIL/BLOCKED。
 
 ## 现场结果
 
