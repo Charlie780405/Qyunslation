@@ -8,12 +8,26 @@ from typing import Any, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from qyunslation.persist.models import TranslationStageEvent
+from qyunslation.persist.models import TranslationRunRecord, TranslationStageEvent
 from qyunslation.pipeline.events import StageEvent, StageEventBuffer
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class StaleGenerationError(RuntimeError):
+    """事件的 generation 与任务当前 generation 不一致，拒绝写入。"""
+
+
+def assert_current_generation(session: Session, *, run_id: str, generation: int) -> None:
+    current = session.scalar(
+        select(TranslationRunRecord.generation).where(TranslationRunRecord.id == run_id)
+    )
+    if current is None or int(current) != int(generation):
+        raise StaleGenerationError(
+            f"run {run_id} generation {generation} is not current ({current})"
+        )
 
 
 def next_sequence(session: Session, *, run_id: str, generation: int) -> int:
@@ -37,6 +51,7 @@ def persist_buffer(
     buffer: StageEventBuffer,
     start_sequence: int | None = None,
 ) -> list[TranslationStageEvent]:
+    assert_current_generation(session, run_id=run_id, generation=generation)
     seq = start_sequence or next_sequence(session, run_id=run_id, generation=generation)
     rows: list[TranslationStageEvent] = []
     for event in buffer.events:
@@ -61,6 +76,8 @@ def persist_buffer(
             started_at=_utcnow() if event.state == "running" else None,
             finished_at=_utcnow() if finished else None,
             progress=event.progress,
+            units_done=event.units_done,
+            units_total=event.units_total,
             message=(event.message or "")[:512] or None,
             error_code=str(event.extra.get("error_code") or "")[:64] or None,
             trace_id=str(event.extra.get("trace_id") or "")[:64] or None,
@@ -125,3 +142,11 @@ def event_to_dict(row: TranslationStageEvent) -> dict[str, Any]:
         "error_code": row.error_code,
         "trace_id": row.trace_id,
     }
+
+
+def pending_stages(
+    session: Session, *, run_id: str, generation: int, planned: Iterable[str]
+) -> list[str]:
+    """重启 reconcile：已 completed/skipped 的阶段不再重复执行。"""
+    done = completed_stages(session, run_id=run_id, generation=generation)
+    return [stage for stage in planned if stage not in done]
