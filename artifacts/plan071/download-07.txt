@@ -1,0 +1,18 @@
+# download evidence (PLAN-071e) run=5b25971e-bd55-4d6e-8134-44a17a395e92
+## artifacts after approval
+[{"kind": "formal", "filename": "protocol-sample.pdf", "formal_export": true, "download_url": "/api/v1/translation-runs/5b25971e-bd55-4d6e-8134-44a17a395e92/artifacts/0a1cb3ac-98da-4b31-bf36-38dd1e58ef57", "size_bytes": 2861}, {"kind": "formal", "filename": "protocol-sample_dual.pdf", "formal_export": true, "download_url": "/api/v1/translation-runs/5b25971e-bd55-4d6e-8134-44a17a395e92/artifacts/bbe7ddcd-a746-409f-b297-8074f797dace", "size_bytes": 2861}]
+## GET formal artifact (approved) -> expect 200
+HTTP/1.1 200 OK
+date: Thu, 01 Oct 2026 02:41:17 GMT
+server: uvicorn
+cache-control: no-store
+x-content-type-options: nosniff
+content-type: application/pdf
+accept-ranges: bytes
+content-disposition: attachment; filename="protocol-sample.pdf"
+downloaded bytes: 2861 magic: %PDF-1.7
+
+## pre-approval gate (409) and approve->download — automated tests
+tests/api/test_plan071e_download_bypass.py::test_formal_download_requires_approved PASSED [ 50%]
+tests/api/test_plan071e_approve_download.py::test_v2_approve_materializes_formal_artifact_and_unlocks_download PASSED [100%]
+======================== 2 passed, 2 warnings in 1.76s =========================

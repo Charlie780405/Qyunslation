@@ -1,0 +1,3 @@
+PLAN-071g settings DOM evidence (2026-10-01T02:21:16Z)
+URL: /next/settings?section=accessibility  prefs saved via PUT /api/v1/preferences: density=compact reduceMotion=true largeText=true
+<html lang="zh-CN" data-theme="auto" class="qy-density-compact qy-reduce-motion qy-large-text" style="--qy-ui-scale: 1.12;">

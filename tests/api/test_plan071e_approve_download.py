@@ -92,3 +92,6 @@ def test_v2_approve_materializes_formal_artifact_and_unlocks_download(client):
     assert formal
     download = client.get(formal[0]["download_url"], headers=headers)
     assert download.status_code == 200
+    events = client.get(f"/api/v1/translation-runs/{run_id}/events", headers=headers).json()["items"]
+    done = {(e["stage"], e["state"]) for e in events}
+    assert ("review", "completed") in done and ("export", "completed") in done

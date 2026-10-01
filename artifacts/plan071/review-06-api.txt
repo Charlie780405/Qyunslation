@@ -1,0 +1,11 @@
+# review evidence (PLAN-071e) run=5b25971e-bd55-4d6e-8134-44a17a395e92
+## 1) translator role tries approve -> expect 403
+{"detail":"reviewer role required"}
+HTTP 403
+## 2) QA items before approve
+{"items":[{"id":"881b7f4f-da2f-45ff-80c8-b3969f48e472","category":"terminology","severity":"warning","code":"TERM_SNAPSHOT_PENDING","message":"术语快照尚未完成","object_id":null,"evidence":{},"resolved":false}],"summary":{"blocker":0,"warning":1,"info":0},"quality_state":"review_ready"}
+## 3) artifacts before approve (formal not materialized)
+[]
+## 4) reviewer approves -> expect 200 approved
+{'status': 'succeeded', 'stage': 'export', 'quality_state': 'approved', 'progress': 100}
+HTTP 200

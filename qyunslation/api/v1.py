@@ -1496,6 +1496,16 @@ def post_review_decision(
         run.completed_at = run.completed_at or datetime.now(timezone.utc)
         session.flush()
         _refresh_translation_run(session, run)
+        try:
+            from qyunslation.pipeline.event_store import persist_buffer
+            from qyunslation.pipeline.events import StageEventBuffer
+
+            buf = StageEventBuffer()
+            buf.emit("review", "completed", message=f"已批准 · {identity.user_sub}")
+            buf.emit("export", "completed", message="正式产物已解锁", progress=100.0)
+            persist_buffer(session, run_id=run.id, generation=run.generation, buffer=buf)
+        except Exception:
+            pass
     elif decision == "request_changes":
         run.quality_state = "draft"
         run.stage = "text"

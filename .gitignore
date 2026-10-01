@@ -57,3 +57,5 @@ docs/Resources/
 
 # local editor
 .vscode/
+
+var/plan071-browser/
