@@ -51,7 +51,12 @@ if env -u QYUNSLATION_PIPELINE "$PY" -m pytest -q -o addopts= \
   tests/ui/test_plan071d_no_hardcoded_stages.py \
   tests/ui/test_plan071f_run_detail_route.py \
   tests/ui/test_plan071g_settings_source.py \
-  tests/persist/test_plan071i_legacy_backfill.py
+  tests/persist/test_plan071i_legacy_backfill.py \
+  tests/persist/test_plan071d_stage_events.py \
+  tests/persist/test_plan071_migrations.py \
+  tests/pipeline/test_plan071e_pdf_inspect.py \
+  tests/pipeline/test_plan071h_term_snapshot.py \
+  tests/glossary/test_plan071h_chain_and_egress.py
 then
   pass "pytest 071 unit/ui contracts"
 else
@@ -63,7 +68,14 @@ if QYUNSLATION_PIPELINE=v2 "$PY" -m pytest -q -o addopts= \
   tests/api/test_plan071e_review_gate.py \
   tests/api/test_plan071e_download_bypass.py \
   tests/api/test_plan071g_model_classification_gate.py \
-  tests/api/test_plan071i_retry_v2.py
+  tests/api/test_plan071i_retry_v2.py \
+  tests/api/test_plan071e_real_qa_gate.py \
+  tests/api/test_plan071e_approve_download.py \
+  tests/api/test_plan071f_preview_range.py \
+  tests/api/test_plan071f_office_preview.py \
+  tests/api/test_plan071g_admin_policies.py \
+  tests/api/test_plan071i_gray_rollout.py \
+  tests/api/test_plan071h_risk_autobatch.py
 then
   pass "pytest 071 api gates"
 else
@@ -77,6 +89,12 @@ if [[ -x "$ROOT/scripts/verify-plan-071b.sh" ]]; then
   if bash "$ROOT/scripts/verify-plan-071b.sh"; then pass "verify-071b"; else fail "verify-071b"; fi
 fi
 
+if [[ -d "$ROOT/frontend/node_modules" ]] && command -v npm >/dev/null 2>&1; then
+  if (cd "$ROOT/frontend" && npm test --silent); then pass "frontend vitest (071f)"; else fail "frontend vitest (071f)"; fi
+else
+  blocked "frontend vitest skipped: node_modules/npm missing"
+fi
+
 EVIDENCE_DIR="$ROOT/artifacts/plan071"
 BROWSER_MARKERS=(
   "login"
@@ -86,6 +104,7 @@ BROWSER_MARKERS=(
   "settings"
   "review"
   "download"
+  "dual-canvas"
 )
 if [[ -d "$EVIDENCE_DIR" ]]; then
   for marker in "${BROWSER_MARKERS[@]}"; do
