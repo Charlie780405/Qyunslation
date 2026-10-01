@@ -78,6 +78,19 @@ else
   blocked "frontend verification skipped: npm or node_modules unavailable"
 fi
 
+if [[ -x "$PY" ]]; then
+  if (cd "$ROOT" && "$PY" scripts/plan074-live-regression.py); then
+    pass "Dupilumab live regression"
+  else
+    rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+      blocked "Dupilumab live regression (set PLAN074_GOLD_* or restore var samples)"
+    else
+      fail "Dupilumab live regression"
+    fi
+  fi
+fi
+
 if [[ "$FAILURES" -gt 0 ]]; then
   printf 'SUMMARY: FAIL fail=%s blocked=%s\n' "$FAILURES" "$BLOCKED"
   exit 1

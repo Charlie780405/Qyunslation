@@ -1,0 +1,168 @@
+Figure 1. Dupilumab-associated vitiligo in a 46-year-old male, Fitzpatrick IV.
+Dupilumab-associated de novo vitiligo in a patient treated for severe asthma
+Patricia Curtin BS 1, Jessica Gai, BA, MS1, Michael Vittori M.D., PharmD2
+1 School of Medicine, New York Medical College, Valhalla, NY, 10595, 2 Department of Dermatology, New York Medical College, New York, NY 10029
+●Dupilumab suppresses T helper (Th) 2 pathway 
+via dual blockade of IL-4 and IL-13 receptors. 
+●Suppression of Th2 pathways may contribute 
+to overexpression of Th1 pathways and 
+increased CD8+ cytotoxic T cell activity 
+implicated in melanocyte destruction in vitiligo 
+development.
+○Other key immune cells hypothesized to 
+promote vitiligo development include T 
+regulatory, resident memory T & dendritic 
+cells. 
+●Cases of vitiligo development following 
+initiation of dupilumab have been reported 
+globally, especially within the first six months of 
+initiation. 
+●Upon vitiligo development, there is not a 
+uniform recovery of melanocytes.
+○Some patients recover pigmentation while 
+continuing dupilumab treatment, while others 
+do not recover pigmentation despite 
+discontinuing dupilumab. 
+○There are few reported cases of patients with 
+previously-diagnosed vitiligo lesions that 
+experience repigmentation upon initiation of 
+dupilumab treatment; this should not be 
+considered as standard.
+●Presentation: 46-year-old male, Fitzpatrick skin 
+type IV, with a history of severe asthma, atopic 
+dermatitis (AD), and extensive sun exposure, 
+presented to clinic with a 1-year history of severe 
+sun sensitivity and new-onset, diffuse, 
+ivory-colored patches.
+○Started on dupilumab by his pulmonologist for 
+moderate-to-severe asthma (history of ICU 
+admission 2x) just before symptom onset.
+○Significant asthma improvement on dupilumab; no 
+other reported adverse effects.
+●Medications: dupilumab pre-filled pen, albuterol.
+●Physical Exam: revealed generalized, diffuse, 
+near-universal ivory-colored patches of 
+hypopigmentation. 
+○Other dermatologic findings included 
+erythematous eczematous plaques bilaterally on 
+arms and face, solar lentigines, actinic keratoses, 
+and nevi across the face, trunk, and extremities.
+●Patient chose not to discontinue dupilumab given 
+improvement of asthmatic exacerbations.
+●Recommendation to mitigate depigmented lesion 
+sun sensitivity by use of daily SPF 30+ and motor 
+vehicle window tints; also started on roflumilast 
+0.15% cream for AD.
+●Dupilumab is a fully human monoclonal antibody 
+that inhibits interleukin receptor signaling (IL-4 and 
+-13).
+●While generally very well-tolerated, reported 
+adverse events include rebound atopic dermatitis, 
+injection site dryness, eczema, and rarely, vitiligo. 
+●Vitiligo is characterized by depletion of melanocytes 
+within the epidermis and impaired melanocyte stem 
+cell regeneration, leading to well-defined milky-white 
+lesions on the skin.
+Background
+Case Description
+Conclusions
+●Even with dupilumab’s well-tolerated profile, 
+longitudinal monitoring and open 
+communication with patients about any new 
+dermatologic changes should occur to guide 
+optimal treatment.
+●Vitiligo mechanisms and plausible dupilumab 
+interactions should be elucidated further.
+Discussion
+1.
+Turk, Mary Jo, and Yina H Huang. “The immunology of vitiligo.” Nature reviews. Immunology vol. 26,4 (2026): 284-297. doi:10.1038/s41577-025-01249-z
+2.
+Patel, D., et al. “735 - A Case Series of Dupilumab for Vitiligo and Alopecia Areata in the Setting of AD.” British Journal of Dermatology, 2024. doi:10.1093/bjd/ljae266.108.
+3.
+Mehta, S., et al. “Interactions between Dupilumab and Vitiligo: A Scoping Review.” Journal of the European Academy of Dermatology and Venereology, vol. 39, 2024. 
+doi:10.1111/jdv.20279.
+4.
+Shao, X., et al. “Biologic Drugs Induced Vitiligo: Case Reports and Review of Literature.” Frontiers in Immunology, vol. 15, 2024, article 1455050. doi:10.3389/fimmu.2024.1455050.
+5.
+Castro, Mario, et al. “Dupilumab Efficacy and Safety in Moderate-to-Severe Uncontrolled Asthma.” New England Journal of Medicine, vol. 378, no. 26, 2018, pp. 2486–2496. New England 
+Journal of Medicine, https://doi.org/10.1056/NEJMoa1804092
+References
+Figure 2. Hypothesized Th1 pathway upregulation during Th2 suppression in dupilumab treatment. Oxidative 
+stress within epidermal environment combined with an increase in IFN-γ-induced stimulation of keratinocytes aids a 
+signal cascade, resulting in Th differentiation into Th1 phenotype & promoting cytotoxic T (CD8+) cell chemotaxis.
+Type IV
+图1。一名46岁男性（FitzpatrickIV型）发生的度普利尤单抗相关白癜风。
+一例因治疗严重哮喘而接受度普利尤单抗治疗后出现新发白癜风的病例报告
+a
+P a t r i c i a C u r t i n B S 1 ，JessicaGai,BA,MS1, M i c h a e l V i t t o r i M . D . , P h a r m D 21 纽约医
+学院医学院，纽约州瓦尔哈拉，邮编10595，2纽约医学院皮肤病学系，纽约州纽约
+029
+●度普利尤单抗通过双重阻断IL-4和IL-13受体
+来抑制T辅助（Th）2通路。
+●Th2通路的抑制可能导致Th1通路过度表达以
+及CD8+ 细胞毒性T细胞活性增加，后者与白癜
+风发展过程中黑素细胞的破坏有关。
+○其他被假设促进白癜风发展的关键免疫细
+胞包括调节性T细胞、驻留记忆T细胞和树
+突状细胞。
+●全球范围内已报道在开始使用度普利尤单抗后出
+现白癜风的情况，尤其是在开始治疗的前六个月内。
+●出现白癜风后，黑素细胞的恢复并不一致。
+○部分患者在继续度普利尤单抗治疗期间恢复
+了色素沉着，而另一些患者即使停用度普利尤
+单抗也未恢复色素沉着。
+○既往已确诊白癜风皮损患者在开始度普利尤
+单抗治疗时出现色素再生的报道病例极少；不应
+将其视为标准情况。
+●临床表现：一名46岁男性，Fitzpatrick皮肤分型
+IV型，有严重哮喘、特应性皮炎（AD）病史及广泛
+日晒史，因<stytleid='3'>1年严重日光敏感史
+</stytle>和<stytleid='5'>新发、弥漫性象牙色斑块
+</stytle>就诊。
+○由他的肺科医生在症状发作前开始使用度普利
+尤单抗治疗中重度哮喘（有2次入住ICU的病史）。
+○使用度普利尤单抗后哮喘显著改善；无其他报道的
+不良事件。
+●药物：度普利尤单抗预充式注射笔、沙丁胺醇。
+●体格检查：显示广泛、弥漫性的近乎普遍的象
+牙色色素减退斑。
+○其他皮肤科发现包括双臂和面部双侧的红斑性湿
+疹斑块，日光性雀斑样痣，光化性角化病，以及面
+部、躯干和四肢的色素痣。
+●患者选择不停用度普利尤单抗，鉴于哮喘急性发作
+有所改善。
+●建议使用减轻脱色皮损对阳光的敏感性，采用每日
+SPF30+ 防晒措施及汽车车窗贴膜；同时开始使用
+0.15%罗氟司特乳膏治疗AD。
+●度普利尤单抗是一种完全人源单克隆抗体，可抑制
+白细胞介素受体信号传导（IL-4和IL-13）。
+●虽然总体耐受性良好，但报告的不良事件包括反跳
+性特应性皮炎、注射部位干燥、湿疹，以及罕见的白癜
+风。
+●白癜风的特征是表皮内黑素细胞耗竭和黑素细胞干
+细胞再生受损，导致皮肤上出现边界清晰的乳白色病变。
+背景
+病例描述
+结论
+●尽管度普利尤单抗具有良好的耐受性，但仍需
+对患者进行纵向监测并与患者保持开放沟通关于
+任何新的皮肤病变，以指导最佳治疗。
+●应进一步阐明白癜风机制及度普利尤单抗可
+能的相互作用。
+讨论
+1.
+Turk, Mary Jo, and Yina H Huang. “The immunology of vitiligo.” Nature reviews. Immunology vol. 26,4 (2026): 284-297. doi:10.1038/s41577-025-01249-z
+2.
+Patel, D., et al. “735 - A Case Series of Dupilumab for Vitiligo and Alopecia Areata in the Setting of AD.” British Journal of Dermatology, 2024. doi:10.1093/bjd/ljae266.108.
+3.
+Mehta, S., et al. “Interactions between Dupilumab and Vitiligo: A Scoping Review.” Journal of the European Academy of Dermatology and Venereology, vol. 39, 2024.
+doi:10.1111/jdv.20279.
+4.
+Shao, X., et al. “Biologic Drugs Induced Vitiligo: Case Reports and Review of Literature.” Frontiers in Immunology, vol. 15, 2024, article 1455050. doi:10.3389/fimmu.2024.1455050.
+5.
+Castro, Mario, et al. “Dupilumab Efficacy and Safety in Moderate-to-Severe Uncontrolled Asthma.” New England Journal of Medicine, vol. 378, no. 26, 2018, pp. 2486–2496. New England
+Journal of Medicine, https://doi.org/10.1056/NEJMoa1804092
+References
+图2。度普利尤单抗治疗期间Th2抑制过程中假设的Th1通路上调。表皮环境中的氧化应激与IFN-γ诱导的角质
+形成细胞刺激增加相结合，有助于信号级联反应，导致Th分化为Th1表型并促进细胞毒性T（CD8+）细胞的趋化性。
+IV型

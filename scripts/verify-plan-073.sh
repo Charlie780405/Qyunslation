@@ -41,8 +41,12 @@ if [[ -x "$PY" ]]; then
   else
     fail "pytest plan073 (see var/verify-plan-073-pytest.log)"
   fi
-  if (cd "$ROOT" && "$PY" scripts/plan073-domain-eval.py) >"$ROOT/var/verify-plan-073-eval.log" 2>&1; then
+  eval_rc=0
+  (cd "$ROOT" && "$PY" scripts/plan073-domain-eval.py) >"$ROOT/var/verify-plan-073-eval.log" 2>&1 || eval_rc=$?
+  if [[ "$eval_rc" -eq 0 ]]; then
     pass "domain eval"
+  elif [[ "$eval_rc" -eq 2 ]]; then
+    blocked "domain eval missing machine corpus for some gold samples (see var/verify-plan-073-eval.log)"
   else
     fail "domain eval (see var/verify-plan-073-eval.log)"
   fi
@@ -66,10 +70,10 @@ else
   blocked "deepseek key not configured"
 fi
 
-if command -v chromium >/dev/null 2>&1 || command -v google-chrome >/dev/null 2>&1; then
-  blocked "browser qa_blocked UI evidence not captured"
+if compgen -G "$ROOT/docs/evidence/plan073-074/*.png" >/dev/null; then
+  pass "browser evidence screenshots present"
 else
-  blocked "browser evidence (no Chrome)"
+  blocked "browser evidence (add PNG under docs/evidence/plan073-074/)"
 fi
 
 if [[ "$FAILURES" -gt 0 ]]; then

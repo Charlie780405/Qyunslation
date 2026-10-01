@@ -1836,6 +1836,19 @@ async def create_translation_run(
     )
     session.add(run)
     session.flush()
+    egress = str((mode_snapshot.get("model_snapshot") or {}).get("egress_scope") or "none")
+    if egress != "none":
+        record_audit(
+            session,
+            actor_sub=identity.user_sub,
+            action="translation_run.egress",
+            extra={
+                "run_id": run.id,
+                "egress_scope": egress,
+                "model_profile_id": model_profile_id,
+                "document_classification": classification,
+            },
+        )
     await _launch_translation_run(
         run=run, preflight=preflight, target_language=target_language, session=session
     )
@@ -2162,6 +2175,50 @@ def _policies_payload(session: Session, tenant_id: str) -> dict[str, Any]:
             for key, row in sorted(_tenant_policies(session, tenant_id).items())
         },
     }
+
+
+@router.get("/admin/egress-audit")
+def list_egress_audit(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """PLAN-075d：按租户查询任务外发记录（模型档、外发范围、片段统计）。"""
+    tenant = _require_policy_admin(session, identity)
+    rows = list(
+        session.scalars(
+            select(TranslationRunRecord)
+            .where(TranslationRunRecord.tenant_id == tenant.id)
+            .order_by(TranslationRunRecord.created_at.desc())
+            .limit(page_size * 4)
+        ).all()
+    )
+    items: list[dict[str, Any]] = []
+    for run in rows:
+        snap = dict((run.settings_snapshot or {}).get("model_snapshot") or {})
+        scope = str(snap.get("egress_scope") or "none")
+        if scope == "none":
+            continue
+        term_summary = dict(run.term_summary or {})
+        items.append(
+            {
+                "run_id": run.id,
+                "generation": run.generation,
+                "status": run.status,
+                "quality_state": run.quality_state,
+                "document_classification": run.document_classification,
+                "model_profile_id": run.model_profile_id,
+                "egress_scope": scope,
+                "provider": snap.get("provider"),
+                "model_id": snap.get("model_id"),
+                "term_profile_id": snap.get("term_profile_id"),
+                "fragment_count": term_summary.get("egress_fragment_count"),
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+            }
+        )
+        if len(items) >= page_size:
+            break
+    return {"items": items, "count": len(items)}
 
 
 @router.get("/admin/policies")
