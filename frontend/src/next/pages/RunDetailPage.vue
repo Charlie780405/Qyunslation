@@ -95,7 +95,7 @@
         :total="termTotal"
         :page="termPage"
         :page-size="40"
-        :can-manage-terms="canManageTerms"
+        :can-manage-terms="canReviewHighRisk"
         :error="termPanelError"
         :enriching="termEnriching"
         @decide="decideTerm"
@@ -127,7 +127,10 @@
         </section>
       </div>
 
-      <section class="qy-panel qy-log-section">
+      <p v-if="!logVisible" class="qy-log-toggle">
+        <button type="button" class="qy-link-button" @click="logVisible = true">显示技术日志</button>
+      </p>
+      <section v-else class="qy-panel qy-log-section">
         <h2>
           <button
             type="button"
@@ -137,6 +140,7 @@
             aria-label="技术日志抽屉"
             @click="logOpen = !logOpen"
           >{{ logOpen ? '收起技术日志' : '展开技术日志' }}</button>
+          <button type="button" class="qy-link-button" @click="logVisible = false">隐藏</button>
         </h2>
         <pre v-show="logOpen" id="qy-log-drawer" class="qy-log-drawer" tabindex="0" aria-label="技术日志内容">{{ logText }}</pre>
       </section>
@@ -164,6 +168,7 @@ const view = useRunDetailView();
 const sessionStore = useSessionStore();
 const loadError = ref('');
 const logOpen = ref(false);
+const logVisible = ref(false);
 const run = ref(null);
 const events = ref([]);
 const qaItems = ref([]);
@@ -179,6 +184,10 @@ const termPanelError = ref('');
 const termEnriching = ref(false);
 const reviewComment = ref('');
 const canManageTerms = computed(() => sessionStore.hasCapability('can_manage_terms'));
+const isRunOwner = computed(() => Boolean(
+  run.value?.actor_sub && sessionStore.user?.sub && run.value.actor_sub === sessionStore.user.sub,
+));
+const canReviewHighRisk = computed(() => canManageTerms.value || isRunOwner.value);
 let timer;
 let draftTimer;
 
@@ -206,16 +215,22 @@ const formalGateMessage = computed(() => {
   return `尚有 ${gate.unresolved_term_count || 0} 条术语、${gate.unconfirmed_affiliation_count || 0} 条单位译名或 ${gate.qa_blockers || 0} 个 QA 阻断项未处理`;
 });
 
+const OPEN_TERM_STATUSES = new Set(['pending', 'pending_admin', 'violation']);
+
+function visibleTermItems(items) {
+  return (items || []).filter((item) => OPEN_TERM_STATUSES.has(item.status));
+}
+
 async function loadTerms(page = termPage.value) {
   const terms = await api.listRunTermCandidates(runId.value, { page, page_size: 40 });
-  termCandidates.value = terms.items || [];
+  termCandidates.value = visibleTermItems(terms.items);
   termRules.value = terms.rules || {};
   termUnresolved.value = terms.unresolved || 0;
-  termTotal.value = terms.total || 0;
+  termTotal.value = termCandidates.value.length;
   termPage.value = terms.page || page;
 }
 
-async function refresh() {
+async function refresh({ includeTerms = true } = {}) {
   if (!runId.value) return;
   try {
     run.value = await api.getRun(runId.value);
@@ -223,10 +238,12 @@ async function refresh() {
     events.value = ev.items || [];
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
-    try {
-      await loadTerms();
-    } catch {
-      termCandidates.value = [];
+    if (includeTerms) {
+      try {
+        await loadTerms();
+      } catch {
+        termCandidates.value = [];
+      }
     }
     try {
       const affiliations = await api.listRunAffiliationSegments(runId.value);
@@ -298,11 +315,15 @@ async function decideTerm(item, payload) {
     await api.decideRunTermCandidate(runId.value, item.id, payload);
     reviewError.value = '';
     termPanelError.value = '';
-    await refresh();
+    termCandidates.value = termCandidates.value.filter((row) => row.id !== item.id);
+    termTotal.value = termCandidates.value.length;
+    termUnresolved.value = Math.max(0, termUnresolved.value - 1);
   } catch (error) {
-    const message = error?.status === 409
-      ? '该术语已被其他审核人更新，请刷新后重试。'
-      : (error?.message || '术语裁决失败');
+    const message = error?.status === 403
+      ? '当前账号不能裁决这条术语。'
+      : error?.status === 409
+        ? '该术语已被其他审核人更新，请刷新后重试。'
+        : (error?.message || '术语裁决失败');
     termPanelError.value = message;
     reviewError.value = message;
   }
@@ -313,7 +334,7 @@ async function enrichTermSuggestions() {
   termPanelError.value = '';
   try {
     const payload = await api.enrichRunTermSuggestions(runId.value);
-    termCandidates.value = payload.items || [];
+    termCandidates.value = visibleTermItems(payload.items);
     termRules.value = payload.rules || {};
     termUnresolved.value = payload.unresolved || 0;
     termTotal.value = payload.total || 0;
@@ -368,7 +389,10 @@ async function applyCorrections() {
 onMounted(async () => {
   await sessionStore.load();
   await refresh();
-  timer = setInterval(refresh, 3000);
+  if (termCandidates.value.some((item) => !item.suggested_target)) {
+    await enrichTermSuggestions();
+  }
+  timer = setInterval(() => refresh({ includeTerms: false }), 3000);
 });
 onUnmounted(() => {
   clearInterval(timer);
@@ -378,6 +402,8 @@ onUnmounted(() => {
 
 <style scoped>
 .qy-run-detail { display: grid; gap: 1rem; min-width: 0; }
+.qy-log-toggle { margin: 0; }
+.qy-log-section h2 { display: flex; gap: .75rem; align-items: center; }
 .qy-run-detail-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
 .qy-run-detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .qy-run-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }

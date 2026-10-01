@@ -261,6 +261,13 @@ def api_me(
     }
 
 
+def _can_review_run(identity: IdentityContext, run: TranslationRunRecord) -> bool:
+    """Reviewers and the run owner can decide terms on that task."""
+    if _identity_role(identity) in {"reviewer", "term_admin", "admin", "owner"}:
+        return True
+    return bool(run.actor_sub) and run.actor_sub == identity.user_sub
+
+
 def _identity_role(identity: IdentityContext) -> str:
     """Map provider roles to the existing persistence role vocabulary."""
     mapping = {
@@ -1484,6 +1491,7 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
     )
     return {
         "id": run.id,
+        "actor_sub": run.actor_sub,
         "project_id": None,
         "preflight_id": run.preflight_id,
         "generation": run.generation,
@@ -2856,9 +2864,13 @@ def _decide_run_candidate(
     action = body.action.strip().casefold()
     role = _identity_role(identity)
     high_risk = candidate.risk.strip().casefold() in {"high", "critical"}
-    if high_risk and action in {"approve", "do_not_translate", "merge"} and role not in {
-        "term_admin", "admin", "owner"
-    }:
+    owner_review = run.actor_sub == identity.user_sub
+    if (
+        high_risk
+        and action in {"approve", "do_not_translate", "merge"}
+        and role not in {"term_admin", "admin", "owner"}
+        and not owner_review
+    ):
         raise HTTPException(status_code=403, detail="term_admin role required for high-risk term")
     if action == "submit_for_admin" and not high_risk:
         raise HTTPException(status_code=400, detail="only high-risk candidates require administrator review")
@@ -2896,7 +2908,7 @@ def decide_run_term_candidate(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if not _can_review_run(identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     candidate = session.get(DocumentTermCandidate, candidate_id)
     if candidate is None:
@@ -2914,7 +2926,7 @@ def batch_decide_run_term_candidates(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if not _can_review_run(identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     decided: list[dict[str, Any]] = []
     for item in body.decisions:
@@ -2940,7 +2952,7 @@ def enrich_run_term_candidate_suggestions(
 ) -> dict[str, Any]:
     """Use termbase + DeepSeek to backfill suggested_target for pending candidates."""
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if not _can_review_run(identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     from qyunslation.workbench.term_extract import enrich_run_term_suggestions
 

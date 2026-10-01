@@ -466,7 +466,7 @@ def decide_candidate(
             f"candidate version {candidate.version} does not match {expected_version}"
         )
     if action == "submit_for_admin":
-        if candidate.status != "pending":
+        if candidate.status not in {"pending", "pending_admin"}:
             raise CandidateConflict(f"candidate is already {candidate.status}")
     elif candidate.status not in {"pending", "pending_admin", "violation"}:
         raise CandidateConflict(f"candidate is already {candidate.status}")

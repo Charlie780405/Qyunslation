@@ -371,9 +371,12 @@ def _validate_suggestion_item(item: dict[str, Any]) -> bool:
     target = item.get("suggested_target") or item.get("target")
     if not isinstance(target, str) or not target.strip():
         return False
-    if "confidence" in item:
+    if "confidence" in item and item["confidence"] not in {None, ""}:
+        raw_conf = item["confidence"]
+        if isinstance(raw_conf, str) and raw_conf.strip().casefold() in {"low", "medium", "high"}:
+            raw_conf = {"low": 0.4, "medium": 0.7, "high": 0.9}[raw_conf.strip().casefold()]
         try:
-            conf = float(item["confidence"])
+            conf = float(raw_conf)
         except (TypeError, ValueError):
             return False
         if conf < 0 or conf > 1:

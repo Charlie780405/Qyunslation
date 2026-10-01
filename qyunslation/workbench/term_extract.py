@@ -347,6 +347,15 @@ def sync_affiliation_segments_from_text(
     return created
 
 
+def _normalize_suggested_target(source_term: str, suggested: str, *, source_context: str = "") -> str:
+    """Prefer 完全人源 over the shorter 全人源 for fully human antibody wording."""
+    text = (suggested or "").strip()
+    blob = f"{source_term}\n{source_context}".casefold()
+    if "fully human" in blob or "全人源" in text:
+        text = re.sub(r"(?<!完)全人源", "完全人源", text)
+    return text
+
+
 def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = None) -> Any | None:
     """Pick the compliant term suggester for structured extraction and DeepSeek hints."""
     if explicit is not None:
@@ -442,7 +451,11 @@ def enrich_discovered_suggestions(
         aligned = suggestions.get(source, row["aligned"])
         item = discovered[norm]
         if aligned.suggested_target and not item.get("suggested_target"):
-            item["suggested_target"] = aligned.suggested_target
+            item["suggested_target"] = _normalize_suggested_target(
+                item.get("source_term") or "",
+                aligned.suggested_target,
+                source_context=item.get("source_context") or "",
+            )
             updated += 1
         if aligned.observed_target and not item.get("observed_target"):
             item["observed_target"] = aligned.observed_target

@@ -133,8 +133,11 @@ describe('RunDetailPage', () => {
     wrapper.unmount();
   });
 
-  it('keeps the technical log collapsed in an in-flow drawer', async () => {
+  it('keeps the technical log hidden until requested, then collapsed in a drawer', async () => {
     const { wrapper } = await mountPage('/workbench/run-1');
+    expect(wrapper.find('#qy-log-drawer').exists()).toBe(false);
+    const showLog = wrapper.findAll('button').find((node) => node.text() === '显示技术日志');
+    await showLog.trigger('click');
     const toggle = wrapper.find('[aria-controls="qy-log-drawer"]');
     expect(toggle.attributes('aria-expanded')).toBe('false');
     expect(wrapper.find('#qy-log-drawer').isVisible()).toBe(false);

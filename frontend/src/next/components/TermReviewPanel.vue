@@ -52,7 +52,7 @@
         </label>
       </div>
       <details v-if="item.source_context">
-        <summary>上下文与提取证据（{{ item.occurrence_count || 0 }} 处）</summary>
+        <summary>上下文与提取证据（{{ evidenceCount(item) }} 处）</summary>
         <p>{{ item.source_context }}</p>
         <small>{{ item.extraction_reason || '规则提取' }} · {{ item.rule_version || rules?.version }}</small>
       </details>
@@ -112,14 +112,19 @@ const canBatchApprove = computed(() => selected.value.length > 0 && selected.val
 
 watch(() => props.items, (items) => {
   items.forEach((item) => {
-    if (!(item.id in drafts)) {
-      drafts[item.id] = item.confirmed_target || item.suggested_target || item.observed_target || '';
+    const next = item.confirmed_target || item.suggested_target || item.observed_target || '';
+    if (!(item.id in drafts) || (!String(drafts[item.id] || '').trim() && next)) {
+      drafts[item.id] = next;
     }
   });
 }, { immediate: true, deep: true });
 
 function isFinal(item) {
   return ['approved', 'rejected', 'applied'].includes(item.status);
+}
+
+function evidenceCount(item) {
+  return item.occurrence_count || (item.source_context ? 1 : 0);
 }
 
 function isBatchEligible(item) {

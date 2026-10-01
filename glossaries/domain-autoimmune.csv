@@ -29,6 +29,8 @@ melanocyte,黑素细胞,domain-autoimmune,cell,
 keratinocyte,角质形成细胞,domain-autoimmune,cell,
 CD8+,CD8+ T细胞,domain-autoimmune,cell,
 monoclonal antibody,单克隆抗体,domain-autoimmune,general,
+fully human,完全人源,domain-autoimmune,general,prefer 完全人源 over 全人源
+fully human monoclonal antibody,完全人源单克隆抗体,domain-autoimmune,general,
 placebo,安慰剂,domain-autoimmune,general,
 moderate-to-severe,中重度,domain-autoimmune,general,
 pruritus,瘙痒,domain-autoimmune,symptom,
