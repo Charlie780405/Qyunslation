@@ -75,7 +75,7 @@ def upgrade() -> None:
         sa.Column("object_id", sa.String(length=128), nullable=True),
         sa.Column("evidence_json", sa.JSON(), nullable=False),
         sa.Column("reviewer_note", sa.String(length=1024), nullable=True),
-        sa.Column("resolved", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("resolved", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_qa_item_run_gen", "qa_item", ["run_id", "generation"])
@@ -103,7 +103,7 @@ def upgrade() -> None:
         sa.Column("model_id", sa.String(length=256), nullable=False),
         sa.Column("reported_version", sa.String(length=256), nullable=True),
         sa.Column("role", sa.String(length=32), nullable=False),
-        sa.Column("experimental", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("experimental", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("probe_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )

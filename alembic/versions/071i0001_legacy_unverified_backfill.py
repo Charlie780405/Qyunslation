@@ -34,7 +34,7 @@ def upgrade() -> None:
             """
             UPDATE translation_artifact
             SET kind = 'legacy'
-            WHERE formal_export = 1
+            WHERE formal_export IS TRUE
               AND kind = 'formal'
               AND run_id IN (
                 SELECT id FROM translation_run_record WHERE quality_state = 'legacy_unverified'
