@@ -11,6 +11,9 @@ from qyunslation.glossary.resolver import TermMatch, TermRecord, TermResolver, b
 from qyunslation.glossary.governance import normalize_lang
 from qyunslation.persist.models import Concept, ConceptTerm
 
+FORM_LAYERS = frozenset({"form", "regulatory-form-fields"})
+REGULATORY_PROFILES = frozenset({"监管申报材料"})
+
 
 def _preferred_target(terms: list[ConceptTerm], lang: str) -> str | None:
     preferred = [
@@ -21,6 +24,24 @@ def _preferred_target(terms: list[ConceptTerm], lang: str) -> str | None:
     return preferred[0] if preferred else None
 
 
+def _profile_allowed(concept: Concept, document_profile: str | None) -> bool:
+    allowed = concept.applies_to_profiles
+    if not allowed:
+        return True
+    profile = (document_profile or "").strip()
+    if not profile:
+        return True
+    return profile in {str(item).strip() for item in allowed if str(item).strip()}
+
+
+def _layer_allowed(layer: str, document_profile: str | None) -> bool:
+    normalized_layer = (layer or "").strip().casefold()
+    if normalized_layer in FORM_LAYERS:
+        profile = (document_profile or "").strip()
+        return profile in REGULATORY_PROFILES
+    return True
+
+
 def list_runtime_terms(
     session: Session,
     *,
@@ -28,6 +49,7 @@ def list_runtime_terms(
     project_id: str | None,
     src_lang: str = "en",
     tgt_lang: str = "zh",
+    document_profile: str | None = None,
 ) -> list[TermRecord]:
     """Load only approved terms visible to this tenant/project."""
     src_lang = normalize_lang(src_lang) or "en"
@@ -42,6 +64,10 @@ def list_runtime_terms(
     concepts = list(session.scalars(stmt).unique().all())
     records: dict[tuple[str, str, str], TermRecord] = {}
     for concept in concepts:
+        if not _profile_allowed(concept, document_profile):
+            continue
+        if not _layer_allowed(concept.layer, document_profile):
+            continue
         target = _preferred_target(concept.terms, tgt_lang)
         if not target and concept.do_not_translate:
             target = _preferred_target(concept.terms, src_lang)
@@ -89,6 +115,7 @@ def resolve_runtime_terms(
     text: str,
     src_lang: str = "en",
     tgt_lang: str = "zh",
+    document_profile: str | None = None,
 ) -> list[TermMatch]:
     records = list_runtime_terms(
         session,
@@ -96,6 +123,7 @@ def resolve_runtime_terms(
         project_id=project_id,
         src_lang=src_lang,
         tgt_lang=tgt_lang,
+        document_profile=document_profile,
     )
     return TermResolver(build_term_index(records)).resolve(text)
 
@@ -136,6 +164,7 @@ def match_to_dict(match: TermMatch) -> dict:
         "scope": match.layer,
         "confidence": match.confidence,
         "source_locations": [{"start": match.start, "end": match.end}],
+        "matched_text": match.matched_text or match.source_term,
         "hard_constraint": match.match_type in {"exact", "alias"},
     }
 

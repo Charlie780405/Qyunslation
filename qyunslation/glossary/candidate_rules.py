@@ -24,6 +24,28 @@ EXCLUDE_TOO_LONG = "TOO_LONG"
 EXCLUDE_JUNK = "JUNK"
 EXCLUDE_FRAGMENT = "FRAGMENT"
 EXCLUDE_REJECTED = "REJECTED"
+_GENERIC_SHORT_TERMS = frozenset(
+    {
+        "no",
+        "yes",
+        "n/a",
+        "na",
+        "pp",
+        "id",
+        "or",
+        "ad",
+        "it",
+        "is",
+        "as",
+        "at",
+        "by",
+        "in",
+        "of",
+        "on",
+        "to",
+        "vs",
+    }
+)
 _DRUG_FRAGMENT = re.compile(r"^[a-z]{1,3}(?:mab|nib|cept)$", re.I)
 _ORG_HINT = re.compile(
     r"\b(?:hospital|university|institute|biotech|pharma(?:ceutical)?)\b",
@@ -174,13 +196,23 @@ def classify_risk_by_rules(
     hit = include_hit(source, rules=current) or normalized_type
     if hit in {"drug", "target", "organization", "study_id", "code", "protocol"}:
         return "high"
-    if current.abbreviation_is_high and (
-        hit == "abbreviation"
-        or re.fullmatch(r"[A-Z]{2,}(?:-[A-Z0-9]+)*", source)
-    ):
-        return "high"
+    if current.abbreviation_is_high:
+        if hit in {"study_id", "code", "protocol"}:
+            return "high"
+        if hit == "abbreviation" or normalized_type == "abbreviation":
+            if source.casefold() in _GENERIC_SHORT_TERMS:
+                return "normal"
+            return "high"
+        if re.fullmatch(r"[A-Z]{2,}(?:-[A-Z0-9]+)*", source):
+            if source.casefold() in _GENERIC_SHORT_TERMS:
+                return "normal"
+            if hit in {"drug", "target", "organization"}:
+                return "high"
+            return "normal"
     if _ORG_HINT.search(source):
         return "high"
     if source and len(source) < current.min_source_chars:
-        return "high"
+        if hit in {"drug", "target", "organization", "study_id", "code", "protocol"}:
+            return "high"
+        return "normal"
     return "normal"

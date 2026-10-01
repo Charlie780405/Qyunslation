@@ -37,9 +37,12 @@
           <div v-if="activeRun" class="qy-live-progress" role="status" aria-live="polite">
             <div class="qy-live-progress-heading">
               <div class="qy-live-progress-title"><span class="qy-live-indicator" aria-hidden="true"></span><strong>翻译实时进度</strong></div>
-              <span>{{ statusLabel(activeRun.status) }}</span>
+              <span>{{ displayStatus(activeRun) }}</span>
             </div>
-            <div class="qy-live-progress-meta"><strong>{{ activeRun.progress_message || stageMessage(activeRun) }}</strong><span>{{ progressText(activeRun) }}</span></div>
+            <div class="qy-live-progress-meta">
+              <strong>{{ liveSummary(activeRun) }}</strong>
+              <span>{{ progressText(activeRun) }}</span>
+            </div>
             <div
               class="qy-task-progress qy-live-progress-bar"
               :class="{ 'is-indeterminate': activeRun.progress === null || activeRun.progress === undefined }"
@@ -49,11 +52,14 @@
               :aria-valuenow="activeRun.progress === null || activeRun.progress === undefined ? undefined : activeRun.progress"
               :aria-valuetext="progressText(activeRun)"
             ><span :style="activeRun.progress === null || activeRun.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, activeRun.progress))}%` }"></span></div>
-            <StageTimeline
-              :events="activeEvents"
-              :current-stage="activeRun.stage || ''"
-              :quality-state="activeRun.quality_state || 'draft'"
-            />
+            <button
+              v-if="activeRun.quality_state === 'qa_blocked' || activeRun.quality_state === 'review_ready'"
+              class="qy-link-button"
+              type="button"
+              @click="openRun(activeRun)"
+            >
+              {{ activeRun.quality_state === 'qa_blocked' ? '查看 QA 拦截项' : '进入人工复核' }}
+            </button>
           </div>
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
@@ -87,8 +93,8 @@
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
               <div class="qy-task-details">
                 <strong>{{ run.display_name || run.filename || run.file_name || '未命名文档' }}</strong>
-                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
-                <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ run.progress_message || stageMessage(run) }}</span><span>{{ progressText(run) }}</span></div>
+                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ displayStatus(run) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
+                <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ liveSummary(run) }}</span><span>{{ progressText(run) }}</span></div>
                 <div v-if="isActive(run)" class="qy-task-progress" :class="{ 'is-indeterminate': run.progress === null || run.progress === undefined }" role="progressbar" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="run.progress === null || run.progress === undefined ? undefined : run.progress" :aria-valuetext="progressText(run)"><span :style="run.progress === null || run.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
                 <div v-if="run.artifacts?.length" class="qy-task-artifacts">
                   <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
@@ -129,7 +135,9 @@
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
           <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
           <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
-          <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
+          <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification" @change="refreshModelProfiles"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
+          <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in modelProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
+          <p v-if="selectedModelProfile" class="qy-muted">外发范围：{{ egressLabel(selectedModelProfile) }}</p>
           <label class="qy-check-field"><input v-model="workbenchState.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
         </div>
       </aside>
@@ -186,6 +194,10 @@ const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancel
 const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
 const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
+const modelProfiles = ref([]);
+const selectedModelProfile = computed(
+  () => modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId) || null,
+);
 
 // HTTP field values are restricted to ISO-8859-1 by the browser Headers API.
 // Encode each segment so localized settings remain safe and deterministic as
@@ -203,6 +215,45 @@ function buildIdempotencyKey() {
 
 function statusLabel(status) {
   return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成', interrupted: '已中断' })[status] || '待处理';
+}
+
+function displayStatus(run) {
+  if (!run) return '待处理';
+  if (run.quality_state === 'qa_blocked') {
+    const blockers = run.qa_summary?.blocker || 0;
+    return `QA 拦截 ${blockers} 项`;
+  }
+  if (run.quality_state === 'review_ready') return '待人工复核';
+  return statusLabel(run.status);
+}
+
+function liveSummary(run) {
+  if (!run) return '';
+  if (run.quality_state === 'qa_blocked') return '版式已完成，等待 QA 处置';
+  if (run.quality_state === 'review_ready') return 'QA 已通过，等待人工复核';
+  if (run.status === 'translating' && run.progress_message) return run.progress_message;
+  return stageMessage(run);
+}
+
+function egressLabel(profile) {
+  if (!profile) return '仅内网';
+  if (profile.role === 'term_suggester') return '脱敏术语片段';
+  if (profile.provider === 'deepseek') return '公开资料全文外发';
+  return '无外发';
+}
+
+async function refreshModelProfiles() {
+  try {
+    const payload = await api.listModelProfiles(workbenchState.classification);
+    modelProfiles.value = payload.items || payload.profiles || [];
+    const current = modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId);
+    if (!current || !current.configured) {
+      const fallback = modelProfiles.value.find((item) => item.configured && item.role === 'translator');
+      if (fallback) workbenchState.modelProfileId = fallback.profile_id;
+    }
+  } catch {
+    modelProfiles.value = [];
+  }
 }
 
 function stageLabel(stage) {
@@ -305,6 +356,7 @@ async function startTranslation() {
       profile: workbenchState.profile,
       bilingual: workbenchState.bilingual,
       document_classification: workbenchState.classification,
+      model_profile_id: workbenchState.modelProfileId,
     }, key);
     uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
     await refreshRuns();
@@ -435,6 +487,7 @@ async function deleteRun(run) {
 onMounted(async () => {
   await sessionStore.load();
   await restoreWorkbenchSession(sessionStore.user);
+  await refreshModelProfiles();
   if (preflight.value === null && restoredPreflight.value?.state === 'ready') {
     preflight.value = restoredPreflight.value;
     uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
@@ -442,6 +495,7 @@ onMounted(async () => {
   await refreshRuns();
 });
 watch(showArchived, refreshRuns);
+watch(() => workbenchState.classification, refreshModelProfiles);
 watch(workbenchState, () => scheduleWorkbenchPreferenceSave(), { deep: true });
 onUnmounted(() => window.clearTimeout(pollTimer));
 </script>

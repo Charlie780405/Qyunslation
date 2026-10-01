@@ -25,6 +25,22 @@ const props = defineProps({
   qualityState: { type: String, default: 'draft' },
 });
 
+const MESSAGE_LABELS = {
+  'format=pdf': 'PDF 格式',
+  'text pdf': '文本型 PDF，无需 OCR',
+  disabled: '本模板未启用',
+  pending: '等待中',
+  'launched:pdf_cli': '已启动 PDF 引擎',
+  'launched:office_sidecar': '已启动 Office 引擎',
+  'launched:image_sidecar': '已启动图片引擎',
+};
+
+function displayMessage(event, state) {
+  const raw = event?.message || state;
+  if (!raw) return state;
+  return MESSAGE_LABELS[raw] || raw;
+}
+
 const STAGE_LABELS = {
   validation: '文件预检',
   structure: '结构解析',
@@ -78,7 +94,7 @@ const displayStages = computed(() => {
       stage,
       state,
       label: STAGE_LABELS[stage] || stage,
-      message: event?.message || state,
+      message: displayMessage(event, state),
       className,
     };
   });

@@ -30,6 +30,7 @@ from qyunslation.persist.db import (
 )
 from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
 from qyunslation.persist.models import (
+    DocumentTermCandidate,
     PreflightRecord,
     QaItem,
     ReviewDecision,
@@ -1064,11 +1065,16 @@ def _materialize_artifacts(
     session.flush()
 
 
+def _document_profile_from_run(run: TranslationRunRecord) -> str:
+    snap = run.settings_snapshot or {}
+    return str(snap.get("profile") or "临床研究文档")
+
+
 def _inspect_run_outputs(
     session: Session,
     run: TranslationRunRecord,
     runner_state: dict[str, Any] | None,
-) -> tuple[list[Any], dict[str, Any] | None]:
+) -> tuple[list[Any], dict[str, Any] | None, dict[str, Any] | None]:
     """PLAN-071e/h：用真实源/译文 PDF 产出 QA findings 与术语快照（失败也要留痕）。"""
     from qyunslation.pipeline.qa.engine import QaFinding
     from qyunslation.pipeline.qa.pdf_inspect import inspect_pdf_pair
@@ -1087,14 +1093,14 @@ def _inspect_run_outputs(
         else:
             mono = mono or path
     if mono is None and dual is None:
-        return [], None
+        return [], None, None
     preflight = session.get(PreflightRecord, run.preflight_id)
     if preflight is None:
-        return [], None
+        return [], None, None
     try:
         source_path = _preflight_path(preflight)
     except HTTPException:
-        return [], None
+        return [], None, None
     target = str(getattr(run, "direction", "") or "").split("→")[-1]
     facts: dict[str, Any] = {}
     findings, summary = inspect_pdf_pair(
@@ -1117,6 +1123,7 @@ def _inspect_run_outputs(
                 tenant_id=run.tenant_id,
                 project_id=None,
                 source_text=facts["source"].text,
+                document_profile=_document_profile_from_run(run),
             )
             findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
         except Exception:
@@ -1130,7 +1137,7 @@ def _inspect_run_outputs(
             evidence=summary,
         )
     )
-    return findings, snapshot
+    return findings, snapshot, facts if facts else None
 
 
 def _maybe_run_auto_qa(
@@ -1157,9 +1164,23 @@ def _maybe_run_auto_qa(
         summarize,
     )
 
-    inspected, term_snapshot = _inspect_run_outputs(session, run, runner_state)
+    inspected, term_snapshot, facts = _inspect_run_outputs(session, run, runner_state)
     if term_snapshot is not None:
         run.term_summary = term_snapshot
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    if facts and preflight is not None:
+        try:
+            from qyunslation.workbench.term_extract import extract_candidates_from_text
+
+            extract_candidates_from_text(
+                session,
+                run=run,
+                preflight=preflight,
+                source_text=facts["source"].text,
+                translated_text=facts["translated"].text,
+            )
+        except Exception:
+            pass
     findings = run_deterministic_qa(
         manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
         term_summary=run.term_summary,
@@ -1442,6 +1463,41 @@ async def _launch_translation_run(
                 )
             except Exception:
                 pass
+
+    if session is not None:
+        try:
+            from qyunslation.workbench.runner import get_pdf2zh_runner
+            from qyunslation.workbench.term_inject import build_run_glossary_path
+
+            run_dir = get_pdf2zh_runner()._run_dir(
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                generation=run.generation,
+            )
+            run_dir.mkdir(parents=True, exist_ok=True)
+            glossary_path, inject_meta = build_run_glossary_path(
+                session,
+                run=run,
+                preflight=preflight,
+                run_dir=run_dir,
+            )
+            snap = dict(run.settings_snapshot or {})
+            if glossary_path:
+                existing = str(
+                    snap.get("glossaries")
+                    or os.environ.get("QYUNSLATION_PDF2ZH_GLOSSARIES")
+                    or ""
+                ).strip()
+                paths = [item for item in existing.split(",") if item.strip()]
+                if glossary_path not in paths:
+                    paths.append(glossary_path)
+                snap["glossaries"] = ",".join(paths)
+            for key in ("termbase_version", "injected_terms", "glossary_path"):
+                if inject_meta.get(key) is not None:
+                    snap[key] = inject_meta[key]
+            run.settings_snapshot = snap
+        except Exception:
+            pass
 
     if run_pipeline_mode(run.settings_snapshot) == "v2":
         try:
@@ -2482,6 +2538,99 @@ async def resume_translation_run(
         resume=True,
     )
     return _translation_run_dict(session, run)
+
+
+def _requalify_translation_run(
+    session: Session,
+    run: TranslationRunRecord,
+    *,
+    runner_state: dict[str, Any] | None = None,
+) -> None:
+    """PLAN-073b：用修复后的术语规则重跑确定性 QA，不重新翻译。"""
+    from qyunslation.pipeline.qa import quality_state_from_findings, run_deterministic_qa, summarize
+
+    session.query(QaItem).filter(
+        QaItem.run_id == run.id,
+        QaItem.generation == run.generation,
+    ).delete(synchronize_session=False)
+    if runner_state is None and run.external_task_id:
+        try:
+            from qyunslation.workbench.runner import get_pdf2zh_task_state
+
+            runner_state = get_pdf2zh_task_state(run.external_task_id)
+        except Exception:
+            runner_state = None
+    inspected, term_snapshot, _facts = _inspect_run_outputs(session, run, runner_state)
+    if term_snapshot is not None:
+        run.term_summary = term_snapshot
+    findings = run_deterministic_qa(
+        manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
+        term_summary=run.term_summary,
+        settings_snapshot={**(run.settings_snapshot or {}), "generation": run.generation},
+        translated_text_sample=None,
+        logo_present=None,
+    )
+    findings.extend(inspected)
+    for finding in findings:
+        session.add(
+            QaItem(
+                run_id=run.id,
+                generation=run.generation,
+                category=finding.category,
+                severity=finding.severity,
+                code=finding.code,
+                message=finding.message,
+                object_id=finding.object_id,
+                evidence_json=finding.evidence,
+            )
+        )
+    run.qa_summary = summarize(findings)
+    run.quality_state = quality_state_from_findings(findings)
+    run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
+    run.updated_at = datetime.now(timezone.utc)
+
+
+@router.post("/translation-runs/{run_id}/requalify")
+async def requalify_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if run.status not in {"translating", "rendering", "review_ready"} and run.quality_state != "qa_blocked":
+        raise HTTPException(status_code=409, detail="run is not ready for requalify")
+    _requalify_translation_run(session, run)
+    session.flush()
+    return _translation_run_dict(session, run)
+
+
+@router.get("/translation-runs/{run_id}/term-candidates")
+def list_run_term_candidates(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    rows = session.scalars(
+        select(DocumentTermCandidate)
+        .where(DocumentTermCandidate.translation_run_id == run.id)
+        .order_by(DocumentTermCandidate.created_at.desc())
+    ).all()
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "source_term": row.source_term,
+                "suggested_target": row.suggested_target,
+                "term_type": row.term_type,
+                "risk": row.risk,
+                "status": row.status,
+                "source_context": row.source_context,
+            }
+            for row in rows
+        ]
+    }
 
 
 class PreferencesBody(BaseModel):

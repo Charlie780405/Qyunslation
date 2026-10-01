@@ -148,7 +148,9 @@ def _ocr_pdf_with_hpd(source: Path, destination: Path) -> Path:
     return Path(ocr_pdf_with_hpd(source, destination))
 
 
-def _prepare_runtime_config(base: Path | None, run_dir: Path) -> Path | None:
+def _prepare_runtime_config(
+    base: Path | None, run_dir: Path, settings: dict[str, Any] | None = None
+) -> Path | None:
     """Copy the operator config and force CLI mode without mutating it.
 
     The production GUI config intentionally contains ``[basic] gui = true``.
@@ -171,6 +173,14 @@ def _prepare_runtime_config(base: Path | None, run_dir: Path) -> Path | None:
     if count == 0:
         # No [basic].gui key means the upstream default is already CLI mode.
         replaced = content
+    try:
+        from qyunslation.workbench.runtime_config import apply_model_snapshot
+
+        snapshot = (settings or {}).get("model_snapshot")
+        if isinstance(snapshot, dict):
+            replaced = apply_model_snapshot(replaced, snapshot)
+    except Exception:
+        pass
     target = run_dir / "runner-config.toml"
     target.write_text(replaced, encoding="utf-8")
     os.chmod(target, 0o600)
@@ -506,7 +516,7 @@ class Pdf2zhRunner:
         output_dir = run_dir / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
-            runtime_config = _prepare_runtime_config(_config_file(), run_dir)
+            runtime_config = _prepare_runtime_config(_config_file(), run_dir, settings)
             command = build_pdf2zh_command(
                 executable=executable,
                 input_path=source,

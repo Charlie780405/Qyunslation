@@ -552,6 +552,7 @@ class Concept(Base):
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     do_not_translate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     layer: Mapped[str] = mapped_column(String(32), nullable=False, default="clinical")
+    applies_to_profiles: Mapped[list | None] = mapped_column(JSON, nullable=True)
     project_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=True
     )
@@ -783,6 +784,7 @@ class DocumentTermCandidate(Base):
     __table_args__ = (
         Index("ix_document_term_candidate_job_status", "job_id", "status"),
         Index("ix_document_term_candidate_project_source", "project_id", "source_norm"),
+        Index("ix_document_term_candidate_translation_run", "translation_run_id", "status"),
         UniqueConstraint(
             "job_id", "source_norm", "observed_target", name="uq_document_term_candidate"
         ),
@@ -791,6 +793,9 @@ class DocumentTermCandidate(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     job_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
+    )
+    translation_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=True
     )
     tenant_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False

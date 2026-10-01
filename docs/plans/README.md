@@ -52,5 +52,6 @@
 | **PLAN-070** | （见 WT-070） | **实时进度与过期预检** |
 | **PLAN-071** | [PLAN-071-translation-quality-pipeline](./PLAN-071-translation-quality-pipeline/) | **可审计翻译质量流水线与真实工作台（071a–071i）** |
 | **PLAN-072** | [PLAN-072-durable-workbench-resume](./PLAN-072-durable-workbench-resume/) | **工作台持久化、断点续传与租户隔离（072a–072e）** |
+| **PLAN-073** | [PLAN-073-quality-gate-domain-terms](./PLAN-073-quality-gate-domain-terms/) | **质量门禁真实化、模型分级与自免术语闭环（073a–073e）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。

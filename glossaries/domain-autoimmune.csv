@@ -1,0 +1,18 @@
+source,target,layer,term_type,notes
+dupilumab,度普利尤单抗,domain-autoimmune,drug,Dupixent
+tralokinumab,曲罗芦单抗,domain-autoimmune,drug,
+upadacitinib,乌帕替尼,domain-autoimmune,drug,
+abrocitinib,阿布昔替尼,domain-autoimmune,drug,
+IL-4Rα,IL-4Rα,domain-autoimmune,target,do not translate receptor symbol
+IL-13,IL-13,domain-autoimmune,target,
+JAK-STAT,JAK-STAT,domain-autoimmune,target,
+Th2,Th2,domain-autoimmune,target,
+EASI-75,EASI 75,domain-autoimmune,code,
+IGA 0/1,IGA 0/1,domain-autoimmune,code,
+SCORAD,SCORAD,domain-autoimmune,code,
+PP-NRS,PP-NRS,domain-autoimmune,code,
+DLQI,DLQI,domain-autoimmune,code,
+AD,特应性皮炎,domain-autoimmune,disease,context dependent
+CSU,慢性自发性荨麻疹,domain-autoimmune,disease,
+PN,结节性痒疹,domain-autoimmune,disease,
+EoE,嗜酸性粒细胞性食管炎,domain-autoimmune,disease,

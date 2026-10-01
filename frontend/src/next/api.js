@@ -99,6 +99,10 @@ export const api = {
   resumeRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/resume`, {
     method: 'POST',
   }),
+  requalifyRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/requalify`, {
+    method: 'POST',
+  }),
+  listRunTermCandidates: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates`),
   getReviewDraft: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`),
   saveReviewDraft: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`, {
     method: 'PUT',

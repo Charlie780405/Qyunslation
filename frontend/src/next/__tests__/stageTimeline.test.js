@@ -32,7 +32,7 @@ describe('StageTimeline', () => {
     expect(states.text).toBe('pending');
     expect(states.export).toBe('pending');
     expect(wrapper.find('[data-stage="validation"]').text()).toContain('预检完成');
-    expect(wrapper.find('[data-stage="text"]').text()).toContain('pending');
+    expect(wrapper.find('[data-stage="text"]').text()).toContain('等待中');
     expect(wrapper.findAll('.is-complete')).toHaveLength(1);
   });
 

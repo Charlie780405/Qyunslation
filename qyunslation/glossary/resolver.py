@@ -5,6 +5,8 @@ The resolver deliberately keeps the exact/alias path independent from the
 embedding service.  A confirmed term should be resolved from the local index
 on every subsequent translation; semantic search is only a fallback for text
 that has no approved exact match.
+
+PLAN-073b：全大写缩写与 ≤3 字符源词区分大小写匹配，避免 PP/No 误命中正文。
 """
 from __future__ import annotations
 
@@ -24,11 +26,28 @@ LAYER_PRIORITY = {
     "harvest": 20,
 }
 
+_CASE_SENSITIVE_RE = re.compile(r"^[A-Z]{2,}(?:-[A-Z0-9]+)*$")
+
 
 def normalize_term(value: str) -> str:
     """Normalize a term without changing its human-readable representation."""
     normalized = unicodedata.normalize("NFKC", value or "")
     return " ".join(normalized.strip().split()).casefold()
+
+
+def normalize_term_preserve_case(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "")
+    return " ".join(normalized.strip().split())
+
+
+def term_requires_case_sensitive(source: str) -> bool:
+    """PLAN-073b：短词与全大写缩写必须区分大小写。"""
+    stripped = (source or "").strip()
+    if not stripped:
+        return False
+    if len(stripped) <= 3:
+        return True
+    return bool(_CASE_SENSITIVE_RE.fullmatch(stripped))
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +68,10 @@ class TermRecord:
         return normalize_term(self.source_term)
 
     @property
+    def case_sensitive(self) -> bool:
+        return term_requires_case_sensitive(self.source_term)
+
+    @property
     def priority(self) -> int:
         return LAYER_PRIORITY.get(self.layer.casefold(), 0)
 
@@ -67,6 +90,7 @@ class TermMatch:
     confidence: float
     do_not_translate: bool
     forbidden_targets: tuple[str, ...]
+    matched_text: str = ""
 
 
 class _TrieNode:
@@ -75,6 +99,12 @@ class _TrieNode:
     def __init__(self) -> None:
         self.children: dict[str, _TrieNode] = {}
         self.records: list[TermRecord] = []
+
+
+@dataclass(frozen=True, slots=True)
+class TermIndex:
+    case_insensitive: _TrieNode
+    case_sensitive: _TrieNode
 
 
 def _record_key(record: TermRecord) -> tuple[int, int, str, str]:
@@ -86,26 +116,54 @@ def _record_key(record: TermRecord) -> tuple[int, int, str, str]:
     )
 
 
-def build_term_index(records: Iterable[TermRecord]) -> _TrieNode:
-    """Build a compact trie and discard duplicate lower-priority entries."""
-    root = _TrieNode()
-    by_key: dict[tuple[str, str, str, str], TermRecord] = {}
+def _insert_record(root: _TrieNode, record: TermRecord, *, preserve_case: bool) -> None:
+    key = (
+        normalize_term_preserve_case(record.source_term)
+        if preserve_case
+        else record.normalized_source
+    )
+    if not key or not record.target_term.strip():
+        return
+    node = root
+    for char in key:
+        node = node.children.setdefault(char, _TrieNode())
+    node.records.append(record)
+
+
+def build_term_index(records: Iterable[TermRecord]) -> TermIndex:
+    """Build case-insensitive and case-sensitive tries."""
+    ci_root = _TrieNode()
+    cs_root = _TrieNode()
+    by_key: dict[tuple[str, str, str, str, bool], TermRecord] = {}
     for record in records:
-        source = record.normalized_source
-        if not source or not record.target_term.strip():
+        preserve = record.case_sensitive
+        source_key = (
+            normalize_term_preserve_case(record.source_term)
+            if preserve
+            else record.normalized_source
+        )
+        if not source_key:
             continue
-        key = (source, record.src_lang.casefold(), record.tgt_lang.casefold(), record.concept_id)
-        previous = by_key.get(key)
+        dedupe_key = (
+            source_key,
+            record.src_lang.casefold(),
+            record.tgt_lang.casefold(),
+            record.concept_id,
+            preserve,
+        )
+        previous = by_key.get(dedupe_key)
         if previous is None or _record_key(record) > _record_key(previous):
-            by_key[key] = record
+            by_key[dedupe_key] = record
     for record in by_key.values():
-        node = root
-        for char in record.normalized_source:
-            node = node.children.setdefault(char, _TrieNode())
-        node.records.append(record)
-    for node in _walk_nodes(root):
-        node.records.sort(key=_record_key, reverse=True)
-    return root
+        _insert_record(
+            cs_root if record.case_sensitive else ci_root,
+            record,
+            preserve_case=record.case_sensitive,
+        )
+    for root in (ci_root, cs_root):
+        for node in _walk_nodes(root):
+            node.records.sort(key=_record_key, reverse=True)
+    return TermIndex(case_insensitive=ci_root, case_sensitive=cs_root)
 
 
 def _walk_nodes(root: _TrieNode) -> Iterable[_TrieNode]:
@@ -131,7 +189,9 @@ def _choose_record(records: list[TermRecord]) -> TermRecord:
     return max(records, key=_record_key)
 
 
-def _match_to_result(record: TermRecord, start: int, end: int, match_type: str) -> TermMatch:
+def _match_to_result(
+    record: TermRecord, start: int, end: int, match_type: str, *, matched_text: str
+) -> TermMatch:
     return TermMatch(
         concept_id=record.concept_id,
         source_term=record.source_term,
@@ -145,11 +205,12 @@ def _match_to_result(record: TermRecord, start: int, end: int, match_type: str) 
         confidence=1.0 if match_type in {"exact", "alias"} else 0.0,
         do_not_translate=record.do_not_translate,
         forbidden_targets=record.forbidden_targets,
+        matched_text=matched_text,
     )
 
 
-def _exact_matches(root: _TrieNode, text: str) -> list[TermMatch]:
-    normalized = normalize_term(text)
+def _exact_matches(root: _TrieNode, text: str, *, preserve_case: bool) -> list[TermMatch]:
+    normalized = normalize_term_preserve_case(text) if preserve_case else normalize_term(text)
     if not normalized:
         return []
     out: list[TermMatch] = []
@@ -168,9 +229,30 @@ def _exact_matches(root: _TrieNode, text: str) -> list[TermMatch]:
             continue
         end, record = best
         match_type = "alias" if record.role in {"synonym", "abbreviation"} else "exact"
-        out.append(_match_to_result(record, cursor, end, match_type))
+        out.append(
+            _match_to_result(
+                record,
+                cursor,
+                end,
+                match_type,
+                matched_text=normalized[cursor:end],
+            )
+        )
         cursor = end
     return out
+
+
+def _merge_matches(*groups: Iterable[TermMatch]) -> list[TermMatch]:
+    seen: set[tuple[str, int, int]] = set()
+    merged: list[TermMatch] = []
+    for group in groups:
+        for match in group:
+            key = (match.concept_id, match.start, match.end)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(match)
+    return sorted(merged, key=lambda item: (item.start, -len(item.source_term)))
 
 
 class TermResolver:
@@ -178,12 +260,16 @@ class TermResolver:
 
     def __init__(
         self,
-        index: _TrieNode,
+        index: TermIndex | _TrieNode,
         *,
         semantic_resolver: Callable[[str], Iterable[TermRecord | TermMatch]] | None = None,
         cache_size: int = 512,
     ) -> None:
-        self.index = index
+        if isinstance(index, TermIndex):
+            self.index = index
+        else:
+            # Backward compatibility: single trie treated as case-insensitive only.
+            self.index = TermIndex(case_insensitive=index, case_sensitive=_TrieNode())
         self.semantic_resolver = semantic_resolver
         self._resolve_cached = lru_cache(maxsize=max(1, cache_size))(self._resolve_uncached)
 
@@ -191,7 +277,10 @@ class TermResolver:
         return list(self._resolve_cached(text or ""))
 
     def _resolve_uncached(self, text: str) -> tuple[TermMatch, ...]:
-        exact = _exact_matches(self.index, text)
+        exact = _merge_matches(
+            _exact_matches(self.index.case_insensitive, text, preserve_case=False),
+            _exact_matches(self.index.case_sensitive, text, preserve_case=True),
+        )
         if exact or self.semantic_resolver is None:
             return tuple(exact)
         semantic = []
@@ -199,7 +288,15 @@ class TermResolver:
             if isinstance(record, TermMatch):
                 semantic.append(record)
             else:
-                semantic.append(_match_to_result(record, 0, len(text), "semantic"))
+                semantic.append(
+                    _match_to_result(
+                        record,
+                        0,
+                        len(text),
+                        "semantic",
+                        matched_text=text[:64],
+                    )
+                )
         return tuple(
             TermMatch(
                 concept_id=item.concept_id,
@@ -214,6 +311,7 @@ class TermResolver:
                 confidence=item.confidence or 0.0,
                 do_not_translate=item.do_not_translate,
                 forbidden_targets=item.forbidden_targets,
+                matched_text=item.matched_text or "",
             )
             for item in semantic
         )

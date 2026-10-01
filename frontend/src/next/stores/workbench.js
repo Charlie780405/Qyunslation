@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   profile: '临床研究文档',
   bilingual: true,
   classification: 'internal',
+  modelProfileId: 'internal-qwen-quality',
 };
 
 export const workbenchState = reactive({ ...DEFAULT_SETTINGS });
@@ -21,6 +22,7 @@ function applyWorkbenchPreferences(preferences = {}) {
     profile: wb.profile || DEFAULT_SETTINGS.profile,
     bilingual: wb.bilingual ?? DEFAULT_SETTINGS.bilingual,
     classification: wb.classification || DEFAULT_SETTINGS.classification,
+    modelProfileId: wb.modelProfileId || DEFAULT_SETTINGS.modelProfileId,
   });
 }
 

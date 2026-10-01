@@ -29,6 +29,12 @@
             @click="requestChanges"
           >请求修改</button>
           <button
+            v-if="run?.quality_state === 'qa_blocked'"
+            class="qy-primary-button"
+            type="button"
+            @click="requalify"
+          >重新 QA</button>
+          <button
             v-if="run?.status === 'interrupted'"
             class="qy-primary-button"
             type="button"
@@ -69,6 +75,17 @@
           :current-stage="run?.stage || ''"
           :quality-state="run?.quality_state || 'draft'"
         />
+      </section>
+
+      <section v-if="termCandidates.length" class="qy-panel qy-run-term-candidates">
+        <h2>本次新术语</h2>
+        <ul class="qy-term-candidate-list">
+          <li v-for="item in termCandidates" :key="item.id">
+            <strong>{{ item.source_term }}</strong>
+            <span>{{ item.term_type }} · {{ item.risk }} · {{ item.status }}</span>
+            <small v-if="item.source_context">{{ item.source_context }}</small>
+          </li>
+        </ul>
       </section>
 
       <div class="qy-run-detail-grid">
@@ -128,6 +145,7 @@ const logOpen = ref(false);
 const run = ref(null);
 const events = ref([]);
 const qaItems = ref([]);
+const termCandidates = ref([]);
 const reviewComment = ref('');
 let timer;
 let draftTimer;
@@ -159,6 +177,12 @@ async function refresh() {
     events.value = ev.items || [];
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
+    try {
+      const terms = await api.listRunTermCandidates(runId.value);
+      termCandidates.value = terms.items || [];
+    } catch {
+      termCandidates.value = [];
+    }
     if (run.value?.quality_state === 'review_ready') {
       const draft = await api.getReviewDraft(runId.value);
       reviewComment.value = draft.comment || '';
@@ -198,6 +222,11 @@ async function requestChanges() {
 
 async function resumeRun() {
   await api.resumeRun(runId.value);
+  await refresh();
+}
+
+async function requalify() {
+  await api.requalifyRun(runId.value);
   await refresh();
 }
 

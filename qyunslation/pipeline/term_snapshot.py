@@ -35,6 +35,7 @@ def build_term_snapshot(
     source_text: str,
     src_lang: str = "en",
     tgt_lang: str = "zh",
+    document_profile: str | None = None,
 ) -> dict[str, Any]:
     matches = resolve_runtime_terms(
         session,
@@ -43,15 +44,36 @@ def build_term_snapshot(
         text=source_text,
         src_lang=src_lang,
         tgt_lang=tgt_lang,
+        document_profile=document_profile,
     )
     version = runtime_termbase_version(session, tenant_id=tenant_id, project_id=project_id)
-    policy = compile_term_policy(matches, termbase_version=version)
+    hits_by_concept: dict[str, list[dict[str, Any]]] = {}
+    for match in matches:
+        if match.match_type not in {"exact", "alias"}:
+            continue
+        hits_by_concept.setdefault(match.concept_id, []).append(
+            {
+                "start": match.start,
+                "end": match.end,
+                "matched_text": match.matched_text or match.source_term,
+            }
+        )
+    exact_matches = [match for match in matches if match.match_type in {"exact", "alias"}]
+    policy = compile_term_policy(exact_matches, termbase_version=version)
     terms: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for item in policy["terms"][:MAX_TERMS]:
+        concept_id = item["concept_id"]
+        if concept_id in seen:
+            continue
+        seen.add(concept_id)
+        source_hits = hits_by_concept.get(concept_id) or []
+        if not source_hits:
+            continue
         risk = classify_risk_by_rules(item["source_term"], item.get("term_type"))
         terms.append(
             {
-                "concept_id": item["concept_id"],
+                "concept_id": concept_id,
                 "source_term": item["source_term"],
                 "preferred_target": item["preferred_target"],
                 "term_type": item.get("term_type"),
@@ -59,13 +81,14 @@ def build_term_snapshot(
                 "forbidden_targets": list(item.get("forbidden_targets") or []),
                 "hard_constraint": bool(item.get("hard_constraint")),
                 "risk": risk,
+                "source_hits": source_hits,
             }
         )
     snapshot: dict[str, Any] = {
         "status": "ready",
         "schema": SNAPSHOT_SCHEMA,
         "termbase_version": version,
-        "match_count": len(policy["terms"]),
+        "match_count": len(terms),
         "hard_constraints": sum(1 for t in terms if t["hard_constraint"]),
         "high_risk_terms": sum(1 for t in terms if t["risk"] == "high"),
         "terms": terms,
@@ -87,7 +110,7 @@ def check_terms_in_translation(
     if not snapshot_is_consistent(snapshot):
         return [
             QaFinding(
-                category="consistency",
+                category="terminology",
                 severity="blocker",
                 code="TERM_SNAPSHOT_INCONSISTENT",
                 message="术语快照哈希与内容不一致，无法证明 QA 与检查器同源",
@@ -99,6 +122,9 @@ def check_terms_in_translation(
     for term in snapshot.get("terms") or []:
         if not term.get("hard_constraint"):
             continue
+        source_hits = term.get("source_hits") or []
+        if not source_hits:
+            continue
         high = term.get("risk") == "high"
         target = term["source_term"] if term.get("do_not_translate") else term.get("preferred_target") or ""
         for forbidden in term.get("forbidden_targets") or []:
@@ -109,7 +135,11 @@ def check_terms_in_translation(
                         severity="blocker",
                         code="TERM_FORBIDDEN_TARGET",
                         message=f"出现禁用译法：{forbidden}（术语 {term['source_term']}）",
-                        evidence={"concept_id": term["concept_id"], "forbidden": forbidden},
+                        evidence={
+                            "concept_id": term["concept_id"],
+                            "forbidden": forbidden,
+                            "source_hits": source_hits,
+                        },
                     )
                 )
         if target and target.casefold() not in folded:
@@ -119,7 +149,11 @@ def check_terms_in_translation(
                     severity="blocker" if high else "warning",
                     code="TERM_HIGH_RISK_CONFLICT" if high else "TERM_TARGET_MISSING",
                     message=f"批准译名未出现：{term['source_term']} → {target}",
-                    evidence={"concept_id": term["concept_id"], "expected": target},
+                    evidence={
+                        "concept_id": term["concept_id"],
+                        "expected": target,
+                        "source_hits": source_hits,
+                    },
                 )
             )
     return findings
