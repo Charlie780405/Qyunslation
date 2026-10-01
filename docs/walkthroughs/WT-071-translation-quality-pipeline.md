@@ -80,6 +80,7 @@ bash scripts/verify-plan-071.sh   # 契约/API/迁移/vitest 全 PASS；八项�
 - 翻译执行器是 **fake pdf2zh CLI**（在原 PDF 上盖“译文预览（证据样本，非真实翻译）”），不是真实模型翻译；证据证明管线门禁与 UI，不证明译文质量。
 - 批准前下载 409 只有自动化测试，无浏览器截图。
 - 预览证据在无头 Chrome 中为响应渲染图，非内嵌 PDF 查看器（双画布另有 pdf.js 截图）。
+- 双画布前端未做旋转；图片预览与“暂不支持”分支只有代码，未在浏览器实测；对象检查器的修订历史恒显示“—”（后端无数据）；vitest 为 3.x（vite 5 限制）；pdf.js 拆出约 545kB chunk 与 1.3MB worker。
 - 外发脱敏失败时当前是 **fail-closed**（跳过外部调用），未回退内部 Qwen 提供方。
 - `tests/ui/test_runtime_surface_050.py` 有 2 个既有失败（硬编码 `/home/dev/qyunslation` 路径），`tests/glossary` 与 `test_figure_data_mark` 因缺 `cv2` 收集失败，均与 071 无关。
 
