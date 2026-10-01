@@ -261,9 +261,25 @@ def api_me(
     }
 
 
-def _can_review_run(identity: IdentityContext, run: TranslationRunRecord) -> bool:
-    """Reviewers and the run owner can decide terms on that task."""
-    if _identity_role(identity) in {"reviewer", "term_admin", "admin", "owner"}:
+def _effective_role(session: Session, identity: IdentityContext) -> str:
+    """Local membership can raise a user to admin even when OIDC only sends workbench_v2."""
+    oidc_role = _identity_role(identity)
+    tenant = _tenant_bundle(session, identity)
+    membership = repo.ensure_membership(
+        session,
+        tenant_id=tenant.id,
+        user_sub=identity.user_sub,
+        role=oidc_role,
+    )
+    rank = {"member": 0, "reviewer": 1, "term_admin": 2, "admin": 3, "owner": 4}
+    if rank.get(membership.role, 0) >= rank.get(oidc_role, 0):
+        return membership.role
+    return oidc_role
+
+
+def _can_review_run(session: Session, identity: IdentityContext, run: TranslationRunRecord) -> bool:
+    """Reviewers, local admins, and the run owner can decide terms on that task."""
+    if _effective_role(session, identity) in {"reviewer", "term_admin", "admin", "owner"}:
         return True
     return bool(run.actor_sub) and run.actor_sub == identity.user_sub
 
@@ -616,7 +632,7 @@ def list_preflights(
         .order_by(PreflightRecord.created_at.desc())
         .limit(limit)
     )
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         stmt = stmt.where(PreflightRecord.actor_sub == identity.user_sub)
     rows = list(session.scalars(stmt))
     items = [_preflight_dict(row) for row in rows if _preflight_dict(row)["state"] == "ready"]
@@ -634,7 +650,7 @@ def get_preflight(
     record = session.get(PreflightRecord, preflight_id)
     if record is None or record.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="preflight not found")
-    if record.actor_sub != identity.user_sub and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if record.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=404, detail="preflight not found")
     return _preflight_dict(record)
 
@@ -1538,7 +1554,7 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
     )
     if run is None or (
         run.actor_sub != identity.user_sub
-        and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}
+        and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}
     ):
         raise HTTPException(status_code=404, detail="translation run not found")
     return run
@@ -1766,7 +1782,7 @@ async def create_translation_run(
     preflight = session.get(PreflightRecord, body.preflight_id)
     if preflight is None or preflight.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="preflight not found")
-    if preflight.actor_sub != identity.user_sub and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if preflight.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=404, detail="preflight not found")
     state = _preflight_dict(preflight)
     if state["state"] != "ready":
@@ -1879,7 +1895,7 @@ def list_translation_runs(
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
     stmt = select(TranslationRunRecord).where(TranslationRunRecord.tenant_id == tenant.id)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         stmt = stmt.where(TranslationRunRecord.actor_sub == identity.user_sub)
     if not include_archived:
         stmt = stmt.where(TranslationRunRecord.archived_at.is_(None))
@@ -2031,7 +2047,7 @@ def patch_preflight(
     record = session.get(PreflightRecord, preflight_id)
     if record is None or record.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="preflight not found")
-    if record.actor_sub != identity.user_sub and _identity_role(identity) not in {
+    if record.actor_sub != identity.user_sub and _effective_role(session, identity) not in {
         "reviewer",
         "term_admin",
         "admin",
@@ -2423,7 +2439,7 @@ def post_review_decision(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    role = _identity_role(identity)
+    role = _effective_role(session, identity)
     if role not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=403, detail="reviewer role required")
     decision = (body.decision or "").strip().casefold()
@@ -2862,7 +2878,7 @@ def _decide_run_candidate(
     if candidate.translation_run_id != run.id or candidate.tenant_id != run.tenant_id:
         raise HTTPException(status_code=404, detail="term candidate not found")
     action = body.action.strip().casefold()
-    role = _identity_role(identity)
+    role = _effective_role(session, identity)
     high_risk = candidate.risk.strip().casefold() in {"high", "critical"}
     owner_review = run.actor_sub == identity.user_sub
     if (
@@ -2908,7 +2924,7 @@ def decide_run_term_candidate(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if not _can_review_run(identity, run):
+    if not _can_review_run(session, identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     candidate = session.get(DocumentTermCandidate, candidate_id)
     if candidate is None:
@@ -2926,7 +2942,7 @@ def batch_decide_run_term_candidates(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if not _can_review_run(identity, run):
+    if not _can_review_run(session, identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     decided: list[dict[str, Any]] = []
     for item in body.decisions:
@@ -2952,7 +2968,7 @@ def enrich_run_term_candidate_suggestions(
 ) -> dict[str, Any]:
     """Use termbase + DeepSeek to backfill suggested_target for pending candidates."""
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if not _can_review_run(identity, run):
+    if not _can_review_run(session, identity, run):
         raise HTTPException(status_code=403, detail="reviewer role required")
     from qyunslation.workbench.term_extract import enrich_run_term_suggestions
 
@@ -3005,7 +3021,7 @@ def decide_run_affiliation_segment(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=403, detail="reviewer role required")
     segment = session.get(ReviewSegment, segment_id)
     if (
@@ -3049,7 +3065,7 @@ async def apply_run_corrections(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+    if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=403, detail="reviewer role required")
     newer = session.scalar(
         select(TranslationRunRecord.id).where(

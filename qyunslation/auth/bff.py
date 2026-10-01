@@ -217,6 +217,23 @@ def _roles_from_claims(claims: dict) -> list[str]:
     return sorted({str(item).strip() for item in raw if str(item).strip() in allowed})
 
 
+_MEMBERSHIP_SESSION_ROLE = {
+    "reviewer": "reviewer",
+    "term_admin": "term_admin",
+    "admin": "admin",
+    "owner": "owner",
+}
+
+
+def merge_membership_session_roles(roles: list[str], membership_role: str | None) -> list[str]:
+    """Keep a locally granted admin/reviewer role across OIDC logins."""
+    merged = list(roles)
+    grant = _MEMBERSHIP_SESSION_ROLE.get((membership_role or "").strip().casefold())
+    if grant and grant not in merged:
+        merged.append(grant)
+    return merged
+
+
 async def _token_exchange(
     metadata: dict[str, str],
     *,
@@ -377,6 +394,13 @@ async def auth_callback(
     if not tenant or not user_sub:
         raise HTTPException(status_code=401, detail="身份服务缺少租户或用户标识")
     roles = _roles_from_claims({**id_claims, **user_claims})
+    from qyunslation.persist.repo import ensure_membership, get_or_create_tenant
+
+    tenant_row = get_or_create_tenant(session, slug=tenant)
+    membership = ensure_membership(
+        session, tenant_id=tenant_row.id, user_sub=user_sub, role="member"
+    )
+    roles = merge_membership_session_roles(roles, membership.role)
     now = _now()
     absolute_hours = _env_float(SESSION_ABSOLUTE_HOURS_ENV, _DEFAULT_ABSOLUTE_HOURS, minimum=0.25)
     max_age = int(absolute_hours * 3600)
