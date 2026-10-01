@@ -142,6 +142,21 @@ def collect_findings(site: Path) -> list[PatchFinding]:
     return findings
 
 
+def _git_commit(root: Path | None = None) -> str | None:
+    base = root or ROOT
+    try:
+        import subprocess
+
+        out = subprocess.check_output(
+            ["git", "-C", str(base), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        return out or None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def build_report(site: Path) -> dict:
     findings = collect_findings(site)
     gui = site / "pdf2zh_next" / "gui.py"
@@ -150,6 +165,7 @@ def build_report(site: Path) -> dict:
     payload = {
         "schema": "plan071-patch-fingerprint/v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit(),
         "site_packages": str(site),
         "site_exists": site.is_dir(),
         "gui_path": str(gui) if gui.exists() else None,

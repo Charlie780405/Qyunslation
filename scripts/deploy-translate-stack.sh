@@ -7,6 +7,26 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SIDECAR_URL="${QYUNSLATION_OFFICE_URL:-http://127.0.0.1:8010}"
 IMG="$ROOT/qyunslation/extensions/image_translate.py"
 OFFICE_ENV="${QYUNSLATION_OFFICE_ENV:-/home/dev/pdf2zh/office.env}"
+PY="${QYUNSLATION_VERIFY_PY:-$ROOT/.venv/bin/python}"
+GATE="$ROOT/scripts/deploy_gate.py"
+
+if [[ -f "$OFFICE_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source <(grep -E '^(QYUNSLATION_DATABASE_URL|QYUNSLATION_OFFICE_URL)=' "$OFFICE_ENV" | sed 's/^/export /')
+  set +a
+fi
+
+echo "== PLAN-075b deploy gates (pre) =="
+if [[ -f "$GATE" && -x "$PY" ]]; then
+  "$PY" "$GATE" pre --base-url "$SIDECAR_URL" || {
+    echo "FAIL: pre-deploy gate blocked restart; fix migration/frontend then retry"
+    exit 1
+  }
+  echo "deploy git commit: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+else
+  echo "WARN: deploy_gate.py or Python missing; skipping pre-deploy checks"
+fi
 if [[ -z "${QYUNSLATION_API_TOKEN:-}${DOCUTRANSLATE_API_TOKEN:-}${API_TOKEN:-}" && -f "$OFFICE_ENV" ]]; then
   QYUNSLATION_API_TOKEN="$(python3 - <<PY
 from pathlib import Path
@@ -77,4 +97,13 @@ if [[ "$LOCAL_FP" != "$REMOTE_FP" ]]; then
 fi
 
 echo "PASS: translate stack deployed; fingerprints match"
+
+echo "== PLAN-075b deploy gates (post) =="
+if [[ -f "$GATE" && -x "$PY" ]]; then
+  "$PY" "$GATE" post --base-url "$SIDECAR_URL" || {
+    echo "FAIL: post-deploy API route probe failed; backend may be stale"
+    exit 1
+  }
+fi
+
 systemctl --user is-active pdf2zh.service qyunslation-office.service
