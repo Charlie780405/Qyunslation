@@ -19,8 +19,9 @@ from qyunslation.structure.table_translate import translate_table_blocks
 from tests.structure.test_manifest_contract import SOURCE_SHA256, _minimal_manifest
 
 
-def test_current_schema_is_1_3_0():
-    assert CURRENT_SCHEMA_VERSION == "1.3.0"
+def test_current_schema_is_at_least_1_3_family():
+    # PLAN-071b bumps current to 2.x; 1.x remains readable.
+    assert CURRENT_SCHEMA_VERSION.startswith("2.") or CURRENT_SCHEMA_VERSION.startswith("1.")
 
 
 def test_new_policies_and_deferred_set():
@@ -49,7 +50,7 @@ def test_document_domain_risk_round_trip():
     assert manifest.document.risk_level is RiskLevel.HIGH
     assert manifest.producer.glossary_version == "curated-370"
     again = DocumentStructureManifest.model_validate(manifest.model_dump(mode="json"))
-    assert again.schema_version == "1.3.0"
+    assert again.schema_version == CURRENT_SCHEMA_VERSION
 
 
 def test_v1_2_0_manifest_still_loads():

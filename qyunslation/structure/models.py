@@ -14,8 +14,9 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-CURRENT_SCHEMA_VERSION = "1.3.0"
-SUPPORTED_SCHEMA_MAJOR = 1
+CURRENT_SCHEMA_VERSION = "2.0.0"
+SUPPORTED_SCHEMA_MAJOR = 2
+SUPPORTED_SCHEMA_MAJORS = frozenset({1, 2})
 _SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MANIFEST_ID_RE = re.compile(r"^manifest:[0-9a-f]{64}$")
@@ -145,6 +146,16 @@ class TranslationPolicy(ContractEnum):
     # PLAN-034b：契约预留；执行侧不得静默当 TRANSLATE
     TERM_ONLY = "TERM_ONLY"
     HUMAN_REVIEW = "HUMAN_REVIEW"
+
+
+class PreserveKind(ContractEnum):
+    """PLAN-071b：图形/标识保真类别（不送翻译模型）。"""
+
+    NONE = "none"
+    LOGO = "logo"
+    SEAL = "seal"
+    SIGNATURE = "signature"
+    AGENCY_MARK = "agency_mark"
 
 
 class DocumentDomain(ContractEnum):
@@ -416,6 +427,19 @@ class SemanticObjectBase(ContractModel):
     semantic_occurrence_index: int = Field(default=1, ge=1)
     confidence: float | None = Field(default=None, ge=0, le=1)
     source_geometry: SourceGeometry | None = None
+    # PLAN-071b Manifest 2.0
+    preserve_kind: PreserveKind = PreserveKind.NONE
+    source_object_hash: str | None = None
+    reading_order: int | None = Field(default=None, ge=0)
+
+    @field_validator("source_object_hash")
+    @classmethod
+    def validate_source_object_hash(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if not _SHA256_RE.fullmatch(value):
+            raise ValueError("MANIFEST_SHA256_INVALID: source_object_hash")
+        return value
 
     @field_validator("object_id")
     @classmethod
@@ -440,7 +464,6 @@ class SemanticObjectBase(ContractModel):
 
 class BodyObject(SemanticObjectBase):
     type: Literal[ObjectType.BODY]
-    reading_order: int | None = Field(default=None, ge=0)
 
 
 class CaptionObject(SemanticObjectBase):
@@ -520,11 +543,17 @@ class ManifestSummary(ContractModel):
 
 def _schema_major(version: str) -> int:
     match = _SEMVER_RE.fullmatch(version)
-    if not match or int(match.group(1)) != SUPPORTED_SCHEMA_MAJOR:
+    if not match:
         raise ValueError(
-            f"MANIFEST_VERSION_UNSUPPORTED: expected major {SUPPORTED_SCHEMA_MAJOR}, got {version!r}"
+            f"MANIFEST_VERSION_UNSUPPORTED: expected semver, got {version!r}"
         )
-    return int(match.group(1))
+    major = int(match.group(1))
+    if major not in SUPPORTED_SCHEMA_MAJORS:
+        raise ValueError(
+            f"MANIFEST_VERSION_UNSUPPORTED: expected major in "
+            f"{sorted(SUPPORTED_SCHEMA_MAJORS)}, got {version!r}"
+        )
+    return major
 
 
 def _require_sha256(value: str) -> str:
@@ -634,6 +663,8 @@ class DocumentStructureManifest(ContractModel):
     issues: list[ManifestIssue] = Field(default_factory=list)
     summary: ManifestSummary | None = None
     extensions: dict[str, Any] = Field(default_factory=dict)
+    # PLAN-071b：产物坐标/cell 键 → 源 object_id
+    reverse_index: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("schema_version")
     @classmethod

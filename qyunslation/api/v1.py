@@ -621,7 +621,22 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
     if runner_state:
         progress_message = runner_state.get("progress_message")
         status = str(runner_state.get("status") or "degraded")
+        if status == "layout_complete":
+            # PLAN-071b：执行器完成 ≠ 正式产物；禁止伪装 export/100%。
+            run.status = "translating"
+            run.stage = str(runner_state.get("stage") or "layout")
+            run.progress = None
+            run.updated_at = datetime.now(timezone.utc)
+            return str(progress_message) if progress_message else None
         if status == "succeeded":
+            from qyunslation.pipeline import pipeline_mode
+
+            if pipeline_mode() == "v2":
+                run.status = "translating"
+                run.stage = "layout"
+                run.progress = None
+                run.updated_at = datetime.now(timezone.utc)
+                return str(progress_message) if progress_message else None
             run.status = "succeeded"
             run.stage = "export"
             run.progress = 100
@@ -661,11 +676,18 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
         run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
         run.stage = "qa"
     elif task_state.get("download_ready"):
-        run.status = "succeeded"
-        run.stage = "export"
-        run.progress = 100
-        run.completed_at = run.completed_at or datetime.now(timezone.utc)
-        _materialize_artifacts(session, run=run, task_state=task_state)
+        from qyunslation.pipeline import pipeline_mode
+
+        if pipeline_mode() == "v2":
+            run.status = "translating"
+            run.stage = "layout"
+            run.progress = None
+        else:
+            run.status = "succeeded"
+            run.stage = "export"
+            run.progress = 100
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            _materialize_artifacts(session, run=run, task_state=task_state)
     elif task_state.get("is_processing"):
         run.status = "translating"
         run.stage = _run_stage_from_task(task_state)
@@ -766,11 +788,48 @@ async def _launch_translation_run(
 ) -> None:
     """Launch the appropriate non-GUI runner and persist an honest state.
 
-    PDF is deliberately routed through the independent ``pdf2zh_next`` CLI.
-    Other formats continue to use the extracted application service during the
-    migration, so the old Office/image path and the new ledger share one
-    boundary without making the Vue UI depend on Gradio DOM or events.
+    PLAN-071b：``QYUNSLATION_PIPELINE=v2`` 时四类格式统一进 DocumentPipeline。
+    默认 ``legacy`` 保持原 PDF CLI / Office sidecar 分叉，便于灰度回滚。
     """
+    from qyunslation.pipeline import pipeline_mode
+
+    if pipeline_mode() == "v2":
+        try:
+            from qyunslation.pipeline.document_pipeline import get_document_pipeline
+
+            content_path = _preflight_path(preflight)
+            meta = preflight.metadata_json or {}
+            launch = await get_document_pipeline().start(
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                generation=run.generation,
+                source_path=content_path,
+                source_format=preflight.source_format,
+                original_filename=preflight.source_filename,
+                direction=run.direction,
+                target_language=target_language,
+                settings=run.settings_snapshot,
+                declared_mime=str(meta.get("mime") or "application/octet-stream"),
+                scanned_hint=bool(meta.get("scanned") or meta.get("needs_ocr")),
+            )
+            run.external_task_id = launch.external_task_id
+            run.status = launch.status
+            run.stage = launch.stage
+            run.manifest_version = launch.manifest_version
+            run.started_at = datetime.now(timezone.utc)
+            snap = dict(run.settings_snapshot or {})
+            snap["pipeline"] = "v2"
+            snap["pipeline_events"] = launch.events
+            snap["sealed_source_sha256"] = launch.sealed_sha256
+            snap["executor_kind"] = launch.executor_kind
+            run.settings_snapshot = snap
+            return
+        except Exception:
+            run.status = "blocked"
+            run.stage = "validation"
+            run.degradation_reason = "document pipeline unavailable"
+            return
+
     if preflight.source_format.casefold() == "pdf" and (
         (os.environ.get("QYUNSLATION_PDF_RUNNER") or "cli").strip().casefold() != "legacy"
     ):

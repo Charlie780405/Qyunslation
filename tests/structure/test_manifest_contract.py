@@ -222,7 +222,10 @@ def test_full_manifest_round_trip_covers_every_v1_object_and_relation():
 
 def test_same_major_unknown_optional_fields_survive_round_trip():
     payload = _minimal_manifest()
-    payload["schema_version"] = "1.7.0"
+    # Stay on the current major so only additive optional fields are exercised.
+    major = CURRENT_SCHEMA_VERSION.split(".", 1)[0]
+    payload["schema_version"] = f"{major}.7.0"
+    payload["manifest_id"] = build_manifest_id(SOURCE_SHA256, payload["schema_version"])
     payload["future_top_level"] = {"enabled": True}
     payload["document"]["future_document_field"] = "kept"
 
@@ -233,7 +236,7 @@ def test_same_major_unknown_optional_fields_survive_round_trip():
     assert dumped["document"]["future_document_field"] == "kept"
 
 
-@pytest.mark.parametrize("version", ["2.0.0", "0.9.0", "v1", "1.0"])
+@pytest.mark.parametrize("version", ["3.0.0", "0.9.0", "v1", "1.0"])
 def test_unsupported_or_malformed_schema_versions_fail_closed(version: str):
     payload = _minimal_manifest()
     payload["schema_version"] = version

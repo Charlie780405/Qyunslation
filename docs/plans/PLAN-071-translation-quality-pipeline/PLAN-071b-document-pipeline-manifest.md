@@ -1,6 +1,6 @@
 # PLAN-071b：统一文档处理服务与 Manifest
 
-> 状态：**待实施**
+> 状态：**骨架已落地**（默认 legacy；v2 灰度）。证据见 [WT-071b](../../walkthroughs/WT-071b-document-pipeline-manifest.md)
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071a](./PLAN-071a-baseline-inventory.md)
 

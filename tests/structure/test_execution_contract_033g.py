@@ -28,7 +28,7 @@ from tests.structure.test_manifest_contract import SOURCE_SHA256, _minimal_manif
 
 
 def test_schema_and_scanner_versions_for_033g():
-    assert CURRENT_SCHEMA_VERSION == "1.3.0"
+    assert CURRENT_SCHEMA_VERSION.startswith("2.")
     assert PDF_STRUCTURE_SCANNER_VERSION == "1.8.0"
 
 

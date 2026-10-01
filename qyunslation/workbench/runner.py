@@ -25,6 +25,9 @@ from typing import Any
 
 NON_TERMINAL = frozenset({"queued", "scanning", "translating", "rendering"})
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "degraded"})
+# PLAN-071b：CLI/执行器完成但尚未 QA/批准（仅 QYUNSLATION_PIPELINE=v2）
+EXECUTOR_DONE = frozenset({"layout_complete"})
+CANCEL_TERMINAL = TERMINAL | EXECUTOR_DONE
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PROGRESS_RE = re.compile(r"\bProgress:\s*(?P<value>0(?:\.\d+)?|1(?:\.0+)?)\s*,\s*(?P<label>.*)$")
 _PERCENT_RE = re.compile(r"\b(?P<value>\d{1,3}(?:\.\d+)?)%\b")
@@ -338,6 +341,36 @@ def _safe_reason(value: str, fallback: str) -> str:
     return (clean[:512] or fallback)[:512]
 
 
+def _pipeline_mode() -> str:
+    raw = (os.environ.get("QYUNSLATION_PIPELINE") or "legacy").strip().casefold()
+    return "v2" if raw in {"v2", "pipeline", "document"} else "legacy"
+
+
+def _cli_success_updates(outputs: list[dict[str, Any]], *, progress_message: str | None) -> dict[str, Any]:
+    """Finalize CLI success. v2 must not claim formal export/succeeded."""
+    if _pipeline_mode() == "v2":
+        return {
+            "status": "layout_complete",
+            "stage": "layout",
+            "progress": None,
+            "outputs": outputs,
+            "reason": None,
+            "cli_complete": True,
+            "progress_message": progress_message or "CLI 已完成，等待版式质检与审核",
+            "finished_at": _utc_now(),
+        }
+    return {
+        "status": "succeeded",
+        "stage": "export",
+        "progress": 100,
+        "outputs": outputs,
+        "reason": None,
+        "cli_complete": True,
+        "progress_message": progress_message or "翻译完成",
+        "finished_at": _utc_now(),
+    }
+
+
 class Pdf2zhRunner:
     """Own PDF CLI processes and their durable state files."""
 
@@ -412,6 +445,7 @@ class Pdf2zhRunner:
             "download_ready": status == "succeeded" and bool(outputs),
             "is_processing": status in NON_TERMINAL,
             "error_flag": status in {"failed", "degraded"},
+            "cli_complete": bool(state.get("cli_complete")) or status in EXECUTOR_DONE,
             "status_message": state.get("reason") or status,
             "progress_message": state.get("progress_message"),
             "downloadable_files": outputs,
@@ -673,13 +707,10 @@ class Pdf2zhRunner:
                     self._write_state(
                         state_path,
                         state,
-                        status="succeeded",
-                        stage="export",
-                        progress=100,
-                        outputs=outputs,
-                        reason=None,
-                        progress_message=state.get("progress_message") or "翻译完成",
-                        finished_at=_utc_now(),
+                        **_cli_success_updates(
+                            outputs,
+                            progress_message=state.get("progress_message"),
+                        ),
                     )
                     break
                 if not outputs and not attempted_hpd:
@@ -748,7 +779,7 @@ class Pdf2zhRunner:
         state = _read_json(state_path)
         if not state:
             raise RunnerError("translation runner state is unreadable")
-        if state.get("status") in TERMINAL:
+        if state.get("status") in CANCEL_TERMINAL:
             return {"cancelled": False, "already_terminal": True}
         pid = int(state.get("pid") or 0)
         managed = self._processes.get(task_id)
@@ -822,11 +853,10 @@ class Pdf2zhRunner:
                 self._write_state(
                     state_path,
                     state,
-                    status="succeeded",
-                    stage="export",
-                    progress=100,
-                    outputs=outputs,
-                    finished_at=_utc_now(),
+                    **_cli_success_updates(
+                        outputs,
+                        progress_message=state.get("progress_message"),
+                    ),
                 )
             else:
                 self._write_state(
