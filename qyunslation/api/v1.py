@@ -1575,6 +1575,30 @@ def post_review_decision(
     return _translation_run_dict(session, run)
 
 
+def _preview_target(path: Path, media: str, filename: str) -> tuple[Path, str, str]:
+    """图片直传；DOCX/PPTX 转受保护 PDF，失败返回稳定错误码。"""
+    from qyunslation.pipeline.office_preview import (
+        IMAGE_MEDIA,
+        OFFICE_SUFFIXES,
+        OfficePreviewError,
+        office_to_pdf,
+    )
+
+    suffix = path.suffix.casefold()
+    if suffix in IMAGE_MEDIA:
+        return path, IMAGE_MEDIA[suffix], filename
+    if suffix in OFFICE_SUFFIXES and path.is_file():
+        try:
+            converted = office_to_pdf(path)
+        except OfficePreviewError as exc:
+            status = 501 if exc.code == "OFFICE_PREVIEW_UNAVAILABLE" else 502
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+        return converted, "application/pdf", f"{Path(filename).stem}.preview.pdf"
+    return path, media, filename
+
+
 @router.get("/translation-runs/{run_id}/preview/{side}")
 def preview_translation_run(
     run_id: str,
@@ -1594,6 +1618,7 @@ def preview_translation_run(
         path = _preflight_path(preflight)
         media = "application/pdf" if path.suffix.casefold() == ".pdf" else "application/octet-stream"
         filename = preflight.source_filename
+        path, media, filename = _preview_target(path, media, filename)
     else:
         approved = getattr(run, "quality_state", None) in {"approved", "legacy_unverified"}
         allowed_kinds = ["translated_preview", "review_draft", "legacy"]
@@ -1621,12 +1646,13 @@ def preview_translation_run(
             if not first:
                 raise HTTPException(status_code=404, detail="translated preview unavailable")
             path = Path(str(first["path"]))
-            media = "application/pdf"
+            media = mimetypes.guess_type(path.name)[0] or "application/pdf"
             filename = str(first.get("filename") or path.name)
         else:
             path = _artifact_path(artifact)
             media = artifact.media_type
             filename = artifact.filename
+        path, media, filename = _preview_target(path, media, filename)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="preview file missing")
     return FileResponse(
