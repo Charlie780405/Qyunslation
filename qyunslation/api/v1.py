@@ -710,6 +710,15 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
     if runner_state:
         progress_message = runner_state.get("progress_message")
         status = str(runner_state.get("status") or "degraded")
+        if status in {"layout_complete", "succeeded"} and run.quality_state == "approved":
+            # PLAN-071e：人工批准后才把执行器输出物化为正式产物。
+            run.status = "succeeded"
+            run.stage = "export"
+            run.progress = 100
+            run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            _materialize_artifacts(session, run=run, task_state=runner_state)
+            run.updated_at = datetime.now(timezone.utc)
+            return str(progress_message) if progress_message else None
         if status == "layout_complete":
             # PLAN-071b：执行器完成 ≠ 正式产物；禁止伪装 export/100%。
             run.status = "translating"
@@ -1485,6 +1494,8 @@ def post_review_decision(
         run.stage = "export"
         run.progress = 100
         run.completed_at = run.completed_at or datetime.now(timezone.utc)
+        session.flush()
+        _refresh_translation_run(session, run)
     elif decision == "request_changes":
         run.quality_state = "draft"
         run.stage = "text"

@@ -182,10 +182,18 @@ class DocumentPipeline:
 
 
 _DEFAULT: DocumentPipeline | None = None
+_DEFAULT_KEY: tuple[str, ...] | None = None
 
 
 def get_document_pipeline() -> DocumentPipeline:
-    global _DEFAULT
-    if _DEFAULT is None:
+    """Process-wide pipeline; rebuilt when workspace/runner/CLI env changes."""
+    global _DEFAULT, _DEFAULT_KEY
+    key = (
+        str(workspace_root_from_env()),
+        os.environ.get("QYUNSLATION_RUNNER_ROOT") or "",
+        os.environ.get("QYUNSLATION_PDF2ZH_CLI") or "",
+    )
+    if _DEFAULT is None or key != _DEFAULT_KEY:
         _DEFAULT = DocumentPipeline()
+        _DEFAULT_KEY = key
     return _DEFAULT

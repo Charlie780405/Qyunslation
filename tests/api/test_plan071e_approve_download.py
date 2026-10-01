@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""PLAN-071b：v2 启动路径写入 manifest_version，且不因 CLI 完成标正式成功。"""
+"""PLAN-071e：批准后才物化正式产物并解锁下载。"""
 from __future__ import annotations
 
 import stat
@@ -57,34 +57,38 @@ def _headers():
     return {"X-Dev-User": "planner", "X-Dev-Tenant": "pilot"}
 
 
-def test_v2_pdf_launch_sets_manifest_and_stops_before_formal(client):
+def test_v2_approve_materializes_formal_artifact_and_unlocks_download(client):
+    headers = {**_headers(), "X-Dev-Role": "system_admin,reviewer"}
     preflight = client.post(
         "/api/v1/preflights",
-        headers=_headers(),
+        headers=headers,
         files={"file": ("protocol.pdf", b"%PDF-1.7", "application/pdf")},
     ).json()
     created = client.post(
         "/api/v1/translation-runs",
-        headers={**_headers(), "Idempotency-Key": "pdf-v2-once"},
+        headers={**headers, "Idempotency-Key": "pdf-v2-approve"},
         json={"preflight_id": preflight["id"]},
-    )
-    assert created.status_code == 201, created.text
-    body = created.json()
-    assert body["manifest_version"]
-    assert str(body["manifest_version"]).startswith("2.")
-    assert body["settings"]["pipeline"] == "v2"
-    assert body["external_task_id"].startswith("pdf2zh:")
-
-    final = body
-    for _ in range(40):
+    ).json()
+    run_id = created["id"]
+    state = created
+    for _ in range(300):
         time.sleep(0.05)
-        final = client.get(f"/api/v1/translation-runs/{body['id']}", headers=_headers()).json()
-        if final["stage"] == "layout" or final["status"] in {"failed", "blocked"}:
+        state = client.get(f"/api/v1/translation-runs/{run_id}", headers=headers).json()
+        if state["quality_state"] == "review_ready":
             break
-    assert final["status"] != "succeeded"
-    assert final["stage"] in {"layout", "qa", "review"}
-    assert final["progress"] is None
-    assert final.get("artifacts") in ([], None) or all(
-        not item.get("formal_export") for item in final.get("artifacts") or []
-    )
+    assert state["quality_state"] == "review_ready", (state["status"], state["stage"], state["quality_state"], state.get("degradation_reason"))
+    assert not any(a["formal_export"] for a in state.get("artifacts") or [])
 
+    approved = client.post(
+        f"/api/v1/translation-runs/{run_id}/review-decision",
+        headers=headers,
+        json={"decision": "approve"},
+    )
+    assert approved.status_code == 200, approved.text
+    after = client.get(f"/api/v1/translation-runs/{run_id}", headers=headers).json()
+    assert after["status"] == "succeeded"
+    assert after["quality_state"] == "approved"
+    formal = [a for a in after["artifacts"] if a["formal_export"]]
+    assert formal
+    download = client.get(formal[0]["download_url"], headers=headers)
+    assert download.status_code == 200
