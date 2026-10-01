@@ -44,6 +44,12 @@ def candidate_to_dict(
     candidate: DocumentTermCandidate, *, include_occurrences: bool = True
 ) -> dict:
     """将候选序列化为 API/UI 可直接消费的稳定结构。"""
+    decisions = sorted(
+        candidate.decisions,
+        key=lambda item: item.created_at.isoformat() if item.created_at else "",
+    )
+    confirmed_target = decisions[-1].target_term if decisions else None
+    metadata = dict(candidate.extraction_metadata or {})
     result = {
         "id": candidate.id,
         "job_id": candidate.job_id,
@@ -65,6 +71,10 @@ def candidate_to_dict(
         "termbase_version": candidate.termbase_version,
         "source_context": candidate.source_context,
         "target_context": candidate.target_context,
+        "confirmed_target": confirmed_target,
+        "extraction_metadata": metadata,
+        "extraction_reason": metadata.get("reason"),
+        "rule_version": metadata.get("rule_version"),
         "reviewed_by": candidate.reviewed_by,
         "reviewed_at": candidate.reviewed_at.isoformat() if candidate.reviewed_at else None,
         "decision_note": candidate.decision_note,
@@ -87,6 +97,7 @@ def candidate_to_dict(
             }
             for occurrence in candidate.occurrences
         ]
+        result["occurrence_count"] = len(candidate.occurrences)
     return result
 
 
@@ -171,6 +182,7 @@ def enqueue_candidate(
     session: Session,
     *,
     job: Job,
+    translation_run_id: str | None = None,
     tenant_id: str,
     project_id: str,
     source_term: str,
@@ -186,6 +198,7 @@ def enqueue_candidate(
     target_context: str | None = None,
     termbase_version: str | None = None,
     occurrences: Iterable[dict] | None = None,
+    extraction_metadata: dict | None = None,
 ) -> DocumentTermCandidate:
     """幂等写入一个候选及其出现位置。
 
@@ -207,6 +220,7 @@ def enqueue_candidate(
     if candidate is None:
         candidate = DocumentTermCandidate(
             job_id=job.id,
+            translation_run_id=translation_run_id,
             tenant_id=tenant_id,
             project_id=project_id,
             source_sha256=job.source_sha256,
@@ -223,6 +237,7 @@ def enqueue_candidate(
             source_context=source_context,
             target_context=target_context,
             termbase_version=termbase_version,
+            extraction_metadata=dict(extraction_metadata or {}),
             version=1,
         )
         session.add(candidate)
@@ -237,6 +252,10 @@ def enqueue_candidate(
             candidate.target_context = target_context
         if termbase_version and not candidate.termbase_version:
             candidate.termbase_version = termbase_version
+        if translation_run_id and not candidate.translation_run_id:
+            candidate.translation_run_id = translation_run_id
+        if extraction_metadata and not candidate.extraction_metadata:
+            candidate.extraction_metadata = dict(extraction_metadata)
 
     existing_occurrence_keys = {
         (

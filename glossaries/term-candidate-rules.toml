@@ -1,5 +1,5 @@
 # PLAN-063：术语候选准入规则。改 version 必须 bump 并登记 fingerprint。
-version = "063-v2"
+version = "074-v1"
 
 [thresholds]
 min_source_chars = 3
@@ -23,6 +23,7 @@ denylist = [
   "THE", "AND", "FOR", "ARE", "WAS", "NOT", "ALL", "BUT", "CAN",
   "MAY", "HAS", "HAD", "THIS", "THAT", "WITH", "FROM", "INTO",
   "NOVEMBER", "UNIVERSITY", "HOSPITAL", "PHARMA",
+  "ICU", "SPF",
 ]
 
 [include]

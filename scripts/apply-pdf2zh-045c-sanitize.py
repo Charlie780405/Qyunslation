@@ -9,6 +9,7 @@ from pathlib import Path
 SITE = Path.home() / ".local/share/uv/tools/pdf2zh-next/lib/python3.12/site-packages"
 IL = SITE / "babeldoc/format/pdf/document_il/midend/il_translator.py"
 MARKER = "_QY_045C_SANITIZE"
+TRACE_MARKER = "_QY_074_POSTPROCESS"
 
 
 HELPER = f'''
@@ -19,6 +20,15 @@ def {MARKER}(text):
         return cleaned
     except Exception:
         return text
+'''
+
+TRACE_HELPER = f'''
+def {TRACE_MARKER}(source_text, translated_text):
+    try:
+        from qyunslation.structure.translation_trace import postprocess_translation
+        return postprocess_translation(source_text, translated_text)
+    except Exception:
+        return {MARKER}(translated_text)
 '''
 
 OLD_POST = """    def post_translate_paragraph(
@@ -40,7 +50,7 @@ NEW_POST = f"""    def post_translate_paragraph(
         translated_text: str,
     ):
         \"\"\"Post-translation processing: update paragraph with translated text.\"\"\"
-        translated_text = {MARKER}(translated_text)  # PLAN-045c
+        translated_text = {TRACE_MARKER}(paragraph.unicode, translated_text)  # PLAN-074
         tracker.set_output(translated_text)
 """
 
@@ -54,12 +64,21 @@ def patch(text: str) -> tuple[str, bool]:
             return text, False
         text = text.replace(anchor, anchor + "\n" + HELPER, 1)
         changed = True
-    if "PLAN-045c" not in text and OLD_POST in text:
+    if TRACE_HELPER.strip() not in text:
+        anchor = "logger = logging.getLogger(__name__)"
+        text = text.replace(anchor, anchor + "\n" + TRACE_HELPER, 1)
+        changed = True
+    old_call = f"translated_text = {MARKER}(translated_text)  # PLAN-045c"
+    new_call = f"translated_text = {TRACE_MARKER}(paragraph.unicode, translated_text)  # PLAN-074"
+    if old_call in text:
+        text = text.replace(old_call, new_call, 1)
+        changed = True
+    elif "PLAN-074" not in text and OLD_POST in text:
         text = text.replace(OLD_POST, NEW_POST, 1)
         changed = True
-    elif f"{MARKER}(translated_text)" in text:
+    elif f"{TRACE_MARKER}(paragraph.unicode, translated_text)" in text:
         pass
-    elif "PLAN-045c" not in text:
+    elif "PLAN-074" not in text:
         print("ERROR: post_translate_paragraph anchor missing", file=sys.stderr)
         return text, False
     return text, changed
@@ -76,8 +95,8 @@ def main() -> int:
         print(f"patched {IL}")
     else:
         print(f"unchanged {IL}")
-    if MARKER not in patched or "PLAN-045c" not in patched:
-        print("ERROR: 045c sanitize not present after patch", file=sys.stderr)
+    if MARKER not in patched or TRACE_MARKER not in patched or "PLAN-074" not in patched:
+        print("ERROR: PLAN-074 postprocess not present after patch", file=sys.stderr)
         return 1
     return 0
 

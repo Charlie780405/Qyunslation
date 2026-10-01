@@ -700,9 +700,22 @@ class ReviewSegment(Base):
     __table_args__ = (
         Index("ix_review_segment_job_status", "job_id", "status"),
         Index("ix_review_segment_source_sha", "source_sha256"),
+        Index(
+            "ix_review_segment_translation_run",
+            "translation_run_id",
+            "generation",
+            "role",
+            "status",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    translation_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=True
+    )
+    generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     job_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
     )
@@ -821,6 +834,7 @@ class DocumentTermCandidate(Base):
     termbase_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     reviewed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)

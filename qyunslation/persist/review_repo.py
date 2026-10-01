@@ -29,6 +29,10 @@ def _utcnow() -> datetime:
 def segment_to_dict(seg: ReviewSegment, *, include_notes: bool = True) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": seg.id,
+        "translation_run_id": seg.translation_run_id,
+        "generation": seg.generation,
+        "page_no": seg.page_no,
+        "bbox": seg.bbox,
         "job_id": seg.job_id,
         "source_sha256": seg.source_sha256,
         "block_id": seg.block_id,
@@ -94,6 +98,10 @@ def enqueue_segments(
             continue
         seg = ReviewSegment(
             job_id=job.id,
+            translation_run_id=(str(raw["translation_run_id"]) if raw.get("translation_run_id") else None),
+            generation=(int(raw["generation"]) if raw.get("generation") is not None else None),
+            page_no=(int(raw["page_no"]) if raw.get("page_no") is not None else None),
+            bbox=(dict(raw["bbox"]) if isinstance(raw.get("bbox"), dict) else None),
             source_sha256=job.source_sha256,
             block_id=(str(raw["block_id"]) if raw.get("block_id") else None),
             policy=policy,

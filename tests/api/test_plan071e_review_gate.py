@@ -11,7 +11,7 @@ from sqlalchemy import select
 from qyunslation.api.v1 import router as api_v1_router
 from qyunslation.persist import db as persist_db
 from qyunslation.persist.db import init_engine, reset_engine
-from qyunslation.persist.models import Base, TranslationRunRecord
+from qyunslation.persist.models import Base, PreflightRecord, TranslationRunRecord
 
 
 @pytest.fixture()
@@ -65,6 +65,115 @@ def test_cannot_approve_with_blockers(client):
         json={"decision": "approve"},
     )
     assert denied.status_code == 409
+
+
+def test_term_review_payload_and_formal_gate_require_every_candidate_decision(client):
+    from qyunslation.workbench.term_extract import extract_candidates_from_text
+
+    run_id = _make_run(client, "term-review-gate")
+    with persist_db.SessionLocal() as session:
+        run = session.get(TranslationRunRecord, run_id)
+        preflight = session.get(PreflightRecord, run.preflight_id)
+        run.quality_state = "review_ready"
+        run.qa_summary = {"blocker": 0, "warning": 0, "info": 0}
+        rows = extract_candidates_from_text(
+            session,
+            run=run,
+            preflight=preflight,
+            source_text="Vitiligo improved after treatment.",
+            translated_text="白癜风在治疗后改善。",
+        )
+        assert len(rows) == 1
+        session.commit()
+
+    listing = client.get(
+        f"/api/v1/translation-runs/{run_id}/term-candidates?page=1&page_size=40",
+        headers=_headers(),
+    )
+    assert listing.status_code == 200, listing.text
+    payload = listing.json()
+    assert payload["unresolved"] == 1
+    assert payload["rules"]["method"]
+    candidate = payload["items"][0]
+    assert candidate["source_term"] == "Vitiligo"
+    assert candidate["observed_target"] == ""
+    assert candidate["occurrence_count"] == 1
+    assert candidate["extraction_reason"].startswith("deterministic:")
+
+    blocked = client.post(
+        f"/api/v1/translation-runs/{run_id}/review-decision",
+        headers=_headers(),
+        json={"decision": "approve"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["unresolved_term_count"] == 1
+
+    decided = client.post(
+        f"/api/v1/translation-runs/{run_id}/term-candidates/{candidate['id']}/decision",
+        headers=_headers(),
+        json={
+            "action": "approve",
+            "expected_version": candidate["version"],
+            "target_term": "白癜风",
+        },
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["candidate"]["confirmed_target"] == "白癜风"
+
+
+def test_affiliation_review_edit_creates_superseding_generation(client, monkeypatch):
+    from qyunslation.workbench.term_extract import sync_affiliation_segments_from_text
+
+    run_id = _make_run(client, "affiliation-review")
+    source = "1 Department of Dermatology, New York Medical College"
+    machine = "1 纽约医学院皮肤病学系"
+    with persist_db.SessionLocal() as session:
+        run = session.get(TranslationRunRecord, run_id)
+        preflight = session.get(PreflightRecord, run.preflight_id)
+        run.quality_state = "review_ready"
+        run.qa_summary = {"blocker": 0, "warning": 0, "info": 0}
+        rows = sync_affiliation_segments_from_text(
+            session,
+            run=run,
+            preflight=preflight,
+            source_text=source,
+            translated_text=machine,
+        )
+        assert len(rows) == 1
+        session.commit()
+
+    listing = client.get(
+        f"/api/v1/translation-runs/{run_id}/affiliation-segments", headers=_headers()
+    )
+    assert listing.status_code == 200, listing.text
+    segment = listing.json()["items"][0]
+    assert listing.json()["unconfirmed"] == 1
+    assert segment["machine_text"] == machine
+
+    revised = "1 纽约医学院皮肤科"
+    approved = client.patch(
+        f"/api/v1/translation-runs/{run_id}/affiliation-segments/{segment['id']}",
+        headers=_headers(),
+        json={"expected_version": segment["version"], "revised_text": revised},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["segment"]["status"] == "approved"
+
+    async def fake_launch(*, run, preflight, target_language, session, **_kwargs):
+        run.status = "queued"
+        run.stage = "validation"
+
+    monkeypatch.setattr("qyunslation.api.v1._launch_translation_run", fake_launch)
+    regenerated = client.post(
+        f"/api/v1/translation-runs/{run_id}/apply-corrections", headers=_headers()
+    )
+    assert regenerated.status_code == 201, regenerated.text
+    next_run = regenerated.json()
+    assert next_run["generation"] == 2
+    assert next_run["settings"]["review_overrides"] == {source: revised}
+
+    old = client.get(f"/api/v1/translation-runs/{run_id}", headers=_headers()).json()
+    assert old["formal_gate"]["superseding_run_id"] == next_run["id"]
 
 
 def _make_run(client, key):

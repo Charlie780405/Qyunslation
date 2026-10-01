@@ -46,6 +46,7 @@ _GENERIC_SHORT_TERMS = frozenset(
         "vs",
     }
 )
+_HIGH_RISK_ABBREVIATIONS = frozenset({"nhs", "icu"})
 _DRUG_FRAGMENT = re.compile(r"^[a-z]{1,3}(?:mab|nib|cept)$", re.I)
 _ORG_HINT = re.compile(
     r"\b(?:hospital|university|institute|biotech|pharma(?:ceutical)?)\b",
@@ -191,6 +192,8 @@ def classify_risk_by_rules(
     current = rules or load_rules()
     source = (text or "").strip()
     normalized_type = (term_type or "").strip().casefold()
+    if source.casefold() in _HIGH_RISK_ABBREVIATIONS:
+        return "high"
     if normalized_type in current.high_types:
         return "high"
     hit = include_hit(source, rules=current) or normalized_type

@@ -15,7 +15,7 @@ from qyunslation.workbench.evidence import BilingualTermEvidence, classify_risk,
 
 
 def test_rules_version_matches_toml():
-    assert rules_version() == "063-v2"
+    assert rules_version() == "074-v1"
 
 
 def test_numeric_dose_and_ratio_tokens_are_excluded():

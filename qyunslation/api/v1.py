@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import hashlib
 import mimetypes
 import shutil
@@ -16,7 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.persist import repo
 from qyunslation.persist.audit import record_audit, sanitize_extra
@@ -31,10 +32,12 @@ from qyunslation.persist.db import (
 from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
 from qyunslation.persist.models import (
     DocumentTermCandidate,
+    Job,
     PreflightRecord,
     QaItem,
     ReviewDecision,
     ReviewDraft,
+    ReviewSegment,
     TranslationArtifact,
     TranslationRunRecord,
     UploadSession,
@@ -897,6 +900,27 @@ class ReviewDecisionBody(BaseModel):
     comment: str | None = Field(default=None, max_length=2048)
 
 
+class RunTermDecisionBody(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    expected_version: int = Field(ge=1)
+    target_term: str | None = Field(default=None, max_length=512)
+    note: str | None = Field(default=None, max_length=10000)
+    scope: str = Field(default="org", max_length=32)
+
+
+class RunTermBatchDecisionItem(RunTermDecisionBody):
+    candidate_id: str = Field(min_length=1, max_length=36)
+
+
+class RunTermBatchDecisionBody(BaseModel):
+    decisions: list[RunTermBatchDecisionItem] = Field(min_length=1, max_length=200)
+
+
+class AffiliationDecisionBody(BaseModel):
+    expected_version: int = Field(ge=1)
+    revised_text: str | None = Field(default=None, max_length=20000)
+
+
 class RetryTranslationBody(BaseModel):
     pipeline: str | None = Field(default=None, max_length=32)
 
@@ -1159,6 +1183,7 @@ def _maybe_run_auto_qa(
     if existing:
         return
     from qyunslation.pipeline.qa import (
+        QaFinding,
         quality_state_from_findings,
         run_deterministic_qa,
         summarize,
@@ -1170,7 +1195,10 @@ def _maybe_run_auto_qa(
     preflight = session.get(PreflightRecord, run.preflight_id)
     if facts and preflight is not None:
         try:
-            from qyunslation.workbench.term_extract import extract_candidates_from_text
+            from qyunslation.workbench.term_extract import (
+                extract_candidates_from_text,
+                sync_affiliation_segments_from_text,
+            )
 
             extract_candidates_from_text(
                 session,
@@ -1179,8 +1207,27 @@ def _maybe_run_auto_qa(
                 source_text=facts["source"].text,
                 translated_text=facts["translated"].text,
             )
-        except Exception:
-            pass
+            sync_affiliation_segments_from_text(
+                session,
+                run=run,
+                preflight=preflight,
+                source_text=facts["source"].text,
+                translated_text=facts["translated"].text,
+            )
+        except Exception as exc:
+            run.term_summary = {
+                **dict(run.term_summary or {}),
+                "extraction_status": "degraded",
+                "degradation_reason": type(exc).__name__,
+            }
+            inspected.append(
+                QaFinding(
+                    category="terminology",
+                    severity="blocker",
+                    code="TERM_EXTRACTION_DEGRADED",
+                    message="专业术语或单位审校证据提取失败，不能按零候选继续批准",
+                )
+            )
     findings = run_deterministic_qa(
         manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
         term_summary=run.term_summary,
@@ -1347,6 +1394,66 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
     return str(progress_message) if progress_message else None
 
 
+_FINAL_TERM_STATUSES = frozenset({"approved", "rejected", "applied"})
+
+
+def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
+    """Unified publication gate for QA, affiliation review, terms, and generations."""
+    unresolved_terms = list(
+        session.scalars(
+            select(DocumentTermCandidate.id).where(
+                DocumentTermCandidate.translation_run_id == run.id,
+                DocumentTermCandidate.status.not_in(_FINAL_TERM_STATUSES),
+            )
+        )
+    )
+    unresolved_affiliations = list(
+        session.scalars(
+            select(ReviewSegment.id).where(
+                ReviewSegment.translation_run_id == run.id,
+                ReviewSegment.generation == run.generation,
+                ReviewSegment.role == "affiliation",
+                ReviewSegment.status != "approved",
+            )
+        )
+    )
+    superseding_run_id = session.scalar(
+        select(TranslationRunRecord.id)
+        .where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.generation > run.generation,
+        )
+        .order_by(TranslationRunRecord.generation.desc())
+        .limit(1)
+    )
+    qa_blockers = int((run.qa_summary or {}).get("blocker") or 0)
+    extraction_degraded = (
+        str((run.term_summary or {}).get("extraction_status") or "").casefold() == "degraded"
+    )
+    reasons: list[str] = []
+    if qa_blockers:
+        reasons.append("qa_blockers")
+    if unresolved_terms:
+        reasons.append("unresolved_terms")
+    if unresolved_affiliations:
+        reasons.append("unconfirmed_affiliations")
+    if superseding_run_id:
+        reasons.append("superseded_artifact")
+    if extraction_degraded:
+        reasons.append("term_extraction_degraded")
+    return {
+        "passed": not reasons,
+        "reasons": reasons,
+        "qa_blockers": qa_blockers,
+        "unresolved_term_count": len(unresolved_terms),
+        "unresolved_term_ids": unresolved_terms,
+        "unconfirmed_affiliation_count": len(unresolved_affiliations),
+        "unconfirmed_affiliation_ids": unresolved_affiliations,
+        "superseding_run_id": superseding_run_id,
+        "term_extraction_degraded": extraction_degraded,
+    }
+
+
 def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
     """Project the durable ledger plus current legacy-service state."""
     progress_message = _refresh_translation_run(session, run)
@@ -1392,6 +1499,7 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "model_profile_id": getattr(run, "model_profile_id", None),
         "qa_summary": run.qa_summary or {},
         "term_summary": run.term_summary or {},
+        "formal_gate": _formal_gate(session, run),
         "artifacts": [_artifact_dict(item, run.id) for item in artifacts],
         "degradation_reason": run.degradation_reason,
         "external_task_id": run.external_task_id,
@@ -1477,6 +1585,13 @@ async def _launch_translation_run(
                 generation=run.generation,
             )
             run_dir.mkdir(parents=True, exist_ok=True)
+            overrides = (run.settings_snapshot or {}).get("review_overrides")
+            if isinstance(overrides, dict) and overrides:
+                from qyunslation.structure.translation_trace import OVERRIDES_FILE
+
+                (run_dir / OVERRIDES_FILE).write_text(
+                    json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             glossary_path, inject_meta = build_run_glossary_path(
                 session,
                 run=run,
@@ -2233,9 +2348,9 @@ def post_review_decision(
     decision = (body.decision or "").strip().casefold()
     if decision not in {"approve", "request_changes", "reject"}:
         raise HTTPException(status_code=400, detail="invalid decision")
-    blockers = int((run.qa_summary or {}).get("blocker") or 0)
-    if decision == "approve" and (run.quality_state == "qa_blocked" or blockers > 0):
-        raise HTTPException(status_code=409, detail="cannot approve while QA blockers remain")
+    formal_gate = _formal_gate(session, run)
+    if decision == "approve" and not formal_gate["passed"]:
+        raise HTTPException(status_code=409, detail={"message": "formal gate blocked", **formal_gate})
     row = ReviewDecision(
         run_id=run.id,
         generation=run.generation,
@@ -2613,29 +2728,284 @@ async def requalify_translation_run(
 @router.get("/translation-runs/{run_id}/term-candidates")
 def list_run_term_candidates(
     run_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=40, ge=1, le=100),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
-    rows = session.scalars(
+    rows = list(session.scalars(
         select(DocumentTermCandidate)
         .where(DocumentTermCandidate.translation_run_id == run.id)
+        .options(
+            selectinload(DocumentTermCandidate.occurrences),
+            selectinload(DocumentTermCandidate.decisions),
+        )
         .order_by(DocumentTermCandidate.created_at.desc())
-    ).all()
+    ).unique().all())
+    from qyunslation.persist.candidate_repo import candidate_to_dict
+
+    start = (page - 1) * page_size
+    selected = rows[start : start + page_size]
     return {
-        "items": [
-            {
-                "id": row.id,
-                "source_term": row.source_term,
-                "suggested_target": row.suggested_target,
-                "term_type": row.term_type,
-                "risk": row.risk,
-                "status": row.status,
-                "source_context": row.source_context,
-            }
-            for row in rows
-        ]
+        "items": [candidate_to_dict(row) for row in selected],
+        "page": page,
+        "page_size": page_size,
+        "total": len(rows),
+        "unresolved": sum(row.status not in _FINAL_TERM_STATUSES for row in rows),
+        "rules": {
+            "version": (run.term_summary or {}).get("rule_version"),
+            "included_regions": ["标题", "摘要", "正文", "章节标题", "图表", "脚注"],
+            "excluded_regions": ["作者", "研究单位", "参考文献", "地址/邮箱", "页眉页脚", "注册编号"],
+            "method": [
+                "词库、形态和缩写规则确定性提取",
+                "结构化模型补充疾病与机制短语",
+                "候选必须逐字存在于源文",
+                "词库命中、通用词、统计词、碎片、乱码和历史拒绝词不进入新候选",
+                "按规范化词形去重并保留全部出现位置；每页默认 40 条",
+            ],
+        },
     }
+
+
+def _decide_run_candidate(
+    session: Session,
+    *,
+    run: TranslationRunRecord,
+    candidate: DocumentTermCandidate,
+    body: RunTermDecisionBody,
+    identity: IdentityContext,
+) -> dict[str, Any]:
+    from qyunslation.persist.candidate_repo import CandidateConflict, decide_candidate
+
+    if candidate.translation_run_id != run.id or candidate.tenant_id != run.tenant_id:
+        raise HTTPException(status_code=404, detail="term candidate not found")
+    action = body.action.strip().casefold()
+    role = _identity_role(identity)
+    high_risk = candidate.risk.strip().casefold() in {"high", "critical"}
+    if high_risk and action in {"approve", "do_not_translate", "merge"} and role not in {
+        "term_admin", "admin", "owner"
+    }:
+        raise HTTPException(status_code=403, detail="term_admin role required for high-risk term")
+    if action == "submit_for_admin" and not high_risk:
+        raise HTTPException(status_code=400, detail="only high-risk candidates require administrator review")
+    try:
+        result = decide_candidate(
+            session,
+            candidate=candidate,
+            actor_sub=identity.user_sub,
+            action=action,
+            expected_version=body.expected_version,
+            target_term=body.target_term,
+            note=body.note,
+            scope="org",
+        )
+    except CandidateConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action=f"translation_run.term.{action}",
+        source_sha256=candidate.source_sha256,
+        extra={"run_id": run.id, "candidate_id": candidate.id},
+    )
+    return result
+
+
+@router.post("/translation-runs/{run_id}/term-candidates/{candidate_id}/decision")
+def decide_run_term_candidate(
+    run_id: str,
+    candidate_id: str,
+    body: RunTermDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    candidate = session.get(DocumentTermCandidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="term candidate not found")
+    return _decide_run_candidate(
+        session, run=run, candidate=candidate, body=body, identity=identity
+    )
+
+
+@router.post("/translation-runs/{run_id}/term-candidates/batch-decision")
+def batch_decide_run_term_candidates(
+    run_id: str,
+    body: RunTermBatchDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    decided: list[dict[str, Any]] = []
+    for item in body.decisions:
+        candidate = session.get(DocumentTermCandidate, item.candidate_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="term candidate not found")
+        action = item.action.strip().casefold()
+        if action == "approve" and candidate.risk.strip().casefold() in {"high", "critical"}:
+            raise HTTPException(status_code=400, detail="high-risk terms require individual review")
+        decided.append(
+            _decide_run_candidate(
+                session, run=run, candidate=candidate, body=item, identity=identity
+            )
+        )
+    return {"decided": decided, "count": len(decided), "formal_gate": _formal_gate(session, run)}
+
+
+@router.get("/translation-runs/{run_id}/affiliation-segments")
+def list_run_affiliation_segments(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    rows = list(
+        session.scalars(
+            select(ReviewSegment)
+            .where(
+                ReviewSegment.translation_run_id == run.id,
+                ReviewSegment.generation == run.generation,
+                ReviewSegment.role == "affiliation",
+            )
+            .options(selectinload(ReviewSegment.notes))
+            .order_by(ReviewSegment.page_no, ReviewSegment.created_at)
+        ).all()
+    )
+    from qyunslation.persist.review_repo import segment_to_dict
+
+    return {
+        "items": [segment_to_dict(row) for row in rows],
+        "unconfirmed": sum(row.status != "approved" for row in rows),
+    }
+
+
+@router.patch("/translation-runs/{run_id}/affiliation-segments/{segment_id}")
+def decide_run_affiliation_segment(
+    run_id: str,
+    segment_id: str,
+    body: AffiliationDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    segment = session.get(ReviewSegment, segment_id)
+    if (
+        segment is None
+        or segment.translation_run_id != run.id
+        or segment.generation != run.generation
+        or segment.role != "affiliation"
+    ):
+        raise HTTPException(status_code=404, detail="affiliation segment not found")
+    if segment.version != body.expected_version:
+        raise HTTPException(status_code=409, detail="affiliation segment version conflict; refresh required")
+    from qyunslation.persist.review_repo import ReviewError, decide_segment
+
+    job = session.get(Job, segment.job_id)
+    try:
+        result = decide_segment(
+            session,
+            segment=segment,
+            tenant_id=run.tenant_id,
+            actor_sub=identity.user_sub,
+            action="approve",
+            revised_text=body.revised_text,
+            project_id=job.project_id if job else None,
+        )
+    except ReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.affiliation.approve",
+        source_sha256=segment.source_sha256,
+        extra={"run_id": run.id, "segment_id": segment.id},
+    )
+    return {**result, "formal_gate": _formal_gate(session, run)}
+
+
+@router.post("/translation-runs/{run_id}/apply-corrections", status_code=201)
+async def apply_run_corrections(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    newer = session.scalar(
+        select(TranslationRunRecord.id).where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.generation > run.generation,
+        ).limit(1)
+    )
+    if newer:
+        raise HTTPException(status_code=409, detail="this artifact has already been superseded")
+    segments = list(
+        session.scalars(
+            select(ReviewSegment).where(
+                ReviewSegment.translation_run_id == run.id,
+                ReviewSegment.generation == run.generation,
+                ReviewSegment.role == "affiliation",
+                ReviewSegment.status == "approved",
+            )
+        ).all()
+    )
+    overrides = {
+        segment.source_text: segment.revised_text
+        for segment in segments
+        if segment.revised_text
+        and segment.revised_text.strip()
+        and segment.revised_text.strip() != (segment.machine_text or "").strip()
+    }
+    if not overrides:
+        raise HTTPException(status_code=409, detail="no edited affiliation translations to apply")
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
+        raise HTTPException(status_code=409, detail="preflight is not ready")
+    next_generation = run.generation + 1
+    snap = {
+        **dict(run.settings_snapshot or {}),
+        "review_overrides": overrides,
+        "correction_of": {"run_id": run.id, "generation": run.generation},
+    }
+    retry = TranslationRunRecord(
+        preflight_id=run.preflight_id,
+        tenant_id=run.tenant_id,
+        actor_sub=identity.user_sub,
+        idempotency_key_hash=hashlib.sha256(
+            f"correction:{run.id}:{next_generation}".encode("utf-8")
+        ).hexdigest(),
+        generation=next_generation,
+        direction=run.direction,
+        profile=run.profile,
+        display_name=run.display_name,
+        settings_snapshot=snap,
+        status="queued",
+        stage="validation",
+        quality_state="draft",
+        document_classification=run.document_classification,
+        model_profile_id=run.model_profile_id,
+        term_summary={"status": "snapshot_pending"},
+        qa_summary={"blocker": 0, "warning": 0, "info": 0},
+    )
+    session.add(retry)
+    session.flush()
+    await _launch_translation_run(
+        run=retry,
+        preflight=preflight,
+        target_language=_run_target_language(retry.direction),
+        session=session,
+    )
+    return _translation_run_dict(session, retry)
 
 
 class PreferencesBody(BaseModel):
