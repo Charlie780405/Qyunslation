@@ -30,6 +30,33 @@ def pipeline_mode() -> str:
     return "v2" if raw in {"v2", "pipeline", "document"} else "legacy"
 
 
+def _normalize_mode(raw: str | None) -> str:
+    return "v2" if (raw or "").strip().casefold() in {"v2", "pipeline", "document"} else "legacy"
+
+
+def resolve_pipeline_mode(tenant_slug: str | None, requested: str | None = None) -> str:
+    """PLAN-071i 灰度：全局开关或租户白名单（QYUNSLATION_PIPELINE_TENANTS）决定新建任务的流水线。
+
+    显式 ``requested``（如重试 pipeline=v2）优先。结果在创建时写入任务快照，
+    之后切换开关不影响在途任务。
+    """
+    if requested:
+        return _normalize_mode(requested)
+    if pipeline_mode() == "v2":
+        return "v2"
+    allow = {
+        item.strip().casefold()
+        for item in (os.environ.get("QYUNSLATION_PIPELINE_TENANTS") or "").split(",")
+        if item.strip()
+    }
+    return "v2" if tenant_slug and tenant_slug.casefold() in allow else "legacy"
+
+
+def run_pipeline_mode(settings_snapshot: dict[str, Any] | None) -> str:
+    """任务自己的流水线模式；缺省（历史任务）一律 legacy，不随当前环境漂移。"""
+    return _normalize_mode((settings_snapshot or {}).get("pipeline"))
+
+
 def workspace_root_from_env() -> Path:
     raw = (os.environ.get("QYUNSLATION_PIPELINE_ROOT") or "var/pipeline").strip()
     root = Path(raw)

@@ -809,9 +809,9 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.updated_at = datetime.now(timezone.utc)
             return str(progress_message) if progress_message else None
         if status == "succeeded":
-            from qyunslation.pipeline import pipeline_mode
+            from qyunslation.pipeline import run_pipeline_mode
 
-            if pipeline_mode() == "v2":
+            if run_pipeline_mode(run.settings_snapshot) == "v2":
                 run.status = "translating"
                 run.stage = "layout"
                 run.progress = None
@@ -859,9 +859,9 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
         run.degradation_reason = str(task_state.get("status_message") or "translation failed")[:512]
         run.stage = "qa"
     elif task_state.get("download_ready"):
-        from qyunslation.pipeline import pipeline_mode
+        from qyunslation.pipeline import run_pipeline_mode
 
-        if pipeline_mode() == "v2":
+        if run_pipeline_mode(run.settings_snapshot) == "v2":
             run.status = "translating"
             run.stage = "layout"
             run.progress = None
@@ -983,9 +983,9 @@ async def _launch_translation_run(
     PLAN-071b：``QYUNSLATION_PIPELINE=v2`` 时四类格式统一进 DocumentPipeline。
     默认 ``legacy`` 保持原 PDF CLI / Office sidecar 分叉，便于灰度回滚。
     """
-    from qyunslation.pipeline import pipeline_mode
+    from qyunslation.pipeline import run_pipeline_mode
 
-    if pipeline_mode() == "v2":
+    if run_pipeline_mode(run.settings_snapshot) == "v2":
         try:
             from qyunslation.pipeline.document_pipeline import get_document_pipeline
 
@@ -1148,6 +1148,21 @@ async def create_translation_run(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from qyunslation.glossary.termbase import runtime_termbase_version
+    from qyunslation.pipeline import resolve_pipeline_mode
+    from qyunslation.pipeline.run_snapshot import build_run_model_snapshot
+
+    try:
+        termbase_version = runtime_termbase_version(session, tenant_id=tenant.id, project_id=None)
+    except Exception:
+        termbase_version = None
+    mode_snapshot = build_run_model_snapshot(
+        classification=classification,
+        translator_id=model_profile_id,
+        term_id=term_profile_id,
+        termbase_version=termbase_version,
+        pipeline=resolve_pipeline_mode(getattr(tenant, "slug", None)),
+    )
     run = TranslationRunRecord(
         preflight_id=preflight.id,
         tenant_id=tenant.id,
@@ -1169,6 +1184,7 @@ async def create_translation_run(
             "document_classification": classification,
             "model_profile_id": model_profile_id,
             "term_model_profile_id": term_profile_id,
+            **mode_snapshot,
         },
         status="queued",
         stage="validation",
@@ -1897,23 +1913,12 @@ async def retry_translation_run(
     )
     session.add(retry)
     session.flush()
-    # Force v2 launch for explicit retry without mutating process-wide env permanently.
-    previous_pipeline = os.environ.get("QYUNSLATION_PIPELINE")
-    if requested_pipeline == "v2":
-        os.environ["QYUNSLATION_PIPELINE"] = "v2"
-    try:
-        await _launch_translation_run(
-            run=retry,
-            preflight=preflight,
-            target_language=_run_target_language(retry.direction),
-            session=session,
-        )
-    finally:
-        if requested_pipeline == "v2":
-            if previous_pipeline is None:
-                os.environ.pop("QYUNSLATION_PIPELINE", None)
-            else:
-                os.environ["QYUNSLATION_PIPELINE"] = previous_pipeline
+    await _launch_translation_run(
+        run=retry,
+        preflight=preflight,
+        target_language=_run_target_language(retry.direction),
+        session=session,
+    )
     return _translation_run_dict(session, retry)
 
 

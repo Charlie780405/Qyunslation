@@ -3,7 +3,18 @@
 
 from __future__ import annotations
 
-from qyunslation.pipeline.document_pipeline import DocumentPipeline, pipeline_mode
+from qyunslation.pipeline.document_pipeline import (
+    DocumentPipeline,
+    pipeline_mode,
+    resolve_pipeline_mode,
+    run_pipeline_mode,
+)
 from qyunslation.pipeline.workspace import RunWorkspace
 
-__all__ = ["DocumentPipeline", "RunWorkspace", "pipeline_mode"]
+__all__ = [
+    "DocumentPipeline",
+    "RunWorkspace",
+    "pipeline_mode",
+    "resolve_pipeline_mode",
+    "run_pipeline_mode",
+]

@@ -346,9 +346,15 @@ def _pipeline_mode() -> str:
     return "v2" if raw in {"v2", "pipeline", "document"} else "legacy"
 
 
-def _cli_success_updates(outputs: list[dict[str, Any]], *, progress_message: str | None) -> dict[str, Any]:
+def _cli_success_updates(
+    outputs: list[dict[str, Any]],
+    *,
+    progress_message: str | None,
+    pipeline: str | None = None,
+) -> dict[str, Any]:
     """Finalize CLI success. v2 must not claim formal export/succeeded."""
-    if _pipeline_mode() == "v2":
+    mode = _pipeline_mode() if not pipeline else ("v2" if pipeline == "v2" else "legacy")
+    if mode == "v2":
         return {
             "status": "layout_complete",
             "stage": "layout",
@@ -511,6 +517,7 @@ class Pdf2zhRunner:
             "pid": None,
             "command": [str(item) for item in command if not str(item).startswith("--")],
             "source_filename": Path(original_filename).name[:256],
+            "pipeline": (settings or {}).get("pipeline") or _pipeline_mode(),
             "outputs": [],
             "reason": None,
             "created_at": _utc_now(),
@@ -710,6 +717,7 @@ class Pdf2zhRunner:
                         **_cli_success_updates(
                             outputs,
                             progress_message=state.get("progress_message"),
+                            pipeline=state.get("pipeline"),
                         ),
                     )
                     break
@@ -856,6 +864,7 @@ class Pdf2zhRunner:
                     **_cli_success_updates(
                         outputs,
                         progress_message=state.get("progress_message"),
+                        pipeline=state.get("pipeline"),
                     ),
                 )
             else:
