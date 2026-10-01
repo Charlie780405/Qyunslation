@@ -1,6 +1,6 @@
 # PLAN-071：可审计翻译质量流水线与真实工作台
 
-状态：**已冻结计划，待 Cursor 按子计划实施**
+状态：**已冻结；071a 契约层已落地（见 WT-071a）；下一刀 071b**
 
 父计划：无（承接 PLAN-066–070 工作台基线）
 
@@ -117,7 +117,7 @@ validation → structure → ocr(可跳过) → text → table_figure → layout
 
 | 子计划 | 目标 | 依赖 | 波次 |
 | --- | --- | --- | --- |
-| [071a](./PLAN-071a-baseline-inventory.md) | 质量基线、旧能力盘点、金标样本、验收矩阵 | 无 | 0 |
+| [071a](./PLAN-071a-baseline-inventory.md) | 质量基线、旧能力盘点、金标样本、验收矩阵 | 无 | 0（契约层完成） |
 | [071b](./PLAN-071b-document-pipeline-manifest.md) | 统一 DocumentPipeline 与版本化 Manifest | 071a | 1 |
 | [071c](./PLAN-071c-table-figure-logo-layout.md) | 表格、图片、Logo、印章、签名和版式保真 | 071b | 2 |
 | [071d](./PLAN-071d-stage-events-progress.md) | 持久化阶段事件、真实进度、重启恢复 | 071b | 1（与 b 并行） |
