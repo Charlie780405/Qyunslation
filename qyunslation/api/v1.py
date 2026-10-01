@@ -1407,6 +1407,25 @@ def settings_schema(identity: IdentityContext = Depends(require_identity)) -> di
     }
 
 
+def _tenant_policies(session: Session, tenant_id: str) -> dict[str, Any]:
+    from qyunslation.persist.models import TenantPolicy
+
+    rows = session.scalars(select(TenantPolicy).where(TenantPolicy.tenant_id == tenant_id))
+    return {row.key: row for row in rows}
+
+
+def _policy_value(row: Any) -> Any:
+    value = row.value
+    return value.get("v") if isinstance(value, dict) and "v" in value else value
+
+
+def _validate_pref_value(key: str, value: Any) -> Any:
+    probe = _safe_preferences({key: value})[key]
+    if key in {"direction", "profile", "density"} and probe != value:
+        raise HTTPException(status_code=400, detail=f"invalid value for {key}")
+    return probe
+
+
 @router.get("/settings/effective")
 def settings_effective(
     identity: IdentityContext = Depends(require_identity),
@@ -1420,12 +1439,28 @@ def settings_effective(
         )
     )
     user_vals = dict((pref.preferences if pref else {}) or {})
+    policies = _tenant_policies(session, tenant.id)
     effective = {}
     for key, default in PREF_DEFAULTS.items():
-        if key in user_vals:
+        policy = policies.get(key)
+        if policy is not None and policy.locked:
+            effective[key] = {
+                "value": _policy_value(policy),
+                "source": "system",
+                "locked": True,
+                "lock_reason": policy.reason or "由系统策略锁定",
+            }
+        elif key in user_vals:
             effective[key] = {
                 "value": user_vals[key],
                 "source": "user",
+                "locked": False,
+                "lock_reason": None,
+            }
+        elif policy is not None:
+            effective[key] = {
+                "value": _policy_value(policy),
+                "source": "system",
                 "locked": False,
                 "lock_reason": None,
             }
@@ -1439,11 +1474,7 @@ def settings_effective(
     return {"effective": effective}
 
 
-@router.get("/admin/policies")
-def get_admin_policies(
-    identity: IdentityContext = Depends(require_identity),
-    session: Session = Depends(get_db),
-) -> dict[str, Any]:
+def _require_policy_admin(session: Session, identity: IdentityContext) -> Any:
     tenant = _tenant_bundle(session, identity)
     membership = repo.ensure_membership(
         session,
@@ -1453,12 +1484,34 @@ def get_admin_policies(
     )
     if membership.role not in {"admin", "owner"}:
         raise HTTPException(status_code=403, detail="admin policy access denied")
+    return tenant
+
+
+def _policies_payload(session: Session, tenant_id: str) -> dict[str, Any]:
     return {
         "pipeline_default": os.environ.get("QYUNSLATION_PIPELINE") or "legacy",
         "deepseek_configured": bool(
             (os.environ.get("QYUNSLATION_DEEPSEEK_API_KEY") or "").strip()
         ),
+        "policies": {
+            key: {
+                "value": _policy_value(row),
+                "locked": bool(row.locked),
+                "reason": row.reason,
+                "updated_by": row.updated_by,
+            }
+            for key, row in sorted(_tenant_policies(session, tenant_id).items())
+        },
     }
+
+
+@router.get("/admin/policies")
+def get_admin_policies(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _require_policy_admin(session, identity)
+    return _policies_payload(session, tenant.id)
 
 
 @router.put("/admin/policies")
@@ -1467,17 +1520,53 @@ def put_admin_policies(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    tenant = _tenant_bundle(session, identity)
-    membership = repo.ensure_membership(
+    from qyunslation.persist.models import TenantPolicy
+
+    tenant = _require_policy_admin(session, identity)
+    requested = body.get("policies") or {}
+    if not isinstance(requested, dict):
+        raise HTTPException(status_code=400, detail="policies must be an object")
+    existing = _tenant_policies(session, tenant.id)
+    for key, spec in requested.items():
+        if key not in PREF_DEFAULTS:
+            raise HTTPException(status_code=400, detail=f"unknown policy key: {key}")
+        if spec is None:
+            if key in existing:
+                session.delete(existing[key])
+            continue
+        if not isinstance(spec, dict) or "value" not in spec:
+            raise HTTPException(status_code=400, detail=f"policy {key} needs a value")
+        value = _validate_pref_value(key, spec["value"])
+        locked = bool(spec.get("locked"))
+        reason = str(spec.get("reason") or "")[:256] or None
+        if locked and not reason:
+            raise HTTPException(status_code=400, detail=f"locked policy {key} requires a reason")
+        row = existing.get(key)
+        if row is None:
+            session.add(
+                TenantPolicy(
+                    tenant_id=tenant.id,
+                    key=key,
+                    value={"v": value},
+                    locked=locked,
+                    reason=reason,
+                    updated_by=identity.user_sub,
+                )
+            )
+        else:
+            row.value = {"v": value}
+            row.locked = locked
+            row.reason = reason
+            row.updated_by = identity.user_sub
+            row.updated_at = datetime.now(timezone.utc)
+    session.flush()
+    record_audit(
         session,
-        tenant_id=tenant.id,
-        user_sub=identity.user_sub,
-        role=_identity_role(identity),
+        actor_sub=identity.user_sub,
+        action="web.policy.update",
+        extra={"keys": sorted(requested)},
     )
-    if membership.role not in {"admin", "owner"}:
-        raise HTTPException(status_code=403, detail="admin policy access denied")
-    # Runtime env remains source of truth; echo accepted keys for audit UI.
-    return {"accepted": {k: body.get(k) for k in ("pipeline_default",) if k in body}}
+    return _policies_payload(session, tenant.id)
 
 
 @router.get("/translation-runs/{run_id}/events")
@@ -1856,7 +1945,19 @@ def get_preferences(
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
     row = session.query(WebPreference).filter_by(tenant_id=tenant.id, user_sub=identity.user_sub).first()
-    return {"preferences": _safe_preferences(row.preferences if row else None), "source": "personal"}
+    raw = dict((row.preferences if row else {}) or {})
+    locked: list[str] = []
+    for key, policy in _tenant_policies(session, tenant.id).items():
+        if policy.locked:
+            raw[key] = _policy_value(policy)
+            locked.append(key)
+        elif key not in raw:
+            raw[key] = _policy_value(policy)
+    return {
+        "preferences": _safe_preferences(raw),
+        "source": "personal",
+        "locked": sorted(locked),
+    }
 
 
 @router.put("/preferences")
@@ -1867,6 +1968,20 @@ def put_preferences(
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
     clean = _safe_preferences(body.preferences)
+    for key, policy in _tenant_policies(session, tenant.id).items():
+        if not policy.locked:
+            continue
+        locked_value = _policy_value(policy)
+        if key in (body.preferences or {}) and body.preferences[key] != locked_value:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "PREFERENCE_LOCKED",
+                    "key": key,
+                    "reason": policy.reason or "由系统策略锁定",
+                },
+            )
+        clean[key] = locked_value
     row = session.query(WebPreference).filter_by(tenant_id=tenant.id, user_sub=identity.user_sub).first()
     if row is None:
         row = WebPreference(tenant_id=tenant.id, user_sub=identity.user_sub, preferences=clean)

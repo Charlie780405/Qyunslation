@@ -266,6 +266,26 @@ class TranslationStageEvent(Base):
     trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class TenantPolicy(Base):
+    """PLAN-071g：租户级系统策略（覆盖用户偏好，可锁定）。"""
+
+    __tablename__ = "tenant_policy"
+    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_tenant_policy_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(256), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
 class QaItem(Base):
     """PLAN-071e：确定性 QA 项。"""
 
