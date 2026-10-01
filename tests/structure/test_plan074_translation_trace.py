@@ -6,6 +6,7 @@ from pathlib import Path
 from qyunslation.structure.translation_trace import (
     OVERRIDES_FILE,
     TRACE_FILE,
+    load_affiliation_trace,
     postprocess_translation,
 )
 
@@ -42,3 +43,25 @@ def test_babeldoc_patcher_passes_source_and_translation_to_plan074_hook():
 
     assert changed is True
     assert "_QY_074_POSTPROCESS(paragraph.unicode, translated_text)" in patched
+
+
+def test_trace_reader_ignores_invalid_rows_and_retry_duplicates(tmp_path: Path):
+    path = tmp_path / TRACE_FILE
+    valid = {
+        "source_text": "Department of Dermatology, Example University",
+        "machine_text": "示例大学皮肤科",
+        "role": "affiliation",
+        "confidence": 0.9,
+    }
+    path.write_text(
+        "not-json\n"
+        + json.dumps(valid, ensure_ascii=False)
+        + "\n"
+        + json.dumps(valid, ensure_ascii=False)
+        + "\n"
+        + json.dumps({**valid, "role": "author"}, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert load_affiliation_trace(path) == [valid]

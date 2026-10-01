@@ -1195,10 +1195,18 @@ def _maybe_run_auto_qa(
     preflight = session.get(PreflightRecord, run.preflight_id)
     if facts and preflight is not None:
         try:
+            from qyunslation.structure.translation_trace import TRACE_FILE
             from qyunslation.workbench.term_extract import (
                 extract_candidates_from_text,
                 sync_affiliation_segments_from_text,
             )
+
+            trace_path: Path | None = None
+            runner_state_path = str((runner_state or {}).get("runner_state_path") or "").strip()
+            if runner_state_path:
+                candidate = Path(runner_state_path).resolve().parent / TRACE_FILE
+                if candidate.is_file():
+                    trace_path = candidate
 
             extract_candidates_from_text(
                 session,
@@ -1214,6 +1222,7 @@ def _maybe_run_auto_qa(
                 preflight=preflight,
                 source_text=facts["source"].text,
                 translated_text=facts["translated"].text,
+                trace_path=trace_path,
             )
         except Exception as exc:
             run.term_summary = {

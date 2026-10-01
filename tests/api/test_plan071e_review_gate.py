@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -121,12 +122,22 @@ def test_term_review_payload_and_formal_gate_require_every_candidate_decision(cl
     assert decided.json()["candidate"]["confirmed_target"] == "白癜风"
 
 
-def test_affiliation_review_edit_creates_superseding_generation(client, monkeypatch):
+def test_affiliation_review_edit_creates_superseding_generation(client, monkeypatch, tmp_path):
     from qyunslation.workbench.term_extract import sync_affiliation_segments_from_text
+    from qyunslation.structure.translation_trace import TRACE_FILE
 
     run_id = _make_run(client, "affiliation-review")
     source = "1 Department of Dermatology, New York Medical College"
     machine = "1 纽约医学院皮肤病学系"
+    trace_path = tmp_path / TRACE_FILE
+    trace_path.write_text(
+        json.dumps(
+            {"source_text": source, "machine_text": machine, "role": "affiliation"},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     with persist_db.SessionLocal() as session:
         run = session.get(TranslationRunRecord, run_id)
         preflight = session.get(PreflightRecord, run.preflight_id)
@@ -137,9 +148,12 @@ def test_affiliation_review_edit_creates_superseding_generation(client, monkeypa
             run=run,
             preflight=preflight,
             source_text=source,
-            translated_text=machine,
+            translated_text="此处是无法可靠对齐的成稿文本",
+            trace_path=trace_path,
         )
         assert len(rows) == 1
+        assert rows[0].block_id.startswith("trace:")
+        assert rows[0].machine_text == machine
         session.commit()
 
     listing = client.get(

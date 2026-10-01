@@ -14,6 +14,33 @@ TRACE_FILE = ".qyunslation-frontmatter.jsonl"
 _TRACE_LOCK = threading.Lock()
 
 
+def load_affiliation_trace(path: Path) -> list[dict[str, object]]:
+    """Read deterministic affiliation evidence, tolerating partial retry writes."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in lines:
+        try:
+            raw = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(raw, dict) or raw.get("role") != AFFILIATION:
+            continue
+        source = raw.get("source_text")
+        machine = raw.get("machine_text")
+        if not isinstance(source, str) or not source.strip() or not isinstance(machine, str):
+            continue
+        identity = (source, machine)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        records.append(raw)
+    return records
+
+
 def postprocess_translation(
     source_text: str | None,
     translated_text: str | None,

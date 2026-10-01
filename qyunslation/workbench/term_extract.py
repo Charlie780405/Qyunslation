@@ -2,8 +2,10 @@
 """PLAN-074：/next 文献译后术语抽取、证据和审核候选落库。"""
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -286,6 +288,7 @@ def sync_affiliation_segments_from_text(
     preflight: PreflightRecord,
     source_text: str,
     translated_text: str,
+    trace_path: Path | None = None,
 ) -> list[ReviewSegment]:
     """Create required affiliation review rows using page-order evidence.
 
@@ -293,13 +296,25 @@ def sync_affiliation_segments_from_text(
     retained as a conservative fallback and never auto-confirms a segment.
     """
     job = _ensure_job(session, run=run, preflight=preflight)
-    source_paragraphs = _paragraphs(source_text)
-    target_paragraphs = _paragraphs(translated_text)
+    from qyunslation.structure.translation_trace import load_affiliation_trace
+
+    trace = load_affiliation_trace(trace_path) if trace_path is not None else []
+    evidence: list[tuple[str, str, str]] = []
+    for record in trace:
+        source = str(record["source_text"])
+        machine = str(record["machine_text"])
+        digest = hashlib.sha256(f"{source}\0{machine}".encode()).hexdigest()[:24]
+        evidence.append((f"trace:{digest}", source, machine))
+    if not evidence:
+        source_paragraphs = _paragraphs(source_text)
+        target_paragraphs = _paragraphs(translated_text)
+        for index, (source, _offset) in enumerate(source_paragraphs):
+            if classify_frontmatter_text(source).role != AFFILIATION:
+                continue
+            machine = target_paragraphs[index][0] if index < len(target_paragraphs) else ""
+            evidence.append((f"paragraph:{index + 1}", source, machine))
     created: list[ReviewSegment] = []
-    for index, (source, _offset) in enumerate(source_paragraphs):
-        if classify_frontmatter_text(source).role != AFFILIATION:
-            continue
-        block_id = f"paragraph:{index + 1}"
+    for block_id, source, machine in evidence:
         existing = session.scalar(
             select(ReviewSegment).where(
                 ReviewSegment.translation_run_id == run.id,
@@ -311,7 +326,6 @@ def sync_affiliation_segments_from_text(
         if existing is not None:
             created.append(existing)
             continue
-        machine = target_paragraphs[index][0] if index < len(target_paragraphs) else ""
         segment = ReviewSegment(
             job_id=job.id,
             translation_run_id=run.id,
