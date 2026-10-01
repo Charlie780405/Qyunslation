@@ -124,5 +124,10 @@ def test_translated_output_reaches_review_ready_without_blockers(monkeypatch, tm
         items = client.get(f"/api/v1/translation-runs/{run_id}/qa-items", headers=HEADERS).json()
         blockers = [i for i in items["items"] if i["severity"] == "blocker"]
         assert state["quality_state"] == "review_ready", (state["quality_state"], blockers)
-        assert "QA_INSPECTION_SUMMARY" in {i["code"] for i in items["items"]}
+        codes = {i["code"] for i in items["items"]}
+        assert "QA_INSPECTION_SUMMARY" in codes
+        assert "TERM_SNAPSHOT_PENDING" not in codes
+        run = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()
+        assert run["term_summary"]["status"] == "ready"
+        assert run["term_summary"]["content_hash"]
     reset_engine()

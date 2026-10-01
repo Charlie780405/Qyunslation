@@ -210,6 +210,7 @@ def inspect_pdf_pair(
     mono_path: Path | None,
     dual_path: Path | None,
     target_is_chinese: bool = True,
+    facts_out: dict[str, PdfFacts] | None = None,
 ) -> tuple[list[QaFinding], dict[str, Any]]:
     """返回 (findings, 取证摘要)。无法读取任何输入时给出 warning，不静默通过。"""
     summary: dict[str, Any] = {}
@@ -229,6 +230,9 @@ def inspect_pdf_pair(
             ],
             summary,
         )
+    if facts_out is not None:
+        facts_out["source"] = source
+        facts_out["translated"] = translated
     findings = check_translation_text(
         source_text=source.text,
         translated_text=translated.text,

@@ -638,8 +638,8 @@ def _inspect_run_outputs(
     session: Session,
     run: TranslationRunRecord,
     runner_state: dict[str, Any] | None,
-) -> list[Any]:
-    """PLAN-071e：用真实源/译文 PDF 产出 QA findings（失败也要留痕，不静默通过）。"""
+) -> tuple[list[Any], dict[str, Any] | None]:
+    """PLAN-071e/h：用真实源/译文 PDF 产出 QA findings 与术语快照（失败也要留痕）。"""
     from qyunslation.pipeline.qa.engine import QaFinding
     from qyunslation.pipeline.qa.pdf_inspect import inspect_pdf_pair
 
@@ -657,21 +657,40 @@ def _inspect_run_outputs(
         else:
             mono = mono or path
     if mono is None and dual is None:
-        return []
+        return [], None
     preflight = session.get(PreflightRecord, run.preflight_id)
     if preflight is None:
-        return []
+        return [], None
     try:
         source_path = _preflight_path(preflight)
     except HTTPException:
-        return []
+        return [], None
     target = str(getattr(run, "direction", "") or "").split("→")[-1]
+    facts: dict[str, Any] = {}
     findings, summary = inspect_pdf_pair(
         source_path=source_path,
         mono_path=mono,
         dual_path=dual,
         target_is_chinese=("中" in target or target.casefold().startswith("zh") or not target),
+        facts_out=facts,
     )
+    snapshot: dict[str, Any] | None = None
+    if facts:
+        try:
+            from qyunslation.pipeline.term_snapshot import (
+                build_term_snapshot,
+                check_terms_in_translation,
+            )
+
+            snapshot = build_term_snapshot(
+                session,
+                tenant_id=run.tenant_id,
+                project_id=run.project_id,
+                source_text=facts["source"].text,
+            )
+            findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
+        except Exception:
+            snapshot = None
     findings.append(
         QaFinding(
             category="consistency",
@@ -681,7 +700,7 @@ def _inspect_run_outputs(
             evidence=summary,
         )
     )
-    return findings
+    return findings, snapshot
 
 
 def _maybe_run_auto_qa(
@@ -708,6 +727,9 @@ def _maybe_run_auto_qa(
         summarize,
     )
 
+    inspected, term_snapshot = _inspect_run_outputs(session, run, runner_state)
+    if term_snapshot is not None:
+        run.term_summary = term_snapshot
     findings = run_deterministic_qa(
         manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
         term_summary=run.term_summary,
@@ -715,7 +737,7 @@ def _maybe_run_auto_qa(
         translated_text_sample=None,
         logo_present=None,
     )
-    findings.extend(_inspect_run_outputs(session, run, runner_state))
+    findings.extend(inspected)
     for finding in findings:
         session.add(
             QaItem(
