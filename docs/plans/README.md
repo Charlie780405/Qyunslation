@@ -45,5 +45,11 @@
 | **PLAN-062** | [PLAN-062-termbase-evolution](./PLAN-062-termbase-evolution/) | **术语工作台准确度与自动进化（词库 seed / 候选准入 / 段落对齐 / 去重复 / Concept ID / 实时进度）** |
 | **PLAN-063** | [PLAN-063-translation-quality-evolution](./PLAN-063-translation-quality-evolution/) | **规则自动进化与全局质量总纲（原拟 062，依赖 PLAN-062）** |
 | **PLAN-065** | [PLAN-065-inspector-close-reuse](./PLAN-065-inspector-close-reuse/) | **专业词汇检查器关闭与入库复用说明** |
+| **PLAN-066** | [PLAN-066-clinical-workbench](./PLAN-066-clinical-workbench/) | **临床翻译 Vue 工作台基线** |
+| **PLAN-067** | [PLAN-067-workbench-public-cutover](./PLAN-067-workbench-public-cutover/) | **/next 公网切换与 Gradio 退役审计** |
+| **PLAN-068** | [PLAN-068-workbench-preflight-task-lifecycle](./PLAN-068-workbench-preflight-task-lifecycle/) | **预检与 TranslationRun 任务生命周期** |
+| **PLAN-069** | （见 WT-069） | **扫描 PDF 产物门禁恢复（HPD OCR 重试）** |
+| **PLAN-070** | （见 WT-070） | **实时进度与过期预检** |
+| **PLAN-071** | [PLAN-071-translation-quality-pipeline](./PLAN-071-translation-quality-pipeline/) | **可审计翻译质量流水线与真实工作台（071a–071i）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
