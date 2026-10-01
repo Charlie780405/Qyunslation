@@ -21,8 +21,8 @@
             <span class="qy-panel-status">尚未开始</span>
           </div>
           <div class="qy-language-fields" aria-label="翻译语言">
-            <label class="qy-field"><span>源语言</span><select v-model="settings.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
-            <label class="qy-field"><span>目标语言</span><select v-model="settings.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
+            <label class="qy-field"><span>源语言</span><select v-model="workbenchState.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
+            <label class="qy-field"><span>目标语言</span><select v-model="workbenchState.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
           </div>
           <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
           <label class="qy-dropzone" :class="{ 'is-selected': selectedFile }" for="workbench-file">
@@ -96,6 +96,7 @@
               </div>
               <div class="qy-task-actions" @click.stop>
                 <button v-if="isActive(run)" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
+                <button v-else-if="canResume(run)" class="qy-link-button" type="button" @click="resumeRunAction(run)">续跑</button>
                 <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="retryRun(run, { pipeline: 'v2' })">新版重试</button>
                 <button v-else-if="canRetry(run)" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
                 <button v-if="run.archived" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
@@ -127,9 +128,9 @@
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
           <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
-          <label class="qy-field"><span>文档类型</span><select v-model="settings.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
-          <label class="qy-field"><span>资料等级</span><select v-model="settings.classification"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
-          <label class="qy-check-field"><input v-model="settings.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
+          <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
+          <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
+          <label class="qy-check-field"><input v-model="workbenchState.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
         </div>
       </aside>
     </div>
@@ -137,10 +138,18 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
+import { useSessionStore } from '../stores/session.js';
+import {
+  restoredPreflight,
+  restoreWorkbenchSession,
+  scheduleWorkbenchPreferenceSave,
+  uploadStorageKey,
+  workbenchState,
+} from '../stores/workbench.js';
 import StageTimeline from '../components/StageTimeline.vue';
 import {
   AdjustmentsHorizontalIcon,
@@ -156,6 +165,7 @@ import {
 } from '@heroicons/vue/24/outline';
 
 const router = useRouter();
+const sessionStore = useSessionStore();
 const selectedFile = ref(null);
 const fileInput = ref(null);
 const uploadMessage = ref('');
@@ -168,13 +178,6 @@ const activeEvents = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
 const showArchived = ref(false);
-const settings = reactive({
-  sourceLanguage: 'English',
-  targetLanguage: '简体中文',
-  profile: '临床研究文档',
-  bilingual: true,
-  classification: 'internal',
-});
 let pollTimer;
 let pollRequest = 0;
 
@@ -182,7 +185,7 @@ const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering'
 const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
-const languageError = computed(() => settings.sourceLanguage === settings.targetLanguage ? '源语言和目标语言不能相同。' : '');
+const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
 
 // HTTP field values are restricted to ISO-8859-1 by the browser Headers API.
 // Encode each segment so localized settings remain safe and deterministic as
@@ -191,15 +194,15 @@ function buildIdempotencyKey() {
   return [
     'preflight',
     preflight.value?.id,
-    settings.sourceLanguage,
-    settings.targetLanguage,
-    settings.profile,
-    settings.bilingual ? '1' : '0',
+    workbenchState.sourceLanguage,
+    workbenchState.targetLanguage,
+    workbenchState.profile,
+    workbenchState.bilingual ? '1' : '0',
   ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
 }
 
 function statusLabel(status) {
-  return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成' })[status] || '待处理';
+  return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成', interrupted: '已中断' })[status] || '待处理';
 }
 
 function stageLabel(stage) {
@@ -216,6 +219,10 @@ function isTerminal(run) {
 
 function canRetry(run) {
   return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
+}
+
+function canResume(run) {
+  return run.status === 'interrupted';
 }
 
 function canRetryV2(run) {
@@ -262,14 +269,16 @@ async function startPreflight() {
   uploadError.value = false;
   uploadMessage.value = '';
   try {
-    preflight.value = await api.uploadPreflight(
+    const storageKey = uploadStorageKey(sessionStore.user?.tenant_slug, sessionStore.user?.sub);
+    preflight.value = await api.uploadPreflightResumable(
       selectedFile.value,
       {
-        source_language: settings.sourceLanguage,
-        target_language: settings.targetLanguage,
-        profile: settings.profile,
+        source_language: workbenchState.sourceLanguage,
+        target_language: workbenchState.targetLanguage,
+        profile: workbenchState.profile,
       },
       (progress) => { uploadProgress.value = progress; },
+      storageKey,
     );
     uploadMessage.value = preflight.value.state === 'ready'
       ? (preflight.value.reused ? '已复用相同文件的预检结果，请确认参数后开始翻译。' : '预检已完成。请确认参数后再开始翻译。')
@@ -291,11 +300,11 @@ async function startTranslation() {
     const key = buildIdempotencyKey();
     await api.createTranslationRun({
       preflight_id: preflight.value.id,
-      source_language: settings.sourceLanguage,
-      target_language: settings.targetLanguage,
-      profile: settings.profile,
-      bilingual: settings.bilingual,
-      document_classification: settings.classification,
+      source_language: workbenchState.sourceLanguage,
+      target_language: workbenchState.targetLanguage,
+      profile: workbenchState.profile,
+      bilingual: workbenchState.bilingual,
+      document_classification: workbenchState.classification,
     }, key);
     uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
     await refreshRuns();
@@ -350,6 +359,17 @@ async function cancelRun(run) {
   } catch (error) {
     uploadError.value = true;
     uploadMessage.value = error.message || '取消任务失败';
+  }
+}
+
+async function resumeRunAction(run) {
+  try {
+    await api.resumeRun(run.id);
+    uploadMessage.value = '任务已从断点续跑。';
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '续跑失败';
   }
 }
 
@@ -412,7 +432,16 @@ async function deleteRun(run) {
   }
 }
 
-onMounted(refreshRuns);
+onMounted(async () => {
+  await sessionStore.load();
+  await restoreWorkbenchSession(sessionStore.user);
+  if (preflight.value === null && restoredPreflight.value?.state === 'ready') {
+    preflight.value = restoredPreflight.value;
+    uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
+  }
+  await refreshRuns();
+});
 watch(showArchived, refreshRuns);
+watch(workbenchState, () => scheduleWorkbenchPreferenceSave(), { deep: true });
 onUnmounted(() => window.clearTimeout(pollTimer));
 </script>

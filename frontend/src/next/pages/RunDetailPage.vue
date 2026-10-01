@@ -12,6 +12,10 @@
           </p>
         </div>
         <div class="qy-run-detail-actions">
+          <label v-if="run?.quality_state === 'review_ready'" class="qy-review-comment">
+            <span>审核意见</span>
+            <textarea v-model="reviewComment" rows="3" placeholder="记录复核意见，刷新后会自动恢复" @input="scheduleDraftSave" />
+          </label>
           <button
             v-if="run?.quality_state === 'review_ready'"
             class="qy-primary-button"
@@ -24,6 +28,12 @@
             type="button"
             @click="requestChanges"
           >请求修改</button>
+          <button
+            v-if="run?.status === 'interrupted'"
+            class="qy-primary-button"
+            type="button"
+            @click="resumeRun"
+          >从断点续跑</button>
           <button
             v-if="run?.quality_state === 'legacy_unverified'"
             class="qy-secondary-button"
@@ -118,7 +128,9 @@ const logOpen = ref(false);
 const run = ref(null);
 const events = ref([]);
 const qaItems = ref([]);
+const reviewComment = ref('');
 let timer;
+let draftTimer;
 
 const runId = computed(() => props.runId || route.params.runId);
 const sourcePreviewUrl = computed(() => (
@@ -147,6 +159,10 @@ async function refresh() {
     events.value = ev.items || [];
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
+    if (run.value?.quality_state === 'review_ready') {
+      const draft = await api.getReviewDraft(runId.value);
+      reviewComment.value = draft.comment || '';
+    }
     loadError.value = '';
   } catch (error) {
     loadError.value = error?.status === 404
@@ -155,13 +171,33 @@ async function refresh() {
   }
 }
 
+function scheduleDraftSave() {
+  window.clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(async () => {
+    if (!runId.value) return;
+    try {
+      await api.saveReviewDraft(runId.value, {
+        comment: reviewComment.value,
+        resolved_qa_ids: qaItems.value.filter((item) => item.resolved).map((item) => item.id),
+      });
+    } catch {
+      /* ignore transient draft errors */
+    }
+  }, 600);
+}
+
 async function approve() {
-  await api.postReviewDecision(runId.value, { decision: 'approve' });
+  await api.postReviewDecision(runId.value, { decision: 'approve', comment: reviewComment.value || null });
   await refresh();
 }
 
 async function requestChanges() {
-  await api.postReviewDecision(runId.value, { decision: 'request_changes' });
+  await api.postReviewDecision(runId.value, { decision: 'request_changes', comment: reviewComment.value || null });
+  await refresh();
+}
+
+async function resumeRun() {
+  await api.resumeRun(runId.value);
   await refresh();
 }
 
@@ -174,7 +210,10 @@ onMounted(async () => {
   await refresh();
   timer = setInterval(refresh, 3000);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => {
+  clearInterval(timer);
+  window.clearTimeout(draftTimer);
+});
 </script>
 
 <style scoped>
@@ -187,6 +226,8 @@ onUnmounted(() => clearInterval(timer));
 .qy-log-section h2 { margin: 0 0 .5rem; font-size: 1rem; }
 .qy-log-drawer { max-height: 240px; overflow: auto; font-size: .8rem; margin: 0; }
 .qy-badge { margin-left: .5rem; padding: .1rem .4rem; border: 1px solid currentColor; }
+.qy-review-comment { display: grid; gap: .35rem; min-width: min(420px, 100%); }
+.qy-review-comment textarea { width: 100%; min-height: 4.5rem; }
 @media (max-width: 1023px) {
   .qy-run-detail-grid { grid-template-columns: 1fr; }
 }

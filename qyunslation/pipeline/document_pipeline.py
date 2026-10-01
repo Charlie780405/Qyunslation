@@ -106,9 +106,13 @@ class DocumentPipeline:
         scanned_hint: bool = False,
     ) -> PipelineLaunch:
         events = StageEventBuffer()
-        run_validation(
-            source_path=source_path, source_format=source_format, events=events
-        )
+        completed = set((settings or {}).get("resume_completed_stages") or [])
+        if "validation" in completed:
+            events.emit("validation", "skipped", message="resume: already completed")
+        else:
+            run_validation(
+                source_path=source_path, source_format=source_format, events=events
+            )
         sealed: SealedSource = self.workspace.seal_source(source_path)
         work_copy = self.workspace.materialize_work_copy(
             sealed,
@@ -118,13 +122,27 @@ class DocumentPipeline:
         )
         self.workspace.assert_source_unchanged(sealed)
 
-        structure_result, manifest = run_structure(
-            source_path=work_copy,
-            source_format=source_format,
-            source_sha256=sealed.sha256,
-            events=events,
-        )
-        assert structure_result.state == "completed"
+        if "structure" in completed:
+            events.emit("structure", "skipped", message="resume: already completed")
+            manifest = self.manifest_store.get(sealed.sha256)
+            if manifest is None:
+                structure_result, manifest = run_structure(
+                    source_path=work_copy,
+                    source_format=source_format,
+                    source_sha256=sealed.sha256,
+                    events=events,
+                )
+                assert structure_result.state == "completed"
+            else:
+                structure_result = None
+        else:
+            structure_result, manifest = run_structure(
+                source_path=work_copy,
+                source_format=source_format,
+                source_sha256=sealed.sha256,
+                events=events,
+            )
+            assert structure_result.state == "completed"
         mark_preserve_objects(manifest)
         # 071c：原子 span 模块挂入结构阶段（译前遮蔽在 text 执行器侧复用同一 API）。
         from qyunslation.pipeline.atomic_spans import shield_atomic_spans
@@ -133,12 +151,16 @@ class DocumentPipeline:
         self.manifest_store.put(manifest)
         self._write_manifest_sidecar(run_id, generation, manifest)
 
-        ocr_result = run_ocr_decision(
-            source_format=source_format,
-            scanned_hint=scanned_hint,
-            events=events,
-        )
-        assert ocr_result.state in {"completed", "skipped"}
+        if "ocr" in completed:
+            events.emit("ocr", "skipped", message="resume: already completed")
+            ocr_result = None
+        else:
+            ocr_result = run_ocr_decision(
+                source_format=source_format,
+                scanned_hint=scanned_hint,
+                events=events,
+            )
+            assert ocr_result.state in {"completed", "skipped"}
 
         kind = classify_format(source_format)
         events.emit("text", "running", message=f"executor={kind}")

@@ -116,6 +116,19 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         global_logger.warning("PDF translation runner reconcile failed: %s", exc)
 
+    try:
+        from qyunslation.api.v1 import reconcile_stale_runs
+        from qyunslation.persist.db import get_engine
+        from sqlalchemy.orm import Session
+
+        with Session(get_engine()) as session:
+            stale = reconcile_stale_runs(session)
+            session.commit()
+            if stale:
+                global_logger.info("Marked %s stale translation run(s) interrupted", stale)
+    except Exception as exc:
+        global_logger.warning("Translation run heartbeat reconcile failed: %s", exc)
+
     configure_runtime_logging()
     # PLAN-023: 确保 image_translate 等模块 logger 能进 journalctl
     if not logging.root.handlers:

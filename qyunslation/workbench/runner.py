@@ -398,14 +398,27 @@ class Pdf2zhRunner:
             raise RunnerError("invalid generation")
         return f"pdf2zh:{run_id}:{generation}"
 
-    def _state_path_for_task(self, task_id: str) -> Path | None:
+    def _state_path_for_task(
+        self, task_id: str, *, tenant_id: str | None = None
+    ) -> Path | None:
         if not task_id.startswith("pdf2zh:"):
             return None
-        matches = []
-        for path in self.root.glob("*/*/generation-*/state.json"):
-            state = _read_json(path)
-            if state and state.get("task_id") == task_id:
-                matches.append(path)
+        parts = task_id.split(":")
+        if len(parts) != 3:
+            return None
+        _, run_id, generation_raw = parts
+        try:
+            generation = int(generation_raw)
+        except ValueError:
+            return None
+        if tenant_id:
+            candidate = self._run_dir(
+                tenant_id=tenant_id, run_id=run_id, generation=generation
+            ) / "state.json"
+            return candidate if candidate.is_file() else None
+        matches = list(
+            self.root.glob(f"*/{run_id}/generation-{generation}/state.json")
+        )
         return matches[0] if len(matches) == 1 else None
 
     def read_task_state(self, task_id: str) -> dict[str, Any] | None:
@@ -505,9 +518,11 @@ class Pdf2zhRunner:
         except Exception:
             lock_path.unlink(missing_ok=True)
             raise
+        resume_done = set((settings or {}).get("resume_completed_stages") or [])
         state: dict[str, Any] = {
             "schema": "qyunslation.runner.v1",
             "task_id": task_id,
+            "tenant_id": tenant_id,
             "run_id": run_id,
             "generation": generation,
             "status": "queued",
@@ -526,6 +541,7 @@ class Pdf2zhRunner:
             "updated_at": _utc_now(),
         }
         _atomic_write_json(state_path, state)
+        self._persist_runner_stages(state, resume_done)
         log_path = run_dir / "runner.log"
         log_handle = log_path.open("ab", buffering=0)
         os.chmod(log_path, 0o600)
@@ -654,6 +670,108 @@ class Pdf2zhRunner:
         )
         return True, state, None
 
+    @staticmethod
+    def _mark_db_interrupted(state: dict[str, Any]) -> None:
+        run_id = str(state.get("run_id") or "")
+        generation = int(state.get("generation") or 0)
+        if not run_id or generation < 1:
+            return
+        try:
+            from qyunslation.persist.db import get_engine
+            from qyunslation.persist.models import TranslationRunRecord
+            from qyunslation.workbench.heartbeat import mark_interrupted
+            from sqlalchemy.orm import Session
+
+            with Session(get_engine()) as session:
+                run = session.get(TranslationRunRecord, run_id)
+                if run is not None and int(run.generation) == generation:
+                    mark_interrupted(
+                        session,
+                        run,
+                        reason="runner process was not found after service restart",
+                    )
+                    session.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _persist_runner_stages(state: dict[str, Any], completed: set[str]) -> None:
+        run_id = str(state.get("run_id") or "")
+        generation = int(state.get("generation") or 0)
+        if not run_id or generation < 1:
+            return
+        try:
+            from qyunslation.persist.db import get_engine
+            from qyunslation.workbench.stage_persist import persist_stage_snapshot
+            from sqlalchemy.orm import Session
+
+            with Session(get_engine()) as session:
+                for stage in ("validation", "structure"):
+                    if stage in completed:
+                        persist_stage_snapshot(
+                            session,
+                            run_id=run_id,
+                            generation=generation,
+                            stage=stage,
+                            state="skipped",
+                            message="resume: stage already completed",
+                        )
+                session.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _touch_run_heartbeat(state: dict[str, Any]) -> None:
+        run_id = str(state.get("run_id") or "")
+        generation = int(state.get("generation") or 0)
+        if not run_id or generation < 1:
+            return
+        try:
+            from qyunslation.persist.db import get_engine
+            from qyunslation.persist.models import TranslationRunRecord
+            from qyunslation.workbench.heartbeat import touch_run_heartbeat
+            from sqlalchemy.orm import Session
+
+            with Session(get_engine()) as session:
+                run = session.get(TranslationRunRecord, run_id)
+                if run is not None and int(run.generation) == generation:
+                    touch_run_heartbeat(session, run)
+                    session.commit()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _persist_runner_progress(
+        state: dict[str, Any], *, stage: str | None, message: str | None
+    ) -> None:
+        run_id = str(state.get("run_id") or "")
+        generation = int(state.get("generation") or 0)
+        if not run_id or generation < 1 or not stage:
+            return
+        marker = f"{stage}:{message or ''}"
+        if state.get("_last_stage_persist") == marker:
+            return
+        state["_last_stage_persist"] = marker
+        try:
+            from qyunslation.persist.db import get_engine
+            from qyunslation.workbench.stage_persist import persist_stage_snapshot
+            from sqlalchemy.orm import Session
+
+            progress = state.get("progress")
+            with Session(get_engine()) as session:
+                persist_stage_snapshot(
+                    session,
+                    run_id=run_id,
+                    generation=generation,
+                    stage=stage,
+                    state="running",
+                    message=message or "",
+                    progress=float(progress) if isinstance(progress, (int, float)) else None,
+                )
+                session.commit()
+        except Exception:
+            pass
+
     async def _monitor(
         self,
         managed: _ManagedProcess,
@@ -669,12 +787,16 @@ class Pdf2zhRunner:
         state_path = managed.state_path
         log_path = run_dir / "runner.log"
         attempted_hpd = False
+        heartbeat_tick = 0
         try:
             while True:
                 offset = log_path.stat().st_size if log_path.exists() else 0
                 last_reason = ""
                 while managed.process.returncode is None:
                     await asyncio.sleep(0.5)
+                    heartbeat_tick += 1
+                    if heartbeat_tick % 10 == 0:
+                        self._touch_run_heartbeat(state)
                     try:
                         with log_path.open("rb") as handle:
                             handle.seek(offset)
@@ -694,13 +816,19 @@ class Pdf2zhRunner:
                         if progress_message and stage is None:
                             stage = _stage_for_label(line)
                         if progress is not None or stage is not None or progress_message:
+                            next_stage = stage or state.get("stage") or "translating"
                             state = self._write_state(
                                 state_path,
                                 state,
                                 status="rendering" if stage in {"rendering", "export"} else "translating",
                                 progress=progress if progress is not None else state.get("progress"),
-                                stage=stage or state.get("stage") or "translating",
+                                stage=next_stage,
                                 progress_message=progress_message or state.get("progress_message"),
+                            )
+                            self._persist_runner_progress(
+                                state,
+                                stage=str(next_stage),
+                                message=progress_message or last_reason,
                             )
                 returncode = await managed.process.wait()
                 # Cancellation is written by the API task while this watcher
@@ -780,6 +908,62 @@ class Pdf2zhRunner:
             )
         return outputs
 
+    async def prepare_resume(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        generation: int,
+    ) -> None:
+        """Stop a stale generation and release its lock so resume can relaunch."""
+        run_dir = self._run_dir(tenant_id=tenant_id, run_id=run_id, generation=generation)
+        state_path = run_dir / "state.json"
+        lock_path = run_dir / "run.lock"
+        state = _read_json(state_path)
+        if not state and not lock_path.is_file():
+            return
+        task_id = self._task_id(run_id, generation)
+        managed = self._processes.pop(task_id, None)
+        watcher = self._watchers.pop(task_id, None)
+        if watcher is not None:
+            watcher.cancel()
+        if managed is not None:
+            pid = int(managed.process.pid or 0)
+            if pid > 0 and _process_alive(pid):
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                deadline = time.monotonic() + 5
+                while _process_alive(pid) and time.monotonic() < deadline:
+                    await asyncio.sleep(0.1)
+                if _process_alive(pid):
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            try:
+                managed.log_handle.close()
+            except Exception:
+                pass
+        elif state:
+            pid = int(state.get("pid") or 0)
+            if pid > 0 and _process_alive(pid):
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        if state and state.get("status") in NON_TERMINAL:
+            self._write_state(
+                state_path,
+                state,
+                status="interrupted",
+                reason="preparing generation resume",
+                finished_at=_utc_now(),
+            )
+        lock_path.unlink(missing_ok=True)
+        (run_dir / "runner-config.toml").unlink(missing_ok=True)
+
     async def cancel(self, task_id: str) -> dict[str, Any]:
         state_path = self._state_path_for_task(task_id)
         if state_path is None:
@@ -839,14 +1023,15 @@ class Pdf2zhRunner:
             self._write_state(
                 path,
                 state,
-                status="degraded",
-                stage="qa",
+                status="interrupted",
+                stage=state.get("stage") or "text",
                 progress=state.get("progress"),
                 reason="runner process was not found after service restart",
                 finished_at=_utc_now(),
             )
             (run_dir / "runner-config.toml").unlink(missing_ok=True)
             (run_dir / "run.lock").unlink(missing_ok=True)
+            self._mark_db_interrupted(state)
             reconciled += 1
         return reconciled
 

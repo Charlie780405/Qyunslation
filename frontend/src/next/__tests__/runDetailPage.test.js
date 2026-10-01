@@ -131,8 +131,8 @@ describe('RunDetailPage', () => {
     const { wrapper } = await mountPage('/workbench/run-1');
     await wrapper.findAll('button').find((b) => b.text() === '批准正式产物').trigger('click');
     await wrapper.findAll('button').find((b) => b.text() === '请求修改').trigger('click');
-    expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'approve' });
-    expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'request_changes' });
+    expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'approve', comment: null });
+    expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'request_changes', comment: null });
     wrapper.unmount();
   });
 

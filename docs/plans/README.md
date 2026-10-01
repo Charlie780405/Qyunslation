@@ -51,5 +51,6 @@
 | **PLAN-069** | （见 WT-069） | **扫描 PDF 产物门禁恢复（HPD OCR 重试）** |
 | **PLAN-070** | （见 WT-070） | **实时进度与过期预检** |
 | **PLAN-071** | [PLAN-071-translation-quality-pipeline](./PLAN-071-translation-quality-pipeline/) | **可审计翻译质量流水线与真实工作台（071a–071i）** |
+| **PLAN-072** | [PLAN-072-durable-workbench-resume](./PLAN-072-durable-workbench-resume/) | **工作台持久化、断点续传与租户隔离（072a–072e）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。

@@ -33,15 +33,25 @@ from qyunslation.persist.models import (
     PreflightRecord,
     QaItem,
     ReviewDecision,
+    ReviewDraft,
     TranslationArtifact,
     TranslationRunRecord,
+    UploadSession,
     WebPreference,
 )
 from qyunslation.core.schemas import AutoWorkflowParams
 from qyunslation.structure.ingest import DEFAULT_MAX_UPLOAD_BYTES
 
 PREF_ALLOWED_KEYS = frozenset(
-    {"direction", "profile", "bilingual", "density", "reduceMotion", "largeText"}
+    {
+        "direction",
+        "profile",
+        "bilingual",
+        "density",
+        "reduceMotion",
+        "largeText",
+        "workbench",
+    }
 )
 PREF_DEFAULTS = {
     "direction": "English → 简体中文",
@@ -50,7 +60,23 @@ PREF_DEFAULTS = {
     "density": "comfortable",
     "reduceMotion": False,
     "largeText": False,
+    "workbench": {
+        "sourceLanguage": "English",
+        "targetLanguage": "简体中文",
+        "profile": "临床研究文档",
+        "bilingual": True,
+        "classification": "internal",
+    },
 }
+WORKBENCH_PREF_KEYS = frozenset(
+    {"sourceLanguage", "targetLanguage", "profile", "bilingual", "classification"}
+)
+UPLOAD_SESSION_TTL_HOURS = 24
+UPLOAD_CHUNK_MAX_BYTES = 8 * 1024 * 1024
+_CONTENT_RANGE_RE = re.compile(
+    r"^bytes\s+(?P<start>\d+)-(?P<end>\d+)/(?P<total>\d+)$",
+    re.IGNORECASE,
+)
 PREFLIGHT_ALLOWED_EXTENSIONS = frozenset({".pdf", ".docx", ".pptx", ".txt", ".md", ".png", ".jpg", ".jpeg"})
 PREFLIGHT_TTL_HOURS = 24
 SUPPORTED_LANGUAGES = frozenset({"English", "简体中文"})
@@ -265,6 +291,139 @@ def _preflight_path(record: PreflightRecord) -> Path:
     return path
 
 
+def _upload_root() -> Path:
+    raw = (os.environ.get("QYUNSLATION_UPLOAD_ROOT") or "var/uploads").strip()
+    root = Path(raw)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return root
+
+
+def _upload_path(record: UploadSession) -> Path:
+    root = _upload_root().resolve()
+    path = (root / record.storage_key).resolve()
+    if root not in path.parents:
+        raise HTTPException(status_code=500, detail="invalid upload storage key")
+    return path
+
+
+def _upload_session_dict(record: UploadSession) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "filename": record.source_filename,
+        "format": record.source_format,
+        "total_size": record.total_size,
+        "received_bytes": record.received_bytes,
+        "expected_sha256": record.expected_sha256,
+        "status": record.status,
+        "expires_at": record.expires_at.isoformat(),
+        "created_at": record.created_at.isoformat(),
+    }
+
+
+def _safe_workbench_preferences(raw: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(PREF_DEFAULTS["workbench"])
+    incoming = (raw or {}).get("workbench")
+    if isinstance(incoming, dict):
+        for key in WORKBENCH_PREF_KEYS:
+            if key in incoming:
+                merged[key] = incoming[key]
+    if merged["sourceLanguage"] not in SUPPORTED_LANGUAGES:
+        merged["sourceLanguage"] = PREF_DEFAULTS["workbench"]["sourceLanguage"]
+    if merged["targetLanguage"] not in SUPPORTED_LANGUAGES:
+        merged["targetLanguage"] = PREF_DEFAULTS["workbench"]["targetLanguage"]
+    if merged["classification"] not in {"confidential", "internal", "public"}:
+        merged["classification"] = "internal"
+    if merged["profile"] not in {"临床研究文档", "监管申报材料", "通用医药文档"}:
+        merged["profile"] = PREF_DEFAULTS["workbench"]["profile"]
+    merged["bilingual"] = bool(merged.get("bilingual"))
+    return merged
+
+
+def _upload_session_expired(record: UploadSession) -> bool:
+    expires_at = record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= datetime.now(timezone.utc)
+
+
+def _owned_upload_session(
+    session: Session, *, upload_id: str, identity: IdentityContext
+) -> UploadSession:
+    tenant = _tenant_bundle(session, identity)
+    record = session.get(UploadSession, upload_id)
+    if record is None or record.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    if record.actor_sub != identity.user_sub:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    return record
+
+
+def reconcile_stale_runs(session: Session) -> int:
+    """Mark ledger runs interrupted when heartbeat expired and no live executor."""
+    from qyunslation.workbench.heartbeat import is_heartbeat_stale, mark_interrupted
+    from qyunslation.workbench.runner import get_pdf2zh_task_state, is_pdf2zh_task
+
+    touched = 0
+    rows = list(
+        session.scalars(
+            select(TranslationRunRecord).where(
+                TranslationRunRecord.status.in_(
+                    ("queued", "scanning", "translating", "rendering")
+                )
+            )
+        )
+    )
+    for run in rows:
+        alive = False
+        if run.external_task_id:
+            if is_pdf2zh_task(run.external_task_id):
+                alive = get_pdf2zh_task_state(run.external_task_id) is not None
+            else:
+                try:
+                    from qyunslation.server import get_translation_service
+
+                    alive = bool(
+                        get_translation_service().get_task_state(run.external_task_id)
+                    )
+                except Exception:
+                    alive = False
+        if alive:
+            continue
+        if is_heartbeat_stale(run):
+            mark_interrupted(
+                session,
+                run,
+                reason="translation heartbeat expired; use resume to continue",
+            )
+            touched += 1
+    return touched
+
+
+def _apply_resume_snapshot(session: Session, run: TranslationRunRecord) -> None:
+    from qyunslation.pipeline.event_store import completed_stages, pending_stages
+
+    planned = [
+        "validation",
+        "structure",
+        "ocr",
+        "text",
+        "table_figure",
+        "layout",
+        "qa",
+        "review",
+        "export",
+    ]
+    done = completed_stages(session, run_id=run.id, generation=run.generation)
+    pending = pending_stages(
+        session, run_id=run.id, generation=run.generation, planned=planned
+    )
+    snap = dict(run.settings_snapshot or {})
+    snap["resume_completed_stages"] = sorted(done)
+    snap["resume_pending_stages"] = pending
+    run.settings_snapshot = snap
+
+
 def _normalize_language_pair(
     source_language: str | None,
     target_language: str | None,
@@ -429,6 +588,31 @@ async def create_preflight(
     return record_dict
 
 
+@router.get("/preflights")
+def list_preflights(
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(PreflightRecord)
+        .where(
+            PreflightRecord.tenant_id == tenant.id,
+            PreflightRecord.expires_at > now,
+        )
+        .order_by(PreflightRecord.created_at.desc())
+        .limit(limit)
+    )
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        stmt = stmt.where(PreflightRecord.actor_sub == identity.user_sub)
+    rows = list(session.scalars(stmt))
+    items = [_preflight_dict(row) for row in rows if _preflight_dict(row)["state"] == "ready"]
+    latest = items[0] if items else None
+    return {"items": items, "latest": latest}
+
+
 @router.get("/preflights/{preflight_id}")
 def get_preflight(
     preflight_id: str,
@@ -442,6 +626,230 @@ def get_preflight(
     if record.actor_sub != identity.user_sub and _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=404, detail="preflight not found")
     return _preflight_dict(record)
+
+
+@router.post("/upload-sessions", status_code=201)
+def create_upload_session(
+    body: UploadSessionCreateBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    filename = Path(body.filename).name.strip()
+    suffix = Path(filename).suffix.casefold()
+    if suffix not in PREFLIGHT_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="unsupported document format")
+    now = datetime.now(timezone.utc)
+    if body.expected_sha256:
+        existing_rows = list(
+            session.scalars(
+                select(PreflightRecord).where(
+                    PreflightRecord.tenant_id == tenant.id,
+                    PreflightRecord.actor_sub == identity.user_sub,
+                    PreflightRecord.source_sha256 == body.expected_sha256.strip().lower(),
+                    PreflightRecord.status == "ready",
+                    PreflightRecord.expires_at > now,
+                )
+            )
+        )
+        for existing in existing_rows:
+            reused = _preflight_dict(existing)
+            reused["reused"] = True
+            return {
+                "upload_session": None,
+                "reused_preflight": reused,
+                "received_bytes": existing.size_bytes,
+                "complete": True,
+            }
+    record_id = str(uuid.uuid4())
+    relative_key = f"{tenant.id}/{record_id}.partial"
+    root = _upload_root().resolve()
+    target = (root / relative_key).resolve()
+    if root not in target.parents:
+        raise HTTPException(status_code=500, detail="invalid upload destination")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"")
+    record = UploadSession(
+        id=record_id,
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        source_filename=filename,
+        source_format=suffix.removeprefix(".").lower(),
+        total_size=body.total_size,
+        received_bytes=0,
+        expected_sha256=(body.expected_sha256 or "").strip().lower() or None,
+        storage_key=relative_key,
+        status="uploading",
+        metadata_json={"mime": mimetypes.guess_type(filename)[0] or "application/octet-stream"},
+        expires_at=now + timedelta(hours=UPLOAD_SESSION_TTL_HOURS),
+    )
+    session.add(record)
+    session.flush()
+    payload = _upload_session_dict(record)
+    payload["complete"] = False
+    payload["reused_preflight"] = None
+    return {"upload_session": payload, "reused_preflight": None, **payload}
+
+
+@router.get("/upload-sessions/{upload_id}")
+def get_upload_session(
+    upload_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    record = _owned_upload_session(session, upload_id=upload_id, identity=identity)
+    if _upload_session_expired(record):
+        record.status = "expired"
+    payload = _upload_session_dict(record)
+    payload["complete"] = record.received_bytes >= record.total_size
+    return payload
+
+
+@router.patch("/upload-sessions/{upload_id}")
+async def append_upload_session(
+    upload_id: str,
+    request: Request,
+    content_range: str | None = Header(default=None, alias="Content-Range"),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    record = _owned_upload_session(session, upload_id=upload_id, identity=identity)
+    if record.status != "uploading":
+        raise HTTPException(status_code=409, detail="upload session is not accepting data")
+    if _upload_session_expired(record):
+        raise HTTPException(status_code=410, detail="upload session expired")
+    if not content_range:
+        raise HTTPException(status_code=400, detail="Content-Range header is required")
+    match = _CONTENT_RANGE_RE.match(content_range.strip())
+    if not match:
+        raise HTTPException(status_code=400, detail="invalid Content-Range header")
+    start = int(match.group("start"))
+    end = int(match.group("end"))
+    total = int(match.group("total"))
+    if total != record.total_size:
+        raise HTTPException(status_code=409, detail="upload total size mismatch")
+    if start != record.received_bytes:
+        raise HTTPException(
+            status_code=409,
+            detail=f"expected offset {record.received_bytes}, got {start}",
+        )
+    chunk = await request.body()
+    expected_len = end - start + 1
+    if len(chunk) != expected_len:
+        raise HTTPException(status_code=400, detail="chunk size mismatch")
+    if len(chunk) > UPLOAD_CHUNK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="chunk too large")
+    path = _upload_path(record)
+    with path.open("r+b") as handle:
+        handle.seek(start)
+        handle.write(chunk)
+    record.received_bytes = end + 1
+    record.updated_at = datetime.now(timezone.utc)
+    session.flush()
+    payload = _upload_session_dict(record)
+    payload["complete"] = record.received_bytes >= record.total_size
+    return payload
+
+
+@router.post("/upload-sessions/{upload_id}/complete", status_code=201)
+async def complete_upload_session(
+    upload_id: str,
+    body: UploadSessionCompleteBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    record = _owned_upload_session(session, upload_id=upload_id, identity=identity)
+    if record.received_bytes < record.total_size:
+        raise HTTPException(status_code=409, detail="upload is incomplete")
+    path = _upload_path(record)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="upload payload missing")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    digest_hex = digest.hexdigest()
+    if record.expected_sha256 and record.expected_sha256 != digest_hex:
+        raise HTTPException(status_code=409, detail="sha256 mismatch")
+    source_language, target_language, direction = _normalize_language_pair(
+        body.source_language, body.target_language, body.direction
+    )
+    profile = body.profile.strip()
+    if not profile or len(profile) > 128:
+        raise HTTPException(status_code=400, detail="invalid document profile")
+    tenant = _tenant_bundle(session, identity)
+    suffix = Path(record.source_filename).suffix.casefold()
+    now = datetime.now(timezone.utc)
+    existing_rows = list(
+        session.scalars(
+            select(PreflightRecord).where(
+                PreflightRecord.tenant_id == tenant.id,
+                PreflightRecord.actor_sub == identity.user_sub,
+                PreflightRecord.source_sha256 == digest_hex,
+                PreflightRecord.status == "ready",
+            )
+        )
+    )
+    for existing in existing_rows:
+        expires_at = existing.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at > now and existing.size_bytes == record.total_size:
+            path.unlink(missing_ok=True)
+            record.status = "completed"
+            reused = _preflight_dict(existing)
+            reused["reused"] = True
+            reused["source_language"] = source_language
+            reused["target_language"] = target_language
+            return reused
+    preflight_id = str(uuid.uuid4())
+    relative_key = f"{tenant.id}/{preflight_id}{suffix}"
+    final_path = (_preflight_root().resolve() / relative_key).resolve()
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(path, final_path)
+    record.status = "completed"
+    preflight = PreflightRecord(
+        id=preflight_id,
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        source_filename=record.source_filename,
+        source_format=record.source_format,
+        source_sha256=digest_hex,
+        size_bytes=record.total_size,
+        status="ready",
+        metadata_json={
+            "mime": record.metadata_json.get("mime") or "application/octet-stream",
+            "manifest_summary": {
+                "pages": None,
+                "objects": None,
+                "scan_detected": suffix in {".png", ".jpg", ".jpeg"},
+            },
+            "capabilities": {
+                "source_read_only": True,
+                "bilingual_output": True,
+                "formal_export": False,
+            },
+            "issues": [],
+            "recommended": {
+                "direction": direction,
+                "profile": profile,
+                "source_language": source_language,
+                "target_language": target_language,
+            },
+            "upload_session_id": record.id,
+        },
+        storage_key=relative_key,
+        expires_at=now + timedelta(hours=PREFLIGHT_TTL_HOURS),
+    )
+    session.add(preflight)
+    session.flush()
+    payload = _preflight_dict(preflight)
+    payload["storage_key"] = preflight.storage_key
+    payload["reused"] = False
+    return payload
 
 
 @router.delete("/preflights/{preflight_id}", status_code=204)
@@ -492,12 +900,34 @@ class RetryTranslationBody(BaseModel):
     pipeline: str | None = Field(default=None, max_length=32)
 
 
+class UploadSessionCreateBody(BaseModel):
+    filename: str = Field(min_length=1, max_length=256)
+    total_size: int = Field(gt=0, le=DEFAULT_MAX_UPLOAD_BYTES)
+    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class UploadSessionCompleteBody(BaseModel):
+    direction: str | None = Field(default="English → 简体中文", max_length=64)
+    profile: str = Field(default="临床研究文档", max_length=128)
+    source_language: str | None = Field(default=None, max_length=32)
+    target_language: str | None = Field(default=None, max_length=32)
+
+
+class ReviewDraftBody(BaseModel):
+    comment: str | None = Field(default=None, max_length=2048)
+    resolved_qa_ids: list[str] = Field(default_factory=list)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class TranslationRunPatchBody(BaseModel):
     display_name: str | None = Field(default=None, max_length=256)
     archived: bool | None = None
 
 
-_RUN_TERMINAL = frozenset({"succeeded", "failed", "cancelled", "blocked", "degraded"})
+_RUN_TERMINAL = frozenset(
+    {"succeeded", "failed", "cancelled", "blocked", "degraded", "interrupted"}
+)
+_RUN_RESUMABLE = frozenset({"interrupted", "degraded", "failed", "cancelled", "blocked"})
 
 
 def _run_target_language(direction: str) -> str:
@@ -773,6 +1203,8 @@ def _maybe_run_auto_qa(
 
 
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
+    if run.status == "interrupted":
+        return run.degradation_reason
     if not run.external_task_id:
         return None
     # PDF runs are owned by the durable non-GUI runner.  Consult its atomic
@@ -852,6 +1284,16 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
     except Exception:
         task_state = None
     if not task_state:
+        from qyunslation.workbench.heartbeat import is_heartbeat_stale, mark_interrupted
+
+        if run.status in {"queued", "scanning", "translating", "rendering"} and is_heartbeat_stale(
+            run
+        ):
+            mark_interrupted(
+                session,
+                run,
+                reason="translation executor lost; use resume to continue",
+            )
         return None
     progress_message = task_state.get("progress_message") or task_state.get("status_message")
     if task_state.get("error_flag"):
@@ -977,6 +1419,7 @@ async def _launch_translation_run(
     preflight: PreflightRecord,
     target_language: str,
     session: Session | None = None,
+    resume: bool = False,
 ) -> None:
     """Launch the appropriate non-GUI runner and persist an honest state.
 
@@ -984,6 +1427,21 @@ async def _launch_translation_run(
     默认 ``legacy`` 保持原 PDF CLI / Office sidecar 分叉，便于灰度回滚。
     """
     from qyunslation.pipeline import run_pipeline_mode
+    from qyunslation.workbench.heartbeat import touch_run_heartbeat
+
+    if resume and session is not None:
+        _apply_resume_snapshot(session, run)
+        if preflight.source_format.casefold() == "pdf":
+            try:
+                from qyunslation.workbench.runner import get_pdf2zh_runner
+
+                await get_pdf2zh_runner().prepare_resume(
+                    tenant_id=run.tenant_id,
+                    run_id=run.id,
+                    generation=run.generation,
+                )
+            except Exception:
+                pass
 
     if run_pipeline_mode(run.settings_snapshot) == "v2":
         try:
@@ -1096,9 +1554,11 @@ async def _launch_translation_run(
         run.stage = "structure"
         run.started_at = datetime.now(timezone.utc)
     except Exception:
-        run.status = "blocked"
-        run.stage = "validation"
-        run.degradation_reason = "translation runner unavailable"
+            run.status = "blocked"
+            run.stage = "validation"
+            run.degradation_reason = "translation runner unavailable"
+    if session is not None:
+        touch_run_heartbeat(session, run)
 
 
 @router.post("/translation-runs", status_code=201)
@@ -1638,6 +2098,69 @@ def list_qa_items(
     }
 
 
+@router.get("/translation-runs/{run_id}/review-draft")
+def get_review_draft(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    row = session.scalar(
+        select(ReviewDraft).where(
+            ReviewDraft.run_id == run.id,
+            ReviewDraft.generation == run.generation,
+            ReviewDraft.user_id == identity.user_sub,
+        )
+    )
+    if row is None:
+        return {
+            "comment": "",
+            "resolved_qa_ids": [],
+            "payload": {},
+            "updated_at": None,
+        }
+    return {
+        "comment": row.comment or "",
+        "resolved_qa_ids": list(row.resolved_qa_ids or []),
+        "payload": dict(row.payload_json or {}),
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.put("/translation-runs/{run_id}/review-draft")
+def put_review_draft(
+    run_id: str,
+    body: ReviewDraftBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    row = session.scalar(
+        select(ReviewDraft).where(
+            ReviewDraft.run_id == run.id,
+            ReviewDraft.generation == run.generation,
+            ReviewDraft.user_id == identity.user_sub,
+        )
+    )
+    if row is None:
+        row = ReviewDraft(
+            run_id=run.id,
+            generation=run.generation,
+            user_id=identity.user_sub,
+            comment=body.comment,
+            resolved_qa_ids=list(body.resolved_qa_ids or []),
+            payload_json=dict(body.payload or {}),
+        )
+        session.add(row)
+    else:
+        row.comment = body.comment
+        row.resolved_qa_ids = list(body.resolved_qa_ids or [])
+        row.payload_json = dict(body.payload or {})
+        row.updated_at = datetime.now(timezone.utc)
+    session.flush()
+    return get_review_draft(run_id, identity=identity, session=session)
+
+
 @router.post("/translation-runs/{run_id}/review-decision")
 def post_review_decision(
     run_id: str,
@@ -1670,6 +2193,15 @@ def post_review_decision(
         },
     )
     session.add(row)
+    draft = session.scalar(
+        select(ReviewDraft).where(
+            ReviewDraft.run_id == run.id,
+            ReviewDraft.generation == run.generation,
+            ReviewDraft.user_id == identity.user_sub,
+        )
+    )
+    if draft is not None:
+        session.delete(draft)
     if decision == "approve":
         run.quality_state = "approved"
         run.status = "succeeded"
@@ -1922,6 +2454,36 @@ async def retry_translation_run(
     return _translation_run_dict(session, retry)
 
 
+@router.post("/translation-runs/{run_id}/resume")
+async def resume_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if run.status not in _RUN_RESUMABLE:
+        raise HTTPException(status_code=409, detail="only interrupted runs can be resumed")
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
+        raise HTTPException(status_code=409, detail="preflight is not ready")
+    run.status = "queued"
+    run.stage = "validation"
+    run.progress = None
+    run.degradation_reason = None
+    run.completed_at = None
+    run.external_task_id = None
+    session.flush()
+    await _launch_translation_run(
+        run=run,
+        preflight=preflight,
+        target_language=_run_target_language(run.direction),
+        session=session,
+        resume=True,
+    )
+    return _translation_run_dict(session, run)
+
+
 class PreferencesBody(BaseModel):
     preferences: dict[str, Any] = Field(default_factory=dict)
 
@@ -1940,6 +2502,7 @@ def _safe_preferences(raw: dict[str, Any] | None) -> dict[str, Any]:
     for key in ("bilingual", "reduceMotion", "largeText"):
         if not isinstance(merged[key], bool):
             merged[key] = bool(merged[key])
+    merged["workbench"] = _safe_workbench_preferences(raw)
     return merged
 
 

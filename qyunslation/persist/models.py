@@ -207,6 +207,62 @@ class TranslationRunRecord(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class UploadSession(Base):
+    """PLAN-072c：分片上传会话。"""
+
+    __tablename__ = "upload_session"
+    __table_args__ = (
+        Index("ix_upload_session_tenant_actor", "tenant_id", "actor_sub", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_format: Mapped[str] = mapped_column(String(32), nullable=False)
+    total_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    received_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expected_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="uploading")
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class ReviewDraft(Base):
+    """PLAN-072d：审核草稿。"""
+
+    __tablename__ = "review_draft"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "generation", "user_id", name="uq_review_draft_run_gen_user"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    comment: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    resolved_qa_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
 
 class TranslationArtifact(Base):
