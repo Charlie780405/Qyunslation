@@ -685,7 +685,7 @@ def _inspect_run_outputs(
             snapshot = build_term_snapshot(
                 session,
                 tenant_id=run.tenant_id,
-                project_id=run.project_id,
+                project_id=None,
                 source_text=facts["source"].text,
             )
             findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
