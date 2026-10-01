@@ -19,6 +19,12 @@
             @click="approve"
           >批准正式产物</button>
           <button
+            v-if="run?.quality_state === 'review_ready'"
+            class="qy-secondary-button"
+            type="button"
+            @click="requestChanges"
+          >请求修改</button>
+          <button
             v-if="run?.quality_state === 'legacy_unverified'"
             class="qy-secondary-button"
             type="button"
@@ -41,41 +47,74 @@
         </div>
       </header>
 
+      <p v-if="loadError" class="qy-panel qy-run-detail-error" role="alert">
+        {{ loadError }}
+        <button type="button" class="qy-secondary-button" aria-label="重新加载任务详情" @click="refresh">重试</button>
+      </p>
+
+      <section class="qy-panel qy-run-stages" aria-labelledby="qy-stage-heading">
+        <h2 id="qy-stage-heading">阶段事件</h2>
+        <StageTimeline
+          :events="events"
+          :current-stage="run?.stage || ''"
+          :quality-state="run?.quality_state || 'draft'"
+        />
+      </section>
+
       <div class="qy-run-detail-grid">
-        <section class="qy-panel">
-          <h2>阶段事件</h2>
-          <StageTimeline
-            :events="events"
-            :current-stage="run?.stage || ''"
-            :quality-state="run?.quality_state || 'draft'"
+        <section class="qy-panel qy-run-viewer" aria-label="源译对照">
+          <DualCanvasViewer
+            :run-id="runId"
+            :page="view.page.value"
+            :zoom="view.zoom.value"
+            :sync-scroll="view.sync.value"
+            :refresh-key="previewRefreshKey"
+            @update:page="view.setPage"
+            @update:zoom="view.setZoom"
+            @update:sync-scroll="view.setSync"
           />
         </section>
-        <section class="qy-panel">
-          <h2>QA 项</h2>
-          <ul v-if="qaItems.length" class="qy-qa-list">
-            <li v-for="item in qaItems" :key="item.id" :data-severity="item.severity">
-              <strong>{{ item.severity }}</strong> {{ item.code }} — {{ item.message }}
-            </li>
-          </ul>
-          <p v-else class="qy-muted">暂无 QA 项</p>
-          <h2>技术日志</h2>
-          <pre class="qy-log-drawer">{{ logText }}</pre>
+        <section class="qy-panel qy-run-inspector">
+          <ObjectInspector
+            :items="qaItems"
+            :selected-id="view.selectedObjectId.value"
+            @select="view.selectObject"
+          />
         </section>
       </div>
+
+      <section class="qy-panel qy-log-section">
+        <h2>
+          <button
+            type="button"
+            class="qy-secondary-button"
+            :aria-expanded="logOpen"
+            aria-controls="qy-log-drawer"
+            aria-label="技术日志抽屉"
+            @click="logOpen = !logOpen"
+          >{{ logOpen ? '收起技术日志' : '展开技术日志' }}</button>
+        </h2>
+        <pre v-show="logOpen" id="qy-log-drawer" class="qy-log-drawer" tabindex="0" aria-label="技术日志内容">{{ logText }}</pre>
+      </section>
     </div>
   </AppShell>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
+import DualCanvasViewer from '../components/DualCanvasViewer.vue';
+import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
+import { useRunDetailView } from '../stores/runDetail.js';
 
 const props = defineProps({ runId: { type: String, default: '' } });
 const route = useRoute();
-const router = useRouter();
+const view = useRunDetailView();
+const loadError = ref('');
+const logOpen = ref(false);
 const run = ref(null);
 const events = ref([]);
 const qaItems = ref([]);
@@ -96,17 +135,33 @@ const logText = computed(() => JSON.stringify({
   events: events.value.slice(-12),
 }, null, 2));
 
+const previewRefreshKey = computed(() => [
+  run.value?.status, run.value?.stage, run.value?.quality_state,
+].join('|'));
+
 async function refresh() {
   if (!runId.value) return;
-  run.value = await api.getRun(runId.value);
-  const ev = await api.getRunEvents(runId.value, { after_sequence: 0 });
-  events.value = ev.items || [];
-  const qa = await api.getQaItems(runId.value);
-  qaItems.value = qa.items || [];
+  try {
+    run.value = await api.getRun(runId.value);
+    const ev = await api.getRunEvents(runId.value, { after_sequence: 0 });
+    events.value = ev.items || [];
+    const qa = await api.getQaItems(runId.value);
+    qaItems.value = qa.items || [];
+    loadError.value = '';
+  } catch (error) {
+    loadError.value = error?.status === 404
+      ? '未找到该任务，请返回任务列表确认。'
+      : `任务详情加载失败：${error?.message || '未知错误'}`;
+  }
 }
 
 async function approve() {
   await api.postReviewDecision(runId.value, { decision: 'approve' });
+  await refresh();
+}
+
+async function requestChanges() {
+  await api.postReviewDecision(runId.value, { decision: 'request_changes' });
   await refresh();
 }
 
@@ -123,15 +178,19 @@ onUnmounted(() => clearInterval(timer));
 </script>
 
 <style scoped>
-.qy-run-detail { display: grid; gap: 1rem; }
+.qy-run-detail { display: grid; gap: 1rem; min-width: 0; }
 .qy-run-detail-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
-.qy-run-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.qy-qa-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
-.qy-qa-list li[data-severity='blocker'] { color: #8b1e1e; }
-.qy-log-drawer { max-height: 240px; overflow: auto; font-size: .8rem; }
+.qy-run-detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.qy-run-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+.qy-run-viewer, .qy-run-inspector, .qy-run-stages, .qy-log-section { padding: .75rem; min-width: 0; }
+.qy-run-detail-error { display: flex; gap: 1rem; align-items: center; padding: .75rem; color: #8b1e1e; }
+.qy-log-section h2 { margin: 0 0 .5rem; font-size: 1rem; }
+.qy-log-drawer { max-height: 240px; overflow: auto; font-size: .8rem; margin: 0; }
 .qy-badge { margin-left: .5rem; padding: .1rem .4rem; border: 1px solid currentColor; }
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .qy-run-detail-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
   .qy-run-detail-head { flex-direction: column; }
 }
 </style>
