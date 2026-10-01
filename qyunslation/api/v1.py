@@ -634,7 +634,61 @@ def _materialize_artifacts(
     session.flush()
 
 
-def _maybe_run_auto_qa(session: Session, run: TranslationRunRecord) -> None:
+def _inspect_run_outputs(
+    session: Session,
+    run: TranslationRunRecord,
+    runner_state: dict[str, Any] | None,
+) -> list[Any]:
+    """PLAN-071e：用真实源/译文 PDF 产出 QA findings（失败也要留痕，不静默通过）。"""
+    from qyunslation.pipeline.qa.engine import QaFinding
+    from qyunslation.pipeline.qa.pdf_inspect import inspect_pdf_pair
+
+    files = (runner_state or {}).get("downloadable_files") or {}
+    mono: Path | None = None
+    dual: Path | None = None
+    for key, meta in files.items():
+        if not isinstance(meta, dict) or not meta.get("path"):
+            continue
+        path = Path(str(meta["path"]))
+        if not path.is_file() or path.suffix.casefold() != ".pdf":
+            continue
+        if "dual" in str(key).casefold() or "dual" in path.name.casefold():
+            dual = dual or path
+        else:
+            mono = mono or path
+    if mono is None and dual is None:
+        return []
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    if preflight is None:
+        return []
+    try:
+        source_path = _preflight_path(preflight)
+    except HTTPException:
+        return []
+    target = str(getattr(run, "direction", "") or "").split("→")[-1]
+    findings, summary = inspect_pdf_pair(
+        source_path=source_path,
+        mono_path=mono,
+        dual_path=dual,
+        target_is_chinese=("中" in target or target.casefold().startswith("zh") or not target),
+    )
+    findings.append(
+        QaFinding(
+            category="consistency",
+            severity="info",
+            code="QA_INSPECTION_SUMMARY",
+            message="确定性 QA 取证摘要",
+            evidence=summary,
+        )
+    )
+    return findings
+
+
+def _maybe_run_auto_qa(
+    session: Session,
+    run: TranslationRunRecord,
+    runner_state: dict[str, Any] | None = None,
+) -> None:
     """PLAN-071e：layout 完成后跑确定性 QA，写入 qa_item 与 quality_state。"""
     if (run.quality_state or "draft") not in {"draft", "qa_blocked", "review_ready"}:
         return
@@ -661,6 +715,7 @@ def _maybe_run_auto_qa(session: Session, run: TranslationRunRecord) -> None:
         translated_text_sample=None,
         logo_present=None,
     )
+    findings.extend(_inspect_run_outputs(session, run, runner_state))
     for finding in findings:
         session.add(
             QaItem(
@@ -724,7 +779,7 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.status = "translating"
             run.stage = str(runner_state.get("stage") or "layout")
             run.progress = None
-            _maybe_run_auto_qa(session, run)
+            _maybe_run_auto_qa(session, run, runner_state)
             if run.quality_state == "review_ready":
                 run.stage = "review"
             elif run.quality_state == "qa_blocked":
