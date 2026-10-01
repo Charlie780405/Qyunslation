@@ -235,7 +235,16 @@ def _parse_json_array(text: str) -> list[dict[str, Any]]:
 
 
 def _needs_suggestion(aligned: AlignedTerm) -> bool:
-    return aligned.match_type == MATCH_NONE and not aligned.suggested_target
+    if aligned.suggested_target:
+        return False
+    if aligned.match_type == MATCH_NONE:
+        return True
+    # Source token copied verbatim into Chinese output still needs a Chinese recommendation.
+    if aligned.match_type == MATCH_VERBATIM:
+        observed = (aligned.observed_target or "").strip()
+        source = (aligned.source_term or "").strip()
+        return not observed or observed == source
+    return False
 
 
 def suggest_from_termbase(

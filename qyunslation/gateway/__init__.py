@@ -8,13 +8,14 @@ from qyunslation.gateway.config import (
     load_profiles,
     resolve_profile,
 )
-from qyunslation.gateway.provider import QwenOllamaProvider, get_provider
+from qyunslation.gateway.provider import QwenOllamaProvider, get_profile_provider, get_provider
 
 __all__ = [
     "BASELINE_MODEL_ID",
     "QwenOllamaProvider",
     "apply_gateway_profile",
     "build_provenance",
+    "get_profile_provider",
     "get_provider",
     "load_profiles",
     "resolve_profile",

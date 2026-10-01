@@ -1,5 +1,20 @@
 const API_PREFIX = '/api/v1';
 
+function formatApiDetail(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const detail = payload.detail ?? payload.message ?? payload.code;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((entry) => (
+      typeof entry === 'string' ? entry : entry?.msg || JSON.stringify(entry)
+    )).join('；');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.message || JSON.stringify(detail);
+  }
+  return null;
+}
+
 function csrfToken() {
   if (window.__QY_CSRF_TOKEN__) return window.__QY_CSRF_TOKEN__;
   const meta = document.querySelector('meta[name="csrf-token"]')?.content;
@@ -28,7 +43,7 @@ export async function apiRequest(path, options = {}) {
     : await response.text();
   if (!response.ok) {
     const detail = typeof payload === 'object' && payload
-      ? payload.message || payload.detail || payload.code
+      ? (formatApiDetail(payload) || payload.message || payload.code)
       : payload;
     const error = new Error(detail || `请求失败（${response.status}）`);
     error.status = response.status;
@@ -113,6 +128,10 @@ export const api = {
   batchDecideRunTermCandidates: (runId, decisions) => apiRequest(
     `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates/batch-decision`,
     { method: 'POST', body: JSON.stringify({ decisions }) },
+  ),
+  enrichRunTermSuggestions: (runId) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates/enrich-suggestions`,
+    { method: 'POST' },
   ),
   listRunAffiliationSegments: (runId) => apiRequest(
     `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/affiliation-segments`,

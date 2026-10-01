@@ -5,11 +5,20 @@
         <h2 id="qy-term-review-heading">术语审核</h2>
         <p>{{ unresolved }} 条待处理 · 共 {{ total }} 条</p>
       </div>
-      <details v-if="rules?.method?.length">
-        <summary>查看提取规则 {{ rules.version || '' }}</summary>
-        <ul><li v-for="line in rules.method" :key="line">{{ line }}</li></ul>
-      </details>
+      <div class="qy-review-panel-tools">
+        <button
+          type="button"
+          class="qy-secondary-button"
+          :disabled="enriching || !items.length"
+          @click="$emit('enrich')"
+        >{{ enriching ? 'DeepSeek 推断中…' : 'DeepSeek 推断推荐译法' }}</button>
+        <details v-if="rules?.method?.length">
+          <summary>查看提取规则 {{ rules.version || '' }}</summary>
+          <ul><li v-for="line in rules.method" :key="line">{{ line }}</li></ul>
+        </details>
+      </div>
     </header>
+    <p v-if="error" class="qy-callout qy-callout-warning" role="alert">{{ error }}</p>
     <div v-if="batchEligible.length" class="qy-review-actions" aria-label="低风险术语批量操作">
       <span>已选 {{ selected.length }} 条低风险术语</span>
       <button type="button" class="qy-primary-button" :disabled="!canBatchApprove" @click="batch('approve')">批量批准</button>
@@ -47,17 +56,24 @@
         <p>{{ item.source_context }}</p>
         <small>{{ item.extraction_reason || '规则提取' }} · {{ item.rule_version || rules?.version }}</small>
       </details>
+      <p v-if="actionHint(item)" class="qy-muted">{{ actionHint(item) }}</p>
       <div v-if="!isFinal(item)" class="qy-review-actions">
         <button
+          v-if="canApprove(item)"
           type="button"
           class="qy-primary-button"
           :aria-label="`批准术语 ${item.source_term}`"
           @click="decide(item, 'approve')"
         >批准</button>
-        <button type="button" class="qy-secondary-button" @click="decide(item, 'do_not_translate')">不翻译</button>
+        <button
+          v-if="canApprove(item)"
+          type="button"
+          class="qy-secondary-button"
+          @click="decide(item, 'do_not_translate')"
+        >不翻译</button>
         <button type="button" class="qy-secondary-button" @click="decide(item, 'reject')">拒绝</button>
         <button
-          v-if="item.risk === 'high' || item.risk === 'critical'"
+          v-if="needsAdmin(item)"
           type="button"
           class="qy-secondary-button"
           @click="decide(item, 'submit_for_admin')"
@@ -82,8 +98,11 @@ const props = defineProps({
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
   pageSize: { type: Number, default: 40 },
+  canManageTerms: { type: Boolean, default: false },
+  error: { type: String, default: '' },
+  enriching: { type: Boolean, default: false },
 });
-const emit = defineEmits(['decide', 'batch', 'page']);
+const emit = defineEmits(['decide', 'batch', 'page', 'enrich', 'error']);
 const drafts = reactive({});
 const selected = ref([]);
 const batchEligible = computed(() => props.items.filter(isBatchEligible));
@@ -107,6 +126,37 @@ function isBatchEligible(item) {
   return item.status === 'pending' && !['high', 'critical'].includes(item.risk);
 }
 
+function isHighRisk(item) {
+  return ['high', 'critical'].includes(String(item.risk || '').toLowerCase());
+}
+
+function needsAdmin(item) {
+  return isHighRisk(item) && !props.canManageTerms;
+}
+
+function canApprove(item) {
+  return props.canManageTerms || !isHighRisk(item);
+}
+
+function actionHint(item) {
+  if (needsAdmin(item)) {
+    return '高风险术语需术语管理员批准；你可拒绝或提交管理员复核。';
+  }
+  if (isHighRisk(item) && item.status === 'pending_admin') {
+    return '已提交管理员，等待 term_admin 裁决。';
+  }
+  return '';
+}
+
+function resolveTarget(item, action) {
+  const draft = String(drafts[item.id] || '').trim();
+  const suggested = String(item.suggested_target || '').trim();
+  if (draft) return draft;
+  if (action === 'approve' && suggested) return suggested;
+  if (action === 'do_not_translate') return item.source_term;
+  return '';
+}
+
 function toggle(id) {
   selected.value = selected.value.includes(id)
     ? selected.value.filter((item) => item !== id)
@@ -126,10 +176,15 @@ function batch(action) {
 }
 
 function decide(item, action) {
+  const target = resolveTarget(item, action);
+  if (action === 'approve' && !target) {
+    emit('error', `「${item.source_term}」缺少确认译法：请先点击 DeepSeek 推断，或手动填写确认译法。`);
+    return;
+  }
   emit('decide', item, {
     action,
     expected_version: item.version,
-    target_term: drafts[item.id] || null,
+    target_term: target || null,
     scope: 'org',
   });
 }
@@ -138,6 +193,7 @@ function decide(item, action) {
 <style scoped>
 .qy-review-panel { padding: .85rem; display: grid; gap: .75rem; }
 .qy-review-panel-head, .qy-review-item-title { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+.qy-review-panel-tools { display: grid; gap: .5rem; justify-items: end; }
 .qy-review-panel h2, .qy-review-panel p { margin: 0; }
 .qy-review-item { border: 1px solid var(--qy-border, #d7dde5); border-radius: .5rem; padding: .75rem; display: grid; gap: .65rem; }
 .qy-term-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }

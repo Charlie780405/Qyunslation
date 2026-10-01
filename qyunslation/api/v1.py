@@ -1783,11 +1783,17 @@ async def create_translation_run(
         or "internal"
     )
     model_profile_id = body.model_profile_id or preflight.model_profile_id
+    term_profile_id = body.term_model_profile_id
+    if term_profile_id is None and classification.strip().casefold() != "confidential":
+        from qyunslation.pipeline.model_profiles import deepseek_configured
+
+        if deepseek_configured():
+            term_profile_id = "term-deepseek-flash"
     try:
         classification, model_profile_id, term_profile_id = validate_selection(
             classification=classification,
             model_profile_id=model_profile_id,
-            term_profile_id=body.term_model_profile_id,
+            term_profile_id=term_profile_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2924,6 +2930,31 @@ def batch_decide_run_term_candidates(
             )
         )
     return {"decided": decided, "count": len(decided), "formal_gate": _formal_gate(session, run)}
+
+
+@router.post("/translation-runs/{run_id}/term-candidates/enrich-suggestions")
+def enrich_run_term_candidate_suggestions(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Use termbase + DeepSeek to backfill suggested_target for pending candidates."""
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if _identity_role(identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    from qyunslation.workbench.term_extract import enrich_run_term_suggestions
+
+    updated = enrich_run_term_suggestions(session, run=run)
+    session.commit()
+    listing = list_run_term_candidates(
+        run_id,
+        page=1,
+        page_size=40,
+        identity=identity,
+        session=session,
+    )
+    listing["suggestions_enriched"] = updated
+    return listing
 
 
 @router.get("/translation-runs/{run_id}/affiliation-segments")

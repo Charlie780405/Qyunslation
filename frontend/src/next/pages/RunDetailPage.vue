@@ -95,9 +95,14 @@
         :total="termTotal"
         :page="termPage"
         :page-size="40"
+        :can-manage-terms="canManageTerms"
+        :error="termPanelError"
+        :enriching="termEnriching"
         @decide="decideTerm"
         @batch="batchDecideTerms"
         @page="loadTerms"
+        @enrich="enrichTermSuggestions"
+        @error="(message) => { termPanelError = message; }"
       />
 
       <div class="qy-run-detail-grid">
@@ -150,11 +155,13 @@ import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import TermReviewPanel from '../components/TermReviewPanel.vue';
 import { useRunDetailView } from '../stores/runDetail.js';
+import { useSessionStore } from '../stores/session.js';
 
 const props = defineProps({ runId: { type: String, default: '' } });
 const route = useRoute();
 const router = useRouter();
 const view = useRunDetailView();
+const sessionStore = useSessionStore();
 const loadError = ref('');
 const logOpen = ref(false);
 const run = ref(null);
@@ -168,7 +175,10 @@ const termPage = ref(1);
 const affiliationSegments = ref([]);
 const affiliationUnconfirmed = ref(0);
 const reviewError = ref('');
+const termPanelError = ref('');
+const termEnriching = ref(false);
 const reviewComment = ref('');
+const canManageTerms = computed(() => sessionStore.hasCapability('can_manage_terms'));
 let timer;
 let draftTimer;
 
@@ -287,11 +297,34 @@ async function decideTerm(item, payload) {
   try {
     await api.decideRunTermCandidate(runId.value, item.id, payload);
     reviewError.value = '';
+    termPanelError.value = '';
     await refresh();
   } catch (error) {
-    reviewError.value = error?.status === 409
+    const message = error?.status === 409
       ? '该术语已被其他审核人更新，请刷新后重试。'
       : (error?.message || '术语裁决失败');
+    termPanelError.value = message;
+    reviewError.value = message;
+  }
+}
+
+async function enrichTermSuggestions() {
+  termEnriching.value = true;
+  termPanelError.value = '';
+  try {
+    const payload = await api.enrichRunTermSuggestions(runId.value);
+    termCandidates.value = payload.items || [];
+    termRules.value = payload.rules || {};
+    termUnresolved.value = payload.unresolved || 0;
+    termTotal.value = payload.total || 0;
+    termPage.value = payload.page || termPage.value;
+    if ((payload.suggestions_enriched || 0) === 0) {
+      termPanelError.value = '没有新的推荐译法；请手动填写确认译法，或检查 DeepSeek 配置。';
+    }
+  } catch (error) {
+    termPanelError.value = error?.message || 'DeepSeek 推断失败';
+  } finally {
+    termEnriching.value = false;
   }
 }
 
@@ -333,6 +366,7 @@ async function applyCorrections() {
 }
 
 onMounted(async () => {
+  await sessionStore.load();
   await refresh();
   timer = setInterval(refresh, 3000);
 });

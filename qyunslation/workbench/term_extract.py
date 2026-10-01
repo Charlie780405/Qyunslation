@@ -347,6 +347,155 @@ def sync_affiliation_segments_from_text(
     return created
 
 
+def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = None) -> Any | None:
+    """Pick the compliant term suggester for structured extraction and DeepSeek hints."""
+    if explicit is not None:
+        return explicit
+    from qyunslation.gateway.provider import get_profile_provider
+    from qyunslation.pipeline.model_profiles import deepseek_configured
+
+    classification = str(run.document_classification or "internal").strip().casefold()
+    term_profile = str((run.settings_snapshot or {}).get("term_model_profile_id") or "").strip()
+    if not term_profile and classification != "confidential" and deepseek_configured():
+        term_profile = "term-deepseek-flash"
+    if not term_profile:
+        return None
+    try:
+        return get_profile_provider(term_profile)
+    except Exception:
+        return None
+
+
+def enrich_discovered_suggestions(
+    session: Session,
+    *,
+    run: TranslationRunRecord,
+    discovered: dict[str, dict[str, Any]],
+    provider: Any | None = None,
+    classification: str | None = None,
+) -> int:
+    """Fill suggested_target via termbase + paragraph/DeepSeek suggesters."""
+    from qyunslation.workbench.term_align import (
+        AlignedTerm,
+        align_by_paragraph_batch,
+        align_observed,
+        prefer_explicit_observation,
+        suggest_from_termbase,
+        suggest_targets,
+    )
+
+    if not discovered:
+        return 0
+    project = get_or_create_company_termbase_project(session, tenant_id=run.tenant_id)
+    doc_class = (classification or run.document_classification or "internal").strip().casefold()
+    staged: list[dict[str, Any]] = []
+    for item in discovered.values():
+        extracted = {
+            "source_term": item["source_term"],
+            "term_type": item.get("term_type") or "general",
+            "source_context": item.get("source_context") or "",
+            "target_context": item.get("target_context") or "",
+        }
+        aligned = prefer_explicit_observation(
+            extracted,
+            align_observed(
+                item["source_term"],
+                source_context=extracted["source_context"],
+                target_context=extracted["target_context"],
+                policy=None,
+            ),
+        )
+        if item.get("suggested_target") and not aligned.suggested_target:
+            aligned = AlignedTerm(
+                source_term=item["source_term"],
+                observed_target=aligned.observed_target or item.get("observed_target") or "",
+                suggested_target=item["suggested_target"],
+                match_type=aligned.match_type,
+                confidence=aligned.confidence,
+            )
+        staged.append({"extracted": extracted, "aligned": aligned})
+
+    suggestions = suggest_from_termbase(
+        staged,
+        session=session,
+        tenant_id=run.tenant_id,
+        project_id=project.id,
+    )
+    remaining = [row for row in staged if row["extracted"]["source_term"] not in suggestions]
+    suggestions.update(align_by_paragraph_batch(remaining, provider=provider))
+    remaining = [row for row in remaining if row["extracted"]["source_term"] not in suggestions]
+    suggestions.update(
+        suggest_targets(
+            remaining,
+            provider=provider,
+            classification=doc_class,
+            allow_external=doc_class != "confidential",
+        )
+    )
+
+    updated = 0
+    for row in staged:
+        source = row["extracted"]["source_term"]
+        norm = normalize_source(source)
+        if norm not in discovered:
+            continue
+        aligned = suggestions.get(source, row["aligned"])
+        item = discovered[norm]
+        if aligned.suggested_target and not item.get("suggested_target"):
+            item["suggested_target"] = aligned.suggested_target
+            updated += 1
+        if aligned.observed_target and not item.get("observed_target"):
+            item["observed_target"] = aligned.observed_target
+    return updated
+
+
+def enrich_run_term_suggestions(
+    session: Session,
+    *,
+    run: TranslationRunRecord,
+    provider: Any | None = None,
+) -> int:
+    """Backfill suggested_target on existing pending candidates (review UI helper)."""
+    rows = list(
+        session.scalars(
+            select(DocumentTermCandidate).where(
+                DocumentTermCandidate.translation_run_id == run.id,
+                DocumentTermCandidate.status.in_(("pending", "pending_admin", "violation")),
+            )
+        ).all()
+    )
+    if not rows:
+        return 0
+    discovered = {
+        row.source_norm: {
+            "source_term": row.source_term,
+            "source_norm": row.source_norm,
+            "observed_target": row.observed_target or "",
+            "suggested_target": row.suggested_target,
+            "term_type": row.term_type,
+            "source_context": row.source_context or "",
+            "target_context": row.target_context or "",
+        }
+        for row in rows
+        if not (row.suggested_target or "").strip()
+    }
+    if not discovered:
+        return 0
+    provider = resolve_term_provider(run, explicit=provider)
+    updated = enrich_discovered_suggestions(
+        session,
+        run=run,
+        discovered=discovered,
+        provider=provider,
+    )
+    for row in rows:
+        item = discovered.get(row.source_norm)
+        if item and item.get("suggested_target") and not row.suggested_target:
+            row.suggested_target = item["suggested_target"]
+    session.flush()
+    return updated
+
+
 def extract_candidates_from_text(
     session: Session,
     *,
@@ -376,23 +525,29 @@ def extract_candidates_from_text(
         item["source_norm"]: item
         for item in discover_term_occurrences(source_text, translated_text)
     }
+    if provider is None:
+        provider = resolve_term_provider(run)
     if provider is None and require_structured_model:
-        from qyunslation.gateway.provider import get_provider
-
-        term_profile = str((run.settings_snapshot or {}).get("term_model_profile_id") or "").strip()
-        if not term_profile:
-            raise TermExtractionDegraded("compliant term model profile is unavailable")
-        try:
-            provider = get_provider(profile=term_profile)
-        except Exception as exc:
-            raise TermExtractionDegraded("compliant term model is unavailable") from exc
+        raise TermExtractionDegraded("compliant term model profile is unavailable")
     if provider is not None:
-        for item in discover_structured_medical_terms(source_text, translated_text, provider):
-            existing = discovered.get(item["source_norm"])
-            if existing is None:
-                discovered[item["source_norm"]] = item
-            elif not existing.get("suggested_target") and item.get("suggested_target"):
-                existing["suggested_target"] = item["suggested_target"]
+        try:
+            for item in discover_structured_medical_terms(source_text, translated_text, provider):
+                existing = discovered.get(item["source_norm"])
+                if existing is None:
+                    discovered[item["source_norm"]] = item
+                elif not existing.get("suggested_target") and item.get("suggested_target"):
+                    existing["suggested_target"] = item["suggested_target"]
+        except TermExtractionDegraded:
+            raise
+        except Exception as exc:
+            if require_structured_model:
+                raise TermExtractionDegraded("structured medical extraction unavailable") from exc
+    enrich_discovered_suggestions(
+        session,
+        run=run,
+        discovered=discovered,
+        provider=provider,
+    )
     rows: list[DocumentTermCandidate] = []
     for item in discovered.values():
         if item["source_norm"] in known or is_rejected_source(item["source_term"], suppressed):

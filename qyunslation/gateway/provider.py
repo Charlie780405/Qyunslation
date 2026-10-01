@@ -113,6 +113,37 @@ def get_provider(*, profile: str | None = None, api_key: str | None = None) -> Q
     )
 
 
+def get_profile_provider(profile_id: str | None = None, *, api_key: str | None = None) -> QwenOllamaProvider:
+    """Resolve PLAN-071g model profiles (DeepSeek/Ollama) or legacy gateway YAML slots."""
+    from qyunslation.pipeline.model_profiles import PROFILES, deepseek_configured
+
+    pid = (profile_id or "").strip()
+    model_profile = PROFILES.get(pid)
+    if model_profile is not None:
+        if model_profile.provider == "deepseek":
+            key = (
+                api_key
+                or (os.environ.get("QYUNSLATION_DEEPSEEK_API_KEY") or "").strip()
+                or (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+            )
+            if not key:
+                raise ValueError("deepseek not configured")
+            base = (
+                (os.environ.get("QYUNSLATION_DEEPSEEK_BASE_URL") or "https://api.deepseek.com")
+                .strip()
+                .rstrip("/")
+            )
+            model = (
+                (os.environ.get("QYUNSLATION_DEEPSEEK_MODEL") or model_profile.model_id or "deepseek-chat")
+                .strip()
+            )
+            if model == "deepseek-flash":
+                model = "deepseek-chat"
+            return QwenOllamaProvider(model_id=model, base_url=base, api_key=key)
+        return get_provider(api_key=api_key)
+    return get_provider(profile=pid or None, api_key=api_key)
+
+
 def ping_provider(*, profile: str | None = None) -> dict[str, Any]:
     """探测服务可达性和目标模型是否真实出现在模型目录中。
 
