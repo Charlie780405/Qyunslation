@@ -82,10 +82,25 @@ else
   fi
 fi
 
-if grep -q '^QYUNSLATION_DEEPSEEK_API_KEY=' /home/dev/pdf2zh/office.env 2>/dev/null; then
+OFFICE_ENV="${QYUNSLATION_OFFICE_ENV:-/home/dev/pdf2zh/office.env}"
+if grep -qE '^QYUNSLATION_DEEPSEEK_API_KEY=.+' "$OFFICE_ENV" 2>/dev/null; then
   pass "deepseek key configured"
+  if [[ -x "$PY" ]]; then
+    if (cd "$ROOT" && set -a && source <(grep -E '^QYUNSLATION_DEEPSEEK_API_KEY=' "$OFFICE_ENV" | sed 's/^/export /') && set +a && \
+      "$PY" -c "from qyunslation.pipeline.model_profiles import deepseek_configured; import sys; sys.exit(0 if deepseek_configured() else 1)"); then
+      pass "deepseek runtime profile available"
+    else
+      blocked "deepseek key present but runtime profile unavailable"
+    fi
+  fi
 else
   blocked "deepseek key not configured in office.env"
+fi
+
+if command -v chromium >/dev/null 2>&1; then
+  pass "headless chromium available"
+else
+  blocked "chromium not in PATH (run scripts/install-headless-chromium.sh)"
 fi
 
 if compgen -G "$ROOT/docs/evidence/plan073-074/*.png" >/dev/null; then

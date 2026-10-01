@@ -64,7 +64,8 @@ else
   blocked "frontend vitest (node_modules missing)"
 fi
 
-if grep -q '^QYUNSLATION_DEEPSEEK_API_KEY=' /home/dev/pdf2zh/office.env 2>/dev/null; then
+OFFICE_ENV="${QYUNSLATION_OFFICE_ENV:-/home/dev/pdf2zh/office.env}"
+if grep -qE '^QYUNSLATION_DEEPSEEK_API_KEY=.+' "$OFFICE_ENV" 2>/dev/null; then
   pass "deepseek key configured"
 else
   blocked "deepseek key not configured"

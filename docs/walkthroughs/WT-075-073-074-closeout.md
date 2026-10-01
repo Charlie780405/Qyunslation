@@ -1,6 +1,6 @@
 # WT-075：073/074 收口与生产对齐
 
-> 状态：**工程闭环；DeepSeek/浏览器/全量金标机器译文 BLOCKED**
+> 状态：**075 收尾完成；DeepSeek 与浏览器证据已就绪；全量金标机器译文仍为 BLOCKED 基线**
 
 ## 执行摘要
 
@@ -34,9 +34,16 @@ bash scripts/verify-plan-073.sh
 | Live regression | 术语金标 PASS；legacy dual PDF QA → **BLOCKED**（需 PLAN-074 重跑） |
 | Domain eval | 1/10 样本有机器译文；9 样本 **BLOCKED**（真实基线） |
 
-## 待用户/运维
+## 075 收尾（2026-10-02）
 
-1. 配置 `QYUNSLATION_DEEPSEEK_API_KEY` 并跑公开资料全文翻译。
-2. 上传浏览器截图至 `docs/evidence/plan073-074/`。
-3. 用 PLAN-074 流水线重跑 Dupilumab Poster，使 live regression QA 段 PASS。
-4. 为其余 9 份金标样本补充 `machine.zh.txt` 后领域评测方可全绿。
+| 项 | 结果 |
+| --- | --- |
+| Chromium | `scripts/install-headless-chromium.sh` → `~/.local/bin/chromium` |
+| 浏览器证据 | `scripts/capture-plan073-074-evidence.py` → `docs/evidence/plan073-074/*.png`（4 张） |
+| DeepSeek | `QYUNSLATION_DEEPSEEK_API_KEY` 已写入 `office.env`；`deepseek_configured()` PASS |
+
+## 仍 BLOCKED（预期基线）
+
+1. 用 PLAN-074 流水线重跑 Dupilumab Poster，使 live regression QA 段 PASS。
+2. 为其余 9 份金标样本补充 `machine.zh.txt` 后领域评测方可全绿。
+3. 可选：用 `public-deepseek-flash` 跑一份公开资料全文翻译留痕。
