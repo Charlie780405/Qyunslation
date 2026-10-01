@@ -27,7 +27,9 @@ NON_TERMINAL = frozenset({"queued", "scanning", "translating", "rendering"})
 TERMINAL = frozenset({"succeeded", "failed", "cancelled", "degraded"})
 # PLAN-071b：CLI/执行器完成但尚未 QA/批准（仅 QYUNSLATION_PIPELINE=v2）
 EXECUTOR_DONE = frozenset({"layout_complete"})
-CANCEL_TERMINAL = TERMINAL | EXECUTOR_DONE
+# User cancel must still apply after CLI finishes (layout_complete) so the web
+# ledger can abandon QA/review without being refreshed back to "translating".
+CANCEL_TERMINAL = TERMINAL
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PROGRESS_RE = re.compile(r"\bProgress:\s*(?P<value>0(?:\.\d+)?|1(?:\.0+)?)\s*,\s*(?P<label>.*)$")
 _PERCENT_RE = re.compile(r"\b(?P<value>\d{1,3}(?:\.\d+)?)%\b")
@@ -983,6 +985,16 @@ class Pdf2zhRunner:
             raise RunnerError("translation runner state is unreadable")
         if state.get("status") in CANCEL_TERMINAL:
             return {"cancelled": False, "already_terminal": True}
+        if state.get("status") in EXECUTOR_DONE:
+            self._write_state(
+                state_path,
+                state,
+                status="cancelled",
+                stage="qa",
+                reason="translation cancelled by user",
+                finished_at=_utc_now(),
+            )
+            return {"cancelled": True}
         pid = int(state.get("pid") or 0)
         managed = self._processes.get(task_id)
         if managed is not None:

@@ -127,6 +127,34 @@ async def test_runner_writes_atomic_state_and_discovers_outputs(tmp_path: Path, 
 
 
 @pytest.mark.asyncio
+async def test_runner_cancel_layout_complete_marks_state_cancelled(tmp_path: Path):
+    runner = Pdf2zhRunner(tmp_path / "runs")
+    run_dir = tmp_path / "runs" / "tenant-1" / "run-layout" / "generation-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    task_id = "pdf2zh:run-layout:1"
+    state_path = run_dir / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "tenant_id": "tenant-1",
+                "run_id": "run-layout",
+                "generation": 1,
+                "status": "layout_complete",
+                "stage": "layout",
+                "progress_message": "正在保存 PDF",
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = await runner.cancel(task_id)
+    assert result["cancelled"] is True
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "cancelled"
+    assert "cancelled" in state["reason"]
+
+
+@pytest.mark.asyncio
 async def test_runner_cancel_terminates_process_group_and_persists_reason(tmp_path: Path, monkeypatch):
     cli = tmp_path / "fake-pdf2zh"
     _fake_cli(cli, delay=30)

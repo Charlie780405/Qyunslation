@@ -1226,6 +1226,8 @@ def _maybe_run_auto_qa(
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
     if run.status == "interrupted":
         return run.degradation_reason
+    if run.status == "cancelled":
+        return run.degradation_reason or "translation cancelled by user"
     if not run.external_task_id:
         return None
     # PDF runs are owned by the durable non-GUI runner.  Consult its atomic
@@ -2448,6 +2450,9 @@ async def cancel_translation_run(
     run.status = "cancelled"
     run.stage = "qa"
     run.progress = run.progress if run.progress is not None else None
+    run.degradation_reason = "translation cancelled by user"
+    run.completed_at = run.completed_at or datetime.now(timezone.utc)
+    run.updated_at = datetime.now(timezone.utc)
     return _translation_run_dict(session, run)
 
 
