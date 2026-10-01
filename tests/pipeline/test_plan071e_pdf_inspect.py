@@ -43,6 +43,17 @@ def test_ordinal_artifact_and_empty_translation():
     assert codes(check_translation_text(source_text="x", translated_text="  ")) == {"EMPTY_TRANSLATION": "blocker"}
 
 
+def test_encoding_and_il_artifacts_are_blockers():
+    found = codes(
+        check_translation_text(
+            source_text="Case description",
+            translated_text="病例<stytle id='3'>描述</stytle>\x03�",
+        )
+    )
+    assert found["IL_MARKUP_LEAK"] == "blocker"
+    assert found["TEXT_ENCODING_ARTIFACT"] == "blocker"
+
+
 def test_untranslated_body_detected():
     english = "\n".join(["The study evaluates the efficacy and safety of the drug in adults"] * 6)
     assert codes(check_translation_text(source_text=english, translated_text=english))["UNTRANSLATED_BODY"] == "blocker"

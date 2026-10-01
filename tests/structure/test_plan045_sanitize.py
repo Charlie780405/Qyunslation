@@ -5,7 +5,9 @@ from __future__ import annotations
 from qyunslation.structure.text_sanitize import (
     IL_MARKUP_LEAK,
     SOURCE_OVERLAY,
+    TEXT_ENCODING_ARTIFACT,
     detect_source_overlay,
+    detect_text_artifacts,
     has_il_markup_leak,
     sanitize_translated_text,
     strip_il_markup,
@@ -68,6 +70,22 @@ def test_sanitize_marks_uncleared_leak():
     leftover = "患者<span"
     cleaned, codes = sanitize_translated_text(leftover)
     assert has_il_markup_leak(cleaned) or IL_MARKUP_LEAK in codes
+
+
+def test_sanitize_removes_misspelled_style_tags_and_control_characters():
+    dirty = "因<stytle\x03id='3'>1年严重日光敏感病史</stytle>就诊。"
+    cleaned, codes = sanitize_translated_text(dirty)
+    assert cleaned == "因1年严重日光敏感病史就诊。"
+    assert "stytle" not in cleaned.casefold()
+    assert "\x03" not in cleaned
+    assert codes == []
+
+
+def test_text_artifact_detection_blocks_replacement_and_mojibake_but_not_comparison():
+    assert detect_text_artifacts("患者比例<5%，IL-13 和 IFN-γ保持不变") == []
+    assert TEXT_ENCODING_ARTIFACT in detect_text_artifacts("错误字符�")
+    assert TEXT_ENCODING_ARTIFACT in detect_text_artifacts("itâ€™s corrupted")
+    assert IL_MARKUP_LEAK in detect_text_artifacts("<stytle id='5'>残留")
 
 
 def test_overlay_detection_warns_on_mixed_residue():

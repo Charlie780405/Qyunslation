@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qyunslation.pipeline.qa.engine import QaFinding
+from qyunslation.structure.text_sanitize import detect_text_artifacts
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 URL_RE = re.compile(r"https?://[^\s)>\]，。；]+")
@@ -133,6 +134,19 @@ def check_translation_text(
                 severity="warning",
                 code="FALLBACK_PRESENT",
                 message="存在 fallback 段落，需人工确认",
+            )
+        )
+    for code in detect_text_artifacts(translated_text):
+        findings.append(
+            QaFinding(
+                category="integrity",
+                severity="blocker",
+                code=code,
+                message=(
+                    "译文包含中间标记残留，必须重新清洗并生成"
+                    if code == "IL_MARKUP_LEAK"
+                    else "译文包含不可打印字符或编码乱码，必须重新生成"
+                ),
             )
         )
     findings.extend(check_protected_literals(source_text, translated_text))

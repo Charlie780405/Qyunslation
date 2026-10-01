@@ -7,9 +7,10 @@ import re
 
 IL_MARKUP_LEAK = "IL_MARKUP_LEAK"
 SOURCE_OVERLAY = "SOURCE_OVERLAY"
+TEXT_ENCODING_ARTIFACT = "TEXT_ENCODING_ARTIFACT"
 
 _SPAN_TAG_RE = re.compile(
-    r"</?\s*span\b[^>]*>",
+    r"</?\s*(?:span|style|stytle|font)\b[^>]*>",
     re.IGNORECASE,
 )
 _STYLE_ID_RE = re.compile(
@@ -17,9 +18,11 @@ _STYLE_ID_RE = re.compile(
     re.IGNORECASE,
 )
 _LEAK_RE = re.compile(
-    r"<\s*span\b|style\s*=\s*['\"]?\s*id\s*:",
+    r"<\s*/?\s*(?:span|style|stytle|font)\b|style\s*=\s*['\"]?\s*id\s*:",
     re.IGNORECASE,
 )
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_MOJIBAKE_RE = re.compile(r"(?:Ã.|Â.|â(?:€™|€œ|€|€“|€”|€¦))")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]{3,}")
 _LATIN_RE = re.compile(r"[A-Za-z]")
@@ -132,7 +135,7 @@ def apply_forced_terms(text: str | None) -> str:
 
 def strip_il_markup(text: str | None) -> str:
     """剥 BabelDOC IL 泄漏的 span / style=id 标记。"""
-    raw = text or ""
+    raw = _CONTROL_RE.sub(" ", text or "")
     cleaned = _SPAN_TAG_RE.sub("", raw)
     cleaned = _STYLE_ID_RE.sub("", cleaned)
     # 容错：被拆开的 st yle=
@@ -142,6 +145,17 @@ def strip_il_markup(text: str | None) -> str:
 
 def has_il_markup_leak(text: str | None) -> bool:
     return bool(_LEAK_RE.search(text or ""))
+
+
+def detect_text_artifacts(text: str | None) -> list[str]:
+    """Return blocker codes for non-printable/encoding and IL artifacts."""
+    raw = text or ""
+    codes: list[str] = []
+    if has_il_markup_leak(raw):
+        codes.append(IL_MARKUP_LEAK)
+    if "\ufffd" in raw or _CONTROL_RE.search(raw) or _MOJIBAKE_RE.search(raw):
+        codes.append(TEXT_ENCODING_ARTIFACT)
+    return codes
 
 
 DRUG_NAME_DRIFT = "DRUG_NAME_DRIFT"
@@ -187,10 +201,7 @@ def detect_drug_name_drift(doc_text: str | None, *, source_text: str | None = No
 def sanitize_translated_text(text: str | None) -> tuple[str, list[str]]:
     """返回 (消毒后文本, QC 码列表)。消毒后仍含标记 → IL_MARKUP_LEAK。"""
     cleaned = apply_forced_terms(strip_il_markup(text))
-    codes: list[str] = []
-    if has_il_markup_leak(cleaned):
-        codes.append(IL_MARKUP_LEAK)
-    return cleaned, codes
+    return cleaned, detect_text_artifacts(cleaned)
 
 
 def detect_source_overlay(page_text: str) -> list[str]:

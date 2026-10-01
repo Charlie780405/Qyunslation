@@ -124,6 +124,8 @@ class ExecutionStatus(ContractEnum):
 
 
 class BlockRole(ContractEnum):
+    AUTHOR = "author"
+    AFFILIATION = "affiliation"
     HEADING = "heading"
     BODY = "body"
     CAPTION = "caption"
@@ -383,6 +385,7 @@ class TranslatableBlock(ContractModel):
     source_language: str | None = None
     role: BlockRole | str | None = None
     translation_policy: TranslationPolicy | str | None = None
+    review_required: bool = False
     source_style: SourceStyle | None = None
     row_index: int | None = Field(default=None, ge=0)
     column_index: int | None = Field(default=None, ge=0)
