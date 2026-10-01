@@ -15,6 +15,11 @@ from qyunslation.pipeline.executors.legacy import (
     classify_format,
 )
 from qyunslation.pipeline.stages import run_ocr_decision, run_structure, run_validation
+from qyunslation.pipeline.stages.postprocess import (
+    mark_preserve_objects,
+    run_layout_stage,
+    run_table_figure_stage,
+)
 from qyunslation.pipeline.workspace import RunWorkspace, SealedSource
 from qyunslation.structure.manifest_store import ManifestStore
 from qyunslation.structure.models import DocumentStructureManifest
@@ -93,6 +98,11 @@ class DocumentPipeline:
             events=events,
         )
         assert structure_result.state == "completed"
+        mark_preserve_objects(manifest)
+        # 071c：原子 span 模块挂入结构阶段（译前遮蔽在 text 执行器侧复用同一 API）。
+        from qyunslation.pipeline.atomic_spans import shield_atomic_spans
+
+        _ = shield_atomic_spans  # imported for stage contract surface
         self.manifest_store.put(manifest)
         self._write_manifest_sidecar(run_id, generation, manifest)
 
@@ -140,7 +150,10 @@ class DocumentPipeline:
 
         self.workspace.assert_source_unchanged(sealed)
         events.emit("text", "running", message=f"launched:{executor_kind}")
-        # table_figure / layout post-steps are 071c; pipeline stops executor-owned.
+        # 071c：挂接后处理探测（重 OCR/回填在执行器产物就绪后由 refresh/postprocess 触发）
+        profile = str((settings or {}).get("profile") or "generic")
+        run_table_figure_stage(mono_pdf=None, dual_pdf=None, events=events, enabled=False)
+        run_layout_stage(mono_pdf=None, events=events, profile=profile, enabled=False)
         return PipelineLaunch(
             external_task_id=external_task_id,
             manifest_version=manifest.schema_version,

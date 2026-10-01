@@ -1,6 +1,6 @@
 # PLAN-071g：参数设置、资料等级与模型治理
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071b](./PLAN-071b-document-pipeline-manifest.md)、[071e](./PLAN-071e-qa-term-gate-formal.md)
 

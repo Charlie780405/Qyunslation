@@ -1,6 +1,6 @@
 # PLAN-071h：专业词库推荐规则优化
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071e](./PLAN-071e-qa-term-gate-formal.md)、[071g](./PLAN-071g-settings-classification-models.md)
 

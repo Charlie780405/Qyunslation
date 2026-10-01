@@ -31,6 +31,8 @@ from qyunslation.persist.db import (
 from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
 from qyunslation.persist.models import (
     PreflightRecord,
+    QaItem,
+    ReviewDecision,
     TranslationArtifact,
     TranslationRunRecord,
     WebPreference,
@@ -310,6 +312,8 @@ def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
         "recommended": recommended,
         "source_language": recommended.get("source_language"),
         "target_language": recommended.get("target_language"),
+        "document_classification": record.document_classification or metadata.get("document_classification") or "internal",
+        "model_profile_id": record.model_profile_id or metadata.get("model_profile_id"),
         "reused": False,
         "expires_at": expires_at.isoformat(),
         "created_at": record.created_at.isoformat(),
@@ -465,6 +469,27 @@ class TranslationRunCreateBody(BaseModel):
     profile: str = Field(default="临床研究文档", min_length=1, max_length=128)
     bilingual: bool = True
     display_name: str | None = Field(default=None, max_length=256)
+    document_classification: str | None = Field(default=None, max_length=32)
+    model_profile_id: str | None = Field(default=None, max_length=128)
+    term_model_profile_id: str | None = Field(default=None, max_length=128)
+
+
+class PreflightPatchBody(BaseModel):
+    document_classification: str | None = Field(default=None, max_length=32)
+    model_profile_id: str | None = Field(default=None, max_length=128)
+    term_model_profile_id: str | None = Field(default=None, max_length=128)
+    source_language: str | None = Field(default=None, max_length=32)
+    target_language: str | None = Field(default=None, max_length=32)
+    profile: str | None = Field(default=None, max_length=128)
+
+
+class ReviewDecisionBody(BaseModel):
+    decision: str = Field(min_length=1, max_length=32)
+    comment: str | None = Field(default=None, max_length=2048)
+
+
+class RetryTranslationBody(BaseModel):
+    pipeline: str | None = Field(default=None, max_length=32)
 
 
 class TranslationRunPatchBody(BaseModel):
@@ -587,13 +612,16 @@ def _materialize_artifacts(
             if target.is_file():
                 target.unlink()
             continue
+        artifact_kind = kind
+        if formal and (getattr(run, "quality_state", None) or "draft") == "legacy_unverified":
+            artifact_kind = "legacy"
         session.add(
             TranslationArtifact(
                 id=artifact_id,
                 run_id=run.id,
                 tenant_id=run.tenant_id,
                 artifact_key=artifact_key,
-                kind=kind,
+                kind=artifact_kind,
                 file_type=key,
                 filename=filename[:256],
                 media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
@@ -604,6 +632,51 @@ def _materialize_artifacts(
             )
         )
     session.flush()
+
+
+def _maybe_run_auto_qa(session: Session, run: TranslationRunRecord) -> None:
+    """PLAN-071e：layout 完成后跑确定性 QA，写入 qa_item 与 quality_state。"""
+    if (run.quality_state or "draft") not in {"draft", "qa_blocked", "review_ready"}:
+        return
+    if run.stage not in {"layout", "qa"} and run.status not in {"translating", "rendering"}:
+        # Still allow when layout_complete just set stage=layout.
+        pass
+    existing = session.scalar(
+        select(QaItem.id).where(
+            QaItem.run_id == run.id, QaItem.generation == run.generation
+        ).limit(1)
+    )
+    if existing:
+        return
+    from qyunslation.pipeline.qa import (
+        quality_state_from_findings,
+        run_deterministic_qa,
+        summarize,
+    )
+
+    findings = run_deterministic_qa(
+        manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
+        term_summary=run.term_summary,
+        settings_snapshot={**(run.settings_snapshot or {}), "generation": run.generation},
+        translated_text_sample=None,
+        logo_present=None,
+    )
+    for finding in findings:
+        session.add(
+            QaItem(
+                run_id=run.id,
+                generation=run.generation,
+                category=finding.category,
+                severity=finding.severity,
+                code=finding.code,
+                message=finding.message,
+                object_id=finding.object_id,
+                evidence_json=finding.evidence,
+            )
+        )
+    run.qa_summary = summarize(findings)
+    run.quality_state = quality_state_from_findings(findings)
+    run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
 
 
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
@@ -626,6 +699,7 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.status = "translating"
             run.stage = str(runner_state.get("stage") or "layout")
             run.progress = None
+            _maybe_run_auto_qa(session, run)
             run.updated_at = datetime.now(timezone.utc)
             return str(progress_message) if progress_message else None
         if status == "succeeded":
@@ -641,6 +715,9 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.stage = "export"
             run.progress = 100
             run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            # Legacy path has no QA/review gate; mark unverified rather than approved.
+            if (run.quality_state or "draft") in {"draft", ""}:
+                run.quality_state = "legacy_unverified"
             _materialize_artifacts(session, run=run, task_state=runner_state)
         elif status in {"failed", "degraded"}:
             run.status = status
@@ -687,6 +764,8 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.stage = "export"
             run.progress = 100
             run.completed_at = run.completed_at or datetime.now(timezone.utc)
+            if (run.quality_state or "draft") in {"draft", ""}:
+                run.quality_state = "legacy_unverified"
             _materialize_artifacts(session, run=run, task_state=task_state)
     elif task_state.get("is_processing"):
         run.status = "translating"
@@ -737,6 +816,9 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
             run.degradation_reason if run.status in {"failed", "degraded"} else None
         ),
         "manifest_version": run.manifest_version,
+        "quality_state": getattr(run, "quality_state", None) or "draft",
+        "document_classification": getattr(run, "document_classification", None),
+        "model_profile_id": getattr(run, "model_profile_id", None),
         "qa_summary": run.qa_summary or {},
         "term_summary": run.term_summary or {},
         "artifacts": [_artifact_dict(item, run.id) for item in artifacts],
@@ -784,7 +866,11 @@ async def _start_legacy_translation(
 
 
 async def _launch_translation_run(
-    *, run: TranslationRunRecord, preflight: PreflightRecord, target_language: str
+    *,
+    run: TranslationRunRecord,
+    preflight: PreflightRecord,
+    target_language: str,
+    session: Session | None = None,
 ) -> None:
     """Launch the appropriate non-GUI runner and persist an honest state.
 
@@ -823,6 +909,27 @@ async def _launch_translation_run(
             snap["sealed_source_sha256"] = launch.sealed_sha256
             snap["executor_kind"] = launch.executor_kind
             run.settings_snapshot = snap
+            try:
+                from qyunslation.pipeline.event_store import persist_buffer
+                from qyunslation.pipeline.events import StageEventBuffer
+
+                buf = StageEventBuffer()
+                for item in launch.events:
+                    buf.emit(
+                        item["stage"],
+                        item["state"],
+                        message=item.get("message") or "",
+                        progress=item.get("progress"),
+                    )
+                if session is not None:
+                    persist_buffer(
+                        session,
+                        run_id=run.id,
+                        generation=run.generation,
+                        buffer=buf,
+                    )
+            except Exception:
+                pass
             return
         except Exception:
             run.status = "blocked"
@@ -919,6 +1026,22 @@ async def create_translation_run(
     )
     if existing is not None:
         return _translation_run_dict(session, existing)
+    from qyunslation.pipeline.model_profiles import validate_selection
+
+    classification = (
+        body.document_classification
+        or preflight.document_classification
+        or "internal"
+    )
+    model_profile_id = body.model_profile_id or preflight.model_profile_id
+    try:
+        classification, model_profile_id, term_profile_id = validate_selection(
+            classification=classification,
+            model_profile_id=model_profile_id,
+            term_profile_id=body.term_model_profile_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     run = TranslationRunRecord(
         preflight_id=preflight.id,
         tenant_id=tenant.id,
@@ -927,6 +1050,9 @@ async def create_translation_run(
         direction=direction,
         profile=body.profile,
         display_name=(body.display_name or "").strip() or None,
+        document_classification=classification,
+        model_profile_id=model_profile_id,
+        quality_state="draft",
         settings_snapshot={
             "direction": direction,
             "source_language": source_language,
@@ -934,6 +1060,9 @@ async def create_translation_run(
             "profile": body.profile,
             "bilingual": body.bilingual,
             "auto_ocr_workaround": True,
+            "document_classification": classification,
+            "model_profile_id": model_profile_id,
+            "term_model_profile_id": term_profile_id,
         },
         status="queued",
         stage="validation",
@@ -943,7 +1072,7 @@ async def create_translation_run(
     session.add(run)
     session.flush()
     await _launch_translation_run(
-        run=run, preflight=preflight, target_language=target_language
+        run=run, preflight=preflight, target_language=target_language, session=session
     )
     return _translation_run_dict(session, run)
 
@@ -1099,6 +1228,319 @@ def list_translation_artifacts(
     return {"items": [_artifact_dict(row, run.id) for row in rows]}
 
 
+@router.patch("/preflights/{preflight_id}")
+def patch_preflight(
+    preflight_id: str,
+    body: PreflightPatchBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    record = session.get(PreflightRecord, preflight_id)
+    if record is None or record.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    if record.actor_sub != identity.user_sub and _identity_role(identity) not in {
+        "reviewer",
+        "term_admin",
+        "admin",
+        "owner",
+    }:
+        raise HTTPException(status_code=404, detail="preflight not found")
+    from qyunslation.pipeline.model_profiles import validate_selection
+
+    classification = body.document_classification or record.document_classification or "internal"
+    try:
+        classification, model_profile_id, term_profile_id = validate_selection(
+            classification=classification,
+            model_profile_id=body.model_profile_id or record.model_profile_id,
+            term_profile_id=body.term_model_profile_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record.document_classification = classification
+    record.model_profile_id = model_profile_id
+    meta = dict(record.metadata_json or {})
+    recommended = dict(meta.get("recommended") or {})
+    if body.source_language:
+        recommended["source_language"] = body.source_language
+    if body.target_language:
+        recommended["target_language"] = body.target_language
+    if body.profile:
+        recommended["profile"] = body.profile
+    if term_profile_id:
+        recommended["term_model_profile_id"] = term_profile_id
+    meta["recommended"] = recommended
+    meta["document_classification"] = classification
+    meta["model_profile_id"] = model_profile_id
+    record.metadata_json = meta
+    record.updated_at = datetime.now(timezone.utc)
+    return _preflight_dict(record)
+
+
+@router.get("/model-profiles")
+def list_model_profiles(
+    classification: str = Query(default="internal"),
+    identity: IdentityContext = Depends(require_identity),
+) -> dict[str, Any]:
+    _ = identity
+    from qyunslation.pipeline.model_profiles import profiles_payload
+
+    return {"items": profiles_payload(classification), "classification": classification}
+
+
+@router.get("/settings/schema")
+def settings_schema(identity: IdentityContext = Depends(require_identity)) -> dict[str, Any]:
+    _ = identity
+    return {
+        "sections": [
+            {"key": "preferences", "title": "偏好"},
+            {"key": "reading", "title": "阅读与交互"},
+            {"key": "policy", "title": "系统策略", "requires": "can_manage_policy"},
+        ],
+        "keys": sorted(PREF_ALLOWED_KEYS),
+    }
+
+
+@router.get("/settings/effective")
+def settings_effective(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    pref = session.scalar(
+        select(WebPreference).where(
+            WebPreference.tenant_id == tenant.id,
+            WebPreference.user_sub == identity.user_sub,
+        )
+    )
+    user_vals = dict((pref.preferences if pref else {}) or {})
+    effective = {}
+    for key, default in PREF_DEFAULTS.items():
+        if key in user_vals:
+            effective[key] = {
+                "value": user_vals[key],
+                "source": "user",
+                "locked": False,
+                "lock_reason": None,
+            }
+        else:
+            effective[key] = {
+                "value": default,
+                "source": "default",
+                "locked": False,
+                "lock_reason": None,
+            }
+    return {"effective": effective}
+
+
+@router.get("/admin/policies")
+def get_admin_policies(
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    membership = repo.ensure_membership(
+        session,
+        tenant_id=tenant.id,
+        user_sub=identity.user_sub,
+        role=_identity_role(identity),
+    )
+    if membership.role not in {"admin", "owner"}:
+        raise HTTPException(status_code=403, detail="admin policy access denied")
+    return {
+        "pipeline_default": os.environ.get("QYUNSLATION_PIPELINE") or "legacy",
+        "deepseek_configured": bool(
+            (os.environ.get("QYUNSLATION_DEEPSEEK_API_KEY") or "").strip()
+        ),
+    }
+
+
+@router.put("/admin/policies")
+def put_admin_policies(
+    body: dict[str, Any],
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    membership = repo.ensure_membership(
+        session,
+        tenant_id=tenant.id,
+        user_sub=identity.user_sub,
+        role=_identity_role(identity),
+    )
+    if membership.role not in {"admin", "owner"}:
+        raise HTTPException(status_code=403, detail="admin policy access denied")
+    # Runtime env remains source of truth; echo accepted keys for audit UI.
+    return {"accepted": {k: body.get(k) for k in ("pipeline_default",) if k in body}}
+
+
+@router.get("/translation-runs/{run_id}/events")
+def list_translation_run_events(
+    run_id: str,
+    after_sequence: int = Query(default=0, ge=0),
+    generation: int | None = Query(default=None),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    from qyunslation.pipeline.event_store import event_to_dict, list_events
+
+    rows = list_events(
+        session,
+        run_id=run.id,
+        generation=generation if generation is not None else run.generation,
+        after_sequence=after_sequence,
+    )
+    return {"items": [event_to_dict(row) for row in rows], "generation": run.generation}
+
+
+@router.get("/translation-runs/{run_id}/qa-items")
+def list_qa_items(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    rows = list(
+        session.scalars(
+            select(QaItem)
+            .where(QaItem.run_id == run.id, QaItem.generation == run.generation)
+            .order_by(QaItem.created_at)
+        )
+    )
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "category": row.category,
+                "severity": row.severity,
+                "code": row.code,
+                "message": row.message,
+                "object_id": row.object_id,
+                "evidence": row.evidence_json,
+                "resolved": row.resolved,
+            }
+            for row in rows
+        ],
+        "summary": run.qa_summary or {},
+        "quality_state": run.quality_state,
+    }
+
+
+@router.post("/translation-runs/{run_id}/review-decision")
+def post_review_decision(
+    run_id: str,
+    body: ReviewDecisionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    role = _identity_role(identity)
+    if role not in {"reviewer", "term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail="reviewer role required")
+    decision = (body.decision or "").strip().casefold()
+    if decision not in {"approve", "request_changes", "reject"}:
+        raise HTTPException(status_code=400, detail="invalid decision")
+    blockers = int((run.qa_summary or {}).get("blocker") or 0)
+    if decision == "approve" and (run.quality_state == "qa_blocked" or blockers > 0):
+        raise HTTPException(status_code=409, detail="cannot approve while QA blockers remain")
+    row = ReviewDecision(
+        run_id=run.id,
+        generation=run.generation,
+        decision=decision,
+        user_id=identity.user_sub,
+        comment=body.comment,
+        qa_snapshot=dict(run.qa_summary or {}),
+        term_snapshot=dict(run.term_summary or {}),
+        model_snapshot={
+            "model_profile_id": run.model_profile_id,
+            "document_classification": run.document_classification,
+            "settings": dict(run.settings_snapshot or {}),
+        },
+    )
+    session.add(row)
+    if decision == "approve":
+        run.quality_state = "approved"
+        run.status = "succeeded"
+        run.stage = "export"
+        run.progress = 100
+        run.completed_at = run.completed_at or datetime.now(timezone.utc)
+    elif decision == "request_changes":
+        run.quality_state = "draft"
+        run.stage = "text"
+        run.status = "translating"
+    else:
+        run.quality_state = "draft"
+        run.status = "failed"
+        run.stage = "review"
+        run.degradation_reason = "rejected by reviewer"
+        run.completed_at = datetime.now(timezone.utc)
+    run.updated_at = datetime.now(timezone.utc)
+    return _translation_run_dict(session, run)
+
+
+@router.get("/translation-runs/{run_id}/preview/{side}")
+def preview_translation_run(
+    run_id: str,
+    side: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+):
+    """Authorized inline preview; does not expose storage paths."""
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if side not in {"source", "translated"}:
+        raise HTTPException(status_code=404, detail="preview side not found")
+    if side == "source":
+        preflight = session.get(PreflightRecord, run.preflight_id)
+        if preflight is None:
+            raise HTTPException(status_code=404, detail="source preview unavailable")
+        path = _preflight_path(preflight)
+        media = "application/pdf" if path.suffix.casefold() == ".pdf" else "application/octet-stream"
+        filename = preflight.source_filename
+    else:
+        artifact = session.scalar(
+            select(TranslationArtifact)
+            .where(
+                TranslationArtifact.run_id == run.id,
+                TranslationArtifact.tenant_id == run.tenant_id,
+                TranslationArtifact.kind.in_(["translated_preview", "review_draft", "legacy", "formal"]),
+            )
+            .order_by(TranslationArtifact.created_at.desc())
+        )
+        if artifact is None:
+            # Fall back to runner outputs for v2 layout_complete without formal gate.
+            try:
+                from qyunslation.workbench.runner import get_pdf2zh_task_state
+
+                state = get_pdf2zh_task_state(run.external_task_id or "")
+            except Exception:
+                state = None
+            files = (state or {}).get("downloadable_files") or {}
+            first = next(iter(files.values()), None)
+            if not first:
+                raise HTTPException(status_code=404, detail="translated preview unavailable")
+            path = Path(str(first["path"]))
+            media = "application/pdf"
+            filename = str(first.get("filename") or path.name)
+        else:
+            if artifact.formal_export and (getattr(run, "quality_state", None) != "approved"):
+                # Prefer non-formal; skip formal until approved.
+                raise HTTPException(status_code=409, detail="formal preview not approved")
+            path = _artifact_path(artifact)
+            media = artifact.media_type
+            filename = artifact.filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="preview file missing")
+    return FileResponse(
+        path=path,
+        media_type=media,
+        filename=filename,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/translation-runs/{run_id}/artifacts/{artifact_id}")
 def download_translation_artifact(
     run_id: str,
@@ -1117,8 +1559,18 @@ def download_translation_artifact(
     )
     if artifact is None:
         raise HTTPException(status_code=404, detail="translation artifact not found")
-    if artifact.formal_export and run.status != "succeeded":
-        raise HTTPException(status_code=409, detail="formal export is not ready")
+    quality_state = getattr(run, "quality_state", None) or "draft"
+    if artifact.formal_export:
+        allowed = (
+            (run.status == "succeeded" and quality_state == "approved")
+            or quality_state == "legacy_unverified"
+            or artifact.kind == "legacy"
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=409,
+                detail="formal export requires approved quality_state and succeeded status",
+            )
     path = _artifact_path(artifact)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="translation artifact is no longer available")
@@ -1164,6 +1616,7 @@ async def cancel_translation_run(
 @router.post("/translation-runs/{run_id}/retry", status_code=201)
 async def retry_translation_run(
     run_id: str,
+    body: RetryTranslationBody | None = None,
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -1184,6 +1637,12 @@ async def retry_translation_run(
     if existing is not None:
         return _translation_run_dict(session, existing)
     key = hashlib.sha256(f"retry:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
+    snap = dict(run.settings_snapshot or {})
+    requested_pipeline = ((body.pipeline if body else None) or "").strip().casefold()
+    if requested_pipeline == "v2":
+        snap["pipeline"] = "v2"
+        snap["pipeline_requested"] = "v2"
+        snap["retry_of"] = {"run_id": run.id, "generation": run.generation}
     retry = TranslationRunRecord(
         preflight_id=run.preflight_id,
         tenant_id=run.tenant_id,
@@ -1193,19 +1652,34 @@ async def retry_translation_run(
         direction=run.direction,
         profile=run.profile,
         display_name=run.display_name,
-        settings_snapshot=dict(run.settings_snapshot or {}),
+        settings_snapshot=snap,
         status="queued",
         stage="validation",
-        term_summary=dict(run.term_summary or {}),
+        quality_state="draft",
+        document_classification=run.document_classification,
+        model_profile_id=run.model_profile_id,
+        term_summary={"status": "snapshot_pending"},
         qa_summary={"blocker": 0, "warning": 0, "info": 0},
     )
     session.add(retry)
     session.flush()
-    await _launch_translation_run(
-        run=retry,
-        preflight=preflight,
-        target_language=_run_target_language(retry.direction),
-    )
+    # Force v2 launch for explicit retry without mutating process-wide env permanently.
+    previous_pipeline = os.environ.get("QYUNSLATION_PIPELINE")
+    if requested_pipeline == "v2":
+        os.environ["QYUNSLATION_PIPELINE"] = "v2"
+    try:
+        await _launch_translation_run(
+            run=retry,
+            preflight=preflight,
+            target_language=_run_target_language(retry.direction),
+            session=session,
+        )
+    finally:
+        if requested_pipeline == "v2":
+            if previous_pipeline is None:
+                os.environ.pop("QYUNSLATION_PIPELINE", None)
+            else:
+                os.environ["QYUNSLATION_PIPELINE"] = previous_pipeline
     return _translation_run_dict(session, retry)
 
 

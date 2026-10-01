@@ -128,11 +128,54 @@ def _default_cache_dir() -> Path:
     return Path.home() / ".cache" / "qyunslation" / "term-align" / "v2"
 
 
-def _cache_key(source_term: str, target_context: str) -> str:
+def _prompt_version() -> str:
+    return (os.environ.get("QYUNSLATION_TERM_PROMPT_VERSION") or "term-align-v1").strip()
+
+
+def _model_version() -> str:
+    return (
+        os.environ.get("QYUNSLATION_TERM_MODEL_VERSION")
+        or os.environ.get("DOCUTRANSLATE_MODEL_ID")
+        or os.environ.get("QYUNSLATION_MODEL_ID")
+        or "unknown"
+    ).strip()
+
+
+def _termbase_version() -> str:
+    return (os.environ.get("QYUNSLATION_TERMBASE_VERSION") or "default").strip()
+
+
+def _direction_token() -> str:
+    return (os.environ.get("QYUNSLATION_TERM_DIRECTION") or "en-zh").strip()
+
+
+def suggestion_cache_key(
+    source_term: str,
+    context_digest: str,
+    *,
+    direction: str | None = None,
+    model_version: str | None = None,
+    prompt_version: str | None = None,
+    termbase_version: str | None = None,
+) -> str:
+    """PLAN-071h：六元组缓存键。"""
     from qyunslation.glossary.governance import normalize_source
 
-    payload = f"{normalize_source(source_term)}|{hashlib.sha1((target_context or '').encode('utf-8')).hexdigest()}"
+    payload = "|".join(
+        [
+            normalize_source(source_term),
+            hashlib.sha1((context_digest or "").encode("utf-8")).hexdigest(),
+            direction or _direction_token(),
+            model_version or _model_version(),
+            prompt_version or _prompt_version(),
+            termbase_version or _termbase_version(),
+        ]
+    )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _cache_key(source_term: str, target_context: str) -> str:
+    return suggestion_cache_key(source_term, target_context)
 
 
 def _read_cache(cache_dir: Path, key: str) -> AlignedTerm | None:
@@ -312,6 +355,26 @@ def suggest_from_termbase(
     return found
 
 
+def _validate_suggestion_item(item: dict[str, Any]) -> bool:
+    """Loose schema gate compatible with legacy LLM replies + 071h schema fields."""
+    if not isinstance(item, dict):
+        return False
+    target = item.get("suggested_target") or item.get("target")
+    if not isinstance(target, str) or not target.strip():
+        return False
+    if "confidence" in item:
+        try:
+            conf = float(item["confidence"])
+        except (TypeError, ValueError):
+            return False
+        if conf < 0 or conf > 1:
+            return False
+    risk = item.get("risk")
+    if risk is not None and risk not in {"low", "normal", "high", "critical"}:
+        return False
+    return True
+
+
 def suggest_targets(
     rows: Iterable[dict[str, Any] | AlignedTerm],
     *,
@@ -319,6 +382,8 @@ def suggest_targets(
     limit: int | None = None,
     timeout: float | None = None,
     cache_dir: Path | str | None = None,
+    classification: str = "internal",
+    allow_external: bool = True,
 ) -> dict[str, AlignedTerm]:
     """只处理 window/none；整篇一次 chat，失败即空。"""
     if not _suggest_enabled():
@@ -342,15 +407,24 @@ def suggest_targets(
     if not staged:
         return {}
 
+    from qyunslation.glossary.redaction import redact_term_context
+
     store = Path(cache_dir) if cache_dir else _default_cache_dir()
     found: dict[str, AlignedTerm] = {}
     pending: list[tuple[str, str, AlignedTerm]] = []
     for source_term, target_context, aligned in staged:
-        cached = _read_cache(store, _cache_key(source_term, target_context))
+        redacted_context, report = redact_term_context(
+            target_context, classification=classification
+        )
+        if not report.ok:
+            # Fail closed for confidential / residual PII: skip external suggest.
+            continue
+        cache_context = redacted_context if allow_external else target_context
+        cached = _read_cache(store, _cache_key(source_term, cache_context))
         if cached is not None:
             found[source_term] = cached
         else:
-            pending.append((source_term, target_context, aligned))
+            pending.append((source_term, cache_context, aligned))
     if not pending:
         return found
 
@@ -384,6 +458,8 @@ def suggest_targets(
             ),
         )
         for item in _parse_json_array(raw):
+            if not _validate_suggestion_item(item):
+                continue
             source_term = str(item.get("source_term") or "").strip()
             if not source_term:
                 continue
@@ -391,7 +467,9 @@ def suggest_targets(
             if match is None:
                 continue
             _source, target_context, aligned = match
-            suggested = str(item.get("suggested_target") or "").strip() or None
+            suggested = str(
+                item.get("suggested_target") or item.get("target") or ""
+            ).strip() or None
             observed = str(item.get("observed_target") or "").strip()
             if observed and observed not in target_context:
                 observed = ""

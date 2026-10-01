@@ -52,7 +52,32 @@ export const api = {
   restoreRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' }),
   deleteRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   cancelRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
-  retryRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
+  retryRun: (runId, payload = {}) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/retry`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  getRunEvents: (runId, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/events${query ? `?${query}` : ''}`);
+  },
+  getQaItems: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/qa-items`),
+  postReviewDecision: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-decision`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  patchPreflight: (preflightId, payload) => apiRequest(`${API_PREFIX}/preflights/${encodeURIComponent(preflightId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }),
+  listModelProfiles: (classification = 'internal') => apiRequest(`${API_PREFIX}/model-profiles?classification=${encodeURIComponent(classification)}`),
+  getSettingsSchema: () => apiRequest(`${API_PREFIX}/settings/schema`),
+  getSettingsEffective: () => apiRequest(`${API_PREFIX}/settings/effective`),
+  getAdminPolicies: () => apiRequest(`${API_PREFIX}/admin/policies`),
+  putAdminPolicies: (payload) => apiRequest(`${API_PREFIX}/admin/policies`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  previewUrl: (runId, side) => `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/preview/${encodeURIComponent(side)}`,
   listTerms: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);

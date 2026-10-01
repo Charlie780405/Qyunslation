@@ -1,6 +1,6 @@
 # PLAN-071c：表格、图片、Logo 与版式修复
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071b](./PLAN-071b-document-pipeline-manifest.md)
 

@@ -1,6 +1,6 @@
 # PLAN-071d：持久化阶段事件与真实进度
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071b](./PLAN-071b-document-pipeline-manifest.md)（可与 071b 同波次并行，接口先定契约）
 

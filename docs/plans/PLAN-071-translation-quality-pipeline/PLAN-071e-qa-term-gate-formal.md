@@ -1,6 +1,6 @@
 # PLAN-071e：QA、术语门禁与正式产物
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071b](./PLAN-071b-document-pipeline-manifest.md)、[071d](./PLAN-071d-stage-events-progress.md)；版式类检查可弱依赖 [071c](./PLAN-071c-table-figure-logo-layout.md)
 

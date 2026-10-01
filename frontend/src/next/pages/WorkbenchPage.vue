@@ -49,9 +49,11 @@
               :aria-valuenow="activeRun.progress === null || activeRun.progress === undefined ? undefined : activeRun.progress"
               :aria-valuetext="progressText(activeRun)"
             ><span :style="activeRun.progress === null || activeRun.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, activeRun.progress))}%` }"></span></div>
-            <ol class="qy-live-stage-list" aria-label="翻译阶段">
-              <li v-for="stage in progressStages" :key="stage.key" :class="stageClass(stage.key, activeRun)"><span>{{ stage.number }}</span><strong>{{ stage.label }}</strong></li>
-            </ol>
+            <StageTimeline
+              :events="activeEvents"
+              :current-stage="activeRun.stage || ''"
+              :quality-state="activeRun.quality_state || 'draft'"
+            />
           </div>
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
@@ -81,19 +83,20 @@
             </div>
           </div>
           <div v-if="runs.length" class="qy-task-list">
-            <article v-for="run in runs" :key="run.id" class="qy-task-row">
+            <article v-for="run in runs" :key="run.id" class="qy-task-row" @click="openRun(run)">
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
               <div class="qy-task-details">
                 <strong>{{ run.display_name || run.filename || run.file_name || '未命名文档' }}</strong>
-                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template></span>
+                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ statusLabel(run.status) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
                 <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ run.progress_message || stageMessage(run) }}</span><span>{{ progressText(run) }}</span></div>
                 <div v-if="isActive(run)" class="qy-task-progress" :class="{ 'is-indeterminate': run.progress === null || run.progress === undefined }" role="progressbar" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="run.progress === null || run.progress === undefined ? undefined : run.progress" :aria-valuetext="progressText(run)"><span :style="run.progress === null || run.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
                 <div v-if="run.artifacts?.length" class="qy-task-artifacts">
                   <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
                 </div>
               </div>
-              <div class="qy-task-actions">
+              <div class="qy-task-actions" @click.stop>
                 <button v-if="isActive(run)" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
+                <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="retryRun(run, { pipeline: 'v2' })">新版重试</button>
                 <button v-else-if="canRetry(run)" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
                 <button v-if="run.archived" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
                 <button v-else-if="isTerminal(run)" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
@@ -114,18 +117,18 @@
       <aside class="qy-workbench-side">
         <div class="qy-panel qy-side-card">
           <span class="qy-eyebrow">TASK FLOW</span>
-          <h2>一次任务，五个可复核阶段</h2>
-          <ol class="qy-flow-list">
-            <li :class="stageClass('validation', activeRun)"><span>01</span><div><strong>文件预检</strong><small>识别格式、页数与风险</small></div></li>
-            <li :class="stageClass('text', activeRun)"><span>02</span><div><strong>翻译处理</strong><small>按文档对象保留结构</small></div></li>
-            <li :class="stageClass('qa', activeRun)"><span>03</span><div><strong>QA 与术语</strong><small>发现高风险不一致</small></div></li>
-            <li :class="stageClass('review', activeRun)"><span>04</span><div><strong>人工复核</strong><small>只编辑译文版本</small></div></li>
-            <li :class="stageClass('export', activeRun)"><span>05</span><div><strong>受控导出</strong><small>通过门禁后生成正式稿</small></div></li>
-          </ol>
+          <h2>真实阶段事件</h2>
+          <p class="qy-muted">进度只反映服务端事件，不伪造已完成。</p>
+          <StageTimeline
+            :events="activeEvents"
+            :current-stage="activeRun?.stage || ''"
+            :quality-state="activeRun?.quality_state || 'draft'"
+          />
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
           <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
           <label class="qy-field"><span>文档类型</span><select v-model="settings.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
+          <label class="qy-field"><span>资料等级</span><select v-model="settings.classification"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
           <label class="qy-check-field"><input v-model="settings.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
         </div>
       </aside>
@@ -135,8 +138,10 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
+import StageTimeline from '../components/StageTimeline.vue';
 import {
   AdjustmentsHorizontalIcon,
   ArrowPathIcon,
@@ -150,6 +155,7 @@ import {
   PlayIcon,
 } from '@heroicons/vue/24/outline';
 
+const router = useRouter();
 const selectedFile = ref(null);
 const fileInput = ref(null);
 const uploadMessage = ref('');
@@ -158,23 +164,23 @@ const uploading = ref(false);
 const uploadProgress = ref(0);
 const showAdvanced = ref(false);
 const runs = ref([]);
+const activeEvents = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
 const showArchived = ref(false);
-const settings = reactive({ sourceLanguage: 'English', targetLanguage: '简体中文', profile: '临床研究文档', bilingual: true });
+const settings = reactive({
+  sourceLanguage: 'English',
+  targetLanguage: '简体中文',
+  profile: '临床研究文档',
+  bilingual: true,
+  classification: 'internal',
+});
 let pollTimer;
 let pollRequest = 0;
 
 const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
 const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
-const progressStages = [
-  { key: 'validation', number: '01', label: '预检' },
-  { key: 'text', number: '02', label: '翻译' },
-  { key: 'qa', number: '03', label: 'QA' },
-  { key: 'review', number: '04', label: '复核' },
-  { key: 'export', number: '05', label: '导出' },
-];
 const activeRun = computed(() => runs.value.find(isActive) || null);
 const languageError = computed(() => settings.sourceLanguage === settings.targetLanguage ? '源语言和目标语言不能相同。' : '');
 
@@ -212,24 +218,13 @@ function canRetry(run) {
   return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
 }
 
-function stageBucket(stage) {
-  if (stage === 'validation') return 'validation';
-  if (['structure', 'text', 'table_figure', 'layout', 'rendering'].includes(stage)) return 'text';
-  if (stage === 'qa') return 'qa';
-  if (stage === 'review' || stage === 'review_ready') return 'review';
-  if (stage === 'export') return 'export';
-  return 'validation';
+function canRetryV2(run) {
+  return run.quality_state === 'legacy_unverified' || canRetry(run);
 }
 
-function stageClass(stage, run) {
-  if (!run) return stage === 'validation' ? 'is-current' : '';
-  const order = ['validation', 'text', 'qa', 'review', 'export'];
-  const current = order.indexOf(stageBucket(run.stage));
-  const index = order.indexOf(stage);
-  if (current < 0 || index < 0) return '';
-  if (index < current || run.status === 'succeeded' && index < order.length) return 'is-complete';
-  if (index === current) return 'is-current';
-  return '';
+function openRun(run) {
+  if (!run?.id) return;
+  router.push(`/workbench/${run.id}`);
 }
 
 function stageMessage(run) {
@@ -300,6 +295,7 @@ async function startTranslation() {
       target_language: settings.targetLanguage,
       profile: settings.profile,
       bilingual: settings.bilingual,
+      document_classification: settings.classification,
     }, key);
     uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
     await refreshRuns();
@@ -316,12 +312,27 @@ async function startTranslation() {
   }
 }
 
+async function refreshActiveEvents(run) {
+  if (!run?.id) {
+    activeEvents.value = [];
+    return;
+  }
+  try {
+    const response = await api.getRunEvents(run.id, { after_sequence: 0 });
+    activeEvents.value = response.items || [];
+  } catch {
+    activeEvents.value = [];
+  }
+}
+
 async function refreshRuns() {
   const requestId = ++pollRequest;
   try {
     const response = await api.listRuns({ include_archived: showArchived.value ? 'true' : 'false' });
     if (requestId !== pollRequest) return;
     runs.value = Array.isArray(response) ? response : response.items || [];
+    const focus = runs.value.find(isActive) || runs.value[0];
+    await refreshActiveEvents(focus);
   } catch {
     if (requestId === pollRequest && !runs.value.length) runs.value = [];
   } finally {
@@ -342,9 +353,9 @@ async function cancelRun(run) {
   }
 }
 
-async function retryRun(run) {
+async function retryRun(run, payload = {}) {
   try {
-    await api.retryRun(run.id);
+    await api.retryRun(run.id, payload);
     await refreshRuns();
   } catch (error) {
     uploadError.value = true;

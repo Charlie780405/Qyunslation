@@ -1,6 +1,6 @@
 # PLAN-071f：源译双画布预览与任务详情
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071d](./PLAN-071d-stage-events-progress.md)、[071e](./PLAN-071e-qa-term-gate-formal.md)
 

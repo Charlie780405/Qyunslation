@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -150,6 +151,8 @@ class PreflightRecord(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    document_classification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_profile_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
@@ -190,6 +193,9 @@ class TranslationRunRecord(Base):
     progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
     external_task_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     manifest_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quality_state: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    document_classification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_profile_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     qa_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     term_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     degradation_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -228,6 +234,98 @@ class TranslationArtifact(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     formal_export: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class TranslationStageEvent(Base):
+    """PLAN-071d：可恢复阶段事件。"""
+
+    __tablename__ = "translation_stage_event"
+    __table_args__ = (
+        UniqueConstraint("run_id", "generation", "sequence", name="uq_stage_event_seq"),
+        Index("ix_stage_event_run_gen_seq", "run_id", "generation", "sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    units_done: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    units_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class QaItem(Base):
+    """PLAN-071e：确定性 QA 项。"""
+
+    __tablename__ = "qa_item"
+    __table_args__ = (Index("ix_qa_item_run_gen", "run_id", "generation"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    message: Mapped[str] = mapped_column(String(1024), nullable=False)
+    object_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    reviewer_note: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class ReviewDecision(Base):
+    """PLAN-071e：人工审核决定。"""
+
+    __tablename__ = "review_decision"
+    __table_args__ = (Index("ix_review_decision_run_gen", "run_id", "generation"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    comment: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    qa_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    term_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    model_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class ModelProfileVersion(Base):
+    """PLAN-071g：模型配置探测版本钉扎。"""
+
+    __tablename__ = "model_profile_version"
+    __table_args__ = (Index("ix_model_profile_id_created", "profile_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    profile_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    reported_version: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    experimental: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    probe_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

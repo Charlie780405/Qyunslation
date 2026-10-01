@@ -68,7 +68,13 @@ class DevBypassAdapter:
             raise HTTPException(status_code=401, detail="dev auth bypass not enabled")
         user = (request.headers.get("X-Dev-User") or "dev-user").strip() or "dev-user"
         tenant = (request.headers.get("X-Dev-Tenant") or "dev").strip() or "dev"
-        return IdentityContext(tenant_slug=tenant, user_sub=user)
+        role_header = (request.headers.get("X-Dev-Role") or "").strip()
+        roles = tuple(
+            part.strip()
+            for part in role_header.replace(";", ",").split(",")
+            if part.strip()
+        ) or ("translator", "workbench_v2")
+        return IdentityContext(tenant_slug=tenant, user_sub=user, roles=roles)
 
 
 _JWKS_CACHE: dict[str, tuple[float, PyJWKClient]] = {}

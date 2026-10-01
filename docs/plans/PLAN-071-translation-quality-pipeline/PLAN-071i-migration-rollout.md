@@ -1,6 +1,6 @@
 # PLAN-071i：历史迁移、灰度和正式切换
 
-> 状态：**待实施**
+> 状态：**已实现（浏览器证据 BLOCKED）**
 > 父计划：[PLAN-071](./README.md)
 > 依赖：[071a](./PLAN-071a-baseline-inventory.md)–[071h](./PLAN-071h-termbase-recommendation.md)
 
