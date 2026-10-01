@@ -27,11 +27,24 @@ bash scripts/verify-plan-072.sh
 - API：`tests/api/test_plan072_resume.py` — PASS（6/6）
 - 前端 vitest — PASS（21/21）
 
+## 生产发布（2026-10-01）
+
+| 步骤 | 结果 |
+| --- | --- |
+| Git | `main` @ `a2191fe` 已 push |
+| 备份 | `pg_dump` → `/home/dev/pdf2zh/backups/qyunslation-pre-072a-20261001T040921Z.dump` |
+| Alembic | 生产库 `071g0002` → **`072a0001`**；`upload_session` / `review_draft` / heartbeat 列已确认 |
+| 部署 | `bash scripts/deploy-translate-stack.sh`；sidecar 指纹 **`7542777de0fd`** 一致 |
+| 孤儿清理 | `plan072-gc-orphans.py --apply` 删除 2 个无 DB 记录的 run 目录 |
+| verify | `SUMMARY: BLOCKED fail=0 blocked=1`（无 Chrome 手测） |
+
+环境变量沿用 PLAN-071：`QYUNSLATION_PIPELINE=legacy`，`QYUNSLATION_PIPELINE_TENANTS=pilot`。
+
 ## 发布门禁
 
 | 项 | 结果 |
 | --- | --- |
-| Alembic 072a0001 | PASS（SQLite 回归） |
+| Alembic 072a0001 | PASS（SQLite 回归 + 生产库） |
 | 分片上传 sha256 | PASS（API 测试） |
 | 续跑跳过已完成阶段 | PASS（resume + pending_stages 接线） |
 | 刷新恢复预检/草稿 | BLOCKED（无 Chrome 手测） |
