@@ -131,3 +131,22 @@ def test_translated_output_reaches_review_ready_without_blockers(monkeypatch, tm
         assert run["term_summary"]["status"] == "ready"
         assert run["term_summary"]["content_hash"]
     reset_engine()
+
+
+def test_new_termbase_entries_do_not_rewrite_existing_run_snapshot(monkeypatch, tmp_path):
+    from qyunslation.persist import db as persist_db
+    from qyunslation.persist.concept_repo import create_staging_concept
+
+    with _make_client(monkeypatch, tmp_path, translate=True) as client:
+        run_id, _ = _run_to_review(client, HEADERS, tmp_path, "snapshot-frozen")
+        before = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()["term_summary"]
+        with persist_db.SessionLocal() as session:
+            concept = create_staging_concept(
+                session, preferred_source="adults", preferred_target="成人", layer="tenant"
+            )
+            concept.status = "curated"
+            session.commit()
+        after = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()["term_summary"]
+        assert after["content_hash"] == before["content_hash"]
+        assert after["termbase_version"] == before["termbase_version"]
+    reset_engine()
