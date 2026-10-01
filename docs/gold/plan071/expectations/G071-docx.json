@@ -1,0 +1,29 @@
+{
+  "id": "G071-docx",
+  "format": "docx",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "notes": "OOXML clone-replace; media/theme/header/footer/logo binary unchanged"
+  },
+  "objects": {
+    "paragraphs_min": 3,
+    "tables": 1,
+    "figures": 0,
+    "preserve": [
+      { "kind": "logo", "count_min": 1, "hash_required": true }
+    ]
+  },
+  "atomic_spans": [
+    { "kind": "email", "examples": ["example.com"] },
+    { "kind": "url", "examples": ["https://"] }
+  ],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "notes": "Styles, header/footer, media relationships preserved"
+  },
+  "quality_rules": [
+    { "id": "ooxml-media", "severity": "blocker", "rule": "Logo binary and media rIds unchanged" },
+    { "id": "styles-kept", "severity": "blocker", "rule": "Paragraph/table styles retained" }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "G071-pdf-figure-dense",
+  "format": "pdf_figure_dense",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "notes": "Promote figure-dense sample; base image must not be redrawn"
+  },
+  "objects": {
+    "paragraphs_min": 0,
+    "tables": 0,
+    "figures": 1,
+    "preserve": []
+  },
+  "atomic_spans": [],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "bbox_tolerance_pt": 2.0,
+    "notes": "Only confirmed OCR labels translated; low confidence keeps original pixels"
+  },
+  "quality_rules": [
+    { "id": "base-image-intact", "severity": "blocker", "rule": "Non-text figure pixels hash-stable outside label masks" },
+    { "id": "low-conf-warning", "severity": "warning", "rule": "Low OCR confidence yields warning not invented text" }
+  ]
+}

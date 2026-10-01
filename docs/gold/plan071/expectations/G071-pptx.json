@@ -1,0 +1,26 @@
+{
+  "id": "G071-pptx",
+  "format": "pptx",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "notes": "Master, text boxes, tables, pictures, logo preserved"
+  },
+  "objects": {
+    "paragraphs_min": 2,
+    "tables": 1,
+    "figures": 1,
+    "preserve": [
+      { "kind": "logo", "count_min": 1, "hash_required": true }
+    ]
+  },
+  "atomic_spans": [],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "notes": "Slide master and shape IDs stable in Manifest"
+  },
+  "quality_rules": [
+    { "id": "master-kept", "severity": "blocker", "rule": "Slide master and theme unchanged" },
+    { "id": "shape-ids", "severity": "blocker", "rule": "Shape/table cell IDs reverse-lookupable" }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "G071-pdf-text",
+  "format": "pdf_text",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "catalog_id": "C-04",
+    "sha256": "c0c4e196259cd852895701a0fae16578f7b65a11dc83af9b235bf669c573ff38",
+    "relpath": "C-04.pdf",
+    "notes": "Borrow PLAN-034 C-04 as text-PDF starter; raise page_or_slide_count when binary verified"
+  },
+  "objects": {
+    "paragraphs_min": 10,
+    "tables": 0,
+    "figures": 0,
+    "preserve": []
+  },
+  "atomic_spans": [
+    { "kind": "dose", "examples": ["mg", "mg/kg"] },
+    { "kind": "number", "examples": ["%"] }
+  ],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "bbox_tolerance_pt": 2.0,
+    "notes": "OCR stage must be skipped; text objects reverse-lookupable"
+  },
+  "quality_rules": [
+    { "id": "ocr-skipped", "severity": "warning", "rule": "ocr stage recorded as skipped for text PDF" },
+    { "id": "manifest-roundtrip", "severity": "blocker", "rule": "Every translated text object maps to source object id" }
+  ]
+}

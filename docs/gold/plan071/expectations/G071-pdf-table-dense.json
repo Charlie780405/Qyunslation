@@ -1,0 +1,31 @@
+{
+  "id": "G071-pdf-table-dense",
+  "format": "pdf_table_dense",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "notes": "Promote real table-dense sample via PLAN-052 inbox; placeholder expectation locked"
+  },
+  "objects": {
+    "paragraphs_min": 0,
+    "tables": 1,
+    "figures": 0,
+    "preserve": [],
+    "table_structure": [
+      { "id": "T1", "rows": 2, "cols": 2, "merges": 0 }
+    ]
+  },
+  "atomic_spans": [
+    { "kind": "number", "examples": ["0.05", "95%"] },
+    { "kind": "dose", "examples": ["mg"] }
+  ],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "bbox_tolerance_pt": 2.0,
+    "notes": "Row/col/merge counts stable; numeric tokens protected"
+  },
+  "quality_rules": [
+    { "id": "table-shape", "severity": "blocker", "rule": "Row/col/merge unchanged vs expectation" },
+    { "id": "numeric-protect", "severity": "blocker", "rule": "Critical numbers and units unchanged" }
+  ]
+}

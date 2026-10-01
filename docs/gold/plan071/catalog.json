@@ -1,0 +1,98 @@
+{
+  "plan": "071",
+  "schema": "plan071-gold-catalog/v1",
+  "notes": "Binaries stay out of git. Resolve via QYUNSLATION_PLAN071_GOLD_ROOT or PLAN034 gold root for shared entries.",
+  "entries": [
+    {
+      "id": "G071-pdf-text",
+      "format": "pdf_text",
+      "title": "Text-layer PDF literature/protocol excerpt",
+      "expectation": "expectations/G071-pdf-text.json",
+      "source": {
+        "catalog_id": "C-04",
+        "plan034_relpath": "C-04.pdf",
+        "sha256": "c0c4e196259cd852895701a0fae16578f7b65a11dc83af9b235bf669c573ff38",
+        "status": "borrow_plan034_pending_verify"
+      },
+      "tags": ["pdf", "text"]
+    },
+    {
+      "id": "G071-pdf-scan-fda",
+      "format": "pdf_scan",
+      "title": "FDA PIND scanned regulatory letter (20 pages)",
+      "expectation": "expectations/G071-pdf-scan-fda.json",
+      "source": {
+        "catalog_id": "C-fda-pind",
+        "plan034_relpath": "C-fda-pind.pdf",
+        "sha256": "dae7401230ca270f1cedfa2052235dba5952d4f0a577e91dc84c36c0ba7b9cb4",
+        "status": "ready_when_binary_present"
+      },
+      "tags": ["pdf", "scan", "letter", "fda", "pind"]
+    },
+    {
+      "id": "G071-pdf-table-dense",
+      "format": "pdf_table_dense",
+      "title": "Table-dense clinical/results PDF",
+      "expectation": "expectations/G071-pdf-table-dense.json",
+      "source": {
+        "catalog_id": null,
+        "relpath": "G071-pdf-table-dense.pdf",
+        "sha256": null,
+        "status": "needs_promote"
+      },
+      "tags": ["pdf", "table"]
+    },
+    {
+      "id": "G071-pdf-figure-dense",
+      "format": "pdf_figure_dense",
+      "title": "Figure-dense PDF with in-image labels",
+      "expectation": "expectations/G071-pdf-figure-dense.json",
+      "source": {
+        "catalog_id": null,
+        "relpath": "G071-pdf-figure-dense.pdf",
+        "sha256": null,
+        "status": "needs_promote"
+      },
+      "tags": ["pdf", "figure", "imgtr"]
+    },
+    {
+      "id": "G071-docx",
+      "format": "docx",
+      "title": "DOCX with header/footer table and embedded logo",
+      "expectation": "expectations/G071-docx.json",
+      "source": {
+        "catalog_id": null,
+        "relpath": "G071-docx.docx",
+        "sha256": null,
+        "status": "needs_promote"
+      },
+      "tags": ["docx", "office"]
+    },
+    {
+      "id": "G071-pptx",
+      "format": "pptx",
+      "title": "PPTX with master, text boxes, table, logo",
+      "expectation": "expectations/G071-pptx.json",
+      "source": {
+        "catalog_id": null,
+        "relpath": "G071-pptx.pptx",
+        "sha256": null,
+        "status": "needs_promote"
+      },
+      "tags": ["pptx", "office"]
+    },
+    {
+      "id": "G071-image",
+      "format": "image",
+      "title": "Standalone PNG/JPEG with OCR labels",
+      "expectation": "expectations/G071-image.json",
+      "source": {
+        "catalog_id": null,
+        "relpath": "G071-image.png",
+        "sha256": null,
+        "status": "needs_promote"
+      },
+      "tags": ["image", "png"]
+    }
+  ]
+}

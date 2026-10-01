@@ -1,0 +1,41 @@
+{
+  "id": "G071-pdf-scan-fda",
+  "format": "pdf_scan",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 20,
+  "source": {
+    "catalog_id": "C-fda-pind",
+    "sha256": "dae7401230ca270f1cedfa2052235dba5952d4f0a577e91dc84c36c0ba7b9cb4",
+    "relpath": "C-fda-pind.pdf",
+    "notes": "FDA PIND letter; logo/seal/signature preserve; letter profile"
+  },
+  "objects": {
+    "paragraphs_min": 40,
+    "tables": 0,
+    "figures": 0,
+    "preserve": [
+      { "kind": "logo", "count_min": 1, "hash_required": true },
+      { "kind": "signature", "count_min": 1, "hash_required": false },
+      { "kind": "agency_mark", "count_min": 0, "hash_required": false }
+    ]
+  },
+  "atomic_spans": [
+    { "kind": "email", "examples": ["@fda.hhs.gov"] },
+    { "kind": "url", "examples": ["www.fda.gov"] },
+    { "kind": "pind", "examples": ["PIND"] },
+    { "kind": "reference_id", "examples": ["Reference ID"] },
+    { "kind": "ordinal", "examples": ["th"] }
+  ],
+  "layout_baseline": {
+    "forbid_substrings": ["^{th}", "^{st}", "^{nd}", "^{rd}"],
+    "bbox_tolerance_pt": 3.0,
+    "notes": "No email split across lines; address and signature blocks stay contiguous"
+  },
+  "quality_rules": [
+    { "id": "fda-logo-preserve", "severity": "blocker", "rule": "FDA logo byte-identical reinsert" },
+    { "id": "no-th-artifact", "severity": "blocker", "rule": "Output must not contain ^{th}" },
+    { "id": "email-atomic", "severity": "blocker", "rule": "Email addresses remain unbroken" },
+    { "id": "page-count", "severity": "blocker", "rule": "Page count equals 20" },
+    { "id": "qa-review-required", "severity": "blocker", "rule": "Must not mark formal without QA+review" }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "G071-image",
+  "format": "image",
+  "lang_pair": "en→zh",
+  "page_or_slide_count": 1,
+  "source": {
+    "notes": "Immutable base image; overlay only detected text regions"
+  },
+  "objects": {
+    "paragraphs_min": 0,
+    "tables": 0,
+    "figures": 1,
+    "preserve": []
+  },
+  "atomic_spans": [
+    { "kind": "dose", "examples": ["mg"] }
+  ],
+  "layout_baseline": {
+    "forbid_substrings": [],
+    "notes": "Coordinates, font, mask retained in Manifest"
+  },
+  "quality_rules": [
+    { "id": "base-immutable", "severity": "blocker", "rule": "Original image bytes unchanged as base layer" },
+    { "id": "mask-only", "severity": "blocker", "rule": "Only OCR boxes receive overlay paint" }
+  ]
+}

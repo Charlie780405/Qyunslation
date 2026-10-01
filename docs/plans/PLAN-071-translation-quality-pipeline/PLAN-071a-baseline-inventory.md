@@ -1,6 +1,6 @@
 # PLAN-071a：质量基线、旧能力盘点与验收样本
 
-> 状态：**待实施**
+> 状态：**契约层已实施**（真实 FDA 二进制缺失时样本跑批仍 BLOCKED；见 [WT-071a](../../walkthroughs/WT-071a-baseline-inventory.md)）
 > 父计划：[PLAN-071](./README.md)
 > 依赖：无
 
