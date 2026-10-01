@@ -28,16 +28,10 @@
 ## 验证
 
 ```bash
-QYUNSLATION_PIPELINE=v2 python3 -m pytest -q -o addopts= \
-  tests/pipeline/ \
-  tests/structure/test_manifest_v2_schema.py \
-  tests/api/test_plan071b_launch_formats.py \
-  tests/workbench/test_plan066e_runner.py \
-  tests/persist/test_plan066e_pdf_runner.py \
-  tests/structure/test_manifest_contract.py
+bash scripts/verify-plan-071b.sh
 ```
 
-本环境结果：上述套件 **65 passed**（`test_manifest_store` 需 PDF_ENGINE，本机缺 pymupdf 未跑）。
+本环境结果：verify **PASS**（legacy 066e 兼容 + v2 layout_complete；`test_manifest_store` 需 PDF_ENGINE，本机未跑）。
 
 ## 手机续做（下一刀）
 

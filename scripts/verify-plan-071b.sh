@@ -43,16 +43,25 @@ else
   fail "manifest version"
 fi
 
-if QYUNSLATION_PIPELINE=v2 "$PY" -m pytest -q -o addopts= \
-  tests/pipeline/ \
-  tests/structure/test_manifest_v2_schema.py \
-  tests/api/test_plan071b_launch_formats.py \
+# Legacy path must keep CLI→succeeded for 066e compatibility.
+if env -u QYUNSLATION_PIPELINE "$PY" -m pytest -q -o addopts= \
   tests/workbench/test_plan066e_runner.py \
   tests/persist/test_plan066e_pdf_runner.py \
-  tests/structure/test_manifest_contract.py; then
-  pass "pytest 071b"
+  tests/structure/test_manifest_contract.py \
+  tests/structure/test_manifest_v2_schema.py \
+  tests/pipeline/test_workspace_readonly_source.py; then
+  pass "pytest 071b legacy+contract"
 else
-  fail "pytest 071b"
+  fail "pytest 071b legacy+contract"
+fi
+
+# v2 path: CLI success stops at layout_complete / no formal export.
+if QYUNSLATION_PIPELINE=v2 "$PY" -m pytest -q -o addopts= \
+  tests/pipeline/test_document_pipeline_skeleton.py \
+  tests/api/test_plan071b_launch_formats.py; then
+  pass "pytest 071b v2"
+else
+  fail "pytest 071b v2"
 fi
 
 if [[ "$FAILURES" -gt 0 ]]; then
