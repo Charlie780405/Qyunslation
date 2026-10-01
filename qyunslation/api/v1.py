@@ -1206,6 +1206,7 @@ def _maybe_run_auto_qa(
                 preflight=preflight,
                 source_text=facts["source"].text,
                 translated_text=facts["translated"].text,
+                require_structured_model=True,
             )
             sync_affiliation_segments_from_text(
                 session,

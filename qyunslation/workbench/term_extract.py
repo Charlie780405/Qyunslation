@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from qyunslation.glossary.candidate_rules import (
     classify_risk_by_rules,
     classify_term_type,
+    EXCLUDE_TOO_LONG,
     rules_version,
     should_exclude_from_termbase,
 )
@@ -54,6 +55,11 @@ _EXTRACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 EXTRACTION_RULE_VERSION = f"PLAN-074-v1+{rules_version()}"
+STRUCTURED_PROMPT_VERSION = "PLAN-074-medical-v1"
+
+
+class TermExtractionDegraded(RuntimeError):
+    """Structured medical extraction could not produce trustworthy evidence."""
 
 
 def _paragraphs(text: str) -> list[tuple[str, int]]:
@@ -76,15 +82,10 @@ def _exact_target_fragment(source_term: str, translated_text: str) -> str:
     return match.group(0) if match else ""
 
 
-def discover_term_occurrences(source_text: str, translated_text: str) -> list[dict[str, Any]]:
-    """Deterministically discover balanced medical candidates with complete locations.
-
-    Model supplementation is a separate stage; this function is intentionally
-    evidence-only and cannot invent a source term or target fragment.
-    """
-    found: dict[str, dict[str, Any]] = {}
+def _eligible_paragraphs(text: str) -> list[tuple[int, str, int]]:
+    rows: list[tuple[int, str, int]] = []
     in_references = False
-    for paragraph_no, (paragraph, base_offset) in enumerate(_paragraphs(source_text), start=1):
+    for paragraph_no, (paragraph, base_offset) in enumerate(_paragraphs(text), start=1):
         if is_reference_heading(paragraph):
             in_references = True
             continue
@@ -92,9 +93,20 @@ def discover_term_occurrences(source_text: str, translated_text: str) -> list[di
             in_references = False
         if in_references or is_reference_entry(paragraph):
             continue
-        frontmatter = classify_frontmatter_text(paragraph)
-        if frontmatter.role in {AUTHOR, AFFILIATION}:
+        if classify_frontmatter_text(paragraph).role in {AUTHOR, AFFILIATION}:
             continue
+        rows.append((paragraph_no, paragraph, base_offset))
+    return rows
+
+
+def discover_term_occurrences(source_text: str, translated_text: str) -> list[dict[str, Any]]:
+    """Deterministically discover balanced medical candidates with complete locations.
+
+    Model supplementation is a separate stage; this function is intentionally
+    evidence-only and cannot invent a source term or target fragment.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for paragraph_no, paragraph, base_offset in _eligible_paragraphs(source_text):
         for label, pattern in _EXTRACT_PATTERNS:
             for match in pattern.finditer(paragraph):
                 token = match.group(0).strip()
@@ -141,6 +153,109 @@ def discover_term_occurrences(source_text: str, translated_text: str) -> list[di
                     for item in row["occurrences"]
                 ):
                     row["occurrences"].append(occurrence)
+    return sorted(found.values(), key=lambda item: item["source_norm"])
+
+
+def _structured_chunks(rows: list[tuple[int, str, int]], *, max_chars: int = 12000) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for _number, paragraph, _offset in rows:
+        if current and size + len(paragraph) + 1 > max_chars:
+            chunks.append("\n".join(current))
+            current = []
+            size = 0
+        current.append(paragraph)
+        size += len(paragraph) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def discover_structured_medical_terms(
+    source_text: str,
+    translated_text: str,
+    provider: Any,
+) -> list[dict[str, Any]]:
+    """Use a structured model to supplement difficult disease/mechanism phrases.
+
+    Every returned term is re-located verbatim in an eligible source region.
+    Model recommendations remain suggestions and never become observed evidence.
+    """
+    from qyunslation.workbench.term_align import _parse_json_array
+
+    eligible = _eligible_paragraphs(source_text)
+    if not eligible:
+        return []
+    system = (
+        "你是医学术语抽取器。只返回 JSON 数组，每项包含 source_term、term_type、"
+        "recommended_target、reason。source_term 必须逐字存在于所给源文；提取疾病、分型、"
+        "症状、安全性事件、药物、靶点、基因/蛋白/受体/细胞因子/通路、量表/终点/方法、"
+        "生物标志物、细胞类型、治疗/器械、方案名、专业缩写、监管机构或学会。排除作者、"
+        "单位、参考文献、地址邮箱、注册号、纯数字/剂量/统计缩写和 OCR 噪声。每批最多40条。"
+    )
+    proposed: list[dict[str, Any]] = []
+    try:
+        for chunk in _structured_chunks(eligible):
+            raw = provider.translate(chunk, system=system)
+            if "[" not in (raw or "") or "]" not in (raw or ""):
+                raise TermExtractionDegraded("structured extractor returned invalid JSON")
+            proposed.extend(_parse_json_array(raw))
+    except TermExtractionDegraded:
+        raise
+    except Exception as exc:
+        raise TermExtractionDegraded("structured medical extraction unavailable") from exc
+
+    found: dict[str, dict[str, Any]] = {}
+    for item in proposed:
+        requested = str(item.get("source_term") or "").strip()
+        if not requested:
+            continue
+        term_type = str(item.get("term_type") or "general").strip()[:64] or "general"
+        reason = str(item.get("reason") or "medical phrase").strip()[:240]
+        occurrences: list[dict[str, Any]] = []
+        surface = ""
+        for paragraph_no, paragraph, base_offset in eligible:
+            for match in re.finditer(re.escape(requested), paragraph, re.I):
+                surface = surface or match.group(0)
+                occurrences.append(
+                    {
+                        "page_no": None,
+                        "block_id": f"paragraph:{paragraph_no}",
+                        "object_id": None,
+                        "char_start": base_offset + match.start(),
+                        "char_end": base_offset + match.end(),
+                        "bbox": None,
+                        "source_context": paragraph[:1000],
+                        "target_context": (translated_text or "")[:1000],
+                    }
+                )
+        if not surface or not occurrences:
+            continue
+        excluded, exclusion_reason = should_exclude_from_termbase(surface)
+        if excluded and not (exclusion_reason == EXCLUDE_TOO_LONG and len(surface) <= 512):
+            continue
+        norm = normalize_source(surface)
+        found.setdefault(
+            norm,
+            {
+                "source_term": surface,
+                "source_norm": norm,
+                "observed_target": _exact_target_fragment(surface, translated_text),
+                "suggested_target": str(item.get("recommended_target") or "").strip() or None,
+                "term_type": term_type,
+                "risk": classify_risk_by_rules(surface, term_type),
+                "source_context": occurrences[0]["source_context"],
+                "target_context": (translated_text or "")[:1000],
+                "occurrences": occurrences,
+                "extraction_metadata": {
+                    "reason": f"structured_model:{reason}",
+                    "rule_version": EXTRACTION_RULE_VERSION,
+                    "prompt_version": STRUCTURED_PROMPT_VERSION,
+                    "source_region": "translatable_content",
+                },
+            },
+        )
     return sorted(found.values(), key=lambda item: item["source_norm"])
 
 
@@ -225,6 +340,8 @@ def extract_candidates_from_text(
     preflight: PreflightRecord,
     source_text: str,
     translated_text: str,
+    provider: Any | None = None,
+    require_structured_model: bool = False,
 ) -> list[DocumentTermCandidate]:
     profile = str((run.settings_snapshot or {}).get("profile") or "临床研究文档")
     known = {
@@ -241,8 +358,29 @@ def extract_candidates_from_text(
     suppressed = load_rejected_suppress_index(
         session, tenant_id=run.tenant_id, project_id=project.id
     )
+    discovered = {
+        item["source_norm"]: item
+        for item in discover_term_occurrences(source_text, translated_text)
+    }
+    if provider is None and require_structured_model:
+        from qyunslation.gateway.provider import get_provider
+
+        term_profile = str((run.settings_snapshot or {}).get("term_model_profile_id") or "").strip()
+        if not term_profile:
+            raise TermExtractionDegraded("compliant term model profile is unavailable")
+        try:
+            provider = get_provider(profile=term_profile)
+        except Exception as exc:
+            raise TermExtractionDegraded("compliant term model is unavailable") from exc
+    if provider is not None:
+        for item in discover_structured_medical_terms(source_text, translated_text, provider):
+            existing = discovered.get(item["source_norm"])
+            if existing is None:
+                discovered[item["source_norm"]] = item
+            elif not existing.get("suggested_target") and item.get("suggested_target"):
+                existing["suggested_target"] = item["suggested_target"]
     rows: list[DocumentTermCandidate] = []
-    for item in discover_term_occurrences(source_text, translated_text):
+    for item in discovered.values():
         if item["source_norm"] in known or is_rejected_source(item["source_term"], suppressed):
             continue
         row = enqueue_candidate(
@@ -268,6 +406,7 @@ def extract_candidates_from_text(
         **dict(run.term_summary or {}),
         "extraction_status": "complete",
         "candidate_count": len(rows),
+        "structured_model": "complete" if provider is not None else "not_required",
         "rule_version": EXTRACTION_RULE_VERSION,
     }
     return rows

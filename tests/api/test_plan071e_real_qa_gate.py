@@ -25,6 +25,17 @@ BODY = [
 ]
 
 
+class _EmptyStructuredTermProvider:
+    def translate(self, source, *, system=None):
+        assert "逐字存在" in (system or "")
+        return "[]"
+
+
+class _UnavailableStructuredTermProvider:
+    def translate(self, source, *, system=None):
+        raise RuntimeError("compliant term model unavailable")
+
+
 def _cli(path: Path, *, translate: bool) -> None:
     body = (
         "import pathlib, sys, pymupdf\n"
@@ -45,11 +56,12 @@ def _cli(path: Path, *, translate: bool) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def _make_client(monkeypatch, tmp_path: Path, *, translate: bool):
+def _make_client(monkeypatch, tmp_path: Path, *, translate: bool, term_model_available: bool = True):
     reset_engine()
     monkeypatch.setenv("QYUNSLATION_DATABASE_URL", "sqlite+pysqlite:///:memory:")
     monkeypatch.setenv("QYUNSLATION_DEV_AUTH_BYPASS", "1")
     monkeypatch.setenv("QYUNSLATION_ENV", "development")
+    monkeypatch.setenv("QYUNSLATION_DEEPSEEK_API_KEY", "test-only")
     for name, folder in (
         ("PREFLIGHT_ROOT", "preflights"),
         ("ARTIFACT_ROOT", "artifacts"),
@@ -61,6 +73,12 @@ def _make_client(monkeypatch, tmp_path: Path, *, translate: bool):
     cli = tmp_path / "cli"
     _cli(cli, translate=translate)
     monkeypatch.setenv("QYUNSLATION_PDF2ZH_CLI", str(cli))
+    provider = (
+        _EmptyStructuredTermProvider()
+        if term_model_available
+        else _UnavailableStructuredTermProvider()
+    )
+    monkeypatch.setattr("qyunslation.gateway.provider.get_provider", lambda **_kwargs: provider)
     Base.metadata.create_all(init_engine("sqlite+pysqlite:///:memory:"))
     app = FastAPI()
     app.include_router(api_v1_router)
@@ -86,7 +104,10 @@ def _run_to_review(client, headers, tmp_path, key):
     run = client.post(
         "/api/v1/translation-runs",
         headers={**headers, "Idempotency-Key": key},
-        json={"preflight_id": pf["id"]},
+        json={
+            "preflight_id": pf["id"],
+            "term_model_profile_id": "term-deepseek-flash",
+        },
     ).json()
     state = run
     for _ in range(300):
@@ -130,6 +151,24 @@ def test_translated_output_reaches_review_ready_without_blockers(monkeypatch, tm
         run = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()
         assert run["term_summary"]["status"] == "ready"
         assert run["term_summary"]["content_hash"]
+    reset_engine()
+
+
+def test_term_model_failure_is_a_blocker_instead_of_zero_candidates(monkeypatch, tmp_path):
+    with _make_client(
+        monkeypatch,
+        tmp_path,
+        translate=True,
+        term_model_available=False,
+    ) as client:
+        run_id, state = _run_to_review(client, HEADERS, tmp_path, "term-model-degraded")
+        items = client.get(f"/api/v1/translation-runs/{run_id}/qa-items", headers=HEADERS).json()
+        assert state["quality_state"] == "qa_blocked"
+        assert "TERM_EXTRACTION_DEGRADED" in {item["code"] for item in items["items"]}
+        run = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()
+        assert run["term_summary"]["extraction_status"] == "degraded"
+        assert run["formal_gate"]["term_extraction_degraded"] is True
+        assert run["formal_gate"]["passed"] is False
     reset_engine()
 
 

@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: MPL-2.0
-from qyunslation.workbench.term_extract import discover_term_occurrences
+import pytest
+
+from qyunslation.workbench.term_extract import (
+    TermExtractionDegraded,
+    discover_structured_medical_terms,
+    discover_term_occurrences,
+)
 
 
 def test_balanced_medical_extraction_finds_poster_gold_terms_and_excludes_metadata():
@@ -35,3 +41,38 @@ def test_occurrences_are_deduplicated_by_normalized_form_without_silent_cap():
     assert len([key for key in by_norm if key.startswith("il-")]) == 50
     assert by_norm["vitiligo"]["observed_target"] == "vitiligo"
     assert by_norm["il-1"]["observed_target"] == ""
+
+
+class _StructuredProvider:
+    def translate(self, source, *, system=None):
+        assert "Janus kinase" in source
+        assert "逐字存在" in system
+        return """[
+          {"source_term":"Janus kinase-signal transducer and activator of transcription pathway",
+           "term_type":"pathway", "recommended_target":"JAK-STAT通路", "reason":"机制通路"},
+          {"source_term":"hallucinated disease", "term_type":"disease", "reason":"不存在"}
+        ]"""
+
+
+def test_structured_model_supplements_only_verbatim_source_terms():
+    source = (
+        "The Janus kinase-signal transducer and activator of transcription pathway "
+        "was evaluated in the study."
+    )
+    rows = discover_structured_medical_terms(source, "评估了JAK-STAT通路。", _StructuredProvider())
+
+    assert [row["source_term"] for row in rows] == [
+        "Janus kinase-signal transducer and activator of transcription pathway"
+    ]
+    assert rows[0]["suggested_target"] == "JAK-STAT通路"
+    assert rows[0]["observed_target"] == ""
+    assert rows[0]["extraction_metadata"]["reason"] == "structured_model:机制通路"
+
+
+def test_structured_model_failure_is_explicitly_degraded():
+    class Broken:
+        def translate(self, source, *, system=None):
+            raise RuntimeError("offline")
+
+    with pytest.raises(TermExtractionDegraded):
+        discover_structured_medical_terms("atopic dermatitis", "特应性皮炎", Broken())
