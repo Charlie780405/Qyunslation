@@ -37,6 +37,12 @@ KNOWN_PATCHES: list[tuple[str, str, str, str]] = [
     ("office-route", "apply-pdf2zh-office-route.py", "_qy_office_sidecar", "pdf2zh_next/gui.py"),
     ("042b", "apply-pdf2zh-042b-short-label.py", "_qy_042b_short_label_direct", ""),
     ("045c", "apply-pdf2zh-045c-sanitize.py", "_QY_045C_SANITIZE", ""),
+    (
+        "074-frontmatter-trace",
+        "apply-pdf2zh-045c-sanitize.py",
+        "_QY_074_POSTPROCESS",
+        "babeldoc/format/pdf/document_il/midend/il_translator.py",
+    ),
     ("046b", "apply-pdf2zh-046b-para-merge.py", "_QY_046B_PARA_MERGE", ""),
     ("047c", "apply-pdf2zh-047c-no-drop.py", "_QY_047C_NO_DROP", "babeldoc/format/pdf/document_il/backend/pdf_creater.py"),
     ("047d", "apply-pdf2zh-047d-para-layout.py", "_QY_047D_PARA_LAYOUT", ""),

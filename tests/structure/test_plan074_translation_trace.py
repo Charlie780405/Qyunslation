@@ -43,6 +43,9 @@ def test_babeldoc_patcher_passes_source_and_translation_to_plan074_hook():
 
     assert changed is True
     assert "_QY_074_POSTPROCESS(paragraph.unicode, translated_text)" in patched
+    second, changed_again = script["patch"](patched)
+    assert changed_again is False
+    assert second == patched
 
 
 def test_trace_reader_ignores_invalid_rows_and_retry_duplicates(tmp_path: Path):
