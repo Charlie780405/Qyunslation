@@ -65,3 +65,69 @@ def test_cannot_approve_with_blockers(client):
         json={"decision": "approve"},
     )
     assert denied.status_code == 409
+
+
+def _make_run(client, key):
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=_headers(),
+        files={"file": ("protocol.pdf", b"%PDF-1.7", "application/pdf")},
+    ).json()
+    created = client.post(
+        "/api/v1/translation-runs",
+        headers={**_headers(), "Idempotency-Key": key},
+        json={"preflight_id": preflight["id"]},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["id"]
+
+
+def test_auto_qa_emits_qa_and_review_stage_events(client):
+    from qyunslation.api.v1 import _maybe_run_auto_qa
+
+    run_id = _make_run(client, "qa-events")
+    with persist_db.SessionLocal() as session:
+        run = session.scalar(select(TranslationRunRecord).where(TranslationRunRecord.id == run_id))
+        run.quality_state = "draft"
+        run.stage = "layout"
+        _maybe_run_auto_qa(session, run)
+        session.commit()
+    events = client.get(f"/api/v1/translation-runs/{run_id}/events", headers=_headers()).json()
+    items = events["items"]
+    stages = {(e["stage"], e["state"]) for e in items}
+    assert ("qa", "completed") in stages or ("qa", "blocked") in stages
+
+
+def test_unapproved_formal_artifact_is_not_previewed_as_formal(client, tmp_path):
+    from qyunslation.persist.models import TranslationArtifact
+
+    run_id = _make_run(client, "preview-gate")
+    artifact_root = tmp_path / "artifacts"
+    with persist_db.SessionLocal() as session:
+        run = session.scalar(select(TranslationRunRecord).where(TranslationRunRecord.id == run_id))
+        run.quality_state = "review_ready"
+        key = f"{run.tenant_id}/{run.id}/formal.pdf"
+        target = artifact_root / key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"%PDF-1.7 formal")
+        session.add(
+            TranslationArtifact(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                artifact_key="formal:pdf",
+                kind="formal",
+                file_type="pdf",
+                filename="formal.pdf",
+                media_type="application/pdf",
+                storage_key=key,
+                size_bytes=target.stat().st_size,
+                sha256="0" * 64,
+                formal_export=True,
+            )
+        )
+        session.commit()
+    resp = client.get(
+        f"/api/v1/translation-runs/{run_id}/preview/translated", headers=_headers()
+    )
+    assert resp.status_code in {404, 409}
+    assert b"formal" not in resp.content or resp.status_code != 200

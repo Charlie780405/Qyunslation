@@ -677,6 +677,22 @@ def _maybe_run_auto_qa(session: Session, run: TranslationRunRecord) -> None:
     run.qa_summary = summarize(findings)
     run.quality_state = quality_state_from_findings(findings)
     run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
+    try:
+        from qyunslation.pipeline.event_store import persist_buffer
+        from qyunslation.pipeline.events import StageEventBuffer
+
+        buf = StageEventBuffer()
+        blockers = int((run.qa_summary or {}).get("blocker") or 0)
+        if run.quality_state == "qa_blocked":
+            buf.emit("layout", "completed", message="版式完成")
+            buf.emit("qa", "blocked", message=f"QA 拦截 {blockers} 项", progress=100.0)
+        else:
+            buf.emit("layout", "completed", message="版式完成")
+            buf.emit("qa", "completed", message="确定性 QA 通过", progress=100.0)
+            buf.emit("review", "running", message="等待人工审校")
+        persist_buffer(session, run_id=run.id, generation=run.generation, buffer=buf)
+    except Exception:
+        pass
 
 
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
@@ -700,6 +716,10 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             run.stage = str(runner_state.get("stage") or "layout")
             run.progress = None
             _maybe_run_auto_qa(session, run)
+            if run.quality_state == "review_ready":
+                run.stage = "review"
+            elif run.quality_state == "qa_blocked":
+                run.stage = "qa"
             run.updated_at = datetime.now(timezone.utc)
             return str(progress_message) if progress_message else None
         if status == "succeeded":
@@ -1499,12 +1519,16 @@ def preview_translation_run(
         media = "application/pdf" if path.suffix.casefold() == ".pdf" else "application/octet-stream"
         filename = preflight.source_filename
     else:
+        approved = getattr(run, "quality_state", None) in {"approved", "legacy_unverified"}
+        allowed_kinds = ["translated_preview", "review_draft", "legacy"]
+        if approved:
+            allowed_kinds.append("formal")
         artifact = session.scalar(
             select(TranslationArtifact)
             .where(
                 TranslationArtifact.run_id == run.id,
                 TranslationArtifact.tenant_id == run.tenant_id,
-                TranslationArtifact.kind.in_(["translated_preview", "review_draft", "legacy", "formal"]),
+                TranslationArtifact.kind.in_(allowed_kinds),
             )
             .order_by(TranslationArtifact.created_at.desc())
         )
@@ -1524,9 +1548,6 @@ def preview_translation_run(
             media = "application/pdf"
             filename = str(first.get("filename") or path.name)
         else:
-            if artifact.formal_export and (getattr(run, "quality_state", None) != "approved"):
-                # Prefer non-formal; skip formal until approved.
-                raise HTTPException(status_code=409, detail="formal preview not approved")
             path = _artifact_path(artifact)
             media = artifact.media_type
             filename = artifact.filename

@@ -82,7 +82,7 @@ def test_v2_pdf_launch_sets_manifest_and_stops_before_formal(client):
         if final["stage"] == "layout" or final["status"] in {"failed", "blocked"}:
             break
     assert final["status"] != "succeeded"
-    assert final["stage"] == "layout"
+    assert final["stage"] in {"layout", "qa", "review"}
     assert final["progress"] is None
     assert final.get("artifacts") in ([], None) or all(
         not item.get("formal_export") for item in final.get("artifacts") or []
