@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from qyunslation.pipeline.qa.pdf_inspect import (
+    check_author_metadata,
     check_protected_literals,
     check_translation_text,
     inspect_pdf_pair,
@@ -52,6 +53,13 @@ def test_encoding_and_il_artifacts_are_blockers():
     )
     assert found["IL_MARKUP_LEAK"] == "blocker"
     assert found["TEXT_ENCODING_ARTIFACT"] == "blocker"
+
+
+def test_author_metadata_requires_exact_punctuation_preservation():
+    source = "Patricia Curtin, BS¹; Jessica Gai, BA, MS¹\nBackground"
+    assert check_author_metadata(source, source) == []
+    found = codes(check_author_metadata(source, "Patricia Curtin BS¹; Jessica Gai, BA, MS¹"))
+    assert found["AUTHOR_METADATA_CHANGED"] == "blocker"
 
 
 def test_untranslated_body_detected():
@@ -105,6 +113,20 @@ def test_inspect_pair_clean_translation_has_no_blockers(tmp_path: Path):
     mono = _pdf(tmp_path / "m.pdf", ["邮箱 a@b.com", "剂量 300 mg"], image=logo)
     found, _ = inspect_pdf_pair(source_path=source, mono_path=mono, dual_path=None)
     assert not [f for f in found if f.severity == "blocker"], found
+
+
+def test_inspect_pair_checks_dual_even_when_mono_is_clean(tmp_path: Path):
+    source = _pdf(tmp_path / "s.pdf", ["Dose 300 mg"])
+    mono = _pdf(tmp_path / "m.pdf", ["剂量 300 mg"])
+    dual = _pdf(tmp_path / "d.pdf", ["Dose 300 mg", "病例<stytle id='3'>描述</stytle>"])
+
+    found, summary = inspect_pdf_pair(
+        source_path=source, mono_path=mono, dual_path=dual
+    )
+
+    leak = [item for item in found if item.code == "IL_MARKUP_LEAK"]
+    assert leak and leak[0].evidence["output_kind"] == "dual"
+    assert set(summary["checked_outputs"]) == {"mono", "dual"}
 
 
 def test_unreadable_pdf_is_not_silent_pass(tmp_path: Path):

@@ -51,6 +51,10 @@ def test_body_person_mention_is_not_misclassified_as_author():
     assert result.preserve is False
 
 
+def test_generic_contact_email_is_not_an_author_line():
+    assert classify_frontmatter_text("Email a@b.com").role == BODY
+
+
 def test_author_is_excluded_from_translation_and_context_but_affiliation_is_not():
     author = "Patricia Curtin BS¹, Jessica Gai, BA, MS¹, Michael Dans, MD²"
     affiliation = "1 Department of Dermatology, New York Medical College, Valhalla, NY"

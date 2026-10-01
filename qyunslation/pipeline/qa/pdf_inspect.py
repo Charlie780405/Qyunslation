@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qyunslation.pipeline.qa.engine import QaFinding
+from qyunslation.structure.frontmatter import AUTHOR, classify_frontmatter_text
 from qyunslation.structure.text_sanitize import detect_text_artifacts
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -84,6 +85,32 @@ def check_protected_literals(
     return findings
 
 
+def _author_metadata_lines(text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in (text or "").splitlines()
+        if line.strip() and classify_frontmatter_text(line).role == AUTHOR
+    ]
+
+
+def check_author_metadata(source_text: str, translated_text: str) -> list[QaFinding]:
+    """Author metadata is immutable; punctuation changes block publication."""
+    authors = _author_metadata_lines(source_text)
+    translated = _norm(translated_text)
+    missing = [line for line in authors if _norm(line) not in translated]
+    if not missing:
+        return []
+    return [
+        QaFinding(
+            category="integrity",
+            severity="blocker",
+            code="AUTHOR_METADATA_CHANGED",
+            message="作者元数据缺失或被改写，必须与源文逐行一致",
+            evidence={"missing": missing[:20], "total_source": len(authors)},
+        )
+    ]
+
+
 def latin_residue_ratio(text: str, *, protected: set[str] | None = None) -> float:
     """含长英文串的行占非空行比例（译文目标为中文时用于疑似漏翻译）。"""
     lines = [ln for ln in (text or "").splitlines() if ln.strip()]
@@ -150,6 +177,7 @@ def check_translation_text(
             )
         )
     findings.extend(check_protected_literals(source_text, translated_text))
+    findings.extend(check_author_metadata(source_text, translated_text))
 
     if target_is_chinese:
         protected = set().union(
@@ -229,9 +257,16 @@ def inspect_pdf_pair(
     """返回 (findings, 取证摘要)。无法读取任何输入时给出 warning，不静默通过。"""
     summary: dict[str, Any] = {}
     source = read_pdf_facts(source_path)
-    translated_path = mono_path or dual_path
-    translated = read_pdf_facts(translated_path) if translated_path else None
-    if source is None or translated is None:
+    outputs: dict[str, PdfFacts] = {}
+    if mono_path is not None:
+        mono = read_pdf_facts(mono_path)
+        if mono is not None:
+            outputs["mono"] = mono
+    if dual_path is not None:
+        dual = read_pdf_facts(dual_path)
+        if dual is not None:
+            outputs["dual"] = dual
+    if source is None or not outputs:
         summary["inputs"] = "unavailable"
         return (
             [
@@ -246,38 +281,54 @@ def inspect_pdf_pair(
         )
     if facts_out is not None:
         facts_out["source"] = source
-        facts_out["translated"] = translated
-    findings = check_translation_text(
-        source_text=source.text,
-        translated_text=translated.text,
-        target_is_chinese=target_is_chinese,
-    )
+        facts_out.update(outputs)
+        facts_out["translated"] = outputs.get("mono") or outputs["dual"]
+    findings: list[QaFinding] = []
+    for output_kind, translated in outputs.items():
+        current = check_translation_text(
+            source_text=source.text,
+            translated_text=translated.text,
+            # A bilingual PDF intentionally retains source-language body text.
+            target_is_chinese=target_is_chinese and output_kind == "mono",
+        )
+        for finding in current:
+            finding.evidence.setdefault("output_kind", output_kind)
+        findings.extend(current)
+        if source.page_count != translated.page_count:
+            findings.append(
+                QaFinding(
+                    category="layout",
+                    severity="blocker",
+                    code="PAGE_COUNT_MISMATCH",
+                    message=(
+                        f"页数不一致 source={source.page_count} "
+                        f"{output_kind}={translated.page_count}"
+                    ),
+                    evidence={"output_kind": output_kind},
+                )
+            )
+        if source.first_page_image_hashes and not (
+            source.first_page_image_hashes & translated.image_hashes
+        ):
+            findings.append(
+                QaFinding(
+                    category="layout",
+                    severity="blocker",
+                    code="LOGO_MISSING",
+                    message="源文件首页图片（疑似 Logo/印章）未在译文中原样保留",
+                    evidence={
+                        "source_first_page_images": len(source.first_page_image_hashes),
+                        "output_kind": output_kind,
+                    },
+                )
+            )
+    translated = outputs.get("mono") or outputs["dual"]
     summary.update(
         source_pages=source.page_count,
         output_pages=translated.page_count,
         source_images=len(source.image_hashes),
         output_images=len(translated.image_hashes),
-        compared="mono" if mono_path else "dual",
+        compared="+".join(outputs),
+        checked_outputs=list(outputs),
     )
-    if mono_path is not None and source.page_count != translated.page_count:
-        findings.append(
-            QaFinding(
-                category="layout",
-                severity="blocker",
-                code="PAGE_COUNT_MISMATCH",
-                message=f"页数不一致 source={source.page_count} output={translated.page_count}",
-            )
-        )
-    if source.first_page_image_hashes and not (
-        source.first_page_image_hashes & translated.image_hashes
-    ):
-        findings.append(
-            QaFinding(
-                category="layout",
-                severity="blocker",
-                code="LOGO_MISSING",
-                message="源文件首页图片（疑似 Logo/印章）未在译文中原样保留",
-                evidence={"source_first_page_images": len(source.first_page_image_hashes)},
-            )
-        )
     return findings, summary

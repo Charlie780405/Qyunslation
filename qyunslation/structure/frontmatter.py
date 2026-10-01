@@ -54,12 +54,14 @@ def classify_frontmatter_text(text: str | None) -> FrontmatterClassification:
         return FrontmatterClassification(
             AFFILIATION, False, True, 0.95, "organization/address markers"
         )
-    explicit_author = bool(
-        _CORRESPONDING.search(value) or _EMAIL.search(value) or _ORCID.search(value)
-    )
     names = _NAME.findall(value)
     degree = bool(_DEGREE.search(value))
     prose = bool(_BODY_SENTENCE.search(value))
+    explicit_author = bool(
+        _CORRESPONDING.search(value)
+        or _ORCID.search(value)
+        or (_EMAIL.search(value) and (names or "author" in value.casefold()))
+    )
     author_shape = explicit_author or (len(names) >= 2 and degree) or (
         len(names) == 1 and degree and not prose and len(value.split()) <= 18
     )
@@ -75,4 +77,3 @@ def paragraph_role(text: str | None) -> str:
 
 def paragraph_is_author(text: str | None) -> bool:
     return classify_frontmatter_text(text).role == AUTHOR
-
