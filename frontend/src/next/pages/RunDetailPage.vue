@@ -20,6 +20,9 @@
             v-if="run?.quality_state === 'review_ready'"
             class="qy-primary-button"
             type="button"
+            data-action="formal-approve"
+            :disabled="run?.formal_gate?.passed === false"
+            :title="formalGateMessage"
             @click="approve"
           >批准正式产物</button>
           <button
@@ -67,6 +70,7 @@
         {{ loadError }}
         <button type="button" class="qy-secondary-button" aria-label="重新加载任务详情" @click="refresh">重试</button>
       </p>
+      <p v-if="reviewError" class="qy-panel qy-run-detail-error" role="alert">{{ reviewError }}</p>
 
       <section class="qy-panel qy-run-stages" aria-labelledby="qy-stage-heading">
         <h2 id="qy-stage-heading">阶段事件</h2>
@@ -77,16 +81,24 @@
         />
       </section>
 
-      <section v-if="termCandidates.length" class="qy-panel qy-run-term-candidates">
-        <h2>本次新术语</h2>
-        <ul class="qy-term-candidate-list">
-          <li v-for="item in termCandidates" :key="item.id">
-            <strong>{{ item.source_term }}</strong>
-            <span>{{ item.term_type }} · {{ item.risk }} · {{ item.status }}</span>
-            <small v-if="item.source_context">{{ item.source_context }}</small>
-          </li>
-        </ul>
-      </section>
+      <AffiliationReviewPanel
+        :items="affiliationSegments"
+        :unconfirmed="affiliationUnconfirmed"
+        @decide="decideAffiliation"
+        @apply-corrections="applyCorrections"
+      />
+
+      <TermReviewPanel
+        :items="termCandidates"
+        :rules="termRules"
+        :unresolved="termUnresolved"
+        :total="termTotal"
+        :page="termPage"
+        :page-size="40"
+        @decide="decideTerm"
+        @batch="batchDecideTerms"
+        @page="loadTerms"
+      />
 
       <div class="qy-run-detail-grid">
         <section class="qy-panel qy-run-viewer" aria-label="源译对照">
@@ -129,16 +141,19 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
+import AffiliationReviewPanel from '../components/AffiliationReviewPanel.vue';
 import DualCanvasViewer from '../components/DualCanvasViewer.vue';
 import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
+import TermReviewPanel from '../components/TermReviewPanel.vue';
 import { useRunDetailView } from '../stores/runDetail.js';
 
 const props = defineProps({ runId: { type: String, default: '' } });
 const route = useRoute();
+const router = useRouter();
 const view = useRunDetailView();
 const loadError = ref('');
 const logOpen = ref(false);
@@ -146,6 +161,13 @@ const run = ref(null);
 const events = ref([]);
 const qaItems = ref([]);
 const termCandidates = ref([]);
+const termRules = ref({});
+const termUnresolved = ref(0);
+const termTotal = ref(0);
+const termPage = ref(1);
+const affiliationSegments = ref([]);
+const affiliationUnconfirmed = ref(0);
+const reviewError = ref('');
 const reviewComment = ref('');
 let timer;
 let draftTimer;
@@ -168,6 +190,20 @@ const logText = computed(() => JSON.stringify({
 const previewRefreshKey = computed(() => [
   run.value?.status, run.value?.stage, run.value?.quality_state,
 ].join('|'));
+const formalGateMessage = computed(() => {
+  const gate = run.value?.formal_gate;
+  if (!gate || gate.passed) return '';
+  return `尚有 ${gate.unresolved_term_count || 0} 条术语、${gate.unconfirmed_affiliation_count || 0} 条单位译名或 ${gate.qa_blockers || 0} 个 QA 阻断项未处理`;
+});
+
+async function loadTerms(page = termPage.value) {
+  const terms = await api.listRunTermCandidates(runId.value, { page, page_size: 40 });
+  termCandidates.value = terms.items || [];
+  termRules.value = terms.rules || {};
+  termUnresolved.value = terms.unresolved || 0;
+  termTotal.value = terms.total || 0;
+  termPage.value = terms.page || page;
+}
 
 async function refresh() {
   if (!runId.value) return;
@@ -178,10 +214,17 @@ async function refresh() {
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
     try {
-      const terms = await api.listRunTermCandidates(runId.value);
-      termCandidates.value = terms.items || [];
+      await loadTerms();
     } catch {
       termCandidates.value = [];
+    }
+    try {
+      const affiliations = await api.listRunAffiliationSegments(runId.value);
+      affiliationSegments.value = affiliations.items || [];
+      affiliationUnconfirmed.value = affiliations.unconfirmed || 0;
+    } catch {
+      affiliationSegments.value = [];
+      affiliationUnconfirmed.value = 0;
     }
     if (run.value?.quality_state === 'review_ready') {
       const draft = await api.getReviewDraft(runId.value);
@@ -211,8 +254,13 @@ function scheduleDraftSave() {
 }
 
 async function approve() {
-  await api.postReviewDecision(runId.value, { decision: 'approve', comment: reviewComment.value || null });
-  await refresh();
+  try {
+    await api.postReviewDecision(runId.value, { decision: 'approve', comment: reviewComment.value || null });
+    reviewError.value = '';
+    await refresh();
+  } catch (error) {
+    reviewError.value = error?.message || '正式稿批准失败';
+  }
 }
 
 async function requestChanges() {
@@ -233,6 +281,55 @@ async function requalify() {
 async function retryV2() {
   await api.retryRun(runId.value, { pipeline: 'v2' });
   await refresh();
+}
+
+async function decideTerm(item, payload) {
+  try {
+    await api.decideRunTermCandidate(runId.value, item.id, payload);
+    reviewError.value = '';
+    await refresh();
+  } catch (error) {
+    reviewError.value = error?.status === 409
+      ? '该术语已被其他审核人更新，请刷新后重试。'
+      : (error?.message || '术语裁决失败');
+  }
+}
+
+async function batchDecideTerms(decisions) {
+  try {
+    await api.batchDecideRunTermCandidates(runId.value, decisions);
+    reviewError.value = '';
+    await refresh();
+  } catch (error) {
+    reviewError.value = error?.status === 409
+      ? '部分术语已被其他审核人更新，请刷新后重试。'
+      : (error?.message || '批量术语裁决失败');
+  }
+}
+
+async function decideAffiliation(item, revisedText) {
+  try {
+    await api.decideRunAffiliationSegment(runId.value, item.id, {
+      expected_version: item.version,
+      revised_text: revisedText,
+    });
+    reviewError.value = '';
+    await refresh();
+  } catch (error) {
+    reviewError.value = error?.status === 409
+      ? '该单位译名已被其他审核人更新，请刷新后重试。'
+      : (error?.message || '单位译名确认失败');
+  }
+}
+
+async function applyCorrections() {
+  try {
+    const nextRun = await api.applyRunCorrections(runId.value);
+    reviewError.value = '';
+    if (nextRun?.id) await router.push(`/workbench/${nextRun.id}`);
+  } catch (error) {
+    reviewError.value = error?.message || '重新生成失败';
+  }
 }
 
 onMounted(async () => {

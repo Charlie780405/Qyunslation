@@ -9,6 +9,14 @@ const apiMock = vi.hoisted(() => ({
   getRunEvents: vi.fn(),
   getQaItems: vi.fn(),
   postReviewDecision: vi.fn(),
+  listRunTermCandidates: vi.fn(),
+  decideRunTermCandidate: vi.fn(),
+  batchDecideRunTermCandidates: vi.fn(),
+  listRunAffiliationSegments: vi.fn(),
+  decideRunAffiliationSegment: vi.fn(),
+  applyRunCorrections: vi.fn(),
+  getReviewDraft: vi.fn(),
+  saveReviewDraft: vi.fn(),
   retryRun: vi.fn(),
   previewUrl: (id, side) => `/api/v1/translation-runs/${id}/preview/${side}`,
 }));
@@ -78,6 +86,14 @@ beforeEach(() => {
   apiMock.getRunEvents.mockResolvedValue({ items: [{ stage: 'validation', state: 'completed', message: 'ok' }] });
   apiMock.getQaItems.mockResolvedValue({ items: QA_ITEMS });
   apiMock.postReviewDecision.mockResolvedValue({});
+  apiMock.getReviewDraft.mockResolvedValue({ comment: '' });
+  apiMock.listRunTermCandidates.mockResolvedValue({
+    items: [], total: 0, unresolved: 0, page: 1, page_size: 40,
+    rules: { version: 'PLAN-074-v1', method: ['候选必须逐字存在于源文'] },
+  });
+  apiMock.listRunAffiliationSegments.mockResolvedValue({ items: [], unconfirmed: 0 });
+  apiMock.decideRunTermCandidate.mockResolvedValue({});
+  apiMock.decideRunAffiliationSegment.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -133,6 +149,51 @@ describe('RunDetailPage', () => {
     await wrapper.findAll('button').find((b) => b.text() === '请求修改').trigger('click');
     expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'approve', comment: null });
     expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', { decision: 'request_changes', comment: null });
+    wrapper.unmount();
+  });
+
+  it('reviews term translations and affiliation corrections in the QA page', async () => {
+    apiMock.getRun.mockResolvedValue({
+      id: 'run-1', filename: 'a.pdf', status: 'completed', stage: 'review',
+      quality_state: 'review_ready',
+      formal_gate: { passed: false, unresolved_term_count: 1, unconfirmed_affiliation_count: 1 },
+    });
+    apiMock.listRunTermCandidates.mockResolvedValue({
+      items: [{
+        id: 'term-1', source_term: 'vitiligo', observed_target: '',
+        suggested_target: '白癜风', confirmed_target: null, term_type: 'disease',
+        risk: 'normal', status: 'pending', version: 1, occurrence_count: 2,
+        source_context: 'patient with vitiligo', extraction_reason: 'deterministic:disease',
+      }],
+      total: 1, unresolved: 1, page: 1, page_size: 40,
+      rules: { version: 'PLAN-074-v1', method: ['候选必须逐字存在于源文'] },
+    });
+    apiMock.listRunAffiliationSegments.mockResolvedValue({
+      items: [{
+        id: 'aff-1', source_text: 'Department of Dermatology', machine_text: '皮肤病学系',
+        revised_text: null, status: 'pending', version: 1,
+      }],
+      unconfirmed: 1,
+    });
+
+    const { wrapper } = await mountPage('/workbench/run-1');
+    expect(wrapper.text()).toContain('术语审核');
+    expect(wrapper.text()).toContain('单位译名审核');
+    expect(wrapper.find('button[data-action="formal-approve"]').attributes('disabled')).toBeDefined();
+
+    const termInput = wrapper.find('input[aria-label="vitiligo 的确认译法"]');
+    expect(termInput.element.value).toBe('白癜风');
+    await wrapper.find('button[aria-label="批准术语 vitiligo"]').trigger('click');
+    expect(apiMock.decideRunTermCandidate).toHaveBeenCalledWith('run-1', 'term-1', {
+      action: 'approve', expected_version: 1, target_term: '白癜风', scope: 'org',
+    });
+
+    const affiliation = wrapper.find('textarea[aria-label="Department of Dermatology 的确认译名"]');
+    await affiliation.setValue('皮肤科');
+    await wrapper.find('button[aria-label="确认单位 Department of Dermatology"]').trigger('click');
+    expect(apiMock.decideRunAffiliationSegment).toHaveBeenCalledWith('run-1', 'aff-1', {
+      expected_version: 1, revised_text: '皮肤科',
+    });
     wrapper.unmount();
   });
 

@@ -102,7 +102,29 @@ export const api = {
   requalifyRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/requalify`, {
     method: 'POST',
   }),
-  listRunTermCandidates: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates`),
+  listRunTermCandidates: (runId, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates${query ? `?${query}` : ''}`);
+  },
+  decideRunTermCandidate: (runId, candidateId, payload) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates/${encodeURIComponent(candidateId)}/decision`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
+  batchDecideRunTermCandidates: (runId, decisions) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates/batch-decision`,
+    { method: 'POST', body: JSON.stringify({ decisions }) },
+  ),
+  listRunAffiliationSegments: (runId) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/affiliation-segments`,
+  ),
+  decideRunAffiliationSegment: (runId, segmentId, payload) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/affiliation-segments/${encodeURIComponent(segmentId)}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  ),
+  applyRunCorrections: (runId) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/apply-corrections`,
+    { method: 'POST' },
+  ),
   getReviewDraft: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`),
   saveReviewDraft: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`, {
     method: 'PUT',
