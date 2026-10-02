@@ -26,6 +26,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `523f1fa` | 将评估器回归纳入总门禁 |
 | `fe6cd45` | 实现 `AD_PROMPT_MODE` 与 pilot 租户 allowlist，生产 fail-closed |
 | `aa5e06e` | 简化 rollout policy 边界，保持 fail-closed 行为 |
+| `09db35f` | 修复显式 OIDC 高权限对已有低权限 membership 的晋升 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -40,6 +41,7 @@ bash scripts/verify-plan-076.sh
 结果：
 
 - PLAN-076 pipeline/API/rollout 聚焦测试：**24 passed**；
+- OIDC 角色/持久层回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
 - `qyunslation-office.service`、`pdf2zh.service`：**active**；
@@ -85,9 +87,18 @@ bash scripts/deploy-translate-stack.sh
 截图验证的是 SSO 入口和响应式布局，尚未验证登录后的 AD 选择器、上传、运行详情、术语闭环和下载闭环。
 部署重启后复核截图位于 `var/plan076-browser-postdeploy/workbench-{320,768,1024,1440}.png`。
 
+已补充真实 OIDC 登录证据：
+
+- `test01@qyunslation.com`：OIDC callback、BFF session、`/api/v1/me=200`、tenant=`pilot`、`workbench_v2=true`，有效角色为 translator/member；
+- `test02@qyunslation.com`：同样完成登录，主机侧 term_admin 授权后 `/api/v1/me=200`、`can_review=true`、`can_manage_terms=true`；
+- 登录后的 AD 工作台四视宽截图：`var/plan076-browser-auth/workbench-{320,768,1024,1440}.png`；
+- term_admin 登录工作台截图：`var/plan076-browser-auth-term-admin/workbench-1440.png`。
+
+本组截图由临时 Chromium profile 通过 Chrome DevTools Protocol 采集；未保存 token、密码或 session 文件到仓库。
+
 ## 测试用户与生产边界
 
-本次没有在公司身份服务中创建 `test01`/`test02` 账号：当前服务走 OIDC BFF，开发旁路在生产关闭，且没有获得身份服务管理员授权。现有 API 合约使用隔离的测试身份头进行 TestClient 验证，不代表生产登录验收。正式验收前应由管理员创建最小角色矩阵（translator/reviewer/termbase_admin），并在不记录密码或 token 的前提下完成登录、术语审核和下载权限测试。
+已在受保护 Authentik API 中创建两个 pilot 租户测试账号，并加入非 superuser 的 `qyunslation-vue-beta` 组。账号密码未写入 Git、日志或证据文件；test02 的 term_admin 通过既有主机侧授权脚本授予并记录审计。生产仍保持 OIDC BFF，开发旁路关闭；AD 生产模式仍需在真实语料和专家门禁通过后才可配置为 pilot。
 
 ## 上线判定
 
