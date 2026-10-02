@@ -122,4 +122,3 @@ uv run python scripts/plan076-ad-eval.py --report-performance
 - 不全文二次“润色”。
 - 不把模型置信度当作事实正确性的唯一证据。
 - 不自动批准修复后的正式产物。
-

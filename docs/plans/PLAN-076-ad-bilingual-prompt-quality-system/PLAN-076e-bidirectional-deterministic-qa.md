@@ -110,4 +110,3 @@ uv run pytest tests/pipeline/qa/test_plan076_term_residue_structure.py \
 - 不使用语言模型判断纯数字/单位是否一致。
 - 不在规则无法定位证据时猜测错误。
 - 不自动修改译文。
-

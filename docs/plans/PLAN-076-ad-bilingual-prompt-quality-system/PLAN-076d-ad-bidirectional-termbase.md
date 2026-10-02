@@ -115,4 +115,3 @@ uv run pytest tests/glossary/test_plan076_ambiguity.py \
 - 不用自动翻译批量生成 curated 英文术语。
 - 不删除 `domain-autoimmune.csv`。
 - 不把术语候选自动批准入库。
-

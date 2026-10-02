@@ -128,4 +128,3 @@ uv run python scripts/plan076-ad-eval.py --direction both --baseline-only
 - 不在本阶段优化提示词或词库。
 - 不把参考译文当机器译文填补缺失结果。
 - 不用 BLEU/ROUGE 单独决定医学翻译是否通过。
-
