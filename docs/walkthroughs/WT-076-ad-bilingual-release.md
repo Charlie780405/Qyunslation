@@ -25,6 +25,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `afbd1d0` | 修正 `--direction` 筛选、补充 API 合约回归和评估器测试 |
 | `523f1fa` | 将评估器回归纳入总门禁 |
 | `fe6cd45` | 实现 `AD_PROMPT_MODE` 与 pilot 租户 allowlist，生产 fail-closed |
+| `aa5e06e` | 简化 rollout policy 边界，保持 fail-closed 行为 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -55,7 +56,7 @@ bash scripts/deploy-translate-stack.sh
 
 结果：
 
-- 部署提交：`fe6cd45`；
+- 部署提交：`aa5e06e`；
 - Alembic migration：**aligned**；
 - 前端静态包：**fresh**；
 - sidecar 指纹：本地/运行中均为 `7542777de0fd`；
