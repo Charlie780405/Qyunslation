@@ -28,6 +28,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `aa5e06e` | 简化 rollout policy 边界，保持 fail-closed 行为 |
 | `09db35f` | 修复显式 OIDC 高权限对已有低权限 membership 的晋升 |
 | `97d386f` | 增加 AD 语料 manifest/schema、哈希与授权完整性门禁 |
+| `9e7db80` | 评测仅读取锁定 manifest case；baseline-only 在模型运行器接入前 fail-closed |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -41,11 +42,11 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**31 passed**；
+- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**33 passed**；
 - 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
-- `qyunslation-office.service`、`pdf2zh.service`：**active**；
+- 本机 qyunslation 与 pdf2zh 进程分别监听 `127.0.0.1:8010` / `127.0.0.1:7860`；本环境未暴露对应 systemd unit，故不把 `systemctl` 状态作为运行证据；
 - Chromium：`/home/dev/.local/bin/chromium` 可执行；
 - 总门禁：**BLOCKED**，不是代码失败。
 
