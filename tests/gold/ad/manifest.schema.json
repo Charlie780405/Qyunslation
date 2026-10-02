@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qyunslation.local/plan076/ad-manifest.schema.json",
+  "type": "object",
+  "required": ["cases"],
+  "properties": {
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "direction",
+          "document_profile",
+          "source_ref",
+          "reference_ref",
+          "source_sha256",
+          "reference_sha256",
+          "annotations_ref",
+          "license",
+          "is_locked_test"
+        ],
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "direction": {"enum": ["en-zh", "zh-en"]},
+          "document_profile": {"enum": ["医学研究文献", "临床研究文档"]},
+          "source_ref": {"type": "string", "minLength": 1},
+          "reference_ref": {"type": "string", "minLength": 1},
+          "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "annotations_ref": {"type": "string", "minLength": 1},
+          "license": {"const": "public-or-internal-approved"},
+          "is_locked_test": {"const": true}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

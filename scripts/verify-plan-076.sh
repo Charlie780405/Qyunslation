@@ -19,6 +19,7 @@ REQUIRED=(
   "qyunslation/pipeline/ad_semantic.py"
   "glossaries/domain-ad.csv"
   "scripts/plan076-ad-eval.py"
+  "tests/gold/ad/manifest.schema.json"
   "tests/gold/ad/README.md"
 )
 for path in "${REQUIRED[@]}"; do

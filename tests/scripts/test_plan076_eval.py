@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 
 from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
@@ -53,3 +55,36 @@ def test_eval_direction_filter_does_not_mix_rows(monkeypatch):
     assert summary["direction"] == "en-zh"
     assert summary["cases"] == {"en-zh": 1}
     assert [row["direction"] for row in summary["rows"]] == ["en-zh"]
+
+
+def test_corpus_contract_blocks_missing_manifest(tmp_path):
+    result = plan076_ad_eval.check_corpus(tmp_path)
+    assert result["valid"] is False
+    assert result["errors"] == ["manifest_missing"]
+
+
+def test_corpus_contract_validates_hashes_and_authorization(tmp_path):
+    source = tmp_path / "source.en.txt"
+    reference = tmp_path / "reference.zh.txt"
+    annotations = tmp_path / "annotations.json"
+    source.write_text("Patients with atopic dermatitis received dupilumab.", encoding="utf-8")
+    reference.write_text("特应性皮炎患者接受了度普利尤单抗。", encoding="utf-8")
+    annotations.write_text(json.dumps({"facts": []}), encoding="utf-8")
+    manifest = {
+        "cases": [{
+            "case_id": "ad-en-zh-001",
+            "direction": "en-zh",
+            "document_profile": "医学研究文献",
+            "source_ref": source.name,
+            "reference_ref": reference.name,
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "reference_sha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
+            "annotations_ref": annotations.name,
+            "license": "public-or-internal-approved",
+            "is_locked_test": True,
+        }]
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = plan076_ad_eval.check_corpus(tmp_path, direction="en-zh")
+    assert result["valid"] is True
+    assert result["cases"] == 1
