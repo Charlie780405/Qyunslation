@@ -21,6 +21,8 @@ REQUIRED=(
   "scripts/plan076-ad-eval.py"
   "tests/gold/ad/manifest.schema.json"
   "tests/gold/ad/annotations.schema.json"
+  "tests/gold/ad/expert-review.schema.json"
+  "tests/gold/ad/pilot-report.schema.json"
   "tests/gold/ad/README.md"
 )
 for path in "${REQUIRED[@]}"; do

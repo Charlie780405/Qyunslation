@@ -1,6 +1,6 @@
 # PLAN-076h：汇总验证、内部试运行与专家验证准备
 
-> 状态：**待实施**
+> 状态：**专家结果只读门禁已实施；真实双盲结果待接入**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076a](./PLAN-076a-evaluation-contract-corpus.md)–[076g](./PLAN-076g-api-ui-rollout.md)
 
@@ -69,7 +69,7 @@ bash scripts/verify-plan-076.sh
 **验证：**
 
 ```bash
-uv run python scripts/plan076-ad-eval.py --pilot-report var/plan076-pilot
+uv run python scripts/plan076-ad-eval.py --pilot-report var/plan076-pilot/pilot.json
 ```
 
 **依赖：** Tasks 1–2
@@ -85,7 +85,7 @@ MVP 后生成去模型标识、随机顺序的双盲审包。两名角色分别�
 - [ ] Critical=0、Major≤1/1,000 源文词、κ≥0.70、候选盲选偏好≥70%。
 - [ ] 未达到标准时产品继续显示「内部测试版」，不得改为「专家验证」。
 
-**验证：** 盲审结果导入后由 `plan076-ad-eval.py --expert-review` 生成只读报告。
+**验证：** 盲审结果导入后由 `plan076-ad-eval.py --expert-review` 生成只读报告；没有真实语料或缺少完整双角色结果时返回 `BLOCKED`，不会把工程门状态改成 FAIL。
 
 **依赖：** Task 3
 **预计规模：** M（rubric、export/import、report，3–5 文件）

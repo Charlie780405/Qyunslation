@@ -45,6 +45,21 @@ REQUIRED_CASE_FIELDS = {
 ALLOWED_DIRECTIONS = {"en-zh", "zh-en"}
 ALLOWED_DOCUMENT_PROFILES = {"医学研究文献", "临床研究文档"}
 ANNOTATION_GROUPS = ("concepts", "facts")
+EXPERT_ROLES = {"ad_medical", "medical_translation"}
+EXPERT_SEVERITIES = {"none", "minor", "major", "critical"}
+EXPERT_CHOICES = {"baseline", "candidate", "tie"}
+EXPERT_CATEGORIES = {"fact", "terminology", "completeness", "language_quality", "structure"}
+EXPERT_FORBIDDEN_KEYS = {
+    "model",
+    "model_id",
+    "candidate_model",
+    "baseline_model",
+    "prompt",
+    "system_prompt",
+    "machine_output",
+    "source",
+    "reference",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -427,6 +442,271 @@ def compare_model_runs(model_runs: list[dict]) -> dict:
     }
 
 
+def _source_units(text: str) -> int:
+    """Count Latin words and CJK characters without exposing source text."""
+    latin_words = re.findall(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*", text or "")
+    cjk_chars = re.findall(r"[\u3400-\u9fff]", text or "")
+    return max(1, len(latin_words) + len(cjk_chars))
+
+
+def assess_expert_review(
+    document: object,
+    source_units_by_case: dict[str, int],
+    *,
+    min_cases: int = 20,
+    expected_case_ids: set[str] | None = None,
+) -> dict:
+    """Validate blinded reviewer outcomes and return aggregate-only evidence."""
+    if not isinstance(document, dict):
+        return {"status": "BLOCKED", "errors": ["review_document_not_object"]}
+    forbidden = []
+
+    def scan_forbidden(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if str(key).strip().casefold() in EXPERT_FORBIDDEN_KEYS:
+                    forbidden.append(str(key))
+                scan_forbidden(child)
+        elif isinstance(value, list):
+            for child in value:
+                scan_forbidden(child)
+
+    scan_forbidden(document)
+    if forbidden:
+        return {"status": "BLOCKED", "errors": ["review_contains_sensitive_fields"]}
+    cases = document.get("cases")
+    if not isinstance(cases, list):
+        return {"status": "BLOCKED", "errors": ["review_cases_not_list"]}
+    errors: list[str] = []
+    seen: set[str] = set()
+    kappas: list[tuple[str, str]] = []
+    major = 0
+    critical = 0
+    total_units = 0
+    candidate_choices = 0
+    baseline_choices = 0
+    for index, item in enumerate(cases):
+        prefix = f"case[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{prefix}:not_object")
+            continue
+        case_id = str(item.get("case_id") or "")
+        if not case_id or case_id in seen:
+            errors.append(f"{prefix}:duplicate_or_empty_case_id")
+        seen.add(case_id)
+        if case_id not in source_units_by_case:
+            errors.append(f"{prefix}:case_not_in_corpus")
+        reviewers = item.get("reviewers")
+        if not isinstance(reviewers, list) or len(reviewers) != 2:
+            errors.append(f"{prefix}:reviewers_count")
+            continue
+        by_role: dict[str, dict] = {}
+        for reviewer in reviewers:
+            if not isinstance(reviewer, dict):
+                errors.append(f"{prefix}:reviewer_not_object")
+                continue
+            role = str(reviewer.get("reviewer_role") or "")
+            if role not in EXPERT_ROLES or role in by_role:
+                errors.append(f"{prefix}:reviewer_role")
+            by_role[role] = reviewer
+            choice = str(reviewer.get("blind_choice") or "")
+            severity = str(reviewer.get("severity") or "")
+            if choice not in EXPERT_CHOICES:
+                errors.append(f"{prefix}:blind_choice")
+            if severity not in EXPERT_SEVERITIES:
+                errors.append(f"{prefix}:severity")
+            categories = reviewer.get("categories", [])
+            if not isinstance(categories, list) or any(str(value) not in EXPERT_CATEGORIES for value in categories):
+                errors.append(f"{prefix}:categories")
+            if choice == "candidate":
+                candidate_choices += 1
+            elif choice == "baseline":
+                baseline_choices += 1
+        if set(by_role) != EXPERT_ROLES:
+            errors.append(f"{prefix}:reviewer_roles_incomplete")
+        if len(by_role) == 2:
+            kappas.append((
+                str(by_role["ad_medical"].get("blind_choice") or ""),
+                str(by_role["medical_translation"].get("blind_choice") or ""),
+            ))
+        adjudicated = item.get("adjudicated")
+        if not isinstance(adjudicated, dict):
+            errors.append(f"{prefix}:adjudicated_missing")
+        else:
+            severity = str(adjudicated.get("severity") or "")
+            if severity not in EXPERT_SEVERITIES:
+                errors.append(f"{prefix}:adjudicated_severity")
+            if severity == "critical":
+                critical += 1
+            elif severity == "major":
+                major += 1
+        total_units += int(source_units_by_case.get(case_id, 0) or 0)
+
+    if len(cases) < min_cases:
+        errors.append(f"cases_below_{min_cases}")
+    if expected_case_ids is not None:
+        missing = expected_case_ids - seen
+        unexpected = seen - expected_case_ids
+        if missing:
+            errors.append(f"corpus_cases_missing:{len(missing)}")
+        if unexpected:
+            errors.append(f"corpus_cases_unexpected:{len(unexpected)}")
+    if errors:
+        return {"status": "BLOCKED", "errors": sorted(set(errors)), "cases": len(cases)}
+    if not kappas or candidate_choices + baseline_choices == 0:
+        return {"status": "BLOCKED", "errors": ["preference_or_kappa_data_missing"], "cases": len(cases)}
+    agreements = sum(left == right for left, right in kappas)
+    observed = agreements / len(kappas)
+    labels = sorted(EXPERT_CHOICES)
+    expected = 0.0
+    for label in labels:
+        left_ratio = sum(left == label for left, _ in kappas) / len(kappas)
+        right_ratio = sum(right == label for _, right in kappas) / len(kappas)
+        expected += left_ratio * right_ratio
+    kappa = 1.0 if expected == 1.0 else (observed - expected) / (1.0 - expected)
+    preference_total = candidate_choices + baseline_choices
+    candidate_preference = candidate_choices / preference_total
+    major_rate = major / max(total_units, 1) * 1000
+    thresholds = {
+        "critical": 0,
+        "major_per_1000_units": 1.0,
+        "kappa": 0.70,
+        "candidate_preference": 0.70,
+    }
+    passed = (
+        critical == 0
+        and major_rate <= thresholds["major_per_1000_units"]
+        and kappa >= thresholds["kappa"]
+        and candidate_preference >= thresholds["candidate_preference"]
+    )
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "cases": len(cases),
+        "total_source_units": total_units,
+        "critical": critical,
+        "major": major,
+        "major_per_1000_units": round(major_rate, 4),
+        "kappa": round(kappa, 4),
+        "candidate_preference": round(candidate_preference, 4),
+        "candidate_choices": candidate_choices,
+        "baseline_choices": baseline_choices,
+        "thresholds": thresholds,
+    }
+
+
+def _p95(values: list[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    index = max(0, min(len(ordered) - 1, int(len(ordered) * 0.95 + 0.9999) - 1))
+    return ordered[index]
+
+
+def assess_pilot_report(document: object, *, min_tasks: int = 20, min_per_cell: int = 5) -> dict:
+    """Aggregate a pilot manifest without emitting task text or identifiers."""
+    if not isinstance(document, dict):
+        return {"status": "BLOCKED", "errors": ["pilot_document_not_object"]}
+    tasks = document.get("tasks")
+    baseline = document.get("baseline")
+    if not isinstance(tasks, list):
+        return {"status": "BLOCKED", "errors": ["pilot_tasks_not_list"]}
+    if not isinstance(baseline, dict):
+        return {"status": "BLOCKED", "errors": ["pilot_baseline_missing"]}
+    errors: list[str] = []
+    seen: set[str] = set()
+    cell_counts: dict[tuple[str, str], int] = {}
+    latency: list[float] = []
+    tokens: list[float] = []
+    prompt_by_cell: dict[tuple[str, str], set[str]] = {}
+    termbase_by_cell: dict[tuple[str, str], set[str]] = {}
+    high_risk_errors = 0
+    drug_drift = 0
+    for index, task in enumerate(tasks):
+        prefix = f"task[{index}]"
+        if not isinstance(task, dict):
+            errors.append(f"{prefix}:not_object")
+            continue
+        task_id = str(task.get("task_id") or "")
+        direction = str(task.get("direction") or "")
+        document_profile = str(task.get("document_profile") or "")
+        if not task_id or task_id in seen:
+            errors.append(f"{prefix}:duplicate_or_empty_task_id")
+        seen.add(task_id)
+        if direction not in ALLOWED_DIRECTIONS:
+            errors.append(f"{prefix}:direction")
+        if document_profile not in ALLOWED_DOCUMENT_PROFILES:
+            errors.append(f"{prefix}:document_profile")
+        if str(task.get("status") or "").casefold() not in {"pass", "approved", "completed"}:
+            errors.append(f"{prefix}:status")
+        cell = (direction, document_profile)
+        cell_counts[cell] = cell_counts.get(cell, 0) + 1
+        prompt_digest = str(task.get("prompt_digest") or "")
+        termbase_version = str(task.get("termbase_version") or "")
+        if not prompt_digest:
+            errors.append(f"{prefix}:prompt_digest")
+        if not termbase_version:
+            errors.append(f"{prefix}:termbase_version")
+        prompt_by_cell.setdefault(cell, set()).add(prompt_digest)
+        termbase_by_cell.setdefault(cell, set()).add(termbase_version)
+        try:
+            latency.append(float(task["latency_ms"]))
+            tokens.append(float(task["tokens"]))
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"{prefix}:performance")
+        try:
+            high_risk_errors += int(task.get("high_risk_fact_errors") or 0)
+            drug_drift += int(task.get("drug_drift") or 0)
+        except (TypeError, ValueError):
+            errors.append(f"{prefix}:quality_counts")
+    if len(tasks) < min_tasks:
+        errors.append(f"tasks_below_{min_tasks}")
+    for cell in ((direction, profile) for direction in sorted(ALLOWED_DIRECTIONS) for profile in sorted(ALLOWED_DOCUMENT_PROFILES)):
+        if cell_counts.get(cell, 0) < min_per_cell:
+            errors.append(f"cell_below_{min_per_cell}:{cell[0]}:{cell[1]}")
+    if any(len(values) != 1 for values in prompt_by_cell.values()):
+        errors.append("prompt_version_drift")
+    if any(len(values) != 1 for values in termbase_by_cell.values()):
+        errors.append("termbase_version_drift")
+    try:
+        baseline_latency = float(baseline["p95_latency_ms"])
+        baseline_tokens = float(baseline["p95_tokens"])
+    except (KeyError, TypeError, ValueError):
+        errors.append("pilot_baseline_performance_invalid")
+        baseline_latency = baseline_tokens = 0.0
+    if errors:
+        return {"status": "BLOCKED", "errors": sorted(set(errors)), "tasks": len(tasks)}
+    candidate_latency = _p95(latency)
+    candidate_tokens = _p95(tokens)
+    latency_ratio = candidate_latency / baseline_latency if baseline_latency > 0 else float("inf")
+    token_ratio = candidate_tokens / baseline_tokens if baseline_tokens > 0 else float("inf")
+    thresholds = {
+        "max_latency_ratio": 1.25,
+        "max_token_ratio": 1.25,
+        "high_risk_fact_errors": 0,
+        "drug_drift": 0,
+    }
+    passed = (
+        high_risk_errors == 0
+        and drug_drift == 0
+        and latency_ratio <= thresholds["max_latency_ratio"]
+        and token_ratio <= thresholds["max_token_ratio"]
+    )
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "tasks": len(tasks),
+        "cell_counts": {f"{direction}:{profile}": count for (direction, profile), count in sorted(cell_counts.items())},
+        "high_risk_fact_errors": high_risk_errors,
+        "drug_drift": drug_drift,
+        "baseline_p95_latency_ms": baseline_latency,
+        "pilot_p95_latency_ms": candidate_latency,
+        "latency_ratio": round(latency_ratio, 4),
+        "baseline_p95_tokens": baseline_tokens,
+        "pilot_p95_tokens": candidate_tokens,
+        "token_ratio": round(token_ratio, 4),
+        "thresholds": thresholds,
+    }
+
+
 def run_model_cases(
     rows: list[dict],
     *,
@@ -589,6 +869,8 @@ def main() -> int:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--allow-external-endpoint", action="store_true")
+    parser.add_argument("--expert-review", help="read a blinded expert review JSON and write an aggregate-only gate report")
+    parser.add_argument("--pilot-report", help="read a pilot soak JSON and write an aggregate-only gate report")
     args = parser.parse_args()
     corpus_check = check_corpus(direction=args.direction)
     if args.check_corpus:
@@ -600,6 +882,76 @@ def main() -> int:
             print("BLOCKED: AD corpus manifest contract incomplete: " + ", ".join(corpus_check["errors"]))
             return 2
         return 0
+    if args.expert_review:
+        report: dict
+        review_path = Path(args.expert_review)
+        if not review_path.is_file():
+            report = {"status": "BLOCKED", "errors": ["expert_review_missing"]}
+        elif not corpus_check["valid"]:
+            report = {"status": "BLOCKED", "errors": ["corpus_contract"]}
+        else:
+            try:
+                review_document = json.loads(review_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                report = {"status": "BLOCKED", "errors": ["expert_review_invalid_json"]}
+            else:
+                rows = _read_pairs()
+                if args.direction != "both":
+                    rows = [row for row in rows if row["direction"] == args.direction]
+                source_units = {str(row["case"]): _source_units(row["source"]) for row in rows}
+                report = assess_expert_review(
+                    review_document,
+                    source_units,
+                    expected_case_ids=set(source_units),
+                )
+        report = {
+            "schema": "plan076-ad-expert-review/v1",
+            "direction": args.direction,
+            "review_file": str(review_path),
+            **report,
+        }
+        RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        report_path = RUNS_ROOT / f"expert-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:10]}.json"
+        report["report_path"] = str(report_path)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report["status"] == "PASS":
+            return 0
+        if report["status"] == "FAIL":
+            print("FAIL: expert review thresholds not met")
+            return 1
+        print("BLOCKED: expert review evidence incomplete")
+        return 2
+    if args.pilot_report:
+        report: dict
+        pilot_path = Path(args.pilot_report)
+        if not pilot_path.is_file():
+            report = {"status": "BLOCKED", "errors": ["pilot_report_missing"]}
+        else:
+            try:
+                pilot_document = json.loads(pilot_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                report = {"status": "BLOCKED", "errors": ["pilot_report_invalid_json"]}
+            else:
+                report = assess_pilot_report(pilot_document)
+        report = {
+            "schema": "plan076-ad-pilot-report/v1",
+            "direction": args.direction,
+            "pilot_file": str(pilot_path),
+            **report,
+        }
+        RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        report_path = RUNS_ROOT / f"pilot-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:10]}.json"
+        report["report_path"] = str(report_path)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report["status"] == "PASS":
+            return 0
+        if report["status"] == "FAIL":
+            print("FAIL: PLAN-076 pilot thresholds not met")
+            return 1
+        print("BLOCKED: PLAN-076 pilot evidence incomplete")
+        return 2
     summary = evaluate(baseline=args.baseline, candidate=args.candidate, direction=args.direction)
     summary["corpus_contract"] = corpus_check
     if not corpus_check["valid"]:

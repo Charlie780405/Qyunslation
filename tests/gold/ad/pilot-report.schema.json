@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qyunslation.local/plan076/ad-pilot-report.schema.json",
+  "type": "object",
+  "required": ["baseline", "tasks"],
+  "properties": {
+    "baseline": {
+      "type": "object",
+      "required": ["p95_latency_ms", "p95_tokens"],
+      "properties": {
+        "p95_latency_ms": {"type": "number", "exclusiveMinimum": 0},
+        "p95_tokens": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "task_id", "direction", "document_profile", "status",
+          "prompt_digest", "termbase_version", "latency_ms", "tokens"
+        ],
+        "properties": {
+          "task_id": {"type": "string", "minLength": 1},
+          "direction": {"enum": ["en-zh", "zh-en"]},
+          "document_profile": {"enum": ["医学研究文献", "临床研究文档"]},
+          "status": {"enum": ["pass", "approved", "completed"]},
+          "prompt_digest": {"type": "string", "minLength": 1},
+          "termbase_version": {"type": "string", "minLength": 1},
+          "latency_ms": {"type": "number", "minimum": 0},
+          "tokens": {"type": "number", "minimum": 0},
+          "high_risk_fact_errors": {"type": "integer", "minimum": 0},
+          "drug_drift": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -205,6 +205,99 @@ def test_display_endpoint_strips_embedded_credentials():
     assert plan076_ad_eval._display_endpoint("https://user:password@example.com/v1") == "https://example.com/v1"
 
 
+def test_expert_review_gate_computes_kappa_and_preference():
+    source_units = {f"case-{index}": 100 for index in range(20)}
+    document = {
+        "schema": "plan076-expert-review/v1",
+        "cases": [
+            {
+                "case_id": case_id,
+                "reviewers": [
+                    {"reviewer_role": "ad_medical", "blind_choice": "candidate", "severity": "none", "categories": []},
+                    {"reviewer_role": "medical_translation", "blind_choice": "candidate", "severity": "none", "categories": []},
+                ],
+                "adjudicated": {"severity": "none", "categories": []},
+            }
+            for case_id in source_units
+        ],
+    }
+    result = plan076_ad_eval.assess_expert_review(
+        document,
+        source_units,
+        expected_case_ids=set(source_units),
+    )
+    assert result["status"] == "PASS"
+    assert result["kappa"] == 1.0
+    assert result["candidate_preference"] == 1.0
+
+
+def test_expert_review_gate_blocks_missing_roles_and_fails_critical():
+    source_units = {"case-1": 1000}
+    document = {
+        "cases": [{
+            "case_id": "case-1",
+            "reviewers": [
+                {"reviewer_role": "ad_medical", "blind_choice": "candidate", "severity": "critical", "categories": ["fact"]},
+                {"reviewer_role": "medical_translation", "blind_choice": "candidate", "severity": "critical", "categories": ["fact"]},
+            ],
+            "adjudicated": {"severity": "critical", "categories": ["fact"]},
+        }],
+    }
+    result = plan076_ad_eval.assess_expert_review(document, source_units, min_cases=1)
+    assert result["status"] == "FAIL"
+    assert result["critical"] == 1
+
+    result = plan076_ad_eval.assess_expert_review({"cases": []}, source_units, min_cases=1)
+    assert result["status"] == "BLOCKED"
+
+
+def test_expert_review_gate_rejects_model_or_source_fields():
+    result = plan076_ad_eval.assess_expert_review(
+        {"model": "secret-model", "cases": []},
+        {},
+        min_cases=0,
+    )
+    assert result == {"status": "BLOCKED", "errors": ["review_contains_sensitive_fields"]}
+
+
+def test_pilot_gate_requires_four_cells_and_performance_budget():
+    tasks = []
+    cells = [
+        ("en-zh", "医学研究文献"),
+        ("en-zh", "临床研究文档"),
+        ("zh-en", "医学研究文献"),
+        ("zh-en", "临床研究文档"),
+    ]
+    for direction, profile in cells:
+        for index in range(5):
+            tasks.append({
+                "task_id": f"{direction}-{profile}-{index}",
+                "direction": direction,
+                "document_profile": profile,
+                "status": "approved",
+                "prompt_digest": f"prompt-{direction}-{profile}",
+                "termbase_version": f"terms-{direction}-{profile}",
+                "latency_ms": 110,
+                "tokens": 110,
+                "high_risk_fact_errors": 0,
+                "drug_drift": 0,
+            })
+    result = plan076_ad_eval.assess_pilot_report(
+        {"baseline": {"p95_latency_ms": 100, "p95_tokens": 100}, "tasks": tasks}
+    )
+    assert result["status"] == "PASS"
+    assert result["latency_ratio"] == 1.1
+
+    tasks[0]["drug_drift"] = 1
+    result = plan076_ad_eval.assess_pilot_report(
+        {"baseline": {"p95_latency_ms": 100, "p95_tokens": 100}, "tasks": tasks}
+    )
+    assert result["status"] == "FAIL"
+
+    result = plan076_ad_eval.assess_pilot_report({"tasks": []})
+    assert result["status"] == "BLOCKED"
+
+
 def test_model_comparison_requires_ten_point_gain_without_new_blockers():
     baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 1}
     candidate_row = {"case": "case-1", "metrics": {"score": 0.91}, "qa_blockers": 0}

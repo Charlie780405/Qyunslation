@@ -20,6 +20,24 @@ PLAN076_AD_CORPUS_ROOT=/secure/plan076/ad \
 
 为防止受控语料外发，公网端点默认拒绝；只有经过数据治理批准时才显式增加 `--allow-external-endpoint`。
 
+专家双盲结果使用 `expert-review.schema.json`，只提交 case 级盲选、严重度和仲裁结果，不提交模型名、完整 prompt 或原文。导入命令：
+
+```bash
+.venv/bin/python scripts/plan076-ad-eval.py \
+  --expert-review /secure/plan076/ad/expert-review.json \
+  --direction both
+```
+
+结果必须同时满足 Critical=0、Major≤1/1,000 源文单位、Cohen κ≥0.70、候选盲选偏好≥70%，否则状态为 `FAIL` 或 `BLOCKED`，产品仍只能显示“AD 内部测试版”。
+
+Pilot soak 使用 `pilot-report.schema.json`，必须覆盖 20 个真实任务，且 `en-zh/医学研究文献`、`en-zh/临床研究文档`、`zh-en/医学研究文献`、`zh-en/临床研究文档` 四个组合各至少 5 个：
+
+```bash
+.venv/bin/python scripts/plan076-ad-eval.py \
+  --pilot-report /secure/plan076/ad/pilot.json \
+  --direction both
+```
+
 ```bash
 PLAN076_AD_CORPUS_ROOT=/secure/plan076/ad \
   .venv/bin/python scripts/plan076-ad-eval.py \

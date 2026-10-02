@@ -32,6 +32,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `9e7db80` | 评测仅读取锁定 manifest case；baseline-only 在模型运行器接入前 fail-closed |
 | `a16fb44` | 接入不可覆盖 generic/candidate model run、annotation schema 和公网端点 fail-closed |
 | `537aef9` | 评测报告剥离端点内嵌凭据 |
+| `pending` | 增加 pilot soak 与专家双盲聚合门禁；缺证据保持 BLOCKED |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -45,7 +46,7 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**38 passed**；
+- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**42 passed**；
 - 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；

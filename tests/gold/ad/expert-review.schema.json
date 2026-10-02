@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qyunslation.local/plan076/ad-expert-review.schema.json",
+  "type": "object",
+  "required": ["cases"],
+  "properties": {
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "reviewers", "adjudicated"],
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "reviewers": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"$ref": "#/$defs/reviewer"}
+          },
+          "adjudicated": {"$ref": "#/$defs/adjudicated"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "reviewer": {
+      "type": "object",
+      "required": ["reviewer_role", "blind_choice", "severity", "categories"],
+      "properties": {
+        "reviewer_role": {"enum": ["ad_medical", "medical_translation"]},
+        "blind_choice": {"enum": ["baseline", "candidate", "tie"]},
+        "severity": {"enum": ["none", "minor", "major", "critical"]},
+        "categories": {"type": "array", "items": {"enum": ["fact", "terminology", "completeness", "language_quality", "structure"]}}
+      },
+      "additionalProperties": true
+    },
+    "adjudicated": {
+      "type": "object",
+      "required": ["severity", "categories"],
+      "properties": {
+        "severity": {"enum": ["none", "minor", "major", "critical"]},
+        "categories": {"type": "array", "items": {"enum": ["fact", "terminology", "completeness", "language_quality", "structure"]}}
+      },
+      "additionalProperties": true
+    }
+  }
+}
