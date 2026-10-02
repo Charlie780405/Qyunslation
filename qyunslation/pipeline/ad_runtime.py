@@ -6,10 +6,14 @@ from typing import Any
 
 from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt
 
+QA_RULE_VERSION = "076-qa-v1"
+
 
 def ad_rollout_mode(*, env: str | None, configured: str | None) -> str:
     value = (configured or "").strip().casefold()
-    if value in {"off", "shadow", "pilot", "default"}:
+    if value == "default":
+        value = "off"
+    if value in {"off", "shadow", "pilot"}:
         return value
     return "off" if (env or "development").strip().casefold() == "production" else "pilot"
 
@@ -26,12 +30,12 @@ def ad_rollout_allowed(*, mode: str, tenant: str, tenants: str | None) -> bool:
     normalized_tenant = (tenant or "").strip().casefold()
     if mode == "off" or not normalized_tenant:
         return False
-    if mode != "pilot":
-        return True
-    allowlist = ad_rollout_tenants(tenants)
-    # Pilot is always tenant-scoped; an empty allowlist is fail-closed in every
-    # environment, including development.
-    return normalized_tenant in allowlist
+    if mode == "shadow":
+        return False
+    if mode == "pilot":
+        allowlist = ad_rollout_tenants(tenants)
+        return normalized_tenant in allowlist
+    return False
 
 
 def _direction_code(direction: str, target_language: str | None = None) -> str:
@@ -48,19 +52,27 @@ def _direction_code(direction: str, target_language: str | None = None) -> str:
     raise ValueError("unsupported translation direction for AD profile")
 
 
-def compile_runtime_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
+def compile_runtime_settings(
+    settings: dict[str, Any] | None,
+    *,
+    termbase_version: str | None = None,
+    model_profile_id: str | None = None,
+) -> dict[str, Any]:
     current = deepcopy(settings or {})
     domain = str(current.get("domain_profile") or "general").strip().casefold()
     if domain != "ad":
         return current
+    if str(current.get("custom_prompt") or "").strip():
+        raise ValueError("AD profile forbids custom_prompt")
     direction = _direction_code(str(current.get("direction") or ""), current.get("target_language"))
     document = str(current.get("profile") or current.get("document_profile") or "").strip()
     compiled = compile_prompt(PromptContext(domain, direction, document, "translate"))
-    custom = str(current.get("custom_prompt") or "").strip()
-    if custom.startswith(compiled.text):
-        current["custom_prompt"] = custom
-    else:
-        current["custom_prompt"] = compiled.text + (f"\n\n附加任务约束：\n{custom}" if custom else "")
-    current["prompt_snapshot"] = compiled.snapshot()
-    current["prompt_snapshot"]["domain_profile"] = "ad"
+    current["custom_prompt"] = compiled.text
+    snapshot = compiled.snapshot()
+    snapshot["domain_profile"] = "ad"
+    snapshot["termbase_version"] = termbase_version
+    snapshot["qa_rule_version"] = QA_RULE_VERSION
+    if model_profile_id:
+        snapshot["model_profile_id"] = model_profile_id
+    current["prompt_snapshot"] = snapshot
     return current

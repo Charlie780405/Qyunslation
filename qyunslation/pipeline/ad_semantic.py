@@ -63,6 +63,76 @@ def _protected_tokens(text: str) -> set[str]:
     return set(re.findall(r"\b\d+(?:\.\d+)?\b|\b(?:mg|mL|EASI-75|SCORAD|IGA|PP-NRS)\b", text or "", flags=re.I))
 
 
+def run_semantic_review_http(
+    *,
+    reviewer_url: str,
+    source: str,
+    target: str,
+    segments: list[dict],
+    timeout: float = 30.0,
+) -> list[SemanticIssue]:
+    import httpx
+
+    payload = {
+        "source": source,
+        "target": target,
+        "segments": segments,
+    }
+    response = httpx.post(reviewer_url, json=payload, timeout=timeout)
+    response.raise_for_status()
+    return parse_semantic_review(response.json())
+
+
+def orchestrate_ad_semantic_qa(
+    *,
+    source: str,
+    target: str,
+    mode: str,
+    reviewer_url: str | None,
+    repair_fn: Callable[[str, str, list], str] | None = None,
+    timeout: float = 30.0,
+) -> dict:
+    """Return semantic QA outcome for pipeline wiring."""
+    segments = select_high_risk_segments([{"id": "full-text", "source": source}])
+    result = {
+        "mode": mode,
+        "risk_segment_count": len(segments),
+        "reviewer_configured": bool(reviewer_url),
+        "issues": [],
+        "repair_attempts": 0,
+        "repaired": False,
+        "fact_drift": False,
+        "degraded": False,
+        "target": target,
+    }
+    if mode == "shadow" or not segments:
+        return result
+    if not reviewer_url:
+        result["degraded"] = mode == "required"
+        return result
+    try:
+        issues = run_semantic_review_http(
+            reviewer_url=reviewer_url,
+            source=source,
+            target=target,
+            segments=segments,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        result["degraded"] = True
+        result["error"] = type(exc).__name__
+        return result
+    result["issues"] = [{"id": item.segment_id, "severity": item.severity, "code": item.code} for item in issues]
+    critical = [item for item in issues if item.severity in {"major", "critical"}]
+    if critical and repair_fn is not None:
+        repair = repair_once(source=source, target=target, issues=critical, repair_fn=repair_fn)
+        result["repair_attempts"] = repair.attempts
+        result["repaired"] = repair.repaired
+        result["fact_drift"] = repair.fact_drift
+        result["target"] = repair.target
+    return result
+
+
 def repair_once(
     *, source: str, target: str, issues: list[dict] | list[SemanticIssue], repair_fn: Callable[[str, str, list], str]
 ) -> RepairResult:

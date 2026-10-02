@@ -19,7 +19,6 @@ SUPPORTED_AD_DOCUMENTS = {"医学研究文献", "临床研究文档"}
 
 _DOMAIN_ANCHORS = (
     r"\batopic dermatitis\b",
-    r"\bAD\b",
     r"\beczema\b",
     r"\bdupilumab\b",
     r"\btralokinumab\b",
@@ -82,6 +81,7 @@ class CompiledPrompt:
             "document_profile": self.document_profile,
             "task": self.task,
             "compiler_version": "076-compiler-v1",
+            "qa_rule_version": "076-qa-v1",
         }
 
 

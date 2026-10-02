@@ -1,6 +1,6 @@
 # PLAN-076d：AD 概念词库与双向术语 policy
 
-> 状态：**待实施**
+> 状态：**部分实施（076i G-008：概念表 SSOT 替代机械反转）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076a](./PLAN-076a-evaluation-contract-corpus.md)
 

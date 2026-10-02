@@ -699,7 +699,6 @@ class TranslationService:
                     else "简体中文 → English",
                     "target_language": getattr(payload, "to_lang", None),
                     "profile": getattr(payload, "document_profile", "通用医药文档"),
-                    "custom_prompt": getattr(payload, "custom_prompt", None),
                 }
             )
             if runtime.get("custom_prompt"):

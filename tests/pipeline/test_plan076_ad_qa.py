@@ -45,7 +45,7 @@ def test_ad_qa_checks_negation_and_modality_in_both_directions():
     assert any(item.code == "AD_MODALITY_DRIFT" for item in findings)
 
 
-def test_ad_qa_ignores_source_numbers_that_are_not_protected_facts():
+def test_ad_qa_ignores_publication_years_as_protected_dose_numbers():
     findings = run_ad_deterministic_qa(
         QaContext(
             source="The study was conducted in 2024.",
@@ -53,4 +53,4 @@ def test_ad_qa_ignores_source_numbers_that_are_not_protected_facts():
             direction="en-zh",
         )
     )
-    assert any(item.code == "AD_NUMBER_DRIFT" for item in findings)
+    assert not any(item.code == "AD_NUMBER_DRIFT" for item in findings)

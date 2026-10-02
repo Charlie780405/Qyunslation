@@ -1,6 +1,6 @@
 # PLAN-076e：AD 中英双向确定性 QA
 
-> 状态：**待实施**
+> 状态：**部分实施（076i G-004/G-105：全格式 QA 与中文数字规则）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076c](./PLAN-076c-translation-prompts-runtime.md)、[076d](./PLAN-076d-ad-bidirectional-termbase.md)
 

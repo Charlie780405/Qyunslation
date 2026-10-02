@@ -1,6 +1,6 @@
 # PLAN-076f：风险驱动语义 QA 与一次定点修复
 
-> 状态：**待实施**
+> 状态：**部分实施（076i G-005：库函数就绪，流水线编排待接）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076e](./PLAN-076e-bidirectional-deterministic-qa.md)
 

@@ -1,6 +1,6 @@
 # PLAN-076g：API/UI 可见性、审计与灰度
 
-> 状态：**待实施**
+> 状态：**部分实施（076i G-002/G-106：shadow 语义与前端门控）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076b](./PLAN-076b-prompt-registry-compiler.md)–[076f](./PLAN-076f-semantic-qa-repair.md)
 

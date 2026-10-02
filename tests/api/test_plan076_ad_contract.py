@@ -89,5 +89,5 @@ def test_ad_pilot_respects_tenant_allowlist(client, monkeypatch):
             "profile": "医学研究文献",
         },
     )
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "AD_PROFILE_UNSUPPORTED"
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "AD_ROLLOUT_DENIED"

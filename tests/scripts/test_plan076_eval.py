@@ -180,7 +180,8 @@ def test_model_runner_writes_immutable_machine_output(monkeypatch, tmp_path):
     )
     assert result["status"] == "PASS"
     assert result["cases"] == 1
-    assert result["rows"][0]["metrics"]["score"] == 1.0
+    assert result["rows"][0]["metrics"]["term_total"] == 0
+    assert result["rows"][0]["metrics"]["score"] == 0.3
     report = Path(result["run_dir"]) / "report.json"
     assert report.is_file()
     assert "machine output" not in report.read_text(encoding="utf-8")
@@ -296,6 +297,30 @@ def test_pilot_gate_requires_four_cells_and_performance_budget():
 
     result = plan076_ad_eval.assess_pilot_report({"tasks": []})
     assert result["status"] == "BLOCKED"
+
+
+def test_challenge_segments_count_annotation_entries():
+    row = {
+        "case": "case-1",
+        "direction": "en-zh",
+        "source": "Patients with atopic dermatitis received dupilumab 300 mg.",
+        "target": "特应性皮炎患者接受了度普利尤单抗 300 mg。",
+        "annotations": {
+            "facts": [
+                {"source_span": "300 mg", "target_terms": ["300 mg"], "criticality": "high"},
+                {"source_span": "dupilumab", "target_terms": ["度普利尤单抗"], "criticality": "high"},
+            ]
+        },
+    }
+    assert plan076_ad_eval._count_challenge_segments(row) == 2
+
+
+def test_hard_gates_block_empty_denominator():
+    result = plan076_ad_eval.assess_hard_gates(
+        [{"case": "c1", "direction": "en-zh", "source": "plain text", "target": "plain text", "annotations": {}}]
+    )
+    assert result["status"] == "BLOCKED"
+    assert "term_denominator_empty" in result["errors"]
 
 
 def test_model_comparison_requires_ten_point_gain_without_new_blockers():

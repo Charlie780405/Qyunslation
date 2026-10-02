@@ -240,6 +240,8 @@ def api_me(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Return the authenticated principal without exposing bearer credentials."""
+    from qyunslation.pipeline.ad_runtime import ad_rollout_allowed, ad_rollout_mode
+
     tenant = _tenant_bundle(session, identity)
     membership = repo.ensure_membership(
         session,
@@ -258,6 +260,17 @@ def api_me(
             "can_manage_terms": membership.role in {"term_admin", "admin", "owner"},
             "can_manage_policy": membership.role in {"admin", "owner"},
             "workbench_v2": "workbench_v2" in identity.roles,
+            "ad_enabled": ad_rollout_allowed(
+                mode=ad_rollout_mode(
+                    env=os.environ.get("QYUNSLATION_ENV"),
+                    configured=(
+                        os.environ.get("QYUNSLATION_AD_PROMPT_MODE")
+                        or os.environ.get("QYUNSLATION_AD_ROLLOUT")
+                    ),
+                ),
+                tenant=tenant.slug,
+                tenants=os.environ.get("QYUNSLATION_AD_PROMPT_TENANTS"),
+            ),
         },
     }
 
@@ -321,20 +334,11 @@ def _preflight_path(record: PreflightRecord) -> Path:
 
 def _preflight_text_for_domain(record: PreflightRecord) -> str:
     """Read bounded text for domain gating; binary failures remain explicit."""
-    path = _preflight_path(record)
-    if not path.is_file():
-        return ""
-    if path.suffix.casefold() == ".pdf":
-        try:
-            from qyunslation.pipeline.qa.pdf_inspect import read_pdf_facts
+    from qyunslation.pipeline.ad_text_extract import extract_preflight_text
 
-            facts = read_pdf_facts(path)
-            return facts.text if facts else ""
-        except Exception:
-            return ""
     try:
-        return path.read_text(encoding="utf-8", errors="ignore")[:500_000]
-    except (OSError, UnicodeError):
+        return extract_preflight_text(_preflight_path(record))
+    except HTTPException:
         return ""
 
 
@@ -366,8 +370,8 @@ def _validate_domain_profile(
         tenants=os.environ.get("QYUNSLATION_AD_PROMPT_TENANTS"),
     ):
         raise HTTPException(
-            status_code=404,
-            detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "AD 专业模式尚未开放"},
+            status_code=422,
+            detail={"code": "AD_ROLLOUT_DENIED", "message": "AD 专业模式尚未对该租户开放"},
         )
     if direction not in {"English → 简体中文", "简体中文 → English"} or document_profile not in {"医学研究文献", "临床研究文档"}:
         raise HTTPException(
@@ -1194,25 +1198,32 @@ def _inspect_run_outputs(
     run: TranslationRunRecord,
     runner_state: dict[str, Any] | None,
 ) -> tuple[list[Any], dict[str, Any] | None, dict[str, Any] | None]:
-    """PLAN-071e/h：用真实源/译文 PDF 产出 QA findings 与术语快照（失败也要留痕）。"""
+    """PLAN-071e/h + 076i：PDF 与非 PDF 产物的 QA 取证。"""
+    from qyunslation.pipeline.ad_inspection import inspect_ad_text_pair
+    from qyunslation.pipeline.ad_text_extract import extract_preflight_text, extract_translated_text
     from qyunslation.pipeline.qa.engine import QaFinding
     from qyunslation.pipeline.qa.pdf_inspect import inspect_pdf_pair
 
+    domain_ad = str((run.settings_snapshot or {}).get("domain_profile") or "general").casefold() == "ad"
     files = (runner_state or {}).get("downloadable_files") or {}
     mono: Path | None = None
     dual: Path | None = None
+    text_artifact: Path | None = None
     for key, meta in files.items():
         if not isinstance(meta, dict) or not meta.get("path"):
             continue
         path = Path(str(meta["path"]))
-        if not path.is_file() or path.suffix.casefold() != ".pdf":
+        if not path.is_file():
             continue
-        if "dual" in str(key).casefold() or "dual" in path.name.casefold():
-            dual = dual or path
-        else:
-            mono = mono or path
-    if mono is None and dual is None:
-        return [], None, None
+        suffix = path.suffix.casefold()
+        if suffix == ".pdf":
+            if "dual" in str(key).casefold() or "dual" in path.name.casefold():
+                dual = dual or path
+            else:
+                mono = mono or path
+        elif suffix in {".txt", ".md", ".docx"} and text_artifact is None:
+            if "dual" not in str(key).casefold():
+                text_artifact = path
     preflight = session.get(PreflightRecord, run.preflight_id)
     if preflight is None:
         return [], None, None
@@ -1220,70 +1231,56 @@ def _inspect_run_outputs(
         source_path = _preflight_path(preflight)
     except HTTPException:
         return [], None, None
+
+    if mono is None and dual is None and not (domain_ad and text_artifact):
+        if domain_ad:
+            findings = [
+                QaFinding(
+                    category="ad",
+                    severity="blocker",
+                    code="AD_QA_SOURCE_UNAVAILABLE",
+                    message="AD 任务缺少可 QA 的译文产物",
+                )
+            ]
+            return findings, {"status": "unavailable"}, None
+        return [], None, None
+
     target = str(getattr(run, "direction", "") or "").split("→")[-1]
     facts: dict[str, Any] = {}
-    findings, summary = inspect_pdf_pair(
-        source_path=source_path,
-        mono_path=mono,
-        dual_path=dual,
-        target_is_chinese=("中" in target or target.casefold().startswith("zh") or not target),
-        facts_out=facts,
-    )
-    snapshot: dict[str, Any] | None = None
-    if facts:
-        if str((run.settings_snapshot or {}).get("domain_profile") or "general").casefold() == "ad":
-            from qyunslation.pipeline.ad_prompt import detect_domain_evidence
-            from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
-            from qyunslation.pipeline.ad_semantic import select_high_risk_segments
-            from qyunslation.pipeline.ad_termbase import build_ad_term_policy
+    findings: list[Any] = []
+    summary: dict[str, Any] = {}
+    if mono is not None or dual is not None:
+        findings, summary = inspect_pdf_pair(
+            source_path=source_path,
+            mono_path=mono,
+            dual_path=dual,
+            target_is_chinese=("中" in target or target.casefold().startswith("zh") or not target),
+            facts_out=facts,
+        )
+    elif domain_ad and text_artifact is not None:
+        source_text = extract_preflight_text(source_path)
+        target_text = extract_translated_text(text_artifact)
+        ad_findings, snapshot, _ = inspect_ad_text_pair(
+            source_text=source_text,
+            target_text=target_text,
+            direction_label=run.direction,
+            settings_snapshot=run.settings_snapshot,
+        )
+        if snapshot.get("semantic_degraded"):
+            snapshot = dict(snapshot)
+        return ad_findings, snapshot, None
 
-            direction = "en-zh" if run.direction == "English → 简体中文" else "zh-en"
-            source_text = facts["source"].text
-            target_text = facts["translated"].text
-            ad_policy = build_ad_term_policy(source_text, direction)
-            findings.extend(
-                run_ad_deterministic_qa(
-                    QaContext(
-                        source=source_text,
-                        target=target_text,
-                        direction=direction,
-                        terms=ad_policy.get("terms") or {},
-                    )
-                )
+    snapshot: dict[str, Any] | None = None
+    semantic_degraded = False
+    if facts:
+        if domain_ad:
+            ad_findings, snapshot, semantic_degraded = inspect_ad_text_pair(
+                source_text=facts["source"].text,
+                target_text=facts["translated"].text,
+                direction_label=run.direction,
+                settings_snapshot=run.settings_snapshot,
             )
-            if not detect_domain_evidence(source_text):
-                findings.append(
-                    QaFinding(
-                        category="ad",
-                        severity="blocker",
-                        code="AD_DOMAIN_EVIDENCE_MISSING",
-                        message="源文缺少可验证的 AD 领域锚点",
-                    )
-                )
-            snapshot = {
-                "status": "ready",
-                "schema": "076-ad-termbase-v1",
-                "direction": direction,
-                "termbase_version": ad_policy.get("termbase_version"),
-                "terms": ad_policy.get("metadata") or [],
-            }
-            semantic_mode = str((run.settings_snapshot or {}).get("semantic_qa_mode") or "shadow").casefold()
-            risk_segments = select_high_risk_segments([{"id": "pdf-text", "source": source_text}])
-            snapshot["semantic_qa"] = {
-                "mode": semantic_mode,
-                "risk_segment_count": len(risk_segments),
-                "reviewer_configured": bool(os.environ.get("QYUNSLATION_AD_SEMANTIC_REVIEWER_URL")),
-            }
-            if semantic_mode == "required" and not snapshot["semantic_qa"]["reviewer_configured"]:
-                findings.append(
-                    QaFinding(
-                        category="ad_semantic",
-                        severity="blocker",
-                        code="AD_QA_DEGRADED",
-                        message="AD 语义 QA 被设为 required，但审核服务未配置",
-                        evidence=snapshot["semantic_qa"],
-                    )
-                )
+            findings.extend(ad_findings)
         else:
             try:
                 from qyunslation.pipeline.term_snapshot import (
@@ -1301,6 +1298,9 @@ def _inspect_run_outputs(
                 findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
             except Exception:
                 snapshot = None
+    if snapshot is not None:
+        snapshot = dict(snapshot)
+        snapshot["semantic_degraded"] = semantic_degraded
     findings.append(
         QaFinding(
             category="consistency",
@@ -1319,7 +1319,7 @@ def _maybe_run_auto_qa(
     runner_state: dict[str, Any] | None = None,
 ) -> None:
     """PLAN-071e：layout 完成后跑确定性 QA，写入 qa_item 与 quality_state。"""
-    if (run.quality_state or "draft") not in {"draft", "qa_blocked", "review_ready"}:
+    if (run.quality_state or "draft") not in {"draft", "qa_blocked", "review_ready", "qa_degraded"}:
         return
     if run.stage not in {"layout", "qa"} and run.status not in {"translating", "rendering"}:
         # Still allow when layout_complete just set stage=layout.
@@ -1417,7 +1417,8 @@ def _maybe_run_auto_qa(
             )
         )
     run.qa_summary = summarize(findings)
-    run.quality_state = quality_state_from_findings(findings)
+    semantic_degraded = bool((term_snapshot or {}).get("semantic_degraded"))
+    run.quality_state = quality_state_from_findings(findings, semantic_degraded=semantic_degraded)
     run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
     try:
         from qyunslation.pipeline.event_store import persist_buffer
@@ -1608,6 +1609,8 @@ def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
         reasons.append("superseded_artifact")
     if extraction_degraded:
         reasons.append("term_extraction_degraded")
+    if (run.quality_state or "") == "qa_degraded":
+        reasons.append("qa_degraded")
     return {
         "passed": not reasons,
         "reasons": reasons,
@@ -1735,16 +1738,27 @@ async def _launch_translation_run(
     # process and the private PDF runner config.
     launch_settings = dict(run.settings_snapshot or {})
     if str(launch_settings.get("domain_profile") or "general").casefold() == "ad":
-        try:
-            from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+        from qyunslation.pipeline.ad_prompt_store import load_frozen_prompt, verify_frozen_digest
+        from qyunslation.workbench.runner import get_pdf2zh_runner
 
-            compiled_settings = compile_runtime_settings(launch_settings)
-            launch_settings["ad_prompt_text"] = compiled_settings.get("custom_prompt")
-        except ValueError:
+        expected_digest = str(dict(launch_settings.get("prompt_snapshot") or {}).get("digest") or "")
+        run_dir = get_pdf2zh_runner()._run_dir(
+            tenant_id=run.tenant_id,
+            run_id=run.id,
+            generation=run.generation,
+        )
+        if not verify_frozen_digest(run_dir, expected_digest):
+            run.status = "blocked"
+            run.stage = "validation"
+            run.degradation_reason = "AD prompt digest mismatch"
+            return
+        loaded = load_frozen_prompt(run_dir)
+        if loaded is None:
             run.status = "blocked"
             run.stage = "validation"
             run.degradation_reason = "AD prompt unavailable"
             return
+        launch_settings["ad_prompt_text"] = loaded[0]
 
     if resume and session is not None:
         _apply_resume_snapshot(session, run)
@@ -1956,7 +1970,8 @@ async def create_translation_run(
     key = (idempotency_key or f"preflight:{preflight.id}").strip()
     if not key or len(key) > 256:
         raise HTTPException(status_code=400, detail="invalid Idempotency-Key")
-    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    key_material = f"{key}|domain_profile={domain_profile}"
+    key_hash = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
     existing = session.scalar(
         select(TranslationRunRecord).where(
             TranslationRunRecord.tenant_id == tenant.id,
@@ -1964,6 +1979,12 @@ async def create_translation_run(
         )
     )
     if existing is not None:
+        existing_domain = str((existing.settings_snapshot or {}).get("domain_profile") or "general").casefold()
+        if existing_domain != domain_profile:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "IDEMPOTENCY_PROFILE_MISMATCH", "message": "Idempotency-Key 已用于不同 domain_profile"},
+            )
         return _translation_run_dict(session, existing)
     from qyunslation.pipeline.model_profiles import validate_selection
 
@@ -2003,21 +2024,29 @@ async def create_translation_run(
         pipeline=resolve_pipeline_mode(getattr(tenant, "slug", None)),
     )
     prompt_snapshot: dict[str, Any] | None = None
+    ad_prompt_text: str | None = None
     if domain_profile == "ad":
         try:
             from qyunslation.pipeline.ad_runtime import compile_runtime_settings
 
-            prompt_snapshot = compile_runtime_settings(
+            compiled = compile_runtime_settings(
                 {
                     "domain_profile": domain_profile,
                     "direction": direction,
                     "profile": body.profile,
-                }
-            ).get("prompt_snapshot")
+                    "target_language": target_language,
+                },
+                termbase_version=termbase_version,
+                model_profile_id=model_profile_id,
+            )
+            prompt_snapshot = compiled.get("prompt_snapshot")
+            ad_prompt_text = str(compiled.get("custom_prompt") or "")
         except ValueError as exc:
+            message = str(exc)
+            code = "AD_CUSTOM_PROMPT_FORBIDDEN" if "custom_prompt" in message else "AD_PROMPT_UNAVAILABLE"
             raise HTTPException(
-                status_code=422,
-                detail={"code": "AD_PROMPT_UNAVAILABLE", "message": str(exc)},
+                status_code=422 if code == "AD_CUSTOM_PROMPT_FORBIDDEN" else 503,
+                detail={"code": code, "message": message},
             ) from exc
     run = TranslationRunRecord(
         preflight_id=preflight.id,
@@ -2037,6 +2066,7 @@ async def create_translation_run(
             "profile": body.profile,
             "domain_profile": domain_profile,
             "prompt_snapshot": prompt_snapshot,
+            "ad_prompt_text": ad_prompt_text,
             "semantic_qa_mode": (os.environ.get("QYUNSLATION_AD_SEMANTIC_QA_MODE") or "shadow").strip().casefold(),
             "bilingual": body.bilingual,
             "auto_ocr_workaround": True,
@@ -2052,6 +2082,22 @@ async def create_translation_run(
     )
     session.add(run)
     session.flush()
+    if domain_profile == "ad" and ad_prompt_text and prompt_snapshot:
+        try:
+            from qyunslation.pipeline.ad_prompt_store import write_frozen_prompt
+            from qyunslation.workbench.runner import get_pdf2zh_runner
+
+            run_dir = get_pdf2zh_runner()._run_dir(
+                tenant_id=tenant.id,
+                run_id=run.id,
+                generation=run.generation,
+            )
+            write_frozen_prompt(run_dir, text=ad_prompt_text, snapshot=prompt_snapshot)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "AD_PROMPT_UNAVAILABLE", "message": f"failed to freeze prompt: {exc}"},
+            ) from exc
     egress = str((mode_snapshot.get("model_snapshot") or {}).get("egress_scope") or "none")
     if egress != "none":
         record_audit(

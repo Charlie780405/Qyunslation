@@ -145,7 +145,9 @@ def summarize(findings: list[QaFinding]) -> dict[str, int]:
     return summary
 
 
-def quality_state_from_findings(findings: list[QaFinding]) -> str:
+def quality_state_from_findings(findings: list[QaFinding], *, semantic_degraded: bool = False) -> str:
     if any(item.severity == "blocker" for item in findings):
         return "qa_blocked"
+    if semantic_degraded or any(item.code == "AD_QA_DEGRADED" for item in findings):
+        return "qa_degraded"
     return "review_ready"

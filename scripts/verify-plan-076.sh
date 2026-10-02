@@ -13,12 +13,17 @@ blocked() { printf 'BLOCKED: %s\n' "$1"; BLOCKED=$((BLOCKED + 1)); }
 
 REQUIRED=(
   "docs/plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md"
+  "docs/plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md"
   "qyunslation/pipeline/ad_prompt.py"
+  "qyunslation/pipeline/ad_prompt_store.py"
   "qyunslation/pipeline/ad_termbase.py"
   "qyunslation/pipeline/ad_qa.py"
   "qyunslation/pipeline/ad_semantic.py"
+  "qyunslation/pipeline/ad_inspection.py"
   "glossaries/domain-ad.csv"
+  "glossaries/domain-ad-concepts.csv"
   "scripts/plan076-ad-eval.py"
+  "scripts/plan076-rollback-drill.sh"
   "tests/gold/ad/manifest.schema.json"
   "tests/gold/ad/annotations.schema.json"
   "tests/gold/ad/expert-review.schema.json"
@@ -35,6 +40,11 @@ if [[ -x "$PY" ]]; then
     tests/pipeline/test_plan076_ad_qa.py \
     tests/pipeline/test_plan076_ad_termbase.py \
     tests/pipeline/test_plan076_ad_runtime.py \
+    tests/pipeline/test_plan076_rollout_modes.py \
+    tests/pipeline/test_plan076_prompt_freeze.py \
+    tests/pipeline/test_plan076_office_prompt.py \
+    tests/pipeline/test_plan076_ad_qa_formats.py \
+    tests/pipeline/test_plan076_semantic_pipeline.py \
     tests/pipeline/test_plan076_factory_prompt.py \
     tests/pipeline/test_plan076_semantic_qa.py \
     tests/scripts/test_plan076_eval.py \
@@ -49,10 +59,20 @@ else
   blocked "PLAN-076 Python interpreter unavailable"
 fi
 
+if [[ -x "$PY" ]]; then
+  if (cd "$ROOT" && "$PY" -m pytest -q -o addopts= \
+    tests/scripts/test_deploy_gate.py \
+    tests/api/test_plan075_egress_audit.py); then
+    pass "PLAN-075 core regression"
+  else
+    fail "PLAN-075 core regression"
+  fi
+else
+  blocked "PLAN-075 regression unavailable"
+fi
+
 eval_rc=0
 if [[ -x "$PY" ]]; then
-  # A valid manifest is necessary but insufficient: require immutable generic
-  # and AD model runs so the gate cannot pass on reference-text QA alone.
   (cd "$ROOT" && "$PY" scripts/plan076-ad-eval.py --direction both --run-model both) >"$ROOT/var/verify-plan-076-eval.log" 2>&1 || eval_rc=$?
   if [[ "$eval_rc" -eq 0 ]]; then
     pass "AD bilingual evaluation"
@@ -60,6 +80,14 @@ if [[ -x "$PY" ]]; then
     blocked "AD bilingual evaluation corpus incomplete (see var/verify-plan-076-eval.log)"
   else
     fail "AD bilingual evaluation (see var/verify-plan-076-eval.log)"
+  fi
+fi
+
+if [[ -f "$ROOT/scripts/plan076-rollback-drill.sh" ]]; then
+  if bash "$ROOT/scripts/plan076-rollback-drill.sh" --check-only >/dev/null; then
+    pass "PLAN-076 rollback drill checklist"
+  else
+    fail "PLAN-076 rollback drill checklist"
   fi
 fi
 

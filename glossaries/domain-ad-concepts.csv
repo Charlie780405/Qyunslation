@@ -1,0 +1,33 @@
+concept_id,en,zh,term_type,risk,do_not_translate,forbidden_targets,status,notes
+ad-disease-001,atopic dermatitis,特应性皮炎,disease,high,false,异位性皮炎,curated,AD core disease
+ad-abbr-001,AD,AD,abbreviation,high,true,,curated,abbreviation kept in both langs
+ad-disease-002,eczema,湿疹,disease,high,false,,curated,clinical synonym
+ad-symptom-001,pruritus,瘙痒,symptom,normal,false,,curated,
+ad-endpoint-001,itch intensity,瘙痒强度,endpoint,normal,false,,curated,
+ad-sign-001,erythema,红斑,sign,normal,false,,curated,
+ad-sign-002,lichenification,苔藓样变,sign,normal,false,,curated,
+ad-drug-001,dupilumab,度普利尤单抗,drug,high,false,,curated,Dupixent generic
+ad-drug-002,tralokinumab,曲罗芦单抗,drug,high,false,,curated,
+ad-drug-003,upadacitinib,乌帕替尼,drug,high,false,,curated,
+ad-drug-004,abrocitinib,阿布昔替尼,drug,high,false,,curated,
+ad-drug-005,lebrikizumab,来瑞珠单抗,drug,high,false,,curated,
+ad-drug-006,nemolizumab,nemolizumab,drug,high,true,,curated,INN retained
+ad-target-001,IL-4Rα,IL-4Rα,target,high,true,,curated,receptor symbol
+ad-target-002,IL-13,IL-13,target,high,true,,curated,cytokine symbol
+ad-target-003,IL-4,IL-4,target,high,true,,curated,cytokine symbol
+ad-target-004,IL-31,IL-31,target,high,true,,curated,cytokine symbol
+ad-pathway-001,JAK-STAT,JAK-STAT,pathway,high,true,,curated,pathway symbol
+ad-pathway-002,Th2,Th2,pathway,high,true,,curated,cell subset
+ad-target-005,IFN-γ,IFN-γ,target,high,true,,curated,cytokine symbol
+ad-scale-001,EASI,EASI,scale,high,true,,curated,Eczema Area and Severity Index
+ad-endpoint-002,EASI-75,EASI-75,endpoint,high,true,,curated,response threshold
+ad-scale-002,IGA,IGA,scale,high,true,,curated,Investigator Global Assessment
+ad-scale-003,SCORAD,SCORAD,scale,high,true,,curated,SCORing Atopic Dermatitis
+ad-scale-004,PP-NRS,PP-NRS,scale,high,true,,curated,Peak Pruritus Numerical Rating Scale
+ad-endpoint-003,body surface area,体表面积,endpoint,normal,false,,curated,
+ad-endpoint-004,flare,急性加重,endpoint,normal,false,,curated,
+ad-treatment-001,maintenance treatment,维持治疗,treatment,normal,false,,curated,
+ad-treatment-002,rescue medication,补救用药,treatment,normal,false,,curated,
+ad-safety-001,adverse event,不良事件,safety,high,false,,curated,
+ad-safety-002,serious adverse event,严重不良事件,safety,high,false,,curated,
+ad-treatment-003,topical corticosteroid,外用糖皮质激素,treatment,high,false,,curated,

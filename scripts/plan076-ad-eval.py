@@ -28,6 +28,7 @@ from qyunslation.pipeline.ad_termbase import build_ad_term_policy
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS_ROOT = Path(os.environ.get("PLAN076_AD_CORPUS_ROOT") or ROOT / "tests" / "gold" / "ad")
 LEDGER = ROOT / "var" / "plan076-ad-eval.json"
+LEDGER_APPEND = ROOT / "var" / "plan076-ad-eval.jsonl"
 RUNS_ROOT = ROOT / "var" / "plan076-ad-eval" / "runs"
 MANIFEST_NAME = "manifest.json"
 REQUIRED_CASE_FIELDS = {
@@ -385,7 +386,9 @@ def _machine_metrics(row: dict, machine_text: str, findings: list) -> dict:
             aliases = [str(alias).strip() for alias in aliases if str(alias).strip()]
             applicable.append(aliases)
         hits = sum(1 for aliases in applicable if any(_target_contains(machine_text, alias) for alias in aliases))
-        return (hits / len(applicable) if applicable else 1.0, hits, len(applicable))
+        if not applicable:
+            return (-1.0, 0, 0)
+        return (hits / len(applicable), hits, len(applicable))
 
     term_recall, term_hits, term_total = recall(concepts)
     fact_recall, fact_hits, fact_total = recall(facts)
@@ -393,8 +396,10 @@ def _machine_metrics(row: dict, machine_text: str, findings: list) -> dict:
     target_units = len([line for line in machine_text.splitlines() if line.strip()])
     completeness = 1.0 if machine_text.strip() and target_units >= 1 else 0.0
     structure = 1.0 if target_units == source_units else (0.5 if target_units else 0.0)
+    term_component = term_recall if term_recall >= 0 else 0.0
+    fact_component = fact_recall if fact_recall >= 0 else 0.0
     score = round(
-        term_recall * 0.35 + fact_recall * 0.35 + completeness * 0.20 + structure * 0.10,
+        term_component * 0.35 + fact_component * 0.35 + completeness * 0.20 + structure * 0.10,
         4,
     )
     return {
@@ -411,12 +416,105 @@ def _machine_metrics(row: dict, machine_text: str, findings: list) -> dict:
     }
 
 
+def _wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
+    if total <= 0:
+        return 0.0
+    p = successes / total
+    denom = 1 + z**2 / total
+    centre = p + z**2 / (2 * total)
+    margin = z * ((p * (1 - p) / total + z**2 / (4 * total**2)) ** 0.5)
+    return max(0.0, (centre - margin) / denom)
+
+
+def _count_challenge_segments(row: dict) -> int:
+    annotations = row.get("annotations") if isinstance(row.get("annotations"), dict) else {}
+    source = row.get("source") or ""
+    total = 0
+    for group in ANNOTATION_GROUPS:
+        items = annotations.get(group) if isinstance(annotations.get(group), list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            span = str(item.get("source_span") or "").strip()
+            if span and span in source:
+                total += 1
+    return total
+
+
+def assess_hard_gates(rows: list[dict], *, machine_by_case: dict[str, str] | None = None) -> dict:
+    term_hits = term_total = fact_hits = fact_total = high_hits = high_total = 0
+    drift_blockers = 0
+    for row in rows:
+        machine_text = (machine_by_case or {}).get(str(row["case"]), row.get("target") or "")
+        policy = build_ad_term_policy(row["source"], row["direction"])
+        findings = run_ad_deterministic_qa(
+            QaContext(row["source"], machine_text, row["direction"], policy["terms"])
+        )
+        drift_blockers += sum(1 for item in findings if item.code in {"AD_TERM_MISSING", "AD_NUMBER_DRIFT"})
+        metrics = _machine_metrics(row, machine_text, findings)
+        if metrics["term_total"] > 0:
+            term_hits += metrics["term_hits"]
+            term_total += metrics["term_total"]
+        if metrics["fact_total"] > 0:
+            fact_hits += metrics["fact_hits"]
+            fact_total += metrics["fact_total"]
+        annotations = row.get("annotations") if isinstance(row.get("annotations"), dict) else {}
+        for group in ANNOTATION_GROUPS:
+            for item in annotations.get(group) or []:
+                if not isinstance(item, dict) or str(item.get("criticality")) != "high":
+                    continue
+                span = str(item.get("source_span") or "").strip()
+                if not span or span not in row["source"]:
+                    continue
+                aliases = item.get("target_terms") or item.get("allowed_aliases") or []
+                if isinstance(aliases, str):
+                    aliases = [aliases]
+                high_total += 1
+                if any(_target_contains(machine_text, str(alias)) for alias in aliases if str(alias).strip()):
+                    high_hits += 1
+    term_recall = (term_hits / term_total) if term_total else -1.0
+    fact_recall = (fact_hits / fact_total) if fact_total else -1.0
+    high_recall = (high_hits / high_total) if high_total else -1.0
+    thresholds = {
+        "term_recall_min": 0.98,
+        "high_risk_recall_min": 1.0,
+        "drug_drift_max": 0,
+    }
+    errors: list[str] = []
+    if term_total == 0:
+        errors.append("term_denominator_empty")
+    elif term_recall < thresholds["term_recall_min"]:
+        errors.append("term_recall_below_threshold")
+    if high_total == 0:
+        errors.append("high_risk_denominator_empty")
+    elif high_recall < thresholds["high_risk_recall_min"]:
+        errors.append("high_risk_recall_below_threshold")
+    if drift_blockers > thresholds["drug_drift_max"]:
+        errors.append("deterministic_drift_present")
+    status = "PASS" if not errors else ("BLOCKED" if "denominator_empty" in "".join(errors) else "FAIL")
+    return {
+        "status": status,
+        "errors": errors,
+        "term_recall": round(term_recall, 4) if term_total else None,
+        "fact_recall": round(fact_recall, 4) if fact_total else None,
+        "high_risk_recall": round(high_recall, 4) if high_total else None,
+        "term_wilson_lb": round(_wilson_lower_bound(term_hits, term_total), 4) if term_total else None,
+        "high_risk_wilson_lb": round(_wilson_lower_bound(high_hits, high_total), 4) if high_total else None,
+        "drift_blockers": drift_blockers,
+        "thresholds": thresholds,
+    }
+
+
 def compare_model_runs(model_runs: list[dict]) -> dict:
     by_mode = {str(item.get("mode")): item for item in model_runs}
     baseline = by_mode.get("baseline")
     candidate = by_mode.get("candidate")
     if not baseline or not candidate:
         return {"status": "BLOCKED", "errors": ["baseline_or_candidate_missing"]}
+    if baseline.get("model") != candidate.get("model"):
+        return {"status": "BLOCKED", "errors": ["model_mismatch"]}
+    if baseline.get("temperature") != candidate.get("temperature"):
+        return {"status": "BLOCKED", "errors": ["temperature_mismatch"]}
     if baseline.get("status") != "PASS" or candidate.get("status") != "PASS":
         return {"status": "BLOCKED", "errors": ["model_run_incomplete"]}
     baseline_rows = {str(row.get("case")): row for row in baseline.get("rows", [])}
@@ -815,7 +913,9 @@ def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: 
             {
                 "case": row["case"],
                 "direction": row["direction"],
+                "source_units": _source_units(row["source"]),
                 "source_chars": len(row["source"]),
+                "challenge_segments": _count_challenge_segments(row),
                 "term_count": len(policy["terms"]),
                 "qa_blockers": sum(item.severity == "blocker" for item in findings),
                 "qa_codes": sorted({item.code for item in findings}),
@@ -823,14 +923,16 @@ def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: 
         )
     thresholds = {
         "min_cases_per_direction": 12,
-        "min_source_chars_per_direction": 20_000,
+        "min_source_units_per_direction": 20_000,
         "min_challenge_segments_per_direction": 100,
     }
-    # A challenge segment is a source pair containing at least one protected
-    # AD marker, number, negation or modality; it is counted per direction.
     challenges = {
-        direction: sum(1 for row in rows if row["direction"] == direction and build_ad_term_policy(row["source"], direction)["terms"])
-        for direction in by_direction
+        item_direction: sum(_count_challenge_segments(row) for row in rows if row["direction"] == item_direction)
+        for item_direction in by_direction
+    }
+    source_units = {
+        item_direction: sum(_source_units(item["source"]) for item in items)
+        for item_direction, items in by_direction.items()
     }
     summary = {
         "schema": "plan076-ad-eval/v1",
@@ -838,20 +940,26 @@ def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: 
         "candidate": candidate,
         "direction": direction,
         "thresholds": thresholds,
-        "cases": {direction: len(items) for direction, items in by_direction.items()},
-        "source_chars": {direction: sum(len(item["source"]) for item in items) for direction, items in by_direction.items()},
+        "cases": {item_direction: len(items) for item_direction, items in by_direction.items()},
+        "source_units": source_units,
+        "source_chars": {item_direction: sum(len(item["source"]) for item in items) for item_direction, items in by_direction.items()},
         "challenge_segments": challenges,
         "qa_blockers": sum(item["qa_blockers"] for item in scored),
         "rows": scored,
+        "hard_gates": assess_hard_gates(rows),
     }
     deficits = []
-    for direction in by_direction:
-        if summary["cases"][direction] < thresholds["min_cases_per_direction"]:
-            deficits.append(f"{direction}: cases")
-        if summary["source_chars"][direction] < thresholds["min_source_chars_per_direction"]:
-            deficits.append(f"{direction}: source_chars")
-        if summary["challenge_segments"][direction] < thresholds["min_challenge_segments_per_direction"]:
-            deficits.append(f"{direction}: challenge_segments")
+    for item_direction in by_direction:
+        if summary["cases"][item_direction] < thresholds["min_cases_per_direction"]:
+            deficits.append(f"{item_direction}: cases")
+        if summary["source_units"][item_direction] < thresholds["min_source_units_per_direction"]:
+            deficits.append(f"{item_direction}: source_units")
+        if summary["challenge_segments"][item_direction] < thresholds["min_challenge_segments_per_direction"]:
+            deficits.append(f"{item_direction}: challenge_segments")
+    if summary["hard_gates"].get("status") == "BLOCKED":
+        deficits.append("hard_gates_denominator")
+    elif summary["hard_gates"].get("status") == "FAIL":
+        summary.setdefault("failures", []).append("hard_gates")
     summary["deficits"] = deficits
     return summary
 
@@ -992,8 +1100,32 @@ def main() -> int:
                 summary["deficits"].append("model_comparison")
             elif comparison.get("status") == "FAIL":
                 summary.setdefault("failures", []).append("model_comparison")
+            candidate_run = next((item for item in model_runs if item.get("mode") == "candidate"), None)
+            if candidate_run and candidate_run.get("status") == "PASS":
+                machine_text_by_case: dict[str, str] = {}
+                for row in candidate_run.get("rows", []):
+                    case_id = str(row.get("case") or "")
+                    output_ref = row.get("output_ref")
+                    if not case_id or not output_ref:
+                        continue
+                    output_path = Path(str(candidate_run["run_dir"])) / str(output_ref)
+                    if output_path.is_file():
+                        machine_text_by_case[case_id] = output_path.read_text(encoding="utf-8")
+                summary["hard_gates"] = assess_hard_gates(rows, machine_by_case=machine_text_by_case)
+                if summary["hard_gates"].get("status") == "BLOCKED":
+                    summary["deficits"].append("hard_gates_denominator")
+                elif summary["hard_gates"].get("status") == "FAIL":
+                    summary.setdefault("failures", []).append("hard_gates")
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     LEDGER.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with LEDGER_APPEND.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {"ts": datetime.now(timezone.utc).isoformat(), **summary},
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary["deficits"]:
         print("BLOCKED: missing real AD bilingual evaluation corpus: " + ", ".join(summary["deficits"]))

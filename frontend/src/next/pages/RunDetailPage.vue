@@ -10,6 +10,7 @@
             质量 {{ run?.quality_state || 'draft' }}
             <span v-if="run?.domain_profile === 'ad'" class="qy-badge qy-ad-badge">AD 专业模式</span>
             <span v-if="run?.quality_state === 'legacy_unverified'" class="qy-badge">旧版未验证</span>
+            <span v-if="run?.quality_state === 'qa_degraded'" class="qy-badge qy-status-badge is-pending">语义 QA 降级</span>
           </p>
           <p v-if="run?.prompt_snapshot" class="qy-prompt-provenance">
             提示词 {{ run.prompt_snapshot.version }} · {{ run.prompt_snapshot.profile_id }} · {{ run.prompt_snapshot.digest?.slice(0, 19) }}…

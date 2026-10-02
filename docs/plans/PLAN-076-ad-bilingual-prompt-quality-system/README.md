@@ -1,7 +1,7 @@
 # PLAN-076：AD 中英双向专业翻译质量系统
 
-> 状态：**代码垂直切片已落地；真实语料、专家验收与正式 UI 门禁待完成**
-> 日期：2026-10-02
+> 状态：**垂直切片已落地，存在 P0 工程缺口（见 [076i](./PLAN-076i-gap-remediation.md)）；真实语料与专家验收待完成**
+> 日期：2026-10-02（076i 修订：2026-10-02）
 > 依赖：PLAN-051、PLAN-058、PLAN-063、PLAN-071、PLAN-073、PLAN-074、PLAN-075
 
 ## 目标
@@ -80,9 +80,21 @@ TranslationRun 增加只读 `prompt_snapshot`：
 | --- | --- | --- |
 | AD + 不支持方向/文档类型 | 422 | `AD_PROFILE_UNSUPPORTED` |
 | 源文没有任何 AD 领域锚点 | 422 | `AD_DOMAIN_EVIDENCE_MISSING` |
-| 提示词注册表/摘要损坏 | 503 | `AD_PROMPT_UNAVAILABLE` |
+| 提示词注册表/摘要损坏或 digest 不一致 | 503 | `AD_PROMPT_UNAVAILABLE` |
+| AD 模式未对租户开放（allowlist） | 422 | `AD_ROLLOUT_DENIED` |
+| AD 模式提交 `custom_prompt` | 422 | `AD_CUSTOM_PROMPT_FORBIDDEN` |
 | 语义 QA 服务不可用 | run `qa_degraded` | `AD_QA_DEGRADED` |
 | 修复改变受保护事实 | run `qa_blocked` | `AD_REPAIR_FACT_DRIFT` |
+
+### 灰度模式（`QYUNSLATION_AD_PROMPT_MODE`）
+
+| 模式 | 行为 |
+| --- | --- |
+| `off` | 拒绝创建 AD 任务；生产未配置时默认 |
+| `shadow` | 仅离线评测/回放，**拒绝**创建用户可见 AD 任务 |
+| `pilot` | 仅 allowlist 内租户可创建 AD 任务；空 allowlist 为 fail-closed |
+
+已废弃：`default`（视为 `off`）。开发环境未配置时默认 `pilot`，但仍需非空 allowlist。
 
 ## 子计划与依赖
 
@@ -96,6 +108,7 @@ TranslationRun 增加只读 `prompt_snapshot`：
 | [076f](./PLAN-076f-semantic-qa-repair.md) | 风险驱动语义 QA 与一次定点修复 | 076e | 3 |
 | [076g](./PLAN-076g-api-ui-rollout.md) | API/UI 可见性、审计和灰度 | 076b–076f | 4 |
 | [076h](./PLAN-076h-verification-expert-readiness.md) | 汇总验证、试运行与专家验证准备 | 076a–076g | 5 |
+| [076i](./PLAN-076i-gap-remediation.md) | P0/P1 工程缺口收敛台账 | 076a–076h | 5+ |
 
 ```text
 076a ──┬──> 076b ───────┐
@@ -133,8 +146,11 @@ TranslationRun 增加只读 `prompt_snapshot`：
 
 自动评测 MVP：
 
-- 每方向至少 12 个真实文档案例、20,000 源文词、100 个挑战片段；
-- 两方向术语准确率分别 ≥98%，高风险术语召回 100%，禁用译法与药名漂移为 0；
+- 每方向至少 12 个真实文档案例、**20,000 源文计量单位**、**100 个标注挑战片段**；
+- **源文计量单位**（`_source_units`）：拉丁词元数 + CJK 字符数；en-zh 以英文词+CJK 译文中字符计分母，zh-en 以 CJK 字+英文词计分母；语料门、专家 Major/1k 与评测报告统一此口径；
+- **挑战片段**：按 `annotations.json` 中 `concepts`/`facts` 条目计数（`source_span` 必须在源文中），不得按 case 数代替；
+- 两方向术语准确率分别 ≥98%，高风险（`criticality=high`）召回 100%，禁用译法与药名漂移为 0；
+- 100% 召回门禁须报告 **Wilson 95% 置信下界**；下界 < 目标时不宣称「100%」；
 - 药名、靶点、剂量、单位、数字、统计量、否定、情态和终点保护召回 100%；
 - 段落/ID/占位符最终完整率 100%，首轮结构合规率 ≥99.5%；
 - 相同模型下，AD 提示词自动综合分比通用提示词至少提高 10 个百分点，任何硬门禁不得退化；
@@ -144,10 +160,29 @@ TranslationRun 增加只读 `prompt_snapshot`：
 专家验证（MVP 后）：
 
 - AD 医学专家与中英医学写作/翻译专家双人盲审；
-- Critical error = 0，Major error ≤1/1,000 源文词；
-- Cohen's κ ≥0.70，候选方案相对通用基线盲选偏好率 ≥70%。
+- Critical error = 0，Major error ≤1/1,000 **源文计量单位**；
+- Cohen's κ ≥0.70（severity  adjudication 为主指标；blind_choice 为辅），候选相对通用基线盲选偏好率 ≥70%（**≥30 case** 以满足功效）；
+- 专家样本量不足时门禁为 BLOCKED，不得用 20 case 宣称 70% 偏好。
 
 专家门未完成前，只能标记「AD 内部测试版」，不能标记「专家验证」。
+
+## 撤回判据（内部测试版）
+
+满足任一即回退 `AD_PROMPT_MODE=off` 并通知医学负责人：
+
+- 生产 AD 任务 `qa_blocked` 率较 pilot 基线上升 >5pp（7 日滚动）；
+- 出现已确认的 Critical 医学事实错误（专家 adjudication）；
+- 提示词 digest 与运行时不一致（`AD_PROMPT_UNAVAILABLE`）未在 24h 内修复；
+- pilot soak 任一项硬指标 FAIL。
+
+## 外部依赖 RACI
+
+| 交付物 | Responsible | Accountable | Consulted | Informed | 目标日期 |
+| --- | --- | --- | --- | --- | --- |
+| 双向授权语料 + manifest | 医学负责人 | 产品负责人 | AD 医学专家 | 工程 | T+14d |
+| 挑战片段标注 | AD 医学专家 | 医学负责人 | 翻译专家 | 工程 | T+21d |
+| 双盲专家评审包 | 翻译专家 | 医学负责人 | AD 医学专家 | 工程 | T+35d |
+| 076i P0 工程收敛 | 工程 | 技术负责人 | — | 医学负责人 | T+7d |
 
 ## 不做
 

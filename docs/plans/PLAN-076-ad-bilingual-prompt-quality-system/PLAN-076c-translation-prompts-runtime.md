@@ -1,6 +1,6 @@
 # PLAN-076c：AD 双向翻译提示词与运行时接线
 
-> 状态：**待实施**
+> 状态：**部分实施（076i G-001/G-003：v2 Office 透传与 digest 冻结待收敛）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076b](./PLAN-076b-prompt-registry-compiler.md)、[076d](./PLAN-076d-ad-bidirectional-termbase.md) 的 policy 接口
 

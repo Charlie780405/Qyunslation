@@ -1,7 +1,7 @@
 # WT-076：AD 中英双向专业翻译发布证据
 
 > 对应计划：[PLAN-076](../plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md)
-> 当前状态：**代码与自动化门禁就绪；真实语料、专家验收和正式浏览器 DevTools 证据仍未闭环，暂不宣称完整上线**
+> 当前状态：**垂直切片已落地，存在 P0 工程缺口（[076i](../plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md)）；真实语料与专家验收待完成**
 
 ## 交付范围
 
@@ -85,7 +85,7 @@ bash scripts/deploy-translate-stack.sh
 - `zh-en`：0 cases / 0 source chars / 0 challenge segments。
 - 语料合同：`manifest_missing`，因此不会把未登记文件计入分母。
 
-`tests/gold/ad/` 只提交了语料格式和授权规则，没有伪造文献、临床研究文档或重复样本。需由业务/医学专家提供每方向至少 12 份真实授权样本、累计至少 20,000 源字符和 100 个挑战片段，随后补齐机器基线、专家参考译文并重跑评估。
+`tests/gold/ad/` 只提交了语料格式和授权规则，没有伪造文献、临床研究文档或重复样本。需由业务/医学专家提供每方向至少 12 份真实授权样本、累计至少 20,000 **源文计量单位**（拉丁词元 + CJK 字符，见 PLAN-076 README）和 100 个 **annotation 挑战片段**，随后补齐机器基线、专家参考译文并重跑评估。
 
 正式浏览器 DevTools MCP 在当前会话不可用；已用本机 Chromium 做入口烟雾截图（非正式 DevTools 证据）：
 
@@ -123,15 +123,14 @@ git status --short --branch
 
 预期只有用户本机未跟踪目录或配置，例如 `.cursor/mcp.json`、`slide-deck/`、`var/`；这些内容不属于 PLAN-076 交付，不应批量加入提交。
 
-已完成且不需要重复实现：
+已完成骨架（**存在缺口，见 076i，勿重复造轮子**）：
 
-- AD 中英双向提示词编译、术语注入、确定性/语义 QA、API/UI 接线和 pilot allowlist；
-- 授权语料 manifest、哈希、锁定测试集、模型运行、pilot 与专家评审 schema/门禁；
-- 42 项 PLAN-076 后端门禁、前端测试/type-check/build、部署和运行态健康检查；
-- UI 已明确标记 `AD 内部测试版`，生产 AD 模式保持关闭，未冒充专家验证。
+- AD 提示词编译、术语注入、确定性/语义 QA 库、API/UI 接线、pilot allowlist、语料 manifest/schema；
+- 42 项 PLAN-076 后端门禁、前端 build、部署与健康检查；UI 标记 `AD 内部测试版`。
 
 仍需继续的工作严格按以下顺序进行：
 
+0. **先完成 [076i](../plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md) P0 收敛**（Office 透传、shadow、digest 冻结、评测硬门、概念词库等）；`verify-plan-076.sh` 工程项 PASS 后进入外部证据阶段。
 1. 由业务/医学负责人提供经过授权和脱敏的真实 AD 中英双向语料，并设置 `PLAN076_AD_CORPUS_ROOT`；禁止使用合成、占位或未批准文件充数。
 2. 先验证语料合同：
 
@@ -158,4 +157,4 @@ git status --short --branch
 
 ## 上线判定
 
-当前可称为“PLAN-076 代码实现和自动化门禁就绪”，不可称为“AD 专业翻译完整功能成功上线”。完成上线还需：真实双向语料评估通过、医学专家签署术语/译文验收、正式 DevTools 四尺寸证据、OIDC 角色矩阵验收，以及按既有发布脚本完成代码部署和回滚演练。
+当前**不可**称为“代码就绪只差语料”：评测门槛与运行时存在 P0 缺口（076i）。完成上线还需：076i P0/P1 收敛、真实双向语料评估通过、专家验收、DevTools 证据、OIDC 角色矩阵与回滚演练（`scripts/plan076-rollback-drill.sh`）。

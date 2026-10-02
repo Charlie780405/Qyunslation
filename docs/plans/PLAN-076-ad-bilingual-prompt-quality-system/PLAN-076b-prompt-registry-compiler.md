@@ -1,6 +1,6 @@
 # PLAN-076b：提示词注册表、组合编译与快照
 
-> 状态：**待实施**
+> 状态：**部分实施（偏离：模板在 `ad_prompt.py` 而非 `qyunslation/prompts/`；076i G-003 补 digest 冻结）**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076a](./PLAN-076a-evaluation-contract-corpus.md) 的方向、文档类型和版本记录契约
 

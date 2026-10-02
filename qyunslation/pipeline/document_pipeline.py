@@ -183,6 +183,7 @@ class DocumentPipeline:
                 filename=original_filename,
                 declared_mime=declared_mime,
                 target_language=target_language,
+                settings=settings,
             )
             external_task_id = launch.task_id
             executor_kind = launch.kind
@@ -193,6 +194,7 @@ class DocumentPipeline:
                 filename=original_filename,
                 declared_mime=declared_mime,
                 target_language=target_language,
+                settings=settings,
             )
             external_task_id = launch.task_id
             executor_kind = launch.kind

@@ -62,7 +62,6 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
                 "domain_profile": getattr(payload, "domain_profile", "general"),
                 "target_language": getattr(payload, "to_lang", None),
                 "profile": getattr(payload, "document_profile", "通用医药文档"),
-                "custom_prompt": getattr(payload, "custom_prompt", None),
             }
         )
         payload.custom_prompt = runtime["custom_prompt"]

@@ -25,7 +25,7 @@
             <label class="qy-field"><span>目标语言</span><select v-model="workbenchState.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
           </div>
           <div class="qy-ad-mode" aria-label="专业领域模式">
-            <label class="qy-field"><span>专业领域</span><select v-model="workbenchState.domainProfile"><option value="general">通用医药翻译</option><option value="ad">AD 特应性皮炎</option></select></label>
+            <label class="qy-field"><span>专业领域</span><select v-model="workbenchState.domainProfile"><option value="general">通用医药翻译</option><option v-if="adEnabled" value="ad">AD 特应性皮炎</option></select></label>
             <span class="qy-inline-hint"><span v-if="workbenchState.domainProfile === 'ad'" class="qy-status-badge is-pending" role="status">AD 内部测试版</span>AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
           </div>
           <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
@@ -197,6 +197,7 @@ const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering'
 const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
+const adEnabled = computed(() => Boolean(sessionStore.user?.capabilities?.ad_enabled));
 const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
 const modelProfiles = ref([]);
 const selectedModelProfile = computed(
@@ -228,6 +229,7 @@ function displayStatus(run) {
     const blockers = run.qa_summary?.blocker || 0;
     return `QA 拦截 ${blockers} 项`;
   }
+  if (run.quality_state === 'qa_degraded') return '语义 QA 降级，暂不可批准';
   if (run.quality_state === 'review_ready') return '待人工复核';
   return statusLabel(run.status);
 }
@@ -235,6 +237,7 @@ function displayStatus(run) {
 function liveSummary(run) {
   if (!run) return '';
   if (run.quality_state === 'qa_blocked') return '版式已完成，等待 QA 处置';
+  if (run.quality_state === 'qa_degraded') return '确定性 QA 通过，语义 QA 不可用';
   if (run.quality_state === 'review_ready') return 'QA 已通过，等待人工复核';
   if (run.status === 'translating' && run.progress_message) return run.progress_message;
   return stageMessage(run);
@@ -499,6 +502,11 @@ onMounted(async () => {
     uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
   }
   await refreshRuns();
+});
+watch(adEnabled, (enabled) => {
+  if (!enabled && workbenchState.domainProfile === 'ad') {
+    workbenchState.domainProfile = 'general';
+  }
 });
 watch(showArchived, refreshRuns);
 watch(() => workbenchState.classification, refreshModelProfiles);

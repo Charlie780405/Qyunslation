@@ -10,6 +10,11 @@ function formatApiDetail(payload) {
     )).join('；');
   }
   if (detail && typeof detail === 'object') {
+    const code = detail.code;
+    if (code === 'AD_ROLLOUT_DENIED') return 'AD 专业模式尚未对该租户开放';
+    if (code === 'AD_DOMAIN_EVIDENCE_MISSING') return '源文缺少可验证的 AD 领域锚点';
+    if (code === 'AD_PROMPT_UNAVAILABLE') return 'AD 提示词不可用，请联系管理员';
+    if (code === 'AD_CUSTOM_PROMPT_FORBIDDEN') return 'AD 模式不允许自定义提示词';
     return detail.message || JSON.stringify(detail);
   }
   return null;
