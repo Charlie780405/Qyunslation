@@ -361,7 +361,6 @@ def _validate_domain_profile(
         ),
     )
     if not ad_rollout_allowed(
-        env=os.environ.get("QYUNSLATION_ENV"),
         mode=rollout,
         tenant=tenant_slug,
         tenants=os.environ.get("QYUNSLATION_AD_PROMPT_TENANTS"),

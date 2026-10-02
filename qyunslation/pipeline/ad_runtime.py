@@ -22,7 +22,7 @@ def ad_rollout_tenants(raw: str | None) -> frozenset[str]:
     )
 
 
-def ad_rollout_allowed(*, env: str | None, mode: str, tenant: str, tenants: str | None) -> bool:
+def ad_rollout_allowed(*, mode: str, tenant: str, tenants: str | None) -> bool:
     normalized_tenant = (tenant or "").strip().casefold()
     if mode == "off" or not normalized_tenant:
         return False

@@ -38,10 +38,9 @@ def test_ad_rollout_defaults_to_pilot_only_outside_production():
 def test_ad_rollout_pilot_is_tenant_scoped_in_production():
     assert ad_rollout_tenants("pilot;research") == frozenset({"pilot", "research"})
     assert ad_rollout_allowed(
-        env="production", mode="pilot", tenant="pilot", tenants="pilot,research"
+        mode="pilot", tenant="pilot", tenants="pilot,research"
     )
     assert not ad_rollout_allowed(
-        env="production", mode="pilot", tenant="other", tenants="pilot,research"
+        mode="pilot", tenant="other", tenants="pilot,research"
     )
-    assert not ad_rollout_allowed(env="development", mode="pilot", tenant="pilot", tenants=None)
-    assert not ad_rollout_allowed(env="production", mode="pilot", tenant="pilot", tenants=None)
+    assert not ad_rollout_allowed(mode="pilot", tenant="pilot", tenants=None)
