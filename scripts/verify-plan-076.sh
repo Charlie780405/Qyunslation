@@ -20,6 +20,7 @@ REQUIRED=(
   "glossaries/domain-ad.csv"
   "scripts/plan076-ad-eval.py"
   "tests/gold/ad/manifest.schema.json"
+  "tests/gold/ad/annotations.schema.json"
   "tests/gold/ad/README.md"
 )
 for path in "${REQUIRED[@]}"; do
@@ -48,7 +49,9 @@ fi
 
 eval_rc=0
 if [[ -x "$PY" ]]; then
-  (cd "$ROOT" && "$PY" scripts/plan076-ad-eval.py --direction both) >"$ROOT/var/verify-plan-076-eval.log" 2>&1 || eval_rc=$?
+  # A valid manifest is necessary but insufficient: require immutable generic
+  # and AD model runs so the gate cannot pass on reference-text QA alone.
+  (cd "$ROOT" && "$PY" scripts/plan076-ad-eval.py --direction both --run-model both) >"$ROOT/var/verify-plan-076-eval.log" 2>&1 || eval_rc=$?
   if [[ "$eval_rc" -eq 0 ]]; then
     pass "AD bilingual evaluation"
   elif [[ "$eval_rc" -eq 2 ]]; then

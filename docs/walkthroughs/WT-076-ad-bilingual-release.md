@@ -13,6 +13,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 - 高风险片段语义复核接口及最多一次受保护修复；
 - 工作台 AD 专业模式选择、运行详情标识和提示词版本摘要；
 - 发布评估脚本，缺少授权真实语料时 fail-closed 为 BLOCKED。
+- 总门禁要求同时生成 generic baseline 与 AD candidate 的不可覆盖 model run；只对参考译文做 QA 不再可判 PASS。
 
 ## 代码提交
 
@@ -29,6 +30,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `09db35f` | 修复显式 OIDC 高权限对已有低权限 membership 的晋升 |
 | `97d386f` | 增加 AD 语料 manifest/schema、哈希与授权完整性门禁 |
 | `9e7db80` | 评测仅读取锁定 manifest case；baseline-only 在模型运行器接入前 fail-closed |
+| `pending` | 接入不可覆盖 generic/candidate model run、annotation schema 和公网端点 fail-closed |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -42,7 +44,7 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**33 passed**；
+- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**37 passed**；
 - 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；

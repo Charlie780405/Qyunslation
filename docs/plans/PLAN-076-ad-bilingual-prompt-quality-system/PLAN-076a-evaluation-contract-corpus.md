@@ -1,6 +1,6 @@
 # PLAN-076a：评测真值、双向语料与基线
 
-> 状态：**待实施**
+> 状态：**评测契约与模型运行器已实施；真实授权语料、机器基线与专家标注待接入**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：无
 
@@ -10,7 +10,7 @@
 
 ## 评测契约
 
-新增 `tests/gold/ad/manifest.schema.json` 和受控语料 manifest。每个 case 至少包含：
+新增 `tests/gold/ad/manifest.schema.json`、`tests/gold/ad/annotations.schema.json` 和受控语料 manifest。每个 case 至少包含：
 
 ```json
 {
@@ -112,6 +112,10 @@ uv run python scripts/plan076-ad-eval.py --check-corpus --direction both
 ```bash
 uv run python scripts/plan076-ad-eval.py --direction both --baseline-only
 ```
+
+基线命令在语料合同通过后才会调用显式配置的 OpenAI-compatible 内网端点；运行产物写入唯一 `var/plan076-ad-eval/runs/<run_id>/`，报告只保存 prompt snapshot、模型参数、译文哈希、延迟、token 和 QA 结果。缺少端点、模型、语料或出现确定性 blocker 时返回 `BLOCKED/FAIL`，不会把参考译文检查冒充机器基线。
+
+评测器默认拒绝公网模型端点；经数据治理批准后，必须显式传入 `--allow-external-endpoint`，并在发布记录中说明资料等级与外发范围。
 
 **依赖：** Tasks 2–3
 **预计规模：** S（脚本参数与报告写入，1–2 文件）

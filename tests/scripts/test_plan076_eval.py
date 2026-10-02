@@ -70,7 +70,18 @@ def test_corpus_contract_validates_hashes_and_authorization(tmp_path):
     annotations = tmp_path / "annotations.json"
     source.write_text("Patients with atopic dermatitis received dupilumab.", encoding="utf-8")
     reference.write_text("特应性皮炎患者接受了度普利尤单抗。", encoding="utf-8")
-    annotations.write_text(json.dumps({"facts": []}), encoding="utf-8")
+    annotations.write_text(
+        json.dumps({
+            "facts": [{
+                "fact_id": "dose-1",
+                "type": "dose",
+                "source_span": "300 mg",
+                "target_terms": ["300 mg"],
+                "criticality": "high",
+            }]
+        }),
+        encoding="utf-8",
+    )
     manifest = {
         "cases": [{
             "case_id": "ad-en-zh-001",
@@ -96,7 +107,8 @@ def test_baseline_only_is_fail_closed_until_model_runner_exists(monkeypatch, tmp
     monkeypatch.setattr(sys, "argv", ["plan076-ad-eval.py", "--baseline-only"])
     assert plan076_ad_eval.main() == 2
     output = capsys.readouterr().out
-    assert "baseline_runtime_unavailable" in output
+    assert '"model_run"' in output
+    assert "corpus_contract" in output
 
 
 def test_read_pairs_uses_locked_manifest_cases_only(monkeypatch, tmp_path):
@@ -123,3 +135,85 @@ def test_read_pairs_uses_locked_manifest_cases_only(monkeypatch, tmp_path):
     monkeypatch.setattr(plan076_ad_eval, "CORPUS_ROOT", tmp_path)
     rows = plan076_ad_eval._read_pairs()
     assert [row["case"] for row in rows] == ["registered-001"]
+
+
+def test_model_runner_blocks_without_explicit_endpoint_or_model(monkeypatch):
+    for key in (
+        "QYUNSLATION_BASE_URL",
+        "DOCUTRANSLATE_BASE_URL",
+        "QYUNSLATION_MODEL_ID",
+        "DOCUTRANSLATE_MODEL_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    result = plan076_ad_eval.run_model_cases(
+        [{"case": "case-1", "direction": "en-zh", "document_profile": "医学研究文献", "source": "source", "target": "target"}],
+        mode="baseline",
+        base_url=None,
+        model=None,
+        api_key=None,
+        temperature=0.0,
+        timeout=1.0,
+    )
+    assert result == {"status": "BLOCKED", "mode": "baseline", "errors": ["model_endpoint_missing"]}
+
+
+def test_model_runner_writes_immutable_machine_output(monkeypatch, tmp_path):
+    class FakeRunner:
+        def __init__(self, **_kwargs):
+            pass
+
+        def translate(self, source, *, system):
+            assert source == "source"
+            assert "English" in system
+            return "machine output", {"latency_ms": 1.0, "usage": {"total_tokens": 3}}
+
+    monkeypatch.setattr(plan076_ad_eval, "OpenAICompatibleRunner", FakeRunner)
+    monkeypatch.setattr(plan076_ad_eval, "RUNS_ROOT", tmp_path)
+    result = plan076_ad_eval.run_model_cases(
+        [{"case": "case-1", "direction": "en-zh", "document_profile": "医学研究文献", "source": "source", "target": "target"}],
+        mode="baseline",
+        base_url="http://127.0.0.1:11434/v1",
+        model="test-model",
+        api_key="test-key",
+        temperature=0.0,
+        timeout=1.0,
+    )
+    assert result["status"] == "PASS"
+    assert result["cases"] == 1
+    assert result["rows"][0]["metrics"]["score"] == 1.0
+    report = Path(result["run_dir"]) / "report.json"
+    assert report.is_file()
+    assert "machine output" not in report.read_text(encoding="utf-8")
+    output_path = Path(result["run_dir"]) / result["rows"][0]["output_ref"]
+    assert output_path.read_text(encoding="utf-8").strip() == "machine output"
+
+
+def test_model_runner_blocks_external_endpoint_by_default():
+    result = plan076_ad_eval.run_model_cases(
+        [{"case": "case-1", "direction": "en-zh", "document_profile": "医学研究文献", "source": "source", "target": "target"}],
+        mode="baseline",
+        base_url="https://api.example.com/v1",
+        model="test-model",
+        api_key="test-key",
+        temperature=0.0,
+        timeout=1.0,
+    )
+    assert result == {"status": "BLOCKED", "mode": "baseline", "errors": ["endpoint_external"]}
+
+
+def test_model_comparison_requires_ten_point_gain_without_new_blockers():
+    baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 1}
+    candidate_row = {"case": "case-1", "metrics": {"score": 0.91}, "qa_blockers": 0}
+    result = plan076_ad_eval.compare_model_runs([
+        {"mode": "baseline", "status": "PASS", "rows": [baseline_row]},
+        {"mode": "candidate", "status": "PASS", "rows": [candidate_row]},
+    ])
+    assert result["status"] == "PASS"
+    assert result["score_delta"] == 0.11
+
+    candidate_row["metrics"]["score"] = 0.89
+    result = plan076_ad_eval.compare_model_runs([
+        {"mode": "baseline", "status": "PASS", "rows": [baseline_row]},
+        {"mode": "candidate", "status": "PASS", "rows": [candidate_row]},
+    ])
+    assert result["status"] == "FAIL"

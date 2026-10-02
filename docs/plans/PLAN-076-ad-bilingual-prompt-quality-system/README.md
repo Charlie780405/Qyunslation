@@ -161,7 +161,7 @@ TranslationRun 增加只读 `prompt_snapshot`：
 
 ```bash
 uv run pytest tests/prompts tests/glossary tests/pipeline tests/api -q
-uv run python scripts/plan076-ad-eval.py --direction both --baseline generic --candidate ad-v1
+uv run python scripts/plan076-ad-eval.py --direction both --baseline generic --candidate ad-v1 --run-model both
 cd frontend && npm test && npm run type-check && npm run build
 bash scripts/verify-plan-075.sh
 bash scripts/verify-plan-076.sh

@@ -112,7 +112,7 @@ uv run pytest tests/translator/test_plan076_agent_prompt_runtime.py \
 **验证：**
 
 ```bash
-uv run python scripts/plan076-ad-eval.py --direction both --baseline generic --candidate ad-v1
+uv run python scripts/plan076-ad-eval.py --direction both --baseline generic --candidate ad-v1 --run-model both
 ```
 
 **依赖：** Tasks 2–3、076a、076d
