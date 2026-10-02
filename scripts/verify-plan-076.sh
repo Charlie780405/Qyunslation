@@ -34,6 +34,7 @@ if [[ -x "$PY" ]]; then
     tests/pipeline/test_plan076_factory_prompt.py \
     tests/pipeline/test_plan076_semantic_qa.py \
     tests/scripts/test_plan076_eval.py \
+    tests/persist/test_plan034c_persist.py \
     tests/api/test_plan076_ad_contract.py \
     tests/api/test_plan071b_launch_formats.py); then
     pass "PLAN-076 unit/contract tests"

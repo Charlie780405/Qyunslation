@@ -46,6 +46,16 @@ def test_project_job_crud(session):
     assert len(repo.list_jobs(session, project_id=project.id)) == 1
 
 
+def test_membership_promotes_explicit_provider_role_without_downgrade(session):
+    tenant = repo.get_or_create_tenant(session, slug="roles")
+    membership = repo.ensure_membership(session, tenant_id=tenant.id, user_sub="u1", role="reviewer")
+    assert membership.role == "reviewer"
+    promoted = repo.ensure_membership(session, tenant_id=tenant.id, user_sub="u1", role="term_admin")
+    assert promoted.role == "term_admin"
+    preserved = repo.ensure_membership(session, tenant_id=tenant.id, user_sub="u1", role="member")
+    assert preserved.role == "term_admin"
+
+
 def test_audit_strips_secrets(session):
     assert sanitize_extra({"authorization": "Bearer x", "ok": 1}) == {"ok": 1}
     event = record_audit(

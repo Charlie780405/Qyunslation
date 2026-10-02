@@ -10,6 +10,13 @@ from qyunslation.persist.models import Job, Project, Tenant, UserMembership
 
 COMPANY_TERMBASE_PROJECT_SLUG = "company-termbase"
 COMPANY_TERMBASE_PROJECT_NAME = "公司共享专业词库"
+_MEMBERSHIP_ROLE_RANK = {
+    "member": 0,
+    "reviewer": 1,
+    "term_admin": 2,
+    "admin": 3,
+    "owner": 4,
+}
 
 
 def get_or_create_tenant(session: Session, *, slug: str, name: str | None = None) -> Tenant:
@@ -34,8 +41,9 @@ def ensure_membership(
     if row is not None:
         # Provider roles are authoritative only when they grant an explicit
         # elevated role; an absent/default role must not downgrade a local
-        # administrator membership.
-        if role != "member" and row.role == "member":
+        # administrator membership. A higher explicit provider role may
+        # promote an existing lower membership after a later OIDC login.
+        if _MEMBERSHIP_ROLE_RANK.get(role, 0) > _MEMBERSHIP_ROLE_RANK.get(row.role, 0):
             row.role = role
             session.flush()
         return row
