@@ -33,6 +33,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `a16fb44` | 接入不可覆盖 generic/candidate model run、annotation schema 和公网端点 fail-closed |
 | `537aef9` | 评测报告剥离端点内嵌凭据 |
 | `51af1e5` | 增加 pilot soak 与专家双盲聚合门禁；缺证据保持 BLOCKED |
+| `a61fbed` | 工作台明确显示 AD「内部测试版」状态 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
