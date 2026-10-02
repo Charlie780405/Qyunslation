@@ -40,8 +40,8 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API/rollout 聚焦测试：**24 passed**；
-- OIDC 角色/持久层回归：**12 passed**（含 membership 晋升与不降权）；
+- PLAN-076 pipeline/API/rollout/持久层总门禁：**29 passed**；
+- 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
 - `qyunslation-office.service`、`pdf2zh.service`：**active**；
