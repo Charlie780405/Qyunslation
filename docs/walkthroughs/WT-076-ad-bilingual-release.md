@@ -53,7 +53,7 @@ bash scripts/verify-plan-076.sh
 - 前端测试、type-check、production build：**PASS**；
 - 部署后的 `/next/workbench` 引用 `index-BuOvl4v-.js`，服务端静态内容可检出 `AD 内部测试版`；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
-- 本机 qyunslation 与 pdf2zh 进程分别监听 `127.0.0.1:8010` / `127.0.0.1:7860`；本环境未暴露对应 systemd unit，故不把 `systemctl` 状态作为运行证据；
+- 本机 qyunslation 与 pdf2zh 进程分别监听 `127.0.0.1:8010` / `127.0.0.1:7860`；`qyunslation-office.service` 与 `pdf2zh.service` 当前均为 **active**；
 - Chromium：`/home/dev/.local/bin/chromium` 可执行；
 - 总门禁：**BLOCKED**，不是代码失败。
 
@@ -110,6 +110,51 @@ bash scripts/deploy-translate-stack.sh
 
 已在受保护 Authentik API 中创建两个 pilot 租户测试账号，并加入非 superuser 的 `qyunslation-vue-beta` 组。账号密码未写入 Git、日志或证据文件；test02 的 term_admin 通过既有主机侧授权脚本授予并记录审计。生产仍保持 OIDC BFF，开发旁路关闭；AD 生产模式仍需在真实语料和专家门禁通过后才可配置为 pilot。
 验收结束后已撤销本次产生的 6 个 BFF session，账号保留但当前无活动登录会话。
+
+## Cursor 续接入口
+
+交接基线为 `main@196ba5c`；本交接说明提交并推送后，以 `origin/main` 最新提交为唯一续接入口。开始工作前执行：
+
+```bash
+git switch main
+git pull --ff-only origin main
+git status --short --branch
+```
+
+预期只有用户本机未跟踪目录或配置，例如 `.cursor/mcp.json`、`slide-deck/`、`var/`；这些内容不属于 PLAN-076 交付，不应批量加入提交。
+
+已完成且不需要重复实现：
+
+- AD 中英双向提示词编译、术语注入、确定性/语义 QA、API/UI 接线和 pilot allowlist；
+- 授权语料 manifest、哈希、锁定测试集、模型运行、pilot 与专家评审 schema/门禁；
+- 42 项 PLAN-076 后端门禁、前端测试/type-check/build、部署和运行态健康检查；
+- UI 已明确标记 `AD 内部测试版`，生产 AD 模式保持关闭，未冒充专家验证。
+
+仍需继续的工作严格按以下顺序进行：
+
+1. 由业务/医学负责人提供经过授权和脱敏的真实 AD 中英双向语料，并设置 `PLAN076_AD_CORPUS_ROOT`；禁止使用合成、占位或未批准文件充数。
+2. 先验证语料合同：
+
+   ```bash
+   PLAN076_AD_CORPUS_ROOT=/secure/plan076/ad \
+     .venv/bin/python scripts/plan076-ad-eval.py --direction both --check-corpus
+   ```
+
+3. 使用获批的内部 OpenAI-compatible endpoint 生成不可覆盖的 generic baseline 与 AD candidate；公网端点默认 fail-closed：
+
+   ```bash
+   PLAN076_AD_CORPUS_ROOT=/secure/plan076/ad \
+     .venv/bin/python scripts/plan076-ad-eval.py \
+       --direction both --run-model both \
+       --base-url http://internal-gateway:11434/v1 \
+       --model <approved-model>
+   ```
+
+4. 完成四个单元格各至少 5 个任务的 20 任务 pilot，并提交符合 `tests/gold/ad/pilot-report.schema.json` 的报告。
+5. 完成 AD 医学专家与中英医学翻译专家双盲评审，并提交符合 `tests/gold/ad/expert-review.schema.json` 的聚合报告。
+6. 补齐正式 DevTools 登录后四场景证据、下载权限闭环和回滚演练；所有门禁通过并经明确批准后，才可从 `off` 切到租户 allowlist 的 `pilot`。
+
+执行 `bash scripts/verify-plan-076.sh` 时，如果未挂载授权语料，最终结果预期为 **BLOCKED**；这表示外部证据缺失，不表示代码测试失败。不得把 BLOCKED 改写成 PASS，也不得自动切换为默认生产模式。
 
 ## 上线判定
 
