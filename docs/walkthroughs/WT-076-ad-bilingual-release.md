@@ -81,6 +81,7 @@ bash scripts/deploy-translate-stack.sh
 - `var/plan076-browser/workbench-1440.png`
 
 截图验证的是 SSO 入口和响应式布局，尚未验证登录后的 AD 选择器、上传、运行详情、术语闭环和下载闭环。
+部署重启后复核截图位于 `var/plan076-browser-postdeploy/workbench-{320,768,1024,1440}.png`。
 
 ## 测试用户与生产边界
 
