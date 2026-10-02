@@ -27,6 +27,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `fe6cd45` | 实现 `AD_PROMPT_MODE` 与 pilot 租户 allowlist，生产 fail-closed |
 | `aa5e06e` | 简化 rollout policy 边界，保持 fail-closed 行为 |
 | `09db35f` | 修复显式 OIDC 高权限对已有低权限 membership 的晋升 |
+| `97d386f` | 增加 AD 语料 manifest/schema、哈希与授权完整性门禁 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -40,7 +41,7 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API/rollout/持久层总门禁：**29 passed**；
+- PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**31 passed**；
 - 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
@@ -74,6 +75,7 @@ bash scripts/deploy-translate-stack.sh
 
 - `en-zh`：0 cases / 0 source chars / 0 challenge segments；
 - `zh-en`：0 cases / 0 source chars / 0 challenge segments。
+- 语料合同：`manifest_missing`，因此不会把未登记文件计入分母。
 
 `tests/gold/ad/` 只提交了语料格式和授权规则，没有伪造文献、临床研究文档或重复样本。需由业务/医学专家提供每方向至少 12 份真实授权样本、累计至少 20,000 源字符和 100 个挑战片段，随后补齐机器基线、专家参考译文并重跑评估。
 
