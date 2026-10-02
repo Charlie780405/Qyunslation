@@ -30,7 +30,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `09db35f` | 修复显式 OIDC 高权限对已有低权限 membership 的晋升 |
 | `97d386f` | 增加 AD 语料 manifest/schema、哈希与授权完整性门禁 |
 | `9e7db80` | 评测仅读取锁定 manifest case；baseline-only 在模型运行器接入前 fail-closed |
-| `pending` | 接入不可覆盖 generic/candidate model run、annotation schema 和公网端点 fail-closed |
+| `a16fb44` | 接入不可覆盖 generic/candidate model run、annotation schema 和公网端点 fail-closed |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
