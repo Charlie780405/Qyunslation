@@ -38,7 +38,7 @@ bash scripts/verify-plan-076.sh
 
 结果：
 
-- PLAN-076 pipeline/API 聚焦测试：**20 passed**；
+- PLAN-076 pipeline/API/rollout 聚焦测试：**24 passed**；
 - 前端测试、type-check、production build：**PASS**；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
 - `qyunslation-office.service`、`pdf2zh.service`：**active**；
