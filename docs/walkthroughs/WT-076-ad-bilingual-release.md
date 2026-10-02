@@ -1,7 +1,7 @@
 # WT-076：AD 中英双向专业翻译发布证据
 
 > 对应计划：[PLAN-076](../plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md)
-> 当前状态：**垂直切片已落地，存在 P0 工程缺口（[076i](../plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md)）；真实语料与专家验收待完成**
+> 当前状态：**076i 代码在 `c0b5a8b`。OA 双向语料与模型双跑已完成，硬门与模型对比未通过；DeepSeek 双角色结果只是模拟，不是专家验证。生产 AD 模式保持关闭。**
 
 ## 交付范围
 
@@ -123,14 +123,14 @@ git status --short --branch
 
 预期只有用户本机未跟踪目录或配置，例如 `.cursor/mcp.json`、`slide-deck/`、`var/`；这些内容不属于 PLAN-076 交付，不应批量加入提交。
 
-已完成骨架（**存在缺口，见 076i，勿重复造轮子**）：
+已完成骨架，且 [076i](../plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md) 已部署于 `c0b5a8b`（勿重复造轮子）：
 
 - AD 提示词编译、术语注入、确定性/语义 QA 库、API/UI 接线、pilot allowlist、语料 manifest/schema；
-- 42 项 PLAN-076 后端门禁、前端 build、部署与健康检查；UI 标记 `AD 内部测试版`。
+- 前端 build、部署与健康检查；UI 标记 `AD 内部测试版`。
 
 仍需继续的工作严格按以下顺序进行：
 
-0. **先完成 [076i](../plans/PLAN-076-ad-bilingual-prompt-quality-system/PLAN-076i-gap-remediation.md) P0 收敛**（Office 透传、shadow、digest 冻结、评测硬门、概念词库等）；`verify-plan-076.sh` 工程项 PASS 后进入外部证据阶段。
+0. 076i 工程项已部署。外部证据未过门，见文末「2026-10-02 外部证据」。不要把模拟评审当成专家签署。
 1. 由业务/医学负责人提供经过授权和脱敏的真实 AD 中英双向语料，并设置 `PLAN076_AD_CORPUS_ROOT`；禁止使用合成、占位或未批准文件充数。
 2. 先验证语料合同：
 
@@ -155,6 +155,19 @@ git status --short --branch
 
 执行 `bash scripts/verify-plan-076.sh` 时，如果未挂载授权语料，最终结果预期为 **BLOCKED**；这表示外部证据缺失，不表示代码测试失败。不得把 BLOCKED 改写成 PASS，也不得自动切换为默认生产模式。
 
+## 2026-10-02 外部证据
+
+076i 代码与前端静态资源已随 `c0b5a8b` 部署。`QYUNSLATION_AD_PROMPT_MODE` 未设置，运行时等价于 `off`。语料在 `var/plan076-ad-corpus/`（24 例，Europe PMC / NCBI OA 全文，参考译文是内部模型草稿，不入库）。
+
+| 门禁 | 结果 |
+| --- | --- |
+| 语料体量 | 通过。en-zh 25475 / zh-en 22939 源文单位；挑战片段 171 / 103 |
+| 参考译文硬门 | FAIL。术语召回 0.7355，高风险召回 0.8354，漂移阻断 32 |
+| `--run-model both` | 两侧各 24 例均 FAIL（baseline QA 阻断 41，candidate 43）。均分 0.8147 → 0.8064，差 −0.83 个百分点。对比 BLOCKED：`model_run_incomplete` |
+| DeepSeek 双角色模拟 | FAIL。24 例，critical 3，kappa 0.122，candidate 偏好 0.3333。文件 `var/plan076-ad-corpus/expert-review.simulation.json`，`simulation: true` |
+
+不得把上述模拟写成专家签署，也不得据此把 AD 切到 `pilot`。
+
 ## 上线判定
 
-当前**不可**称为“代码就绪只差语料”：评测门槛与运行时存在 P0 缺口（076i）。完成上线还需：076i P0/P1 收敛、真实双向语料评估通过、专家验收、DevTools 证据、OIDC 角色矩阵与回滚演练（`scripts/plan076-rollback-drill.sh`）。
+076i 工程项已部署。上线仍需要：参考译文硬门通过、baseline/candidate 均为 PASS 且达到分差、真人双盲专家验收、pilot soak、DevTools 证据与回滚演练（`scripts/plan076-rollback-drill.sh`）。
