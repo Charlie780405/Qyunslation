@@ -19,6 +19,7 @@ SUPPORTED_AD_DOCUMENTS = {"医学研究文献", "临床研究文档"}
 
 _DOMAIN_ANCHORS = (
     r"\batopic dermatitis\b",
+    r"\bAD\b",
     r"\beczema\b",
     r"\bdupilumab\b",
     r"\btralokinumab\b",

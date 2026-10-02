@@ -1211,6 +1211,7 @@ def _inspect_run_outputs(
         if str((run.settings_snapshot or {}).get("domain_profile") or "general").casefold() == "ad":
             from qyunslation.pipeline.ad_prompt import detect_domain_evidence
             from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
+            from qyunslation.pipeline.ad_semantic import select_high_risk_segments
             from qyunslation.pipeline.ad_termbase import build_ad_term_policy
 
             direction = "en-zh" if run.direction == "English → 简体中文" else "zh-en"
@@ -1243,6 +1244,23 @@ def _inspect_run_outputs(
                 "termbase_version": ad_policy.get("termbase_version"),
                 "terms": ad_policy.get("metadata") or [],
             }
+            semantic_mode = str((run.settings_snapshot or {}).get("semantic_qa_mode") or "shadow").casefold()
+            risk_segments = select_high_risk_segments([{"id": "pdf-text", "source": source_text}])
+            snapshot["semantic_qa"] = {
+                "mode": semantic_mode,
+                "risk_segment_count": len(risk_segments),
+                "reviewer_configured": bool(os.environ.get("QYUNSLATION_AD_SEMANTIC_REVIEWER_URL")),
+            }
+            if semantic_mode == "required" and not snapshot["semantic_qa"]["reviewer_configured"]:
+                findings.append(
+                    QaFinding(
+                        category="ad_semantic",
+                        severity="blocker",
+                        code="AD_QA_DEGRADED",
+                        message="AD 语义 QA 被设为 required，但审核服务未配置",
+                        evidence=snapshot["semantic_qa"],
+                    )
+                )
         else:
             try:
                 from qyunslation.pipeline.term_snapshot import (
@@ -1355,6 +1373,14 @@ def _maybe_run_auto_qa(
     )
     findings.extend(inspected)
     for finding in findings:
+        evidence = dict(finding.evidence or {})
+        evidence.setdefault("direction", run.direction)
+        evidence.setdefault(
+            "prompt_version",
+            dict((run.settings_snapshot or {}).get("prompt_snapshot") or {}).get("version"),
+        )
+        evidence.setdefault("rule_version", "076-qa-v1")
+        evidence.setdefault("repair_attempt", 0)
         session.add(
             QaItem(
                 run_id=run.id,
@@ -1364,7 +1390,7 @@ def _maybe_run_auto_qa(
                 code=finding.code,
                 message=finding.message,
                 object_id=finding.object_id,
-                evidence_json=finding.evidence,
+                evidence_json=evidence,
             )
         )
     run.qa_summary = summarize(findings)
@@ -1987,6 +2013,7 @@ async def create_translation_run(
             "profile": body.profile,
             "domain_profile": domain_profile,
             "prompt_snapshot": prompt_snapshot,
+            "semantic_qa_mode": (os.environ.get("QYUNSLATION_AD_SEMANTIC_QA_MODE") or "shadow").strip().casefold(),
             "bilingual": body.bilingual,
             "auto_ocr_workaround": True,
             "document_classification": classification,

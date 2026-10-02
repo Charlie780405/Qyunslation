@@ -1061,7 +1061,7 @@ class Pdf2zhRunner:
             self._write_state(
                 path,
                 state,
-                status="interrupted",
+                status="degraded",
                 stage=state.get("stage") or "text",
                 progress=state.get("progress"),
                 reason="runner process was not found after service restart",
