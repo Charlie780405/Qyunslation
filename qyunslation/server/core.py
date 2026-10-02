@@ -571,6 +571,7 @@ class TranslationService:
                 "chunk_size", "concurrent", "temperature", "top_p", "timeout", "thinking", "retry",
                 "system_proxy_enable", "custom_prompt", "glossary_dict",
                 "termbase_policy", "termbase_version",
+                "domain_profile", "document_profile",
                 "glossary_generate_enable", "glossary_agent_config",
                 "force_json", "rpm", "tpm", "provider", "extra_body"
             ]
@@ -685,6 +686,27 @@ class TranslationService:
         log_history.append({"seq": 1, "message": initial_log_msg})
 
         # PLAN-034d0：全工作流挂 SSOT glossary_dict；不写全表 custom_prompt
+        # PLAN-076：领域提示词只能由版本化编译器生成，禁止把客户端传入的
+        # 任意 AD 系统提示词直接交给翻译引擎。
+        try:
+            from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+
+            runtime = compile_runtime_settings(
+                {
+                    "domain_profile": getattr(payload, "domain_profile", "general"),
+                    "direction": "English → 简体中文"
+                    if str(getattr(payload, "to_lang", "")).casefold() in {"简体中文", "中文", "chinese", "zh"}
+                    else "简体中文 → English",
+                    "target_language": getattr(payload, "to_lang", None),
+                    "profile": getattr(payload, "document_profile", "通用医药文档"),
+                    "custom_prompt": getattr(payload, "custom_prompt", None),
+                }
+            )
+            if runtime.get("custom_prompt"):
+                payload.custom_prompt = runtime["custom_prompt"]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         try:
             from qyunslation.glossary.ssot import apply_ssot_to_payload
 

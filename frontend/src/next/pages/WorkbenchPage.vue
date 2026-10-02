@@ -24,6 +24,10 @@
             <label class="qy-field"><span>源语言</span><select v-model="workbenchState.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
             <label class="qy-field"><span>目标语言</span><select v-model="workbenchState.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
           </div>
+          <div class="qy-ad-mode" aria-label="专业领域模式">
+            <label class="qy-field"><span>专业领域</span><select v-model="workbenchState.domainProfile"><option value="general">通用医药翻译</option><option value="ad">AD 特应性皮炎</option></select></label>
+            <span class="qy-inline-hint">AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
+          </div>
           <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
           <label class="qy-dropzone" :class="{ 'is-selected': selectedFile }" for="workbench-file">
             <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" accept=".pdf,.docx,.pptx,.txt,.md" @change="selectFile" />
@@ -209,6 +213,7 @@ function buildIdempotencyKey() {
     workbenchState.sourceLanguage,
     workbenchState.targetLanguage,
     workbenchState.profile,
+    workbenchState.domainProfile,
     workbenchState.bilingual ? '1' : '0',
   ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
 }
@@ -354,6 +359,7 @@ async function startTranslation() {
       source_language: workbenchState.sourceLanguage,
       target_language: workbenchState.targetLanguage,
       profile: workbenchState.profile,
+      domain_profile: workbenchState.domainProfile,
       bilingual: workbenchState.bilingual,
       document_classification: workbenchState.classification,
       model_profile_id: workbenchState.modelProfileId,

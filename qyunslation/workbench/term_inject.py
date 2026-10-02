@@ -63,8 +63,21 @@ def build_run_glossary_path(
     )
     policy = compile_term_policy(matches, termbase_version=version)
     hard_terms = policy_to_glossary(policy)
+    domain_profile = str(settings.get("domain_profile") or "general").strip().casefold()
+    ad_meta: dict[str, Any] = {}
+    if domain_profile == "ad":
+        from qyunslation.pipeline.ad_prompt import detect_domain_evidence
+        from qyunslation.pipeline.ad_termbase import build_ad_term_policy
+
+        direction = "en-zh" if run.direction == "English → 简体中文" else "zh-en"
+        ad_meta = {"domain_profile": "ad", "domain_evidence": detect_domain_evidence(source_text)}
+        ad_policy = build_ad_term_policy(source_text, direction)
+        # AD policy is additive, but its approved domain translation wins over
+        # a generic shared entry with the same source spelling.
+        hard_terms = {**hard_terms, **dict(ad_policy.get("terms") or {})}
+        version = ad_policy.get("termbase_version") or version
     if not hard_terms:
-        return None, {"termbase_version": version, "injected_terms": 0}
+        return None, {"termbase_version": version, "injected_terms": 0, **ad_meta}
     directory = run_dir / ".qyunslation-termbase"
     directory.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(
@@ -80,4 +93,5 @@ def build_run_glossary_path(
         "termbase_version": version,
         "injected_terms": len(hard_terms),
         "glossary_path": str(glossary_path.resolve()),
+        **ad_meta,
     }

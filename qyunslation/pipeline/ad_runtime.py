@@ -1,0 +1,39 @@
+"""PLAN-076 runtime glue shared by API and legacy translation workflows."""
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any
+
+from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt
+
+
+def _direction_code(direction: str, target_language: str | None = None) -> str:
+    value = (direction or "").strip()
+    if value in {"English → 简体中文", "en-zh"}:
+        return "en-zh"
+    if value in {"简体中文 → English", "zh-en"}:
+        return "zh-en"
+    target = (target_language or "").strip().casefold()
+    if target in {"english", "en"}:
+        return "zh-en"
+    if target in {"简体中文", "中文", "chinese", "zh"}:
+        return "en-zh"
+    raise ValueError("unsupported translation direction for AD profile")
+
+
+def compile_runtime_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
+    current = deepcopy(settings or {})
+    domain = str(current.get("domain_profile") or "general").strip().casefold()
+    if domain != "ad":
+        return current
+    direction = _direction_code(str(current.get("direction") or ""), current.get("target_language"))
+    document = str(current.get("profile") or current.get("document_profile") or "").strip()
+    compiled = compile_prompt(PromptContext(domain, direction, document, "translate"))
+    custom = str(current.get("custom_prompt") or "").strip()
+    if custom.startswith(compiled.text):
+        current["custom_prompt"] = custom
+    else:
+        current["custom_prompt"] = compiled.text + (f"\n\n附加任务约束：\n{custom}" if custom else "")
+    current["prompt_snapshot"] = compiled.snapshot()
+    current["prompt_snapshot"]["domain_profile"] = "ad"
+    return current

@@ -5,6 +5,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi[standard]>=0.115.12",
+    "python-multipart>=0.0.20",
     "jsonpath-ng>=1.7.0",
     "openpyxl>=3.1.5",
     "xlsx2html>=0.6.2",

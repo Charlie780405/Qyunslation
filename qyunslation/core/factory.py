@@ -52,6 +52,21 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
     if logger is None:
         logger = logging.getLogger("qyunslation.factory")
 
+    # PLAN-076：SDK/CLI 直连路径也必须经过同一版本化提示词编译器，
+    # 不能只依赖 Web API 才获得 AD 专业约束。
+    if getattr(payload, "domain_profile", "general") == "ad":
+        from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+
+        runtime = compile_runtime_settings(
+            {
+                "domain_profile": getattr(payload, "domain_profile", "general"),
+                "target_language": getattr(payload, "to_lang", None),
+                "profile": getattr(payload, "document_profile", "通用医药文档"),
+                "custom_prompt": getattr(payload, "custom_prompt", None),
+            }
+        )
+        payload.custom_prompt = runtime["custom_prompt"]
+
     if not getattr(payload, "skip_translate", False):
         try:
             from qyunslation.structure.model_trace import bind_task_model_trace

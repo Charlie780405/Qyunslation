@@ -64,16 +64,17 @@ PREF_DEFAULTS = {
     "density": "comfortable",
     "reduceMotion": False,
     "largeText": False,
-    "workbench": {
+        "workbench": {
         "sourceLanguage": "English",
         "targetLanguage": "简体中文",
         "profile": "临床研究文档",
         "bilingual": True,
         "classification": "internal",
+        "domainProfile": "general",
     },
 }
 WORKBENCH_PREF_KEYS = frozenset(
-    {"sourceLanguage", "targetLanguage", "profile", "bilingual", "classification"}
+    {"sourceLanguage", "targetLanguage", "profile", "bilingual", "classification", "domainProfile"}
 )
 UPLOAD_SESSION_TTL_HOURS = 24
 UPLOAD_CHUNK_MAX_BYTES = 8 * 1024 * 1024
@@ -318,6 +319,49 @@ def _preflight_path(record: PreflightRecord) -> Path:
     return path
 
 
+def _preflight_text_for_domain(record: PreflightRecord) -> str:
+    """Read bounded text for domain gating; binary failures remain explicit."""
+    path = _preflight_path(record)
+    if not path.is_file():
+        return ""
+    if path.suffix.casefold() == ".pdf":
+        try:
+            from qyunslation.pipeline.qa.pdf_inspect import read_pdf_facts
+
+            facts = read_pdf_facts(path)
+            return facts.text if facts else ""
+        except Exception:
+            return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")[:500_000]
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _validate_domain_profile(
+    *, preflight: PreflightRecord, domain_profile: str, direction: str, document_profile: str
+) -> dict[str, Any] | None:
+    domain = (domain_profile or "general").strip().casefold()
+    if domain == "general":
+        return None
+    if domain != "ad":
+        raise HTTPException(status_code=422, detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "unsupported domain profile"})
+    if direction not in {"English → 简体中文", "简体中文 → English"} or document_profile not in {"医学研究文献", "临床研究文档"}:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "AD 仅支持中英双向医学研究文献或临床研究文档"},
+        )
+    from qyunslation.pipeline.ad_prompt import detect_domain_evidence
+
+    text = _preflight_text_for_domain(preflight)
+    if not text or not detect_domain_evidence(text):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "AD_DOMAIN_EVIDENCE_MISSING", "message": "源文缺少可验证的 AD 领域锚点"},
+        )
+    return {"source_chars": len(text), "evidence": True}
+
+
 def _upload_root() -> Path:
     raw = (os.environ.get("QYUNSLATION_UPLOAD_ROOT") or "var/uploads").strip()
     root = Path(raw)
@@ -361,6 +405,8 @@ def _safe_workbench_preferences(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["targetLanguage"] = PREF_DEFAULTS["workbench"]["targetLanguage"]
     if merged["classification"] not in {"confidential", "internal", "public"}:
         merged["classification"] = "internal"
+    if merged.get("domainProfile") not in {"general", "ad"}:
+        merged["domainProfile"] = "general"
     if merged["profile"] not in {"临床研究文档", "监管申报材料", "通用医药文档"}:
         merged["profile"] = PREF_DEFAULTS["workbench"]["profile"]
     merged["bilingual"] = bool(merged.get("bilingual"))
@@ -498,6 +544,7 @@ def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
         "recommended": recommended,
         "source_language": recommended.get("source_language"),
         "target_language": recommended.get("target_language"),
+        "domain_profile": recommended.get("domain_profile") or "general",
         "document_classification": record.document_classification or metadata.get("document_classification") or "internal",
         "model_profile_id": record.model_profile_id or metadata.get("model_profile_id"),
         "reused": False,
@@ -902,6 +949,7 @@ class TranslationRunCreateBody(BaseModel):
     source_language: str | None = Field(default=None, max_length=32)
     target_language: str | None = Field(default=None, max_length=32)
     profile: str = Field(default="临床研究文档", min_length=1, max_length=128)
+    domain_profile: str = Field(default="general", max_length=32)
     bilingual: bool = True
     display_name: str | None = Field(default=None, max_length=256)
     document_classification: str | None = Field(default=None, max_length=32)
@@ -916,6 +964,7 @@ class PreflightPatchBody(BaseModel):
     source_language: str | None = Field(default=None, max_length=32)
     target_language: str | None = Field(default=None, max_length=32)
     profile: str | None = Field(default=None, max_length=128)
+    domain_profile: str | None = Field(default=None, max_length=32)
 
 
 class ReviewDecisionBody(BaseModel):
@@ -1159,22 +1208,58 @@ def _inspect_run_outputs(
     )
     snapshot: dict[str, Any] | None = None
     if facts:
-        try:
-            from qyunslation.pipeline.term_snapshot import (
-                build_term_snapshot,
-                check_terms_in_translation,
-            )
+        if str((run.settings_snapshot or {}).get("domain_profile") or "general").casefold() == "ad":
+            from qyunslation.pipeline.ad_prompt import detect_domain_evidence
+            from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
+            from qyunslation.pipeline.ad_termbase import build_ad_term_policy
 
-            snapshot = build_term_snapshot(
-                session,
-                tenant_id=run.tenant_id,
-                project_id=None,
-                source_text=facts["source"].text,
-                document_profile=_document_profile_from_run(run),
+            direction = "en-zh" if run.direction == "English → 简体中文" else "zh-en"
+            source_text = facts["source"].text
+            target_text = facts["translated"].text
+            ad_policy = build_ad_term_policy(source_text, direction)
+            findings.extend(
+                run_ad_deterministic_qa(
+                    QaContext(
+                        source=source_text,
+                        target=target_text,
+                        direction=direction,
+                        terms=ad_policy.get("terms") or {},
+                    )
+                )
             )
-            findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
-        except Exception:
-            snapshot = None
+            if not detect_domain_evidence(source_text):
+                findings.append(
+                    QaFinding(
+                        category="ad",
+                        severity="blocker",
+                        code="AD_DOMAIN_EVIDENCE_MISSING",
+                        message="源文缺少可验证的 AD 领域锚点",
+                    )
+                )
+            snapshot = {
+                "status": "ready",
+                "schema": "076-ad-termbase-v1",
+                "direction": direction,
+                "termbase_version": ad_policy.get("termbase_version"),
+                "terms": ad_policy.get("metadata") or [],
+            }
+        else:
+            try:
+                from qyunslation.pipeline.term_snapshot import (
+                    build_term_snapshot,
+                    check_terms_in_translation,
+                )
+
+                snapshot = build_term_snapshot(
+                    session,
+                    tenant_id=run.tenant_id,
+                    project_id=None,
+                    source_text=facts["source"].text,
+                    document_profile=_document_profile_from_run(run),
+                )
+                findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
+            except Exception:
+                snapshot = None
     findings.append(
         QaFinding(
             category="consistency",
@@ -1517,6 +1602,8 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "source_language": source_language,
         "target_language": target_language,
         "profile": run.profile,
+        "domain_profile": settings.get("domain_profile") or "general",
+        "prompt_snapshot": dict(settings.get("prompt_snapshot") or {}) or None,
         "settings": settings,
         "display_name": run.display_name,
         "archived": run.archived_at is not None,
@@ -1594,6 +1681,22 @@ async def _launch_translation_run(
     from qyunslation.pipeline import run_pipeline_mode
     from qyunslation.workbench.heartbeat import touch_run_heartbeat
 
+    # Compile the protected prompt at launch time.  The durable API snapshot
+    # contains only the digest/metadata; the raw prompt exists only in this
+    # process and the private PDF runner config.
+    launch_settings = dict(run.settings_snapshot or {})
+    if str(launch_settings.get("domain_profile") or "general").casefold() == "ad":
+        try:
+            from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+
+            compiled_settings = compile_runtime_settings(launch_settings)
+            launch_settings["ad_prompt_text"] = compiled_settings.get("custom_prompt")
+        except ValueError:
+            run.status = "blocked"
+            run.stage = "validation"
+            run.degradation_reason = "AD prompt unavailable"
+            return
+
     if resume and session is not None:
         _apply_resume_snapshot(session, run)
         if preflight.source_format.casefold() == "pdf":
@@ -1665,7 +1768,7 @@ async def _launch_translation_run(
                 original_filename=preflight.source_filename,
                 direction=run.direction,
                 target_language=target_language,
-                settings=run.settings_snapshot,
+                settings={**dict(run.settings_snapshot or {}), "ad_prompt_text": launch_settings.get("ad_prompt_text")},
                 declared_mime=str(meta.get("mime") or "application/octet-stream"),
                 scanned_hint=bool(meta.get("scanned") or meta.get("needs_ocr")),
             )
@@ -1722,7 +1825,7 @@ async def _launch_translation_run(
                 input_path=content_path,
                 direction=run.direction,
                 original_filename=preflight.source_filename,
-                settings=run.settings_snapshot,
+                settings={**dict(run.settings_snapshot or {}), "ad_prompt_text": launch_settings.get("ad_prompt_text")},
             )
             run.external_task_id = launch.task_id
             run.status = "translating"
@@ -1745,7 +1848,13 @@ async def _launch_translation_run(
         content_path = _preflight_path(preflight)
         content = content_path.read_bytes()
         task_id = uuid.uuid4().hex[:16]
-        payload = AutoWorkflowParams(workflow_type="auto", to_lang=target_language)
+        payload = AutoWorkflowParams(
+            workflow_type="auto",
+            to_lang=target_language,
+            domain_profile=str(launch_settings.get("domain_profile") or "general"),
+            document_profile=str(launch_settings.get("profile") or "通用医药文档"),
+            custom_prompt=str(launch_settings.get("ad_prompt_text") or "") or None,
+        )
         result = await _start_legacy_translation(
             service=service,
             task_id=task_id,
@@ -1787,6 +1896,13 @@ async def create_translation_run(
     state = _preflight_dict(preflight)
     if state["state"] != "ready":
         raise HTTPException(status_code=409, detail="preflight is not ready")
+    domain_profile = (body.domain_profile or "general").strip().casefold()
+    _validate_domain_profile(
+        preflight=preflight,
+        domain_profile=domain_profile,
+        direction=direction,
+        document_profile=body.profile,
+    )
     key = (idempotency_key or f"preflight:{preflight.id}").strip()
     if not key or len(key) > 256:
         raise HTTPException(status_code=400, detail="invalid Idempotency-Key")
@@ -1836,6 +1952,23 @@ async def create_translation_run(
         termbase_version=termbase_version,
         pipeline=resolve_pipeline_mode(getattr(tenant, "slug", None)),
     )
+    prompt_snapshot: dict[str, Any] | None = None
+    if domain_profile == "ad":
+        try:
+            from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+
+            prompt_snapshot = compile_runtime_settings(
+                {
+                    "domain_profile": domain_profile,
+                    "direction": direction,
+                    "profile": body.profile,
+                }
+            ).get("prompt_snapshot")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "AD_PROMPT_UNAVAILABLE", "message": str(exc)},
+            ) from exc
     run = TranslationRunRecord(
         preflight_id=preflight.id,
         tenant_id=tenant.id,
@@ -1852,6 +1985,8 @@ async def create_translation_run(
             "source_language": source_language,
             "target_language": target_language,
             "profile": body.profile,
+            "domain_profile": domain_profile,
+            "prompt_snapshot": prompt_snapshot,
             "bilingual": body.bilingual,
             "auto_ocr_workaround": True,
             "document_classification": classification,
@@ -2075,6 +2210,19 @@ def patch_preflight(
         recommended["target_language"] = body.target_language
     if body.profile:
         recommended["profile"] = body.profile
+    if body.domain_profile:
+        source_language, target_language, direction = _normalize_language_pair(
+            recommended.get("source_language"),
+            recommended.get("target_language"),
+            recommended.get("direction"),
+        )
+        _validate_domain_profile(
+            preflight=record,
+            domain_profile=body.domain_profile,
+            direction=direction,
+            document_profile=body.profile or recommended.get("profile") or "临床研究文档",
+        )
+        recommended["domain_profile"] = body.domain_profile.strip().casefold()
     if term_profile_id:
         recommended["term_model_profile_id"] = term_profile_id
     meta["recommended"] = recommended

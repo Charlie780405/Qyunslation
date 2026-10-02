@@ -121,6 +121,14 @@ class GlossaryAgentConfigPayload(BaseModel):
 
 # 1. 定义所有工作流共享的基础参数
 class BaseWorkflowParams(BaseModel):
+    # PLAN-076：受控领域配置。默认 general 保持旧客户端行为；AD 只由服务端
+    # 编译提示词，不接受生产环境在线编辑的提示词模板。
+    domain_profile: Literal["general", "ad"] = Field(
+        default="general", description="受控翻译领域配置"
+    )
+    document_profile: str = Field(
+        default="通用医药文档", max_length=128, description="医学文档类型"
+    )
     skip_translate: bool = Field(
         default=False,
         description="是否跳过翻译步骤。如果为True，则仅执行文档解析和格式转换。",

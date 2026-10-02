@@ -1,0 +1,33 @@
+source,target,src_lang,tgt_lang,term_type,risk,do_not_translate,forbidden_targets,notes
+atopic dermatitis,特应性皮炎,en,zh,disease,high,false,异位性皮炎,AD core disease
+AD,AD,en,zh,abbreviation,high,true,,AD abbreviation
+eczema,湿疹,en,zh,disease,high,false,,clinical synonym
+pruritus,瘙痒,en,zh,symptom,normal,false,,
+itch intensity,瘙痒强度,en,zh,endpoint,normal,false,,
+erythema,红斑,en,zh,sign,normal,false,,
+lichenification,苔藓样变,en,zh,sign,normal,false,,
+dupilumab,度普利尤单抗,en,zh,drug,high,false,,Dupixent generic
+tralokinumab,曲罗芦单抗,en,zh,drug,high,false,,
+upadacitinib,乌帕替尼,en,zh,drug,high,false,,
+abrocitinib,阿布昔替尼,en,zh,drug,high,false,,
+lebrikizumab,来瑞珠单抗,en,zh,drug,high,false,,
+nemolizumab, nemolizumab,en,zh,drug,high,true,,
+IL-4Rα,IL-4Rα,en,zh,target,high,true,,receptor symbol
+IL-13,IL-13,en,zh,target,high,true,,cytokine symbol
+IL-4,IL-4,en,zh,target,high,true,,cytokine symbol
+IL-31,IL-31,en,zh,target,high,true,,cytokine symbol
+JAK-STAT,JAK-STAT,en,zh,pathway,high,true,,pathway symbol
+Th2,Th2,en,zh,pathway,high,true,,cell subset
+IFN-γ,IFN-γ,en,zh,target,high,true,,cytokine symbol
+EASI,EASI,en,zh,scale,high,true,,Eczema Area and Severity Index
+EASI-75,EASI-75,en,zh,endpoint,high,true,,response threshold
+IGA,IGA,en,zh,scale,high,true,,Investigator Global Assessment
+SCORAD,SCORAD,en,zh,scale,high,true,,SCORing Atopic Dermatitis
+PP-NRS,PP-NRS,en,zh,scale,high,true,,Peak Pruritus Numerical Rating Scale
+body surface area,体表面积,en,zh,endpoint,normal,false,,
+flare,急性加重,en,zh,endpoint,normal,false,,
+maintenance treatment,维持治疗,en,zh,treatment,normal,false,,
+rescue medication,补救用药,en,zh,treatment,normal,false,,
+adverse event,不良事件,en,zh,safety,high,false,,
+serious adverse event,严重不良事件,en,zh,safety,high,false,,
+topical corticosteroid,外用糖皮质激素,en,zh,treatment,high,false,,

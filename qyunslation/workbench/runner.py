@@ -183,7 +183,23 @@ def _prepare_runtime_config(
             replaced = apply_model_snapshot(replaced, snapshot)
     except Exception:
         pass
+    ad_prompt = str((settings or {}).get("ad_prompt_text") or "").strip()
+    if ad_prompt:
+        # The compiled prompt is kept in the private per-run config.  It is
+        # never placed on argv or in the public run response where it could
+        # become an accidental prompt-editing API.
+        encoded = json.dumps(ad_prompt, ensure_ascii=False)
+        translation_block = re.search(r"(?ms)^\[translation\]\s*\n(.*?)(?=^\[|\Z)", replaced)
+        if translation_block:
+            block = translation_block.group(0)
+            prompt_line = re.compile(r"(?m)^\s*custom_system_prompt\s*=.*$")
+            if prompt_line.search(block):
+                block = prompt_line.sub(f"custom_system_prompt = {encoded}", block, count=1)
+            else:
+                block = block.rstrip() + f"\ncustom_system_prompt = {encoded}\n"
+            replaced = replaced.replace(translation_block.group(0), block)
     target = run_dir / "runner-config.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(replaced, encoding="utf-8")
     os.chmod(target, 0o600)
     return target

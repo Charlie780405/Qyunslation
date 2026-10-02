@@ -69,6 +69,26 @@ def test_pdf2zh_command_uses_cli_flags_without_credentials(tmp_path: Path):
     assert "--api-key" not in command
 
 
+def test_runtime_config_injects_compiled_ad_prompt_without_mutating_operator_config(tmp_path: Path):
+    from qyunslation.workbench.runner import _prepare_runtime_config
+
+    base = tmp_path / "config.toml"
+    base.write_text(
+        '[basic]\ngui = true\n\n[translation]\ncustom_system_prompt = "generic"\n',
+        encoding="utf-8",
+    )
+    output = _prepare_runtime_config(
+        base,
+        tmp_path / "run",
+        {"ad_prompt_text": "特应性皮炎\n保持数字。"},
+    )
+    assert output is not None
+    runtime = output.read_text(encoding="utf-8")
+    assert "gui = false" in runtime
+    assert "特应性皮炎" in runtime
+    assert "custom_system_prompt = \"generic\"" in base.read_text(encoding="utf-8")
+
+
 def test_pdf_runner_env_exposes_package_parent_to_cli_workers():
     import qyunslation.workbench.runner as runner_module
 

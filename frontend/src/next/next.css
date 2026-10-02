@@ -109,6 +109,8 @@
 .qy-preflight-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qy-preflight-card > div > span { margin-top: 3px; color: var(--qy-text-secondary); font-size: 12px; }
 .qy-preflight-card .qy-primary-button { min-height: 40px; }
+.qy-ad-mode { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); align-items: end; gap: 12px; margin-top: 14px; }
+.qy-ad-mode .qy-inline-hint { padding-bottom: 10px; color: var(--qy-text-secondary); font-size: 12px; }
 .qy-task-list { display: grid; gap: 8px; }
 .qy-task-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); }
 .qy-task-row > svg { width: 18px; color: var(--qy-text-secondary); }
