@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
@@ -88,3 +89,37 @@ def test_corpus_contract_validates_hashes_and_authorization(tmp_path):
     result = plan076_ad_eval.check_corpus(tmp_path, direction="en-zh")
     assert result["valid"] is True
     assert result["cases"] == 1
+
+
+def test_baseline_only_is_fail_closed_until_model_runner_exists(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(plan076_ad_eval, "CORPUS_ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["plan076-ad-eval.py", "--baseline-only"])
+    assert plan076_ad_eval.main() == 2
+    output = capsys.readouterr().out
+    assert "baseline_runtime_unavailable" in output
+
+
+def test_read_pairs_uses_locked_manifest_cases_only(monkeypatch, tmp_path):
+    registered_source = tmp_path / "registered.source.en.txt"
+    registered_target = tmp_path / "registered.target.zh.txt"
+    orphan_source = tmp_path / "orphan.source.en.txt"
+    orphan_target = tmp_path / "orphan.target.zh.txt"
+    registered_source.write_text("Patients with atopic dermatitis.", encoding="utf-8")
+    registered_target.write_text("特应性皮炎患者。", encoding="utf-8")
+    orphan_source.write_text("Unregistered source.", encoding="utf-8")
+    orphan_target.write_text("未登记文本。", encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({
+            "cases": [{
+                "case_id": "registered-001",
+                "direction": "en-zh",
+                "source_ref": registered_source.name,
+                "reference_ref": registered_target.name,
+                "is_locked_test": True,
+            }]
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(plan076_ad_eval, "CORPUS_ROOT", tmp_path)
+    rows = plan076_ad_eval._read_pairs()
+    assert [row["case"] for row in rows] == ["registered-001"]

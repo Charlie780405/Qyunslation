@@ -143,24 +143,37 @@ def check_corpus(corpus_root: Path = CORPUS_ROOT, *, direction: str = "both") ->
 
 def _read_pairs() -> list[dict]:
     rows: list[dict] = []
-    candidates = sorted(CORPUS_ROOT.glob("*.source.*")) if CORPUS_ROOT.is_dir() else []
-    for source_path in candidates:
-        if source_path.name.endswith(".source.en.txt"):
-            direction = "en-zh"
-            target_path = source_path.with_name(source_path.name.replace(".source.en.txt", ".target.zh.txt"))
-        elif source_path.name.endswith(".source.zh.txt"):
-            direction = "zh-en"
-            target_path = source_path.with_name(source_path.name.replace(".source.zh.txt", ".target.en.txt"))
-        else:
+    manifest_path = CORPUS_ROOT / MANIFEST_NAME
+    if not manifest_path.is_file():
+        return rows
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return rows
+    cases = manifest.get("cases") if isinstance(manifest, dict) else None
+    if not isinstance(cases, list):
+        return rows
+    for case in cases:
+        if not isinstance(case, dict) or case.get("is_locked_test") is not True:
             continue
-        if not target_path.is_file():
+        direction = case.get("direction")
+        if direction not in ALLOWED_DIRECTIONS:
+            continue
+        source_path = _safe_ref(CORPUS_ROOT, case.get("source_ref"))
+        target_path = _safe_ref(CORPUS_ROOT, case.get("reference_ref"))
+        if not source_path or not target_path or not source_path.is_file() or not target_path.is_file():
+            continue
+        try:
+            source = source_path.read_text(encoding="utf-8")
+            target = target_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
             continue
         rows.append(
             {
-                "case": source_path.name,
+                "case": str(case.get("case_id") or source_path.name),
                 "direction": direction,
-                "source": source_path.read_text(encoding="utf-8"),
-                "target": target_path.read_text(encoding="utf-8"),
+                "source": source,
+                "target": target,
             }
         )
     return rows
@@ -250,6 +263,12 @@ def main() -> int:
         summary["deficits"].append("corpus_contract")
     if args.baseline_only:
         summary["mode"] = "baseline-only"
+        # This script scores locked source/reference pairs and deterministic QA
+        # evidence; it does not invoke a translation model.  Do not let the
+        # flag masquerade as a completed generic baseline when a valid corpus
+        # is eventually mounted.  A model-backed baseline runner must provide
+        # the immutable output/parameter ledger before this gate can pass.
+        summary["deficits"].append("baseline_runtime_unavailable")
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     LEDGER.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
