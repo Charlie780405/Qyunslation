@@ -1,0 +1,70 @@
+# WT-076：AD 中英双向专业翻译发布证据
+
+> 对应计划：[PLAN-076](../plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md)
+> 当前状态：**代码与自动化门禁就绪；真实语料、专家验收和正式浏览器 DevTools 证据仍未闭环，暂不宣称完整上线**
+
+## 交付范围
+
+PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻译：
+
+- 版本化双向提示词编译、运行时注入和 metadata-only prompt snapshot；
+- AD 静态术语表、方向反转、风险级别和不可翻译字段；
+- 数字/剂量、术语、否定和情态四类确定性 QA；
+- 高风险片段语义复核接口及最多一次受保护修复；
+- 工作台 AD 专业模式选择、运行详情标识和提示词版本摘要；
+- 发布评估脚本，缺少授权真实语料时 fail-closed 为 BLOCKED。
+
+## 代码提交
+
+| 提交 | 内容 |
+| --- | --- |
+| `766c189` | AD 提示词、术语、确定性 QA、API/运行时/UI 垂直切片 |
+| `df90fd8` | 有界语义 QA、修复保护、运行详情元数据和回归修复 |
+| `84d3b1d` | AD rollout 环境门禁，生产默认关闭 |
+| `43baf51` | 双向评估脚本、测试语料契约、总门禁和静态包 |
+| `afbd1d0` | 修正 `--direction` 筛选、补充 API 合约回归和评估器测试 |
+
+不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
+
+## 自动化验证
+
+执行：
+
+```bash
+bash scripts/verify-plan-076.sh
+```
+
+结果：
+
+- PLAN-076 pipeline/API 聚焦测试：**20 passed**；
+- 前端测试、type-check、production build：**PASS**；
+- `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
+- `qyunslation-office.service`、`pdf2zh.service`：**active**；
+- Chromium：`/home/dev/.local/bin/chromium` 可执行；
+- 总门禁：**BLOCKED**，不是代码失败。
+
+## 阻塞项
+
+评估器 `scripts/plan076-ad-eval.py --direction both` 当前报告：
+
+- `en-zh`：0 cases / 0 source chars / 0 challenge segments；
+- `zh-en`：0 cases / 0 source chars / 0 challenge segments。
+
+`tests/gold/ad/` 只提交了语料格式和授权规则，没有伪造文献、临床研究文档或重复样本。需由业务/医学专家提供每方向至少 12 份真实授权样本、累计至少 20,000 源字符和 100 个挑战片段，随后补齐机器基线、专家参考译文并重跑评估。
+
+正式浏览器 DevTools MCP 在当前会话不可用；已用本机 Chromium 做入口烟雾截图（非正式 DevTools 证据）：
+
+- `var/plan076-browser/workbench-320.png`
+- `var/plan076-browser/workbench-768.png`
+- `var/plan076-browser/workbench-1024.png`
+- `var/plan076-browser/workbench-1440.png`
+
+截图验证的是 SSO 入口和响应式布局，尚未验证登录后的 AD 选择器、上传、运行详情、术语闭环和下载闭环。
+
+## 测试用户与生产边界
+
+本次没有在公司身份服务中创建 `test01`/`test02` 账号：当前服务走 OIDC BFF，开发旁路在生产关闭，且没有获得身份服务管理员授权。现有 API 合约使用隔离的测试身份头进行 TestClient 验证，不代表生产登录验收。正式验收前应由管理员创建最小角色矩阵（translator/reviewer/termbase_admin），并在不记录密码或 token 的前提下完成登录、术语审核和下载权限测试。
+
+## 上线判定
+
+当前可称为“PLAN-076 代码实现和自动化门禁就绪”，不可称为“AD 专业翻译完整功能成功上线”。完成上线还需：真实双向语料评估通过、医学专家签署术语/译文验收、正式 DevTools 四尺寸证据、OIDC 角色矩阵验收，以及按既有发布脚本完成代码部署和回滚演练。
