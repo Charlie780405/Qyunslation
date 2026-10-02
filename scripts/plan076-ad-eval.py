@@ -321,6 +321,19 @@ def _is_internal_endpoint(endpoint: str) -> bool:
     return not address.is_global
 
 
+def _display_endpoint(endpoint: str) -> str:
+    parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+    if not parsed.hostname:
+        return "<invalid-endpoint>"
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return f"{parsed.scheme}://{netloc}{parsed.path or ''}"
+
+
 def _new_run_dir(mode: str) -> tuple[str, Path]:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_id = f"{stamp}-{mode}-{uuid4().hex[:10]}"
@@ -482,7 +495,7 @@ def run_model_cases(
         "run_id": run_id,
         "mode": mode,
         "model": model_id,
-        "endpoint": endpoint,
+        "endpoint": _display_endpoint(endpoint),
         "temperature": temperature,
         "timeout": timeout,
         "cases": len(rows_out),

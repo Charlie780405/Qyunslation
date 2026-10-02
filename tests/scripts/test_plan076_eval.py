@@ -201,6 +201,10 @@ def test_model_runner_blocks_external_endpoint_by_default():
     assert result == {"status": "BLOCKED", "mode": "baseline", "errors": ["endpoint_external"]}
 
 
+def test_display_endpoint_strips_embedded_credentials():
+    assert plan076_ad_eval._display_endpoint("https://user:password@example.com/v1") == "https://example.com/v1"
+
+
 def test_model_comparison_requires_ten_point_gain_without_new_blockers():
     baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 1}
     candidate_row = {"case": "case-1", "metrics": {"score": 0.91}, "qa_blockers": 0}
