@@ -18,6 +18,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("QYUNSLATION_PREFLIGHT_ROOT", str(tmp_path / "preflights"))
     monkeypatch.setenv("QYUNSLATION_RUNNER_ROOT", str(tmp_path / "runs"))
     monkeypatch.setenv("QYUNSLATION_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("QYUNSLATION_AD_PROMPT_TENANTS", "pilot")
     Base.metadata.create_all(init_engine("sqlite+pysqlite:///:memory:"))
     app = FastAPI()
     app.include_router(api_v1_router)
@@ -67,3 +68,26 @@ def test_ad_run_rejects_missing_domain_evidence(client):
     )
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "AD_DOMAIN_EVIDENCE_MISSING"
+
+
+def test_ad_pilot_respects_tenant_allowlist(client, monkeypatch):
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=_headers(),
+        files={"file": ("ad.txt", b"Patients with atopic dermatitis received dupilumab.", "text/plain")},
+    ).json()
+    monkeypatch.setenv("QYUNSLATION_ENV", "development")
+    monkeypatch.setenv("QYUNSLATION_AD_PROMPT_MODE", "pilot")
+    monkeypatch.setenv("QYUNSLATION_AD_PROMPT_TENANTS", "research")
+    response = client.post(
+        "/api/v1/translation-runs",
+        headers={**_headers(), "Idempotency-Key": "ad-contract-allowlist"},
+        json={
+            "preflight_id": preflight["id"],
+            "domain_profile": "ad",
+            "direction": "English → 简体中文",
+            "profile": "医学研究文献",
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "AD_PROFILE_UNSUPPORTED"

@@ -339,20 +339,33 @@ def _preflight_text_for_domain(record: PreflightRecord) -> str:
 
 
 def _validate_domain_profile(
-    *, preflight: PreflightRecord, domain_profile: str, direction: str, document_profile: str
+    *,
+    preflight: PreflightRecord,
+    domain_profile: str,
+    direction: str,
+    document_profile: str,
+    tenant_slug: str,
 ) -> dict[str, Any] | None:
     domain = (domain_profile or "general").strip().casefold()
     if domain == "general":
         return None
     if domain != "ad":
         raise HTTPException(status_code=422, detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "unsupported domain profile"})
-    from qyunslation.pipeline.ad_runtime import ad_rollout_mode
+    from qyunslation.pipeline.ad_runtime import ad_rollout_allowed, ad_rollout_mode
 
     rollout = ad_rollout_mode(
         env=os.environ.get("QYUNSLATION_ENV"),
-        configured=os.environ.get("QYUNSLATION_AD_ROLLOUT"),
+        configured=(
+            os.environ.get("QYUNSLATION_AD_PROMPT_MODE")
+            or os.environ.get("QYUNSLATION_AD_ROLLOUT")
+        ),
     )
-    if rollout == "off":
+    if not ad_rollout_allowed(
+        env=os.environ.get("QYUNSLATION_ENV"),
+        mode=rollout,
+        tenant=tenant_slug,
+        tenants=os.environ.get("QYUNSLATION_AD_PROMPT_TENANTS"),
+    ):
         raise HTTPException(
             status_code=404,
             detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "AD 专业模式尚未开放"},
@@ -1939,6 +1952,7 @@ async def create_translation_run(
         domain_profile=domain_profile,
         direction=direction,
         document_profile=body.profile,
+        tenant_slug=tenant.slug,
     )
     key = (idempotency_key or f"preflight:{preflight.id}").strip()
     if not key or len(key) > 256:
@@ -2259,6 +2273,7 @@ def patch_preflight(
             domain_profile=body.domain_profile,
             direction=direction,
             document_profile=body.profile or recommended.get("profile") or "临床研究文档",
+            tenant_slug=tenant.slug,
         )
         recommended["domain_profile"] = body.domain_profile.strip().casefold()
     if term_profile_id:

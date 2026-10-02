@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from qyunslation.pipeline.ad_runtime import compile_runtime_settings, ad_rollout_mode
+from qyunslation.pipeline.ad_runtime import (
+    ad_rollout_allowed,
+    ad_rollout_mode,
+    ad_rollout_tenants,
+    compile_runtime_settings,
+)
 
 
 def test_runtime_settings_compile_ad_prompt_snapshot_and_direction():
@@ -28,3 +33,15 @@ def test_ad_rollout_defaults_to_pilot_only_outside_production():
     assert ad_rollout_mode(env="development", configured=None) == "pilot"
     assert ad_rollout_mode(env="production", configured=None) == "off"
     assert ad_rollout_mode(env="production", configured="default") == "default"
+
+
+def test_ad_rollout_pilot_is_tenant_scoped_in_production():
+    assert ad_rollout_tenants("pilot;research") == frozenset({"pilot", "research"})
+    assert ad_rollout_allowed(
+        env="production", mode="pilot", tenant="pilot", tenants="pilot,research"
+    )
+    assert not ad_rollout_allowed(
+        env="production", mode="pilot", tenant="other", tenants="pilot,research"
+    )
+    assert not ad_rollout_allowed(env="development", mode="pilot", tenant="pilot", tenants=None)
+    assert not ad_rollout_allowed(env="production", mode="pilot", tenant="pilot", tenants=None)

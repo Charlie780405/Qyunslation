@@ -14,6 +14,26 @@ def ad_rollout_mode(*, env: str | None, configured: str | None) -> str:
     return "off" if (env or "development").strip().casefold() == "production" else "pilot"
 
 
+def ad_rollout_tenants(raw: str | None) -> frozenset[str]:
+    return frozenset(
+        item.strip().casefold()
+        for item in (raw or "").replace(";", ",").split(",")
+        if item.strip()
+    )
+
+
+def ad_rollout_allowed(*, env: str | None, mode: str, tenant: str, tenants: str | None) -> bool:
+    normalized_tenant = (tenant or "").strip().casefold()
+    if mode == "off" or not normalized_tenant:
+        return False
+    if mode != "pilot":
+        return True
+    allowlist = ad_rollout_tenants(tenants)
+    # Pilot is always tenant-scoped; an empty allowlist is fail-closed in every
+    # environment, including development.
+    return normalized_tenant in allowlist
+
+
 def _direction_code(direction: str, target_language: str | None = None) -> str:
     value = (direction or "").strip()
     if value in {"English → 简体中文", "en-zh"}:
