@@ -34,6 +34,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `537aef9` | 评测报告剥离端点内嵌凭据 |
 | `51af1e5` | 增加 pilot soak 与专家双盲聚合门禁；缺证据保持 BLOCKED |
 | `a61fbed` | 工作台明确显示 AD「内部测试版」状态 |
+| `4d57870` | 重新构建并发布包含内部测试版文案的静态包 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -50,6 +51,7 @@ bash scripts/verify-plan-076.sh
 - PLAN-076 pipeline/API/rollout/持久层/语料契约总门禁：**42 passed**；
 - 角色/持久层专项回归：**12 passed**（含 membership 晋升与不降权）；
 - 前端测试、type-check、production build：**PASS**；
+- 部署后的 `/next/workbench` 引用 `index-BuOvl4v-.js`，服务端静态内容可检出 `AD 内部测试版`；
 - `GET http://127.0.0.1:8010/api/v1/health`：**HTTP 200，db=ok**；
 - 本机 qyunslation 与 pdf2zh 进程分别监听 `127.0.0.1:8010` / `127.0.0.1:7860`；本环境未暴露对应 systemd unit，故不把 `systemctl` 状态作为运行证据；
 - Chromium：`/home/dev/.local/bin/chromium` 可执行；
