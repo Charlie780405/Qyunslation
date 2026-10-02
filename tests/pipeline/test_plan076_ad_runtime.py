@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from qyunslation.pipeline.ad_runtime import compile_runtime_settings
+from qyunslation.pipeline.ad_runtime import compile_runtime_settings, ad_rollout_mode
 
 
 def test_runtime_settings_compile_ad_prompt_snapshot_and_direction():
@@ -22,3 +22,9 @@ def test_runtime_settings_compile_ad_prompt_snapshot_and_direction():
 def test_runtime_settings_fail_closed_for_invalid_ad_profile():
     with pytest.raises(ValueError, match="unsupported AD document profile"):
         compile_runtime_settings({"domain_profile": "ad", "direction": "English → 简体中文", "profile": "监管申报材料"})
+
+
+def test_ad_rollout_defaults_to_pilot_only_outside_production():
+    assert ad_rollout_mode(env="development", configured=None) == "pilot"
+    assert ad_rollout_mode(env="production", configured=None) == "off"
+    assert ad_rollout_mode(env="production", configured="default") == "default"

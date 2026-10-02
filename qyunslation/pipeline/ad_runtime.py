@@ -7,6 +7,13 @@ from typing import Any
 from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt
 
 
+def ad_rollout_mode(*, env: str | None, configured: str | None) -> str:
+    value = (configured or "").strip().casefold()
+    if value in {"off", "shadow", "pilot", "default"}:
+        return value
+    return "off" if (env or "development").strip().casefold() == "production" else "pilot"
+
+
 def _direction_code(direction: str, target_language: str | None = None) -> str:
     value = (direction or "").strip()
     if value in {"English → 简体中文", "en-zh"}:

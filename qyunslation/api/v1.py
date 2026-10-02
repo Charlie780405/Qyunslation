@@ -346,6 +346,17 @@ def _validate_domain_profile(
         return None
     if domain != "ad":
         raise HTTPException(status_code=422, detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "unsupported domain profile"})
+    from qyunslation.pipeline.ad_runtime import ad_rollout_mode
+
+    rollout = ad_rollout_mode(
+        env=os.environ.get("QYUNSLATION_ENV"),
+        configured=os.environ.get("QYUNSLATION_AD_ROLLOUT"),
+    )
+    if rollout == "off":
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "AD_PROFILE_UNSUPPORTED", "message": "AD 专业模式尚未开放"},
+        )
     if direction not in {"English → 简体中文", "简体中文 → English"} or document_profile not in {"医学研究文献", "临床研究文档"}:
         raise HTTPException(
             status_code=422,
