@@ -58,7 +58,7 @@ bash scripts/deploy-translate-stack.sh
 
 结果：
 
-- 部署提交：`aa5e06e`；
+- 部署提交：`09db35f`；
 - Alembic migration：**aligned**；
 - 前端静态包：**fresh**；
 - sidecar 指纹：本地/运行中均为 `7542777de0fd`；
