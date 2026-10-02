@@ -55,5 +55,6 @@
 | **PLAN-073** | [PLAN-073-quality-gate-domain-terms](./PLAN-073-quality-gate-domain-terms/) | **质量门禁真实化、模型分级与自免术语闭环（073a–073e）** |
 | **PLAN-074** | [PLAN-074-author-terms-qa](./PLAN-074-author-terms-qa/) | **作者保护、单位审校、术语 QA 闭环与乱码门禁（074a–074d）** |
 | **PLAN-075** | [PLAN-075-073-074-closeout](./PLAN-075-073-074-closeout/) | **073/074 收口、部署门禁、真件回归与评测真实化（075a–075e）** |
+| **PLAN-076** | [PLAN-076-ad-bilingual-prompt-quality-system](./PLAN-076-ad-bilingual-prompt-quality-system/) | **AD 中英双向专业提示词、术语与质量门禁（076a–076h）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
