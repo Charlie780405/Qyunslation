@@ -99,6 +99,7 @@ bash scripts/deploy-translate-stack.sh
 ## 测试用户与生产边界
 
 已在受保护 Authentik API 中创建两个 pilot 租户测试账号，并加入非 superuser 的 `qyunslation-vue-beta` 组。账号密码未写入 Git、日志或证据文件；test02 的 term_admin 通过既有主机侧授权脚本授予并记录审计。生产仍保持 OIDC BFF，开发旁路关闭；AD 生产模式仍需在真实语料和专家门禁通过后才可配置为 pilot。
+验收结束后已撤销本次产生的 6 个 BFF session，账号保留但当前无活动登录会话。
 
 ## 上线判定
 
