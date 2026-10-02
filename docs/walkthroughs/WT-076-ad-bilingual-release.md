@@ -23,6 +23,7 @@ PLAN-076 只覆盖简体中文 ↔ English 的特应性皮炎（AD）专业翻�
 | `84d3b1d` | AD rollout 环境门禁，生产默认关闭 |
 | `43baf51` | 双向评估脚本、测试语料契约、总门禁和静态包 |
 | `afbd1d0` | 修正 `--direction` 筛选、补充 API 合约回归和评估器测试 |
+| `523f1fa` | 将评估器回归纳入总门禁 |
 
 不包含用户本机的 `.cursor/mcp.json`、`slide-deck/`、`var/` 或既有计划文档改动。
 
@@ -42,6 +43,26 @@ bash scripts/verify-plan-076.sh
 - `qyunslation-office.service`、`pdf2zh.service`：**active**；
 - Chromium：`/home/dev/.local/bin/chromium` 可执行；
 - 总门禁：**BLOCKED**，不是代码失败。
+
+## 受控部署
+
+已执行既有发布入口：
+
+```bash
+bash scripts/deploy-translate-stack.sh
+```
+
+结果：
+
+- 部署提交：`523f1fa`；
+- Alembic migration：**aligned**；
+- 前端静态包：**fresh**；
+- sidecar 指纹：本地/运行中均为 `7542777de0fd`；
+- API 路由探测：`affiliation-segments` / `apply-corrections` → **401**（已注册且鉴权生效）；
+- 两个服务重启后：**active**；
+- `/api/v1/health`：**HTTP 200，db=ok**。
+
+这证明最新提交已经加载到运行进程，但不等于 AD 领域质量门禁已经通过。
 
 ## 阻塞项
 
