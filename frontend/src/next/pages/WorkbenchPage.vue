@@ -26,7 +26,7 @@
           </div>
           <div class="qy-ad-mode" aria-label="专业领域模式">
             <label class="qy-field"><span>专业领域</span><select v-model="workbenchState.domainProfile"><option value="general">通用医药翻译</option><option value="ad">AD 特应性皮炎</option></select></label>
-            <span class="qy-inline-hint">AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
+            <span class="qy-inline-hint"><span v-if="workbenchState.domainProfile === 'ad'" class="qy-status-badge is-pending" role="status">AD 内部测试版</span>AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
           </div>
           <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
           <label class="qy-dropzone" :class="{ 'is-selected': selectedFile }" for="workbench-file">
