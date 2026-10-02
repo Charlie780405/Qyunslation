@@ -32,7 +32,9 @@ if [[ -x "$PY" ]]; then
     tests/pipeline/test_plan076_ad_termbase.py \
     tests/pipeline/test_plan076_ad_runtime.py \
     tests/pipeline/test_plan076_factory_prompt.py \
-    tests/pipeline/test_plan076_semantic_qa.py); then
+    tests/pipeline/test_plan076_semantic_qa.py \
+    tests/api/test_plan076_ad_contract.py \
+    tests/api/test_plan071b_launch_formats.py); then
     pass "PLAN-076 pipeline tests"
   else
     fail "PLAN-076 pipeline tests"

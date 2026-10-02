@@ -45,11 +45,14 @@ def _read_pairs() -> list[dict]:
     return rows
 
 
-def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1") -> dict:
+def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: str = "both") -> dict:
     rows = _read_pairs()
+    if direction != "both":
+        rows = [row for row in rows if row["direction"] == direction]
+    directions = ("en-zh", "zh-en") if direction == "both" else (direction,)
     by_direction = {
-        direction: [row for row in rows if row["direction"] == direction]
-        for direction in ("en-zh", "zh-en")
+        item_direction: [row for row in rows if row["direction"] == item_direction]
+        for item_direction in directions
     }
     scored: list[dict] = []
     for row in rows:
@@ -82,6 +85,7 @@ def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1") -> dict:
         "schema": "plan076-ad-eval/v1",
         "baseline": baseline,
         "candidate": candidate,
+        "direction": direction,
         "thresholds": thresholds,
         "cases": {direction: len(items) for direction, items in by_direction.items()},
         "source_chars": {direction: sum(len(item["source"]) for item in items) for direction, items in by_direction.items()},
@@ -107,7 +111,7 @@ def main() -> int:
     parser.add_argument("--baseline", default="generic")
     parser.add_argument("--candidate", default="ad-v1")
     args = parser.parse_args()
-    summary = evaluate(baseline=args.baseline, candidate=args.candidate)
+    summary = evaluate(baseline=args.baseline, candidate=args.candidate, direction=args.direction)
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     LEDGER.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
