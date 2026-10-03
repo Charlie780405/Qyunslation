@@ -61,6 +61,16 @@ def test_translation_run_is_durable_and_idempotent_when_runner_is_unavailable(cl
     assert client.get(
         "/api/v1/translation-runs", headers={"X-Dev-User": "other", "X-Dev-Tenant": "pilot"}
     ).json()["items"] == []
+    # A different Idempotency-Key for an already-consumed preflight is a 409,
+    # not a unique-constraint 500 (found during the PLAN-076 pilot soak).
+    conflict = client.post(
+        "/api/v1/translation-runs",
+        headers={**headers(), "Idempotency-Key": "run-twice"},
+        json=body,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "PREFLIGHT_ALREADY_RUN"
+    assert conflict.json()["detail"]["run_id"] == first.json()["id"]
 
 
 def test_retry_allocates_new_generation_without_overwriting_original(client):

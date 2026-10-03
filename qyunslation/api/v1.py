@@ -1986,6 +1986,23 @@ async def create_translation_run(
                 detail={"code": "IDEMPOTENCY_PROFILE_MISMATCH", "message": "Idempotency-Key 已用于不同 domain_profile"},
             )
         return _translation_run_dict(session, existing)
+    # (preflight_id, generation) is unique; a second run for the same preflight
+    # must surface as a conflict rather than an IntegrityError 500.
+    occupied = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.preflight_id == preflight.id,
+            TranslationRunRecord.generation == 1,
+        )
+    )
+    if occupied is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PREFLIGHT_ALREADY_RUN",
+                "message": "该预检已创建翻译任务，请重新预检后再翻译",
+                "run_id": occupied.id,
+            },
+        )
     from qyunslation.pipeline.model_profiles import validate_selection
 
     classification = (
