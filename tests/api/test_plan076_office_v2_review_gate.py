@@ -165,3 +165,57 @@ def test_office_v2_reject_is_terminal_and_retry_allocates_new_generation(client,
     assert retried.status_code == 201, retried.text
     assert retried.json()["generation"] == 2
     assert retried.json()["id"] != run_id
+
+
+def test_ad_retry_carries_frozen_prompt_into_next_generation(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("QYUNSLATION_AD_PROMPT_TENANTS", "pilot")
+    output = tmp_path / "ad_translated.txt"
+    output.write_text("特应性皮炎患者接受度普利尤单抗治疗。", encoding="utf-8")
+    from qyunslation import server as server_module
+
+    class FakeService:
+        main_event_loop = object()
+
+        async def start_translation(self, **kwargs):
+            return {"task_id": "office-task-ad"}
+
+        def get_task_state(self, task_id):
+            return {
+                "download_ready": True,
+                "is_processing": False,
+                "error_flag": False,
+                "original_filename": "ad.txt",
+                "downloadable_files": {"txt": {"path": str(output), "filename": output.name}},
+                "attachment_files": {},
+            }
+
+        def cancel_task(self, task_id):
+            return {"cancelled": True}
+
+    monkeypatch.setattr(server_module, "get_translation_service", lambda: FakeService())
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=_headers(),
+        files={"file": ("ad.txt", b"Patients with atopic dermatitis received dupilumab.", "text/plain")},
+    ).json()
+    created = client.post(
+        "/api/v1/translation-runs",
+        headers={**_headers(), "Idempotency-Key": "ad-retry"},
+        json={"preflight_id": preflight["id"], "domain_profile": "ad", "direction": "English → 简体中文", "profile": "医学研究文献"},
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    digest = created.json()["prompt_snapshot"]["digest"]
+    assert client.get(f"/api/v1/translation-runs/{run_id}", headers=_headers()).json()["status"] != "blocked"
+
+    client.post(
+        f"/api/v1/translation-runs/{run_id}/review-decision",
+        headers={**_headers(), "X-Dev-Role": "reviewer"},
+        json={"decision": "reject", "comment": "retranslate"},
+    )
+    retried = client.post(f"/api/v1/translation-runs/{run_id}/retry", headers=_headers())
+    assert retried.status_code == 201, retried.text
+    body = retried.json()
+    assert body["generation"] == 2
+    assert body["status"] != "blocked", body.get("degradation_reason")
+    assert body["prompt_snapshot"]["digest"] == digest
