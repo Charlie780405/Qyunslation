@@ -176,6 +176,16 @@ def _resolve_web_session(request: Request) -> IdentityContext | None:
     from qyunslation.persist.models import WebSession
 
     if persist_db.SessionLocal is None:
+        # The engine is initialised lazily by the first `get_db` dependency, but
+        # `require_identity` resolves before `get_db`; after a service restart the
+        # first authenticated request would otherwise fail with 503.
+        url = persist_db.get_database_url()
+        if url:
+            try:
+                persist_db.init_engine(url)
+            except Exception:
+                persist_db.reset_engine()
+    if persist_db.SessionLocal is None:
         raise HTTPException(status_code=503, detail="web session store unavailable")
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)

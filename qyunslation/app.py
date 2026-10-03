@@ -117,10 +117,11 @@ async def lifespan(app: FastAPI):
         global_logger.warning("PDF translation runner reconcile failed: %s", exc)
 
     try:
-        from qyunslation.api.v1 import reconcile_stale_runs
+        from qyunslation.api.v1 import ensure_engine_ready, reconcile_stale_runs
         from qyunslation.persist.db import get_engine
         from sqlalchemy.orm import Session
 
+        ensure_engine_ready()
         with Session(get_engine()) as session:
             stale = reconcile_stale_runs(session)
             session.commit()

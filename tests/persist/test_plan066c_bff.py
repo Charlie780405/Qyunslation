@@ -174,3 +174,44 @@ def test_id_token_uses_discovery_issuer_with_trailing_slash(monkeypatch):
 
     assert seen["issuer"] == "https://issuer.example/application/o/qyunslation/"
     assert seen["jwks_url"] == "http://127.0.0.1:9000/jwks"
+
+
+def test_cookie_session_survives_process_restart_before_any_db_dependency(tmp_path, monkeypatch):
+    """Regression (PLAN-076 pilot): after a service restart the engine is only
+    initialised lazily by `get_db`, but `require_identity` runs first, so the
+    first authenticated request used to fail with 503 "web session store
+    unavailable"."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+
+    url = f"sqlite+pysqlite:///{tmp_path / 'restart.db'}"
+    reset_engine()
+    monkeypatch.setenv("QYUNSLATION_DATABASE_URL", url)
+    monkeypatch.setenv("QYUNSLATION_ENV", "development")
+    engine = init_engine(url)
+    Base.metadata.create_all(engine)
+    from qyunslation.persist import db
+
+    raw = "opaque-browser-cookie"
+    with db.SessionLocal() as session:
+        session.add(
+            WebSession(
+                session_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                tenant_slug="acme",
+                user_sub="user-1",
+                display_name="Alice",
+                roles=["reviewer"],
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+        session.commit()
+    reset_engine()  # simulates the restarted process: env is set, engine not yet built
+
+    app = FastAPI()
+    app.include_router(api_v1_router)
+    with TestClient(app) as client:
+        client.cookies.set("qyunslation_session", raw)
+        me = client.get("/api/v1/me")
+    reset_engine()
+    assert me.status_code == 200, me.text
+    assert me.json()["display_name"] == "Alice"
