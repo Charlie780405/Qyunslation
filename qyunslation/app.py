@@ -129,6 +129,13 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         global_logger.warning("Translation run heartbeat reconcile failed: %s", exc)
 
+    try:
+        from qyunslation.pipeline.ad_observability import record_rollout_mode_if_changed
+
+        record_rollout_mode_if_changed()
+    except Exception as exc:
+        global_logger.warning("AD rollout mode audit failed: %s", exc)
+
     configure_runtime_logging()
     # PLAN-023: 确保 image_translate 等模块 logger 能进 journalctl
     if not logging.root.handlers:

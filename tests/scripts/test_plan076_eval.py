@@ -333,15 +333,26 @@ def test_hard_gates_block_empty_denominator():
     assert "term_denominator_empty" in result["errors"]
 
 
-def test_model_comparison_requires_ten_point_gain_without_new_blockers():
-    baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 1}
-    candidate_row = {"case": "case-1", "metrics": {"score": 0.91}, "qa_blockers": 0}
+def _perf_row(case: str, score: float, blockers: int, latency: float = 1000.0, tokens: int = 1000) -> dict:
+    return {
+        "case": case,
+        "metrics": {"score": score},
+        "qa_blockers": blockers,
+        "latency_ms": latency,
+        "usage": {"total_tokens": tokens},
+    }
+
+
+def test_model_comparison_requires_ten_point_gain_when_baseline_has_headroom():
+    baseline_row = _perf_row("case-1", 0.80, 1)
+    candidate_row = _perf_row("case-1", 0.91, 0)
     result = plan076_ad_eval.compare_model_runs([
         {"mode": "baseline", "status": "PASS", "rows": [baseline_row]},
         {"mode": "candidate", "status": "PASS", "rows": [candidate_row]},
     ])
     assert result["status"] == "PASS"
     assert result["score_delta"] == 0.11
+    assert result["required_score_delta"] == 0.10
 
     candidate_row["metrics"]["score"] = 0.89
     result = plan076_ad_eval.compare_model_runs([
@@ -349,6 +360,29 @@ def test_model_comparison_requires_ten_point_gain_without_new_blockers():
         {"mode": "candidate", "status": "PASS", "rows": [candidate_row]},
     ])
     assert result["status"] == "FAIL"
+
+
+def test_model_comparison_saturated_baseline_requires_no_regression_and_budget():
+    baseline_row = _perf_row("case-1", 0.98, 1, latency=1000.0, tokens=1000)
+    candidate_row = _perf_row("case-1", 0.99, 0, latency=1200.0, tokens=1100)
+    runs = lambda: [  # noqa: E731
+        {"mode": "baseline", "status": "FAIL", "cases": 1, "errors": [], "rows": [baseline_row]},
+        {"mode": "candidate", "status": "PASS", "cases": 1, "errors": [], "rows": [candidate_row]},
+    ]
+    result = plan076_ad_eval.compare_model_runs(runs())
+    assert result["status"] == "PASS"
+    assert result["baseline_saturated"] is True
+    assert result["required_score_delta"] == 0.0
+    assert result["performance"]["status"] == "PASS"
+
+    candidate_row["latency_ms"] = 1300.0
+    result = plan076_ad_eval.compare_model_runs(runs())
+    assert result["status"] == "FAIL"
+    assert result["performance"]["status"] == "FAIL"
+
+    candidate_row["latency_ms"] = 1200.0
+    candidate_row["metrics"]["score"] = 0.97
+    assert plan076_ad_eval.compare_model_runs(runs())["status"] == "FAIL"
 
 
 def test_candidate_prompt_injects_term_policy_but_baseline_does_not():
@@ -363,8 +397,8 @@ def test_candidate_prompt_injects_term_policy_but_baseline_does_not():
 
 
 def test_model_comparison_accepts_qa_failing_baseline_but_not_incomplete_runs():
-    baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 2}
-    candidate_row = {"case": "case-1", "metrics": {"score": 0.95}, "qa_blockers": 0}
+    baseline_row = _perf_row("case-1", 0.80, 2)
+    candidate_row = _perf_row("case-1", 0.95, 0)
     result = plan076_ad_eval.compare_model_runs([
         {"mode": "baseline", "status": "FAIL", "cases": 1, "errors": [], "rows": [baseline_row]},
         {"mode": "candidate", "status": "PASS", "cases": 1, "errors": [], "rows": [candidate_row]},
@@ -386,3 +420,30 @@ def test_machine_score_renormalises_when_no_facts_are_annotated():
     metrics = plan076_ad_eval._machine_metrics(row, "度普利尤单抗改善了湿疹。", [])
     assert metrics["fact_recall"] == -1.0
     assert metrics["score"] == 1.0
+
+
+def test_expert_pack_is_randomized_and_keeps_key_with_adjudicator(tmp_path):
+    runs = tmp_path / "runs"
+    for mode in ("baseline", "candidate"):
+        run_dir = runs / f"r-{mode}"
+        (run_dir / "machine").mkdir(parents=True)
+        rows = []
+        for case in ("c1", "c2", "c3", "c4"):
+            (run_dir / "machine" / f"{case}.txt").write_text(f"{mode} output {case}", encoding="utf-8")
+            rows.append({"case": case, "output_ref": f"machine/{case}.txt"})
+        (run_dir / "report.json").write_text(json.dumps({"mode": mode, "model": "m", "rows": rows}), encoding="utf-8")
+    rows = [{"case": c, "direction": "en-zh", "document_profile": "医学研究文献", "source": f"src {c}"} for c in ("c1", "c2", "c3", "c4")]
+    out = tmp_path / "pack"
+    result = plan076_ad_eval.export_expert_pack(
+        rows, baseline_run=runs / "r-baseline", candidate_run=runs / "r-candidate", output_dir=out, seed="fixed"
+    )
+    assert result["status"] == "PASS" and result["cases"] == 4
+    key = json.loads((out / "adjudicator" / "key.json").read_text(encoding="utf-8"))["arms"]
+    for case in ("c1", "c2", "c3", "c4"):
+        a_text = (out / "cases" / case / "A.txt").read_text(encoding="utf-8")
+        assert a_text.startswith(key[case]["A"])
+    reviewer_files = list(out.glob("review-*.json"))
+    assert len(reviewer_files) == 2
+    for path in [*reviewer_files, out / "rubric.md", out / "manifest.json"]:
+        text = path.read_text(encoding="utf-8")
+        assert "r-baseline" not in text and "r-candidate" not in text and "\"model\"" not in text

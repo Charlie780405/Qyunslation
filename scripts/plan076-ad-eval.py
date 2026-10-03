@@ -540,7 +540,19 @@ def compare_model_runs(model_runs: list[dict]) -> dict:
     baseline_blockers = sum(int(baseline_rows[key].get("qa_blockers") or 0) for key in case_ids)
     candidate_blockers = sum(int(candidate_rows[key].get("qa_blockers") or 0) for key in case_ids)
     delta = round(candidate_score - baseline_score, 4)
-    status = "PASS" if delta >= 0.10 and candidate_blockers <= baseline_blockers else "FAIL"
+    # PLAN-076 README「全局发布门槛」：基线综合分低于饱和线时要求 +10pp；
+    # 基线已接近满分时，+10pp 不可达，改为不劣于基线、阻断不增加且候选本身 PASS。
+    headroom_required = baseline_score < SATURATION_SCORE
+    required_delta = 0.10 if headroom_required else 0.0
+    performance = _performance_budget(baseline_rows, candidate_rows, case_ids)
+    status = (
+        "PASS"
+        if delta >= required_delta
+        and candidate_blockers <= baseline_blockers
+        and candidate.get("status") == "PASS"
+        and performance["status"] == "PASS"
+        else "FAIL"
+    )
     return {
         "status": status,
         "cases": len(case_ids),
@@ -549,8 +561,172 @@ def compare_model_runs(model_runs: list[dict]) -> dict:
         "score_delta": delta,
         "baseline_qa_blockers": baseline_blockers,
         "candidate_qa_blockers": candidate_blockers,
-        "required_score_delta": 0.10,
+        "required_score_delta": required_delta,
+        "saturation_score": SATURATION_SCORE,
+        "baseline_saturated": not headroom_required,
+        "performance": performance,
     }
+
+
+SATURATION_SCORE = 0.90
+PERFORMANCE_BUDGET_RATIO = 1.25
+
+
+def _performance_budget(baseline_rows: dict, candidate_rows: dict, case_ids: list[str]) -> dict:
+    """P95 latency and total-token growth of candidate over baseline (README: ≤25%)."""
+
+    def collect(rows: dict) -> tuple[list[float], float]:
+        latency: list[float] = []
+        tokens = 0.0
+        for key in case_ids:
+            row = rows[key]
+            try:
+                latency.append(float(row.get("latency_ms")))
+            except (TypeError, ValueError):
+                continue
+            usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
+            tokens += float(usage.get("total_tokens") or (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0))
+        return latency, tokens
+
+    baseline_latency, baseline_tokens = collect(baseline_rows)
+    candidate_latency, candidate_tokens = collect(candidate_rows)
+    if len(baseline_latency) != len(case_ids) or len(candidate_latency) != len(case_ids) or baseline_tokens <= 0:
+        return {"status": "BLOCKED", "errors": ["performance_data_missing"]}
+    baseline_p95, candidate_p95 = _p95(baseline_latency), _p95(candidate_latency)
+    latency_ratio = round(candidate_p95 / baseline_p95, 4) if baseline_p95 > 0 else float("inf")
+    token_ratio = round(candidate_tokens / baseline_tokens, 4)
+    passed = latency_ratio <= PERFORMANCE_BUDGET_RATIO and token_ratio <= PERFORMANCE_BUDGET_RATIO
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "baseline_p95_latency_ms": round(baseline_p95, 1),
+        "candidate_p95_latency_ms": round(candidate_p95, 1),
+        "latency_ratio": latency_ratio,
+        "baseline_tokens": int(baseline_tokens),
+        "candidate_tokens": int(candidate_tokens),
+        "token_ratio": token_ratio,
+        "max_ratio": PERFORMANCE_BUDGET_RATIO,
+    }
+
+
+EXPERT_RUBRIC = """# PLAN-076 AD 双盲评审 rubric
+
+每个 case 目录含 `source.txt` 与两份译文 `A.txt` / `B.txt`。A/B 与系统的对应关系按 case 随机，
+只有仲裁人持有 `adjudicator/key.json`；评审人不得查看。
+
+两名评审角色独立填写各自的 `review-<role>.json`：
+
+- `ad_medical`：特应性皮炎医学专家，侧重事实、药物/靶点/剂量/终点、否定与情态。
+- `medical_translation`：中英医学写作/翻译专家，侧重术语一致性、完整性、语言质量与结构。
+
+每个 case 填：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `blind_choice` | `A` / `B` / `tie` | 整体更可接受的译文 |
+| `severity` | `none` / `minor` / `major` / `critical` | 本 case 中最严重的错误（针对 B 与 A 中较差者即可，仲裁人会按 key 归位） |
+| `categories` | `fact` / `terminology` / `completeness` / `language_quality` / `structure` | 触发该严重度的类别，可多选 |
+| `notes` | 自由文本 | 可选，用于仲裁 |
+
+严重度定义：
+
+- `critical`：会改变临床含义或造成用药/安全风险（药名、剂量、否定、情态、终点、数值错误）。
+- `major`：明显错译/漏译，专业读者会被误导但不致安全风险。
+- `minor`：措辞、风格、轻微术语不一致。
+- `none`：无需修改。
+
+仲裁人收齐两份后：用 `key.json` 把 A/B 还原为 baseline/candidate，分歧先各自复核再裁决，
+产出 `expert-review.json`（结构见 `tests/gold/ad/expert-review.schema.json`），再运行
+`plan076-ad-eval.py --expert-review`。阈值：Critical = 0，Major ≤ 1/1,000 源文单位，κ ≥ 0.70，
+候选盲选偏好 ≥ 70%。
+"""
+
+
+def export_expert_pack(
+    rows: list[dict],
+    *,
+    baseline_run: Path,
+    candidate_run: Path,
+    output_dir: Path,
+    seed: str | None = None,
+) -> dict:
+    """Write a de-identified, randomized A/B blind-review pack from two model runs.
+
+    Only the adjudicator key reveals which arm is baseline/candidate; no model
+    name, endpoint or prompt text is copied into the reviewer-facing files.
+    """
+    import random
+
+    reports = {}
+    for label, run_dir in (("baseline", baseline_run), ("candidate", candidate_run)):
+        report_path = run_dir / "report.json"
+        if not report_path.is_file():
+            return {"status": "BLOCKED", "errors": [f"{label}_report_missing"]}
+        reports[label] = json.loads(report_path.read_text(encoding="utf-8"))
+        if reports[label].get("mode") != label:
+            return {"status": "BLOCKED", "errors": [f"{label}_mode_mismatch"]}
+    outputs = {
+        label: {str(row.get("case")): row.get("output_ref") for row in reports[label].get("rows", [])}
+        for label in reports
+    }
+    rng = random.Random(seed or uuid4().hex)
+    key: dict[str, dict[str, str]] = {}
+    manifest_cases: list[dict] = []
+    cases_dir = output_dir / "cases"
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        case_id = str(row["case"])
+        texts = {}
+        for label in ("baseline", "candidate"):
+            ref = outputs[label].get(case_id)
+            path = (Path(label == "baseline" and str(baseline_run) or str(candidate_run)) / str(ref)) if ref else None
+            if not path or not path.is_file():
+                return {"status": "BLOCKED", "errors": [f"{label}_output_missing:{case_id}"]}
+            texts[label] = path.read_text(encoding="utf-8")
+        a_is_candidate = rng.random() < 0.5
+        mapping = {"A": "candidate" if a_is_candidate else "baseline", "B": "baseline" if a_is_candidate else "candidate"}
+        key[case_id] = mapping
+        case_dir = cases_dir / case_id
+        case_dir.mkdir(exist_ok=True)
+        (case_dir / "source.txt").write_text(row["source"], encoding="utf-8")
+        for arm, label in mapping.items():
+            (case_dir / f"{arm}.txt").write_text(texts[label], encoding="utf-8")
+        manifest_cases.append(
+            {"case_id": case_id, "direction": row["direction"], "document_profile": row.get("document_profile") or ""}
+        )
+    template = {
+        "schema": "plan076-ad-expert-review-arm/v1",
+        "reviewer_role": None,
+        "cases": [
+            {"case_id": item["case_id"], "blind_choice": "", "severity": "", "categories": [], "notes": ""}
+            for item in manifest_cases
+        ],
+    }
+    for role in ("ad_medical", "medical_translation"):
+        (output_dir / f"review-{role}.json").write_text(
+            json.dumps({**template, "reviewer_role": role}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    (output_dir / "rubric.md").write_text(EXPERT_RUBRIC, encoding="utf-8")
+    (output_dir / "manifest.json").write_text(
+        json.dumps({"schema": "plan076-ad-expert-pack/v1", "cases": manifest_cases}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    adjudicator = output_dir / "adjudicator"
+    adjudicator.mkdir(exist_ok=True)
+    (adjudicator / "key.json").write_text(
+        json.dumps(
+            {
+                "schema": "plan076-ad-expert-key/v1",
+                "baseline_run": baseline_run.name,
+                "candidate_run": candidate_run.name,
+                "arms": key,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {"status": "PASS", "cases": len(manifest_cases), "output_dir": str(output_dir)}
 
 
 def _source_units(text: str) -> int:
@@ -999,8 +1175,29 @@ def main() -> int:
     parser.add_argument("--allow-external-endpoint", action="store_true")
     parser.add_argument("--expert-review", help="read a blinded expert review JSON and write an aggregate-only gate report")
     parser.add_argument("--pilot-report", help="read a pilot soak JSON and write an aggregate-only gate report")
+    parser.add_argument("--export-expert-pack", help="write a randomized, de-identified A/B blind-review pack to this directory")
+    parser.add_argument("--baseline-run", help="baseline run id under var/plan076-ad-eval/runs (for --export-expert-pack)")
+    parser.add_argument("--candidate-run", help="candidate run id under var/plan076-ad-eval/runs (for --export-expert-pack)")
     args = parser.parse_args()
     corpus_check = check_corpus(direction=args.direction)
+    if args.export_expert_pack:
+        if not corpus_check["valid"]:
+            print("BLOCKED: corpus contract incomplete")
+            return 2
+        if not (args.baseline_run and args.candidate_run):
+            print("BLOCKED: --baseline-run and --candidate-run are required")
+            return 2
+        rows = _read_pairs()
+        if args.direction != "both":
+            rows = [row for row in rows if row["direction"] == args.direction]
+        result = export_expert_pack(
+            rows,
+            baseline_run=RUNS_ROOT / args.baseline_run,
+            candidate_run=RUNS_ROOT / args.candidate_run,
+            output_dir=Path(args.export_expert_pack),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["status"] == "PASS" else 2
     if args.check_corpus:
         corpus_check["direction"] = args.direction
         LEDGER.parent.mkdir(parents=True, exist_ok=True)
@@ -1111,8 +1308,15 @@ def main() -> int:
         summary["mode"] = "model-run"
         if any(item.get("status") == "BLOCKED" for item in model_runs):
             summary["deficits"].append("model_run")
-        if any(item.get("status") == "FAIL" for item in model_runs):
+        # The generic baseline is the comparator, not the release artefact: its
+        # QA failures are evidence for the comparison, not a release failure.
+        if any(item.get("status") == "FAIL" and item.get("mode") != "baseline" for item in model_runs):
             summary.setdefault("failures", []).append("model_run")
+        if run_model != "both" and any(item.get("status") == "FAIL" for item in model_runs):
+            summary.setdefault("failures", []).append("model_run")
+        summary["baseline_qa_fail"] = any(
+            item.get("status") == "FAIL" and item.get("mode") == "baseline" for item in model_runs
+        )
         if run_model == "both":
             comparison = compare_model_runs(model_runs)
             summary["comparison"] = comparison

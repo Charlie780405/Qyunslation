@@ -2098,6 +2098,24 @@ async def create_translation_run(
                 status_code=503,
                 detail={"code": "AD_PROMPT_UNAVAILABLE", "message": f"failed to freeze prompt: {exc}"},
             ) from exc
+    if domain_profile == "ad":
+        from qyunslation.pipeline.ad_observability import record_ad_event
+
+        record_ad_event(
+            "ad_task_created",
+            run_id=run.id,
+            tenant=tenant.slug,
+            direction=direction,
+            document_profile=body.profile,
+            prompt_digest=str((prompt_snapshot or {}).get("digest") or ""),
+            termbase_version=termbase_version,
+        )
+        record_audit(
+            session,
+            actor_sub=identity.user_sub,
+            action="translation_run.ad_created",
+            extra={"run_id": run.id, "prompt_digest": str((prompt_snapshot or {}).get("digest") or "")},
+        )
     egress = str((mode_snapshot.get("model_snapshot") or {}).get("egress_scope") or "none")
     if egress != "none":
         record_audit(

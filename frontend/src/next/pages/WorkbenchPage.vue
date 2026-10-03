@@ -138,7 +138,8 @@
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
           <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
-          <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option>临床研究文档</option><option>监管申报材料</option><option>通用医药文档</option></select></label>
+          <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option v-for="option in documentProfileOptions" :key="option">{{ option }}</option></select></label>
+          <p v-if="workbenchState.domainProfile === 'ad'" class="qy-muted">AD 模式只支持医学研究文献与临床研究文档。</p>
           <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification" @change="refreshModelProfiles"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
           <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in modelProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
           <p v-if="selectedModelProfile" class="qy-muted">外发范围：{{ egressLabel(selectedModelProfile) }}</p>
@@ -198,6 +199,12 @@ const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancel
 const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
 const adEnabled = computed(() => Boolean(sessionStore.user?.capabilities?.ad_enabled));
+// Mirrors SUPPORTED_AD_DOCUMENTS on the server; AD rejects any other profile with 422.
+const AD_DOCUMENT_PROFILES = ['医学研究文献', '临床研究文档'];
+const GENERAL_DOCUMENT_PROFILES = ['临床研究文档', '监管申报材料', '通用医药文档'];
+const documentProfileOptions = computed(() =>
+  workbenchState.domainProfile === 'ad' ? AD_DOCUMENT_PROFILES : GENERAL_DOCUMENT_PROFILES,
+);
 const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
 const modelProfiles = ref([]);
 const selectedModelProfile = computed(
@@ -508,6 +515,16 @@ watch(adEnabled, (enabled) => {
     workbenchState.domainProfile = 'general';
   }
 });
+watch(
+  () => workbenchState.domainProfile,
+  (domain) => {
+    if (domain === 'ad' && !AD_DOCUMENT_PROFILES.includes(workbenchState.profile)) {
+      workbenchState.profile = '临床研究文档';
+    } else if (domain !== 'ad' && !GENERAL_DOCUMENT_PROFILES.includes(workbenchState.profile)) {
+      workbenchState.profile = '临床研究文档';
+    }
+  },
+);
 watch(showArchived, refreshRuns);
 watch(() => workbenchState.classification, refreshModelProfiles);
 watch(workbenchState, () => scheduleWorkbenchPreferenceSave(), { deep: true });
