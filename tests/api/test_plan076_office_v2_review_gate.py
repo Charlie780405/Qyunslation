@@ -219,3 +219,29 @@ def test_ad_retry_carries_frozen_prompt_into_next_generation(client, monkeypatch
     assert body["generation"] == 2
     assert body["status"] != "blocked", body.get("degradation_reason")
     assert body["prompt_snapshot"]["digest"] == digest
+
+    # A generation that lost its prompt directory (e.g. created before this fix)
+    # must not strand the chain: generation 3 recovers the prompt from gen 1.
+    import shutil
+    from qyunslation.workbench.runner import get_pdf2zh_runner
+
+    gen2_dir = get_pdf2zh_runner()._run_dir(tenant_id=_tenant_id(client), run_id=body["id"], generation=2)
+    shutil.rmtree(gen2_dir / "prompt", ignore_errors=True)
+    client.post(
+        f"/api/v1/translation-runs/{body['id']}/review-decision",
+        headers={**_headers(), "X-Dev-Role": "reviewer"},
+        json={"decision": "reject", "comment": "again"},
+    )
+    third = client.post(f"/api/v1/translation-runs/{body['id']}/retry", headers=_headers())
+    assert third.status_code == 201, third.text
+    assert third.json()["generation"] == 3
+    assert third.json()["status"] != "blocked", third.json().get("degradation_reason")
+
+
+def _tenant_id(client) -> str:
+    from sqlalchemy import select
+    from qyunslation.persist import db
+    from qyunslation.persist.models import Tenant
+
+    with db.SessionLocal() as session:
+        return session.scalar(select(Tenant.id).where(Tenant.slug == "pilot"))

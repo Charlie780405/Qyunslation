@@ -2990,25 +2990,42 @@ async def cancel_translation_run(
     return _translation_run_dict(session, run)
 
 
-def _carry_frozen_ad_prompt(source: TranslationRunRecord, target: TranslationRunRecord) -> None:
+def _carry_frozen_ad_prompt(session: Session, source: TranslationRunRecord, target: TranslationRunRecord) -> None:
     """New generations of an AD run must reuse the frozen prompt text.
 
     The frozen prompt lives in the per-run directory; without carrying the
     identical text (same digest as the copied prompt_snapshot) the launch
-    blocks with "AD prompt digest mismatch".
+    blocks with "AD prompt digest mismatch".  Earlier generations are searched
+    too, so a generation that itself failed to launch does not strand the chain.
     """
     if str((target.settings_snapshot or {}).get("domain_profile") or "general").casefold() != "ad":
         return
+    expected = str(dict((target.settings_snapshot or {}).get("prompt_snapshot") or {}).get("digest") or "")
     try:
         from qyunslation.pipeline.ad_prompt_store import load_frozen_prompt, write_frozen_prompt
         from qyunslation.workbench.runner import get_pdf2zh_runner
 
         runner = get_pdf2zh_runner()
-        loaded = load_frozen_prompt(
-            runner._run_dir(tenant_id=source.tenant_id, run_id=source.id, generation=source.generation)
+        candidates = [source] + list(
+            session.scalars(
+                select(TranslationRunRecord)
+                .where(
+                    TranslationRunRecord.preflight_id == target.preflight_id,
+                    TranslationRunRecord.id != target.id,
+                )
+                .order_by(TranslationRunRecord.generation.desc())
+            )
         )
+        loaded = None
+        for candidate in candidates:
+            found = load_frozen_prompt(
+                runner._run_dir(tenant_id=candidate.tenant_id, run_id=candidate.id, generation=candidate.generation)
+            )
+            if found is not None and (not expected or str(found[1].get("digest") or "") == expected):
+                loaded = found
+                break
         if loaded is None:
-            raise RuntimeError("frozen prompt of the source generation is missing")
+            raise RuntimeError("no earlier generation holds a frozen prompt with the expected digest")
         write_frozen_prompt(
             runner._run_dir(tenant_id=target.tenant_id, run_id=target.id, generation=target.generation),
             text=loaded[0],
@@ -3071,7 +3088,7 @@ async def retry_translation_run(
     )
     session.add(retry)
     session.flush()
-    _carry_frozen_ad_prompt(run, retry)
+    _carry_frozen_ad_prompt(session, run, retry)
     await _launch_translation_run(
         run=retry,
         preflight=preflight,
@@ -3479,7 +3496,7 @@ async def apply_run_corrections(
     )
     session.add(retry)
     session.flush()
-    _carry_frozen_ad_prompt(run, retry)
+    _carry_frozen_ad_prompt(session, run, retry)
     await _launch_translation_run(
         run=retry,
         preflight=preflight,
