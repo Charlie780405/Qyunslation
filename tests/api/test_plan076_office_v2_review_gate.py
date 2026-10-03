@@ -89,6 +89,14 @@ def test_office_v2_run_reaches_review_ready_and_materialises_after_approval(clie
     assert detail["status"] == "translating"
     assert detail["artifacts"] == []
 
+    # Polling again must be idempotent: no second QA pass, no duplicated events.
+    events_url = f"/api/v1/translation-runs/{run_id}/events?after_sequence=0"
+    first_events = client.get(events_url, headers=_headers()).json()["items"]
+    for _ in range(3):
+        client.get(f"/api/v1/translation-runs/{run_id}", headers=_headers())
+    again = client.get(events_url, headers=_headers()).json()["items"]
+    assert len(again) == len(first_events), [e.get("message") for e in again[len(first_events):]]
+
     approved = client.post(
         f"/api/v1/translation-runs/{run_id}/review-decision",
         headers={**_headers(), "X-Dev-Role": "reviewer"},

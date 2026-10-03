@@ -1268,6 +1268,23 @@ def _inspect_run_outputs(
         )
         if snapshot.get("semantic_degraded"):
             snapshot = dict(snapshot)
+        # Always leave an inspection record so a clean AD run still has a
+        # persisted qa_item (the auto-QA idempotency guard relies on it).
+        ad_findings = list(ad_findings)
+        ad_findings.append(
+            QaFinding(
+                category="consistency",
+                severity="info",
+                code="QA_INSPECTION_SUMMARY",
+                message="确定性 QA 取证摘要",
+                evidence={
+                    "artifact": text_artifact.name,
+                    "source_chars": len(source_text),
+                    "target_chars": len(target_text),
+                    "ad_findings": len(ad_findings),
+                },
+            )
+        )
         return ad_findings, snapshot, None
 
     snapshot: dict[str, Any] | None = None
@@ -1324,6 +1341,11 @@ def _maybe_run_auto_qa(
     if run.stage not in {"layout", "qa"} and run.status not in {"translating", "rendering"}:
         # Still allow when layout_complete just set stage=layout.
         pass
+    if (run.quality_state or "draft") != "draft":
+        # Only the evaluators set qa_blocked/review_ready/qa_degraded; a run with
+        # zero persisted qa_items must not be re-evaluated on every poll (it
+        # floods the event ledger with 版式完成/QA 通过 triplets).
+        return
     existing = session.scalar(
         select(QaItem.id).where(
             QaItem.run_id == run.id, QaItem.generation == run.generation
