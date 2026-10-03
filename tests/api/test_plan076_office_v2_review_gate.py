@@ -112,3 +112,56 @@ def test_office_v2_run_reaches_review_ready_and_materialises_after_approval(clie
     downloaded = client.get(formal[0]["download_url"], headers=_headers())
     assert downloaded.status_code == 200
     assert downloaded.content.decode("utf-8") == "临床文本译文"
+
+
+def test_office_v2_reject_is_terminal_and_retry_allocates_new_generation(client, monkeypatch, tmp_path):
+    output = tmp_path / "protocol_translated.txt"
+    output.write_text("译文", encoding="utf-8")
+    from qyunslation import server as server_module
+
+    class FakeService:
+        main_event_loop = object()
+
+        async def start_translation(self, **kwargs):
+            return {"task_id": "office-task-2"}
+
+        def get_task_state(self, task_id):
+            return {
+                "download_ready": True,
+                "is_processing": False,
+                "error_flag": False,
+                "original_filename": "protocol.txt",
+                "downloadable_files": {"txt": {"path": str(output), "filename": output.name}},
+                "attachment_files": {},
+            }
+
+        def cancel_task(self, task_id):
+            return {"cancelled": True}
+
+    monkeypatch.setattr(server_module, "get_translation_service", lambda: FakeService())
+    preflight = client.post(
+        "/api/v1/preflights",
+        headers=_headers(),
+        files={"file": ("protocol.txt", b"clinical text", "text/plain")},
+    ).json()
+    run_id = client.post(
+        "/api/v1/translation-runs",
+        headers={**_headers(), "Idempotency-Key": "office-v2-reject"},
+        json={"preflight_id": preflight["id"], "direction": "English → 简体中文", "profile": "临床研究文档"},
+    ).json()["id"]
+    assert client.get(f"/api/v1/translation-runs/{run_id}", headers=_headers()).json()["quality_state"] == "review_ready"
+
+    rejected = client.post(
+        f"/api/v1/translation-runs/{run_id}/review-decision",
+        headers={**_headers(), "X-Dev-Role": "reviewer"},
+        json={"decision": "reject", "comment": "number omitted"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "failed"
+    # The executor's lingering download_ready state must not revive the run.
+    again = client.get(f"/api/v1/translation-runs/{run_id}", headers=_headers()).json()
+    assert again["status"] == "failed"
+    retried = client.post(f"/api/v1/translation-runs/{run_id}/retry", headers=_headers())
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["generation"] == 2
+    assert retried.json()["id"] != run_id

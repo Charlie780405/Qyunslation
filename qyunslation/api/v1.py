@@ -1465,6 +1465,10 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
         return run.degradation_reason
     if run.status == "cancelled":
         return run.degradation_reason or "translation cancelled by user"
+    if run.status == "failed" and run.degradation_reason == "rejected by reviewer":
+        # A reviewer's reject is terminal; the executor's lingering
+        # download_ready state must not revive the run (retry needs terminal).
+        return run.degradation_reason
     if not run.external_task_id:
         return None
     # PDF runs are owned by the durable non-GUI runner.  Consult its atomic
