@@ -43,6 +43,9 @@ async def test_office_executor_passes_ad_prompt(monkeypatch):
         "qyunslation.server.get_translation_service",
         lambda: FakeService(),
     )
+    # 生产 office.env 的 OFFICE_LOCK 会在校验期用环境 CUSTOM_PROMPT 覆盖字段，
+    # sidecar 随后再按 domain_profile 重新编译 AD 提示词；本测试只断言执行器侧透传。
+    monkeypatch.delenv("DOCUTRANSLATE_OFFICE_LOCK", raising=False)
     executor = OfficeExecutor()
     launch = await executor.start(
         content=b"doc",

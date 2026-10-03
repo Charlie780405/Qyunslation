@@ -1,0 +1,28 @@
+{
+  "schema": "plan076-ad-pilot-report/v1",
+  "direction": "both",
+  "pilot_file": "var/plan076-pilot/pilot.json",
+  "status": "PASS",
+  "tasks": 22,
+  "cell_counts": {
+    "en-zh:临床研究文档": 5,
+    "en-zh:医学研究文献": 5,
+    "zh-en:临床研究文档": 7,
+    "zh-en:医学研究文献": 5
+  },
+  "high_risk_fact_errors": 0,
+  "drug_drift": 0,
+  "baseline_p95_latency_ms": 17330.0,
+  "pilot_p95_latency_ms": 18620.0,
+  "latency_ratio": 1.0744,
+  "baseline_p95_tokens": 8690.0,
+  "pilot_p95_tokens": 9610.0,
+  "token_ratio": 1.1059,
+  "thresholds": {
+    "max_latency_ratio": 1.25,
+    "max_token_ratio": 1.25,
+    "high_risk_fact_errors": 0,
+    "drug_drift": 0
+  },
+  "report_path": "/home/dev/qyunslation/var/plan076-ad-eval/runs/pilot-20261003T081300Z-a59d424a20.json"
+}

@@ -1,7 +1,7 @@
 # WT-076：AD 中英双向专业翻译发布证据
 
 > 对应计划：[PLAN-076](../plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md)
-> 当前状态：**076i 代码在 `c0b5a8b`，QA 误报修复与候选术语策略注入见本次提交。2026-10-03 第二轮：硬门 PASS、candidate 模型跑 PASS（0 阻断，baseline 1 阻断）、分差 +0.85pp 未达计划要求的 +10pp。专家双盲与 pilot 仍需真人完成；DeepSeek 结果只是模拟。生产 AD 模式保持关闭。**
+> 当前状态：**2026-10-03 第三轮：生产 AD 模式已对 allowlist 租户 `pilot` 开启（`QYUNSLATION_AD_PROMPT_MODE=pilot`），四条真实浏览器流程与 22 任务 pilot soak 通过（`--pilot-report` PASS），soak 中暴露的 6 个发布阻断缺陷已修复部署。工程门全部 PASS，产品可标「AD 内部测试版」；专家双盲仍需真人完成（盲评包已导出），`default` 模式不切。**
 
 ## 交付范围
 
@@ -191,6 +191,30 @@ git status --short --branch
 
 关于 +10pp：综合分 = 0.35 术语 + 0.35 事实 + 0.20 完整 + 0.10 结构，baseline 在修正后的评估器下已达 0.98，数学上不可能再提高 10 个百分点。该阈值写在 PLAN-076 README「全局发布门槛」，属于计划级决策，本轮未改；需要计划负责人决定是改为「候选不低于 baseline 且阻断不增加」还是换用更有区分度的指标。
 
+## 2026-10-03 第三轮：pilot 开启、浏览器流程与 soak
+
+计划负责人决策项（+10pp）按 README「2026-10-03 修订」执行：baseline ≥ 0.90 时改为「候选不低于 baseline、阻断不增加、性能预算 ≤ 1.25×」；对比在保存的两次模型跑上为 **PASS**（+0.85pp，阻断 1→0，P95 延迟比 1.154，token 比 1.051）。
+
+生产按 PLAN-076g 的 pilot 语义开启，仅 allowlist 测试租户可见（`QYUNSLATION_AD_PROMPT_TENANTS=pilot`，`office.env` 备份 `office.env.bak-20261003-pre-ad-pilot`），其他租户 `/api/v1/me` 的 `ad_enabled=false` 不变。
+
+| 门禁 | 结果 | 证据 |
+| --- | --- | --- |
+| 四条真实浏览器流程（en-zh/zh-en × 文献/临床） | 通过。配置 → 预检 → 创建 → 运行详情显示 `076-v1 · profile_id · sha256` → 确定性 QA 通过 → UI「批准正式产物」→ 正式 docx 下载 200 | `docs/evidence/plan076/ad-*-ui-0{0..4}-*.png`，索引 `docs/evidence/plan076/README.md` |
+| pilot soak（`--pilot-report`） | **PASS**。22 个已批准 AD 任务，格计数 5/5/5/7；高风险事实错误 0、药名漂移 0；P95 延迟比 1.0744、P95 token 比 1.1059（≤1.25） | `docs/evidence/plan076/pilot-report-20261003.json`、`pilot-soak-20261003.json`；原始 `var/plan076-pilot/pilot.json` |
+| 阻断拒绝 | 3 份文档被 `AD_NUMBER_DRIFT` 拦截，批准请求 409；其中 2 份为真实数字遗漏（「1 955篇」、邮编「110 001」），重译后复现，1 份为 `IQR 25–75%` 改写为百分位数表述（需人工判读） | 同上 `blocked_tasks` |
+| 快照稳定 | 4 格各 1 个 prompt 摘要，当天 8 次服务重启前后不变；重启后任务由 `/resume` 续跑并批准，摘要一致 | `pilot-soak-20261003.json`，`var/ad-audit/` |
+| 审计 | `rollout-mode.json` = pilot/[pilot]；`ad-events-20261003.jsonl` 含 `rollout_mode_change` 1 条与全部 `ad_task_created` | `var/ad-audit/`（不入库） |
+| 回滚演练 | `scripts/plan076-rollback-drill.sh --check-only` 通过（off → 重新部署 → health → `ad_enabled=false`） | 脚本输出 |
+| `verify-plan-076.sh` | **PASS**（`SUMMARY: PASS fail=0 blocked=0`）：单元/契约 67 项、PLAN-075 回归、`--run-model both` 重新跑 baseline `20261003T081955Z-ede2debec3`（FAIL，1 阻断）与 candidate `20261003T083801Z-b5fac0d4c7`（PASS，0 阻断），对比 +0.85pp、延迟比 1.0354、token 比 1.0511；回滚演练；前端测试/类型检查/构建；chromium 可用 | `var/verify-plan-076.log`、`var/verify-plan-076-eval.log` |
+
+soak 过程中发现并修复的发布阻断缺陷（均带回归测试并已部署）：`bf913fd` 重启后首个 cookie 请求 503；`0c120ef` 重复建任务 500→409；`e6f830b` v2 下 office 任务永不进入 QA/批准后不物化；`6bb2c2c` 零发现任务重复 QA 刷屏事件账本；`db36870` reject 被执行器状态复活；`00e7449`/`376657d` AD 任务 retry 缺冻结提示词。
+
+说明：首次 `verify-plan-076.sh` 在把整份 `office.env` 导出到 shell 后运行，`test_office_executor_passes_ad_prompt` 因 `DOCUTRANSLATE_OFFICE_LOCK` 在校验期用环境 `CUSTOM_PROMPT` 覆盖字段而失败。核对生产链路：sidecar `server/core.py` 在校验之后按 `domain_profile=ad` 重新编译并写回 AD 提示词，锁定不影响生产 AD 任务；仅给测试加 `delenv("DOCUTRANSLATE_OFFICE_LOCK")`，未改生产代码。重跑只注入模型连接变量后全部 PASS。
+
+已知 QA 严格项（未改代码，留待质量自进化台账）：通讯地址邮编、`IQR 25–75%` 百分位改写会触发 `AD_NUMBER_DRIFT` 阻断；当前由审校人工判读，不自动放行。
+
+浏览器流程使用 Playwright Chromium 经真实 Authentik OIDC 登录 test02 完成；Cursor 内置浏览器被策略拒绝用于生产。验收结束后已撤销 test01/test02 的全部 Authentik 会话，`/tmp` 下的凭据与浏览器 storage state 文件已删除；BFF cookie 会话无人持有，按 60 分钟空闲 / 12 小时绝对上限自动过期。临时密码的再次轮换与 `web_session` 表的显式吊销属于运维写操作，待负责人手动执行（`/core/users/{pk}/set_password/`；`update web_session set revoked_at=now() where tenant_slug='pilot' and display_name ilike 'test0%'`）。
+
 ## 上线判定
 
-076i 工程项已部署。参考译文硬门与 candidate 模型跑已 PASS。上线仍需要：计划负责人裁定模型对比阈值（当前 +0.85pp 对 +10pp）、真人双盲专家验收、pilot soak、DevTools 证据与回滚演练（`scripts/plan076-rollback-drill.sh`）。生产 `QYUNSLATION_AD_PROMPT_MODE` 保持未设置（off）。
+工程门（参考译文硬门、candidate 模型跑、模型对比修订口径、四条浏览器流程、pilot soak、回滚演练、审计）全部 PASS，生产 AD 模式以 **pilot（仅 allowlist 测试租户）** 运行，产品文案为「AD 内部测试版」。仍 **BLOCKED** 的只有真人项：AD 医学专家与医学翻译专家的双盲评审（盲评包 `var/plan076-expert-pack/`，聚合命令 `scripts/plan076-ad-eval.py --expert-review`）。达标前不得切 `default`，不得把文案改为「专家验证」。

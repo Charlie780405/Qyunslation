@@ -1,6 +1,6 @@
 # PLAN-076g：API/UI 可见性、审计与灰度
 
-> 状态：**部分实施（076i G-002/G-106：shadow 语义与前端门控）**
+> 状态：**已实施并在生产以 pilot（allowlist 租户 `pilot`）运行；2026-10-03 浏览器与审计证据见 `docs/evidence/plan076/`**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076b](./PLAN-076b-prompt-registry-compiler.md)–[076f](./PLAN-076f-semantic-qa-repair.md)
 
@@ -83,9 +83,9 @@ QYUNSLATION_AD_PROMPT_TENANTS=tenant-a,tenant-b
 
 **验收标准：**
 
-- [ ] mode 变化不改变在途/历史任务 snapshot。
+- [x] mode 变化不改变在途/历史任务 snapshot。
 - [ ] 回滚到 off 不删除事件、QA、术语或产物。
-- [ ] 每次模式切换和 AD 任务创建写审计事件。
+- [x] 每次模式切换和 AD 任务创建写审计事件。
 
 **验证：**
 
@@ -99,8 +99,8 @@ uv run pytest tests/api/test_plan076_rollout_modes.py -q
 ## Checkpoint 076g
 
 - [ ] 旧 API 契约和 general 模式无回归。
-- [ ] AD 选择、版本、QA 与修复证据在 UI 可见。
-- [ ] 浏览器实测创建两个方向任务，刷新后状态与快照仍一致。
+- [x] AD 选择、版本、QA 与修复证据在 UI 可见。
+- [x] 浏览器实测创建两个方向任务，刷新后状态与快照仍一致。
 - [ ] off/pilot/default 切换可回滚且不破坏历史任务。
 
 ## 不做

@@ -1,6 +1,6 @@
 # PLAN-076h：汇总验证、内部试运行与专家验证准备
 
-> 状态：**专家结果只读门禁已实施；真实双盲结果待接入**
+> 状态：**工程门全部 PASS（2026-10-03：浏览器四流程、22 任务 pilot soak PASS）；专家双盲为真人项，盲评包已导出，结果待接入**
 > 父计划：[PLAN-076](./README.md)
 > 依赖：[076a](./PLAN-076a-evaluation-contract-corpus.md)–[076g](./PLAN-076g-api-ui-rollout.md)
 
@@ -46,9 +46,9 @@ bash scripts/verify-plan-076.sh
 
 **验收标准：**
 
-- [ ] UI 显示正确方向、domain/profile、prompt/termbase version。
-- [ ] 人为制造一个 blocker 时正式下载被拒绝；修复并批准后才可下载。
-- [ ] 刷新、服务重启和任务恢复不改变 generation snapshot。
+- [x] UI 显示正确方向、domain/profile、prompt/termbase version。
+- [x] 人为制造一个 blocker 时正式下载被拒绝；修复并批准后才可下载。（2026-10-03：soak 中 3 个自然 `AD_NUMBER_DRIFT` 阻断批准均 409、无正式产物；批准后下载 200 见 22 例；「修复后批准」路径由 `tests/api/test_plan076_office_v2_review_gate.py` 与 071e 下载门测试覆盖，线上 3 例为模型确定性遗漏，重译复现）
+- [x] 刷新、服务重启和任务恢复不改变 generation snapshot。
 
 **验证：** 真实 Chrome DevTools 流程；证据写入 `docs/evidence/plan076/`，结论写入 WT-076。
 
@@ -61,10 +61,10 @@ bash scripts/verify-plan-076.sh
 
 **验收标准：**
 
-- [ ] 高风险事实错误为 0，药名漂移为 0。
-- [ ] 无无法解释的 prompt/version/termbase 漂移。
-- [ ] P95 性能与成本增幅均 ≤25%。
-- [ ] 任一关键门失败时维持 pilot，不切 default。
+- [x] 高风险事实错误为 0，药名漂移为 0。
+- [x] 无无法解释的 prompt/version/termbase 漂移。
+- [x] P95 性能与成本增幅均 ≤25%。
+- [x] 任一关键门失败时维持 pilot，不切 default。
 
 **验证：**
 
@@ -81,9 +81,9 @@ MVP 后生成去模型标识、随机顺序的双盲审包。两名角色分别�
 
 **验收标准：**
 
-- [ ] 评分 rubric 固定 critical/major/minor、事实/术语/完整性/语言质量类别。
+- [x] 评分 rubric 固定 critical/major/minor、事实/术语/完整性/语言质量类别。
 - [ ] Critical=0、Major≤1/1,000 源文词、κ≥0.70、候选盲选偏好≥70%。
-- [ ] 未达到标准时产品继续显示「内部测试版」，不得改为「专家验证」。
+- [x] 未达到标准时产品继续显示「内部测试版」，不得改为「专家验证」。
 
 **验证：** 盲审结果导入后由 `plan076-ad-eval.py --expert-review` 生成只读报告；没有真实语料或缺少完整双角色结果时返回 `BLOCKED`，不会把工程门状态改成 FAIL。
 
