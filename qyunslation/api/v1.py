@@ -1542,9 +1542,24 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
         from qyunslation.pipeline import run_pipeline_mode
 
         if run_pipeline_mode(run.settings_snapshot) == "v2":
-            run.status = "translating"
-            run.stage = "layout"
-            run.progress = None
+            # Office (docx/pptx/txt/image) executor under v2: mirror the PDF
+            # runner's layout_complete handling, otherwise the run stays in
+            # translating/layout forever and approval never materialises.
+            if run.quality_state == "approved":
+                run.status = "succeeded"
+                run.stage = "export"
+                run.progress = 100
+                run.completed_at = run.completed_at or datetime.now(timezone.utc)
+                _materialize_artifacts(session, run=run, task_state=task_state)
+            else:
+                run.status = "translating"
+                run.stage = "layout"
+                run.progress = None
+                _maybe_run_auto_qa(session, run, task_state)
+                if run.quality_state == "review_ready":
+                    run.stage = "review"
+                elif run.quality_state == "qa_blocked":
+                    run.stage = "qa"
         else:
             run.status = "succeeded"
             run.stage = "export"
