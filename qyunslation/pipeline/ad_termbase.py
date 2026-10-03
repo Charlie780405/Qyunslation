@@ -21,11 +21,19 @@ def load_ad_concepts(path: str | Path | None = None) -> list[dict]:
     with source.open("r", encoding="utf-8", newline="") as handle:
         rows = []
         for row in csv.DictReader(handle):
-            item = {key: (value or "").strip() for key, value in row.items()}
+            item = {key: (value or "").strip() for key, value in row.items() if key}
             item["do_not_translate"] = _truthy(item.get("do_not_translate", ""))
             item["risk"] = item.get("risk") or ("high" if item.get("term_type") in {"drug", "target"} else "normal")
+            item["en_aliases"] = _split_aliases(item.get("en_aliases", ""))
+            item["zh_aliases"] = _split_aliases(item.get("zh_aliases", ""))
             rows.append(item)
         return rows
+
+
+def _split_aliases(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").split("|") if item.strip()]
 
 
 def _load_legacy_rows(path: Path) -> list[dict]:
@@ -44,6 +52,8 @@ def _load_legacy_rows(path: Path) -> list[dict]:
                     "do_not_translate": _truthy(row.get("do_not_translate", "")),
                     "forbidden_targets": row.get("forbidden_targets", ""),
                     "status": "legacy",
+                    "en_aliases": [],
+                    "zh_aliases": [],
                 }
             )
         return rows
@@ -57,6 +67,7 @@ def _direction_rows(direction: str, rows: Iterable[dict]) -> list[dict]:
                 **row,
                 "source": row.get("en", ""),
                 "target": row.get("zh", ""),
+                "target_aliases": _split_aliases(row.get("zh_aliases", [])),
                 "src_lang": "en",
                 "tgt_lang": "zh",
             }
@@ -69,6 +80,7 @@ def _direction_rows(direction: str, rows: Iterable[dict]) -> list[dict]:
                 **row,
                 "source": row.get("zh", ""),
                 "target": row.get("en", ""),
+                "target_aliases": _split_aliases(row.get("en_aliases", [])),
                 "src_lang": "zh",
                 "tgt_lang": "en",
             }
@@ -85,7 +97,11 @@ def _contains(text: str, term: str) -> bool:
         return term in text
     import re
 
-    return bool(re.search(r"(?<![A-Za-z0-9])" + re.escape(term) + r"(?![A-Za-z0-9])", text, re.I))
+    # "20 mg" must match "20mg" and vice versa; "flare" must match "flares".
+    escaped = re.escape(term).replace(r"\ ", r"\s*")
+    escaped = re.sub(r"(?<=\d)(?=[A-Za-zμµ%])", r"\\s*", escaped)
+    pattern = r"(?<![A-Za-z0-9])" + escaped + r"(?:s|es)?(?![A-Za-z0-9])"
+    return bool(re.search(pattern, text, re.I))
 
 
 def load_ad_terms(path: str | Path | None = None) -> list[dict]:
@@ -105,16 +121,21 @@ def load_ad_terms(path: str | Path | None = None) -> list[dict]:
 def build_ad_term_policy(text: str, direction: str) -> dict:
     rows = sorted(_direction_rows(direction, load_ad_concepts()), key=lambda row: len(row.get("source", "")), reverse=True)
     terms: dict[str, str] = {}
+    aliases: dict[str, tuple[str, ...]] = {}
     metadata: list[dict] = []
     for row in rows:
         source = row.get("source", "")
         if source and source not in terms and _contains(text or "", source):
             terms[source] = row.get("target", "")
+            accepted = tuple(item for item in row.get("target_aliases") or () if item and item != terms[source])
+            if accepted:
+                aliases[source] = accepted
             metadata.append(
                 {
                     "concept_id": row.get("concept_id"),
                     "source_term": source,
                     "target_term": row.get("target", ""),
+                    "target_aliases": list(accepted),
                     "term_type": row.get("term_type", "general"),
                     "risk": row.get("risk", "normal"),
                     "do_not_translate": bool(row.get("do_not_translate")),
@@ -129,5 +150,6 @@ def build_ad_term_policy(text: str, direction: str) -> dict:
         "direction": direction,
         "termbase_version": version,
         "terms": terms,
+        "aliases": aliases,
         "metadata": metadata,
     }

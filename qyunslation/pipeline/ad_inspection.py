@@ -43,6 +43,7 @@ def inspect_ad_text_pair(
                 target=target_text,
                 direction=direction,
                 terms=ad_policy.get("terms") or {},
+                aliases=ad_policy.get("aliases") or {},
             )
         )
     )
@@ -113,6 +114,7 @@ def inspect_ad_text_pair(
                     target=repaired_target,
                     direction=direction,
                     terms=ad_policy.get("terms") or {},
+                    aliases=ad_policy.get("aliases") or {},
                 )
             )
         )

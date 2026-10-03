@@ -15,6 +15,19 @@ def test_ad_termbase_supports_both_directions_and_longest_match():
     assert zh_en["terms"]["度普利尤单抗"] == "dupilumab"
 
 
+def test_ad_termbase_exposes_direction_specific_aliases():
+    en_zh = build_ad_term_policy("Flares were treated with topical corticosteroids.", "en-zh")
+    assert en_zh["terms"]["flare"] == "急性加重"
+    assert "发作" in en_zh["aliases"]["flare"]
+    assert "局部糖皮质激素" in en_zh["aliases"]["topical corticosteroid"]
+    meta = next(item for item in en_zh["metadata"] if item["source_term"] == "flare")
+    assert meta["target_aliases"] == list(en_zh["aliases"]["flare"])
+
+    zh_en = build_ad_term_policy("患者出现急性加重。", "zh-en")
+    assert zh_en["terms"]["急性加重"] == "flare"
+    assert "exacerbation" in zh_en["aliases"]["急性加重"]
+
+
 def test_ad_termbase_marks_identity_targets_and_high_risk_drugs():
     rows = load_ad_terms()
     il4 = next(row for row in rows if row["source"] == "IL-4Rα")

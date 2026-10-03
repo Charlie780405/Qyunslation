@@ -364,7 +364,12 @@ def _target_contains(text: str, term: str) -> bool:
         return False
     if any(ord(char) > 127 for char in value):
         return value in text
-    return bool(re.search(r"(?<![A-Za-z0-9])" + re.escape(value) + r"(?![A-Za-z0-9])", text, re.I))
+    # "20 mg" must match "20mg" and vice versa; "flare" must match "flares".
+    escaped = re.escape(value).replace(r"\ ", r"\s*")
+    escaped = re.sub(r"(?<=\d)(?=[A-Za-zμµ%])", r"\\s*", escaped)
+    escaped = re.sub(r"([<>=±])", r"\\s*\1\\s*", escaped)
+    pattern = r"(?<![A-Za-z0-9])" + escaped + r"(?:s|es)?(?![A-Za-z0-9])"
+    return bool(re.search(pattern, text, re.I))
 
 
 def _machine_metrics(row: dict, machine_text: str, findings: list) -> dict:
@@ -396,12 +401,15 @@ def _machine_metrics(row: dict, machine_text: str, findings: list) -> dict:
     target_units = len([line for line in machine_text.splitlines() if line.strip()])
     completeness = 1.0 if machine_text.strip() and target_units >= 1 else 0.0
     structure = 1.0 if target_units == source_units else (0.5 if target_units else 0.0)
-    term_component = term_recall if term_recall >= 0 else 0.0
-    fact_component = fact_recall if fact_recall >= 0 else 0.0
-    score = round(
-        term_component * 0.35 + fact_component * 0.35 + completeness * 0.20 + structure * 0.10,
-        4,
-    )
+    # A case without annotated facts (or concepts) must not be penalised for the
+    # missing component; the remaining weights are renormalised instead.
+    weighted = [(completeness, 0.20), (structure, 0.10)]
+    if term_recall >= 0:
+        weighted.append((term_recall, 0.35))
+    if fact_recall >= 0:
+        weighted.append((fact_recall, 0.35))
+    total_weight = sum(weight for _, weight in weighted)
+    score = round(sum(value * weight for value, weight in weighted) / total_weight, 4)
     return {
         "term_recall": round(term_recall, 4),
         "term_hits": term_hits,
@@ -448,7 +456,7 @@ def assess_hard_gates(rows: list[dict], *, machine_by_case: dict[str, str] | Non
         machine_text = (machine_by_case or {}).get(str(row["case"]), row.get("target") or "")
         policy = build_ad_term_policy(row["source"], row["direction"])
         findings = run_ad_deterministic_qa(
-            QaContext(row["source"], machine_text, row["direction"], policy["terms"])
+            QaContext(row["source"], machine_text, row["direction"], policy["terms"], policy.get("aliases") or {})
         )
         drift_blockers += sum(1 for item in findings if item.code in {"AD_TERM_MISSING", "AD_NUMBER_DRIFT"})
         metrics = _machine_metrics(row, machine_text, findings)
@@ -515,8 +523,13 @@ def compare_model_runs(model_runs: list[dict]) -> dict:
         return {"status": "BLOCKED", "errors": ["model_mismatch"]}
     if baseline.get("temperature") != candidate.get("temperature"):
         return {"status": "BLOCKED", "errors": ["temperature_mismatch"]}
-    if baseline.get("status") != "PASS" or candidate.get("status") != "PASS":
-        return {"status": "BLOCKED", "errors": ["model_run_incomplete"]}
+    # A QA-failing baseline is still a valid comparator; only runs with model
+    # errors or missing cases are incomparable.
+    for run in (baseline, candidate):
+        if run.get("status") == "BLOCKED" or run.get("errors") or (
+            run.get("cases") is not None and int(run.get("cases") or 0) != len(run.get("rows", []))
+        ):
+            return {"status": "BLOCKED", "errors": ["model_run_incomplete"]}
     baseline_rows = {str(row.get("case")): row for row in baseline.get("rows", [])}
     candidate_rows = {str(row.get("case")): row for row in candidate.get("rows", [])}
     case_ids = sorted(set(baseline_rows) & set(candidate_rows))
@@ -842,12 +855,13 @@ def run_model_cases(
         case_id = str(row["case"])
         prompt_snapshot = _prompt_for_row(row, mode)
         try:
-            machine_text, run_meta = runner.translate(row["source"], system=_compiled_text_for_row(row, mode))
+            policy = build_ad_term_policy(row["source"], row["direction"])
+            system_text = _compiled_text_for_row(row, mode, policy)
+            machine_text, run_meta = runner.translate(row["source"], system=system_text)
             output_path = output_dir / f"{_safe_case_name(case_id)}.txt"
             output_path.write_text(machine_text + "\n", encoding="utf-8")
-            policy = build_ad_term_policy(row["source"], row["direction"])
             findings = run_ad_deterministic_qa(
-                QaContext(row["source"], machine_text, row["direction"], policy["terms"])
+                QaContext(row["source"], machine_text, row["direction"], policy["terms"], policy.get("aliases") or {})
             )
             metrics = _machine_metrics(row, machine_text, findings)
             rows_out.append(
@@ -856,7 +870,7 @@ def run_model_cases(
                     "direction": row["direction"],
                     "output_ref": str(output_path.relative_to(run_dir)),
                     "output_sha256": _sha256(output_path),
-                    "prompt_snapshot": prompt_snapshot,
+                    "prompt_snapshot": {**prompt_snapshot, "injected_terms": len(policy["terms"]) if mode == "candidate" else 0},
                     "qa_blockers": metrics["qa_blockers"],
                     "qa_codes": sorted({item.code for item in findings}),
                     "metrics": metrics,
@@ -886,12 +900,18 @@ def run_model_cases(
     return summary
 
 
-def _compiled_text_for_row(row: dict, mode: str) -> str:
-    from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt
+def _compiled_text_for_row(row: dict, mode: str, policy: dict | None = None) -> str:
+    from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt, render_term_policy_block
 
     domain = "ad" if mode == "candidate" else "general"
     document = row.get("document_profile") if domain == "ad" else "通用医药文档"
-    return compile_prompt(PromptContext(domain, row["direction"], document or "医学研究文献", "translate")).text
+    text = compile_prompt(PromptContext(domain, row["direction"], document or "医学研究文献", "translate")).text
+    if domain == "ad" and policy:
+        # Mirrors production: AD mode injects the approved term policy alongside the prompt.
+        block = render_term_policy_block(policy.get("terms") or {})
+        if block:
+            text = text + "\n\n" + block
+    return text
 
 
 def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: str = "both") -> dict:
@@ -907,7 +927,7 @@ def evaluate(*, baseline: str = "generic", candidate: str = "ad-v1", direction: 
     for row in rows:
         policy = build_ad_term_policy(row["source"], row["direction"])
         findings = run_ad_deterministic_qa(
-            QaContext(row["source"], row["target"], row["direction"], policy["terms"])
+            QaContext(row["source"], row["target"], row["direction"], policy["terms"], policy.get("aliases") or {})
         )
         scored.append(
             {

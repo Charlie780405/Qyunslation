@@ -181,7 +181,8 @@ def test_model_runner_writes_immutable_machine_output(monkeypatch, tmp_path):
     assert result["status"] == "PASS"
     assert result["cases"] == 1
     assert result["rows"][0]["metrics"]["term_total"] == 0
-    assert result["rows"][0]["metrics"]["score"] == 0.3
+    # Without annotations only completeness/structure are measurable.
+    assert result["rows"][0]["metrics"]["score"] == 1.0
     report = Path(result["run_dir"]) / "report.json"
     assert report.is_file()
     assert "machine output" not in report.read_text(encoding="utf-8")
@@ -315,6 +316,15 @@ def test_challenge_segments_count_annotation_entries():
     assert plan076_ad_eval._count_challenge_segments(row) == 2
 
 
+def test_target_contains_tolerates_unit_spacing_and_plurals():
+    contains = plan076_ad_eval._target_contains
+    assert contains("Patients received 20mg daily.", "20 mg")
+    assert contains("Patients received 20 mg daily.", "20mg")
+    assert contains("Two flares were recorded.", "flare")
+    assert not contains("Patients received 200 mg daily.", "20 mg")
+    assert contains("停用局部糖皮质激素", "局部糖皮质激素")
+
+
 def test_hard_gates_block_empty_denominator():
     result = plan076_ad_eval.assess_hard_gates(
         [{"case": "c1", "direction": "en-zh", "source": "plain text", "target": "plain text", "annotations": {}}]
@@ -339,3 +349,40 @@ def test_model_comparison_requires_ten_point_gain_without_new_blockers():
         {"mode": "candidate", "status": "PASS", "rows": [candidate_row]},
     ])
     assert result["status"] == "FAIL"
+
+
+def test_candidate_prompt_injects_term_policy_but_baseline_does_not():
+    module = plan076_ad_eval
+    row = {"source": "Dupilumab improved eczema.", "direction": "en-zh", "document_profile": "医学研究文献"}
+    policy = build_ad_term_policy(row["source"], row["direction"])
+    assert policy["terms"]
+    candidate = module._compiled_text_for_row(row, "candidate", policy)
+    baseline = module._compiled_text_for_row(row, "baseline", policy)
+    assert "任务术语策略" in candidate and "度普利尤单抗" in candidate
+    assert "任务术语策略" not in baseline
+
+
+def test_model_comparison_accepts_qa_failing_baseline_but_not_incomplete_runs():
+    baseline_row = {"case": "case-1", "metrics": {"score": 0.80}, "qa_blockers": 2}
+    candidate_row = {"case": "case-1", "metrics": {"score": 0.95}, "qa_blockers": 0}
+    result = plan076_ad_eval.compare_model_runs([
+        {"mode": "baseline", "status": "FAIL", "cases": 1, "errors": [], "rows": [baseline_row]},
+        {"mode": "candidate", "status": "PASS", "cases": 1, "errors": [], "rows": [candidate_row]},
+    ])
+    assert result["status"] == "PASS"
+    result = plan076_ad_eval.compare_model_runs([
+        {"mode": "baseline", "status": "BLOCKED", "cases": 1, "errors": ["case-1:timeout"], "rows": []},
+        {"mode": "candidate", "status": "PASS", "cases": 1, "errors": [], "rows": [candidate_row]},
+    ])
+    assert result == {"status": "BLOCKED", "errors": ["model_run_incomplete"]}
+
+
+def test_machine_score_renormalises_when_no_facts_are_annotated():
+    row = {
+        "source": "Dupilumab improved eczema.",
+        "direction": "en-zh",
+        "annotations": {"concepts": [{"source_span": "eczema", "target_terms": ["湿疹"]}], "facts": []},
+    }
+    metrics = plan076_ad_eval._machine_metrics(row, "度普利尤单抗改善了湿疹。", [])
+    assert metrics["fact_recall"] == -1.0
+    assert metrics["score"] == 1.0

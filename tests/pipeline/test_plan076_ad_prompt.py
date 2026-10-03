@@ -7,6 +7,7 @@ from qyunslation.pipeline.ad_prompt import (
     PromptContext,
     compile_prompt,
     detect_domain_evidence,
+    render_term_policy_block,
 )
 
 
@@ -55,3 +56,10 @@ def test_general_profile_keeps_backward_compatible_compilation():
     assert compiled.profile_id == "general.en-zh.general.translate.v1"
     assert compiled.domain_profile == "general"
     assert "特应性皮炎" not in compiled.text
+
+
+def test_term_policy_block_lists_approved_terms_and_is_empty_without_terms():
+    block = render_term_policy_block({"dupilumab": "度普利尤单抗", "eczema": "湿疹"})
+    assert "任务术语策略" in block
+    assert "- dupilumab → 度普利尤单抗" in block
+    assert render_term_policy_block({}) == ""

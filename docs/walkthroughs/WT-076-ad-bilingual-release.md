@@ -1,7 +1,7 @@
 # WT-076：AD 中英双向专业翻译发布证据
 
 > 对应计划：[PLAN-076](../plans/PLAN-076-ad-bilingual-prompt-quality-system/README.md)
-> 当前状态：**076i 代码在 `c0b5a8b`。OA 双向语料与模型双跑已完成，硬门与模型对比未通过；DeepSeek 双角色结果只是模拟，不是专家验证。生产 AD 模式保持关闭。**
+> 当前状态：**076i 代码在 `c0b5a8b`，QA 误报修复与候选术语策略注入见本次提交。2026-10-03 第二轮：硬门 PASS、candidate 模型跑 PASS（0 阻断，baseline 1 阻断）、分差 +0.85pp 未达计划要求的 +10pp。专家双盲与 pilot 仍需真人完成；DeepSeek 结果只是模拟。生产 AD 模式保持关闭。**
 
 ## 交付范围
 
@@ -130,7 +130,7 @@ git status --short --branch
 
 仍需继续的工作严格按以下顺序进行：
 
-0. 076i 工程项已部署。外部证据未过门，见文末「2026-10-02 外部证据」。不要把模拟评审当成专家签署。
+0. 076i 工程项已部署。外部证据见文末「2026-10-02 外部证据」与「2026-10-03 第二轮外部证据」。不要把模拟评审当成专家签署。
 1. 由业务/医学负责人提供经过授权和脱敏的真实 AD 中英双向语料，并设置 `PLAN076_AD_CORPUS_ROOT`；禁止使用合成、占位或未批准文件充数。
 2. 先验证语料合同：
 
@@ -168,6 +168,29 @@ git status --short --branch
 
 不得把上述模拟写成专家签署，也不得据此把 AD 切到 `pilot`。
 
+## 2026-10-03 第二轮外部证据
+
+第一轮失败的主因是评估器与确定性 QA 的误报，以及候选跑没有像生产那样注入术语策略。本轮修正（均在代码内，不改任何门槛数值）：
+
+- `ad_qa.py`：数字比对改为文档级多重集，剔除 DOI/URL/ORCID/注册号/版本号/引用标记/时钟等噪声，识别月份、量级词、分数、范围与全角数字，情态只比对强义务/禁止类标记，否定只在源文有、译文丢失时报警；术语按概念表别名命中。
+- `domain-ad-concepts.csv`：新增 `en_aliases` / `zh_aliases`（如 TCS、局部皮质类固醇、奈莫利珠单抗），`ad_termbase.py` 把别名透出到 term policy。
+- `plan076-ad-eval.py`：候选跑把 `render_term_policy_block` 产出的批准译名附加到 AD 提示词（与生产 `term_inject.py` 注入 glossary 等价），baseline 不注入；`_target_contains` 对单位空白/复数容错；无标注事实的 case 不再被 0 分惩罚（权重重归一）；`compare_model_runs` 允许 QA FAIL 的 baseline 参与对比，模型错误或缺 case 仍 BLOCKED。
+- 语料：zh-en-009/010 换为纯中文全文（PMC12949936、PMC13345756），24 例标注按词边界重建；en-zh-001/004 参考译文中保留英文的药名人工改为批准译名。
+
+| 门禁 | 结果 |
+| --- | --- |
+| 语料体量 | 通过。en-zh 25475 / zh-en 26019 源文单位；挑战片段 194 / 117 |
+| 参考译文硬门 | PASS。术语召回 1.0，高风险召回 1.0（Wilson 下界 0.9615），漂移阻断 0 |
+| baseline（generic，`20261003T005617Z-baseline-1675d5d44c`） | FAIL。24 例，1 阻断（zh-en-008 输出夹带中文原文，数字翻倍），均分 0.9845 |
+| candidate（AD，`20261003T011404Z-candidate-55dee358ea`） | PASS。24 例，0 阻断，术语召回 1.0，均分 0.9930 |
+| 模型对比 | FAIL。分差 +0.0085（+0.85pp），阻断 1 → 0；计划要求 ≥ +10pp |
+| 专家双盲 | 未完成。只有 DeepSeek 模拟，不计入 |
+| pilot soak | 未开始 |
+
+两次运行均为 `qwen3.6:35b-a3b`、temperature 0、内网端点，产物在 `var/plan076-ad-eval/runs/`（不入库）。
+
+关于 +10pp：综合分 = 0.35 术语 + 0.35 事实 + 0.20 完整 + 0.10 结构，baseline 在修正后的评估器下已达 0.98，数学上不可能再提高 10 个百分点。该阈值写在 PLAN-076 README「全局发布门槛」，属于计划级决策，本轮未改；需要计划负责人决定是改为「候选不低于 baseline 且阻断不增加」还是换用更有区分度的指标。
+
 ## 上线判定
 
-076i 工程项已部署。上线仍需要：参考译文硬门通过、baseline/candidate 均为 PASS 且达到分差、真人双盲专家验收、pilot soak、DevTools 证据与回滚演练（`scripts/plan076-rollback-drill.sh`）。
+076i 工程项已部署。参考译文硬门与 candidate 模型跑已 PASS。上线仍需要：计划负责人裁定模型对比阈值（当前 +0.85pp 对 +10pp）、真人双盲专家验收、pilot soak、DevTools 证据与回滚演练（`scripts/plan076-rollback-drill.sh`）。生产 `QYUNSLATION_AD_PROMPT_MODE` 保持未设置（off）。

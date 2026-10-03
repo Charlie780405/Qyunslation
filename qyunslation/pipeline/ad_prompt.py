@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Mapping
 
 AD_DOMAIN_PROFILE = "ad"
 PROMPT_VERSION = "076-v1"
@@ -122,6 +122,19 @@ def compile_prompt(context: PromptContext) -> CompiledPrompt:
         task=task,
         text=text,
     )
+
+
+def render_term_policy_block(terms: Mapping[str, str], *, limit: int = 200) -> str:
+    """Render the approved AD term policy the prompt refers to as 任务术语策略.
+
+    Production injects the same policy as a glossary CSV; the evaluation
+    harness appends this block so the candidate run measures the real feature.
+    """
+    pairs = sorted((str(k).strip(), str(v).strip()) for k, v in (terms or {}).items() if k and v)[:limit]
+    if not pairs:
+        return ""
+    lines = [f"- {source} → {target}" for source, target in pairs]
+    return "任务术语策略（批准译名，必须使用；药物通用名须译为下列译名，不保留原文）：\n" + "\n".join(lines)
 
 
 def detect_domain_evidence(text: str) -> bool:
