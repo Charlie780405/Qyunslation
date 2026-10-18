@@ -43,6 +43,7 @@
 import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useSessionStore } from '../stores/session.js';
+import { DEFAULT_END_SESSION_URL } from '../qyuns/logout.js';
 import {
   AdjustmentsHorizontalIcon,
   ArrowRightOnRectangleIcon,
@@ -61,6 +62,10 @@ const navItems = [
 const initials = computed(() => (session.user?.display_name || session.user?.name || 'Q').trim().slice(0, 1).toUpperCase());
 
 async function signOut() {
-  try { await session.logout(); } finally { router.push({ name: 'login' }); }
+  // 本应用退出后继续结束 Authentik 会话（否则点回来会被静默登录）；Authentik 的 end-session 页是终点
+  try { await session.logout(); } finally {
+    if (import.meta.env.DEV) router.push({ name: 'login' });
+    else window.location.assign(import.meta.env.VITE_QYUNSAPPS_END_SESSION_URL || DEFAULT_END_SESSION_URL);
+  }
 }
 </script>

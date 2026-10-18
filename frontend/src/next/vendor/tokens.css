@@ -1,0 +1,86 @@
+/* generated from QyunsApps@4f289eb3792e (tokens sha256:1db8c44ec9cc) — do not edit */
+:root {
+  color-scheme: light;
+  --qa-color-brand-50: #edf8fa;
+  --qa-color-brand-100: #d0eff3;
+  --qa-color-brand-200: #a5dee8;
+  --qa-color-brand-300: #5fccd5;
+  --qa-color-brand-400: #00B1B7;
+  --qa-color-brand-500: #008d96;
+  --qa-color-brand-600: #006A84;
+  --qa-color-brand-700: #005870;
+  --qa-color-brand-800: #00465a;
+  --qa-color-brand-900: #003545;
+  --qa-color-brand-950: #00222e;
+  --qa-radius-sm: 6px;
+  --qa-radius-md: 10px;
+  --qa-radius-lg: 12px;
+  --qa-space-1: 4px;
+  --qa-space-2: 8px;
+  --qa-space-3: 12px;
+  --qa-space-4: 16px;
+  --qa-space-5: 20px;
+  --qa-space-6: 24px;
+  --qa-space-8: 32px;
+  --qa-space-10: 40px;
+  --qa-space-12: 48px;
+  --qa-font-sans: "PingFang SC", "Microsoft YaHei UI", "Source Han Sans SC", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --qa-font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --qa-shadow-sm: 0 1px 2px rgba(15, 20, 27, 0.06);
+  --qa-shadow-md: 0 4px 12px rgba(15, 20, 27, 0.10);
+  --qa-motion-fast: 120ms;
+  --qa-motion-base: 160ms;
+  --qa-motion-slow: 200ms;
+  --qa-size-touch-target: 44px;
+  --qa-size-appbar-height: 48px;
+  --qa-bp-tablet: 768px;
+  --qa-bp-desktop: 1024px;
+  --qa-color-bg: #ffffff;
+  --qa-color-surface: #ffffff;
+  --qa-color-surface-muted: #f6f7f9;
+  --qa-color-text: #181d26;
+  --qa-color-text-muted: #4b5563;
+  --qa-color-border: #dddddd;
+  --qa-color-accent: #006A84;
+  --qa-color-accent-hover: #005870;
+  --qa-color-accent-contrast: #ffffff;
+  --qa-color-focus: #006A84;
+  --qa-color-success: #166534;
+  --qa-color-success-bg: #dcfce7;
+  --qa-color-warning: #92400e;
+  --qa-color-warning-bg: #fef3c7;
+  --qa-color-danger: #b91c1c;
+  --qa-color-danger-bg: #fee2e2;
+  --qa-color-info: #1d4ed8;
+  --qa-color-info-bg: #dbeafe;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --qa-color-bg: #0f141b;
+  --qa-color-surface: #171d27;
+  --qa-color-surface-muted: #1f2733;
+  --qa-color-text: #e6e9ef;
+  --qa-color-text-muted: #a3adbd;
+  --qa-color-border: #2f3948;
+  --qa-color-accent: #5fccd5;
+  --qa-color-accent-hover: #a5dee8;
+  --qa-color-accent-contrast: #00222e;
+  --qa-color-focus: #5fccd5;
+  --qa-color-success: #86efac;
+  --qa-color-success-bg: #14301f;
+  --qa-color-warning: #fcd34d;
+  --qa-color-warning-bg: #3a2a0a;
+  --qa-color-danger: #fca5a5;
+  --qa-color-danger-bg: #3b1414;
+  --qa-color-info: #93c5fd;
+  --qa-color-info-bg: #13243f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --qa-motion-fast: 0ms;
+    --qa-motion-base: 0ms;
+    --qa-motion-slow: 0ms;
+  }
+}

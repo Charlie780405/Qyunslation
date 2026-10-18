@@ -56,5 +56,8 @@
 | **PLAN-074** | [PLAN-074-author-terms-qa](./PLAN-074-author-terms-qa/) | **作者保护、单位审校、术语 QA 闭环与乱码门禁（074a–074d）** |
 | **PLAN-075** | [PLAN-075-073-074-closeout](./PLAN-075-073-074-closeout/) | **073/074 收口、部署门禁、真件回归与评测真实化（075a–075e）** |
 | **PLAN-076** | [PLAN-076-ad-bilingual-prompt-quality-system](./PLAN-076-ad-bilingual-prompt-quality-system/) | **AD 中英双向专业提示词、术语与质量门禁（076a–076h）** |
+| **PLAN-077** | [PLAN-077-qyunsapps-platform-adoption](./PLAN-077-qyunsapps-platform-adoption/) | **接入 QyunsApps 平台控制面：身份/边缘归属、统一 UI、数据面加固与 Authentik 迁出**（T1–T5 仓库侧已实施，见 WT-077） |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
+
+下一个可用父计划编号：**PLAN-078**。创建前须同时检查所有 worktree，避免未合并计划占号。
