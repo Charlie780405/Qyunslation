@@ -6,6 +6,7 @@ import os
 import re
 import json
 import hashlib
+import logging
 import mimetypes
 import shutil
 import uuid
@@ -71,10 +72,23 @@ PREF_DEFAULTS = {
         "bilingual": True,
         "classification": "internal",
         "domainProfile": "general",
+        "modelProfileId": "internal-qwen-quality",
     },
 }
 WORKBENCH_PREF_KEYS = frozenset(
-    {"sourceLanguage", "targetLanguage", "profile", "bilingual", "classification", "domainProfile"}
+    {
+        "sourceLanguage",
+        "targetLanguage",
+        "profile",
+        "bilingual",
+        "classification",
+        "domainProfile",
+        "modelProfileId",
+    }
+)
+# Mirrors the profiles the workbench UI offers; AD additionally allows 医学研究文献.
+WORKBENCH_DOCUMENT_PROFILES = frozenset(
+    {"临床研究文档", "监管申报材料", "通用医药文档", "医学研究文献"}
 )
 UPLOAD_SESSION_TTL_HOURS = 24
 UPLOAD_CHUNK_MAX_BYTES = 8 * 1024 * 1024
@@ -133,6 +147,7 @@ async def _stream_upload_limited(upload: UploadFile, target: Path) -> tuple[str,
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 router = APIRouter(prefix="/api/v1", tags=["API v1"])
+logger = logging.getLogger(__name__)
 
 
 class ProjectCreate(BaseModel):
@@ -434,8 +449,15 @@ def _safe_workbench_preferences(raw: dict[str, Any] | None) -> dict[str, Any]:
         merged["classification"] = "internal"
     if merged.get("domainProfile") not in {"general", "ad"}:
         merged["domainProfile"] = "general"
-    if merged["profile"] not in {"临床研究文档", "监管申报材料", "通用医药文档"}:
+    if merged["profile"] not in WORKBENCH_DOCUMENT_PROFILES:
         merged["profile"] = PREF_DEFAULTS["workbench"]["profile"]
+    if merged["domainProfile"] != "ad" and merged["profile"] == "医学研究文献":
+        merged["profile"] = PREF_DEFAULTS["workbench"]["profile"]
+    from qyunslation.pipeline.model_profiles import PROFILES
+
+    model = PROFILES.get(str(merged.get("modelProfileId") or ""))
+    if model is None or model.role != "translator":
+        merged["modelProfileId"] = PREF_DEFAULTS["workbench"]["modelProfileId"]
     merged["bilingual"] = bool(merged.get("bilingual"))
     return merged
 
@@ -963,10 +985,24 @@ def delete_preflight(
     record = session.get(PreflightRecord, preflight_id)
     if record is None or record.tenant_id != tenant.id or record.actor_sub != identity.user_sub:
         raise HTTPException(status_code=404, detail="preflight not found")
+    # runs reference the preflight with ON DELETE CASCADE; deleting it here would
+    # silently remove every task (and its review evidence) built on this source file.
+    in_use = session.scalar(
+        select(TranslationRunRecord.id).where(TranslationRunRecord.preflight_id == record.id).limit(1)
+    )
+    if in_use is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PREFLIGHT_IN_USE",
+                "message": "该预检已被翻译任务引用，请删除任务而不是预检",
+                "run_id": in_use,
+            },
+        )
     path = _preflight_path(record)
-    if path.is_file():
-        path.unlink()
     session.delete(record)
+    session.commit()
+    _unlink_quietly([path])
     return Response(status_code=204)
 
 
@@ -1740,6 +1776,18 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
     return run
 
 
+def _run_writable(session: Session, *, run_id: str, identity: IdentityContext) -> TranslationRunRecord:
+    """Visibility is not authority: only the submitter or an administrator may rename,
+    archive, restore, cancel or delete a task. Reviewers keep read/review access."""
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    if run.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"admin", "owner"}:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "RUN_OWNER_REQUIRED", "message": "仅任务提交人或管理员可以修改、归档、取消或删除该任务"},
+        )
+    return run
+
+
 async def _start_legacy_translation(
     *,
     service: Any,
@@ -1981,6 +2029,35 @@ async def _launch_translation_run(
         touch_run_heartbeat(session, run)
 
 
+def _run_config_digest(
+    *,
+    preflight_id: str,
+    direction: str,
+    profile: str,
+    domain_profile: str,
+    bilingual: bool,
+    classification: str,
+    model_profile_id: str | None,
+    term_model_profile_id: str | None,
+) -> str:
+    """Stable digest of every request field that shapes a run (see create_translation_run)."""
+    canonical = json.dumps(
+        {
+            "preflight_id": preflight_id,
+            "direction": direction,
+            "profile": profile,
+            "domain_profile": domain_profile,
+            "bilingual": bool(bilingual),
+            "classification": classification,
+            "model_profile_id": model_profile_id or "",
+            "term_model_profile_id": term_model_profile_id or "",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 @router.post("/translation-runs", status_code=201)
 async def create_translation_run(
     body: TranslationRunCreateBody,
@@ -2013,37 +2090,6 @@ async def create_translation_run(
         raise HTTPException(status_code=400, detail="invalid Idempotency-Key")
     key_material = f"{key}|domain_profile={domain_profile}"
     key_hash = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
-    existing = session.scalar(
-        select(TranslationRunRecord).where(
-            TranslationRunRecord.tenant_id == tenant.id,
-            TranslationRunRecord.idempotency_key_hash == key_hash,
-        )
-    )
-    if existing is not None:
-        existing_domain = str((existing.settings_snapshot or {}).get("domain_profile") or "general").casefold()
-        if existing_domain != domain_profile:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "IDEMPOTENCY_PROFILE_MISMATCH", "message": "Idempotency-Key 已用于不同 domain_profile"},
-            )
-        return _translation_run_dict(session, existing)
-    # (preflight_id, generation) is unique; a second run for the same preflight
-    # must surface as a conflict rather than an IntegrityError 500.
-    occupied = session.scalar(
-        select(TranslationRunRecord).where(
-            TranslationRunRecord.preflight_id == preflight.id,
-            TranslationRunRecord.generation == 1,
-        )
-    )
-    if occupied is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "PREFLIGHT_ALREADY_RUN",
-                "message": "该预检已创建翻译任务，请重新预检后再翻译",
-                "run_id": occupied.id,
-            },
-        )
     from qyunslation.pipeline.model_profiles import validate_selection
 
     classification = (
@@ -2066,6 +2112,56 @@ async def create_translation_run(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # The Idempotency-Key only names a request; this digest binds it to every setting
+    # that shapes the run, so a changed model, classification, language or output mode
+    # can never be answered with an earlier run that used different settings.
+    config_digest = _run_config_digest(
+        preflight_id=preflight.id,
+        direction=direction,
+        profile=body.profile,
+        domain_profile=domain_profile,
+        bilingual=body.bilingual,
+        classification=classification,
+        model_profile_id=model_profile_id,
+        term_model_profile_id=body.term_model_profile_id,
+    )
+    existing = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.tenant_id == tenant.id,
+            TranslationRunRecord.idempotency_key_hash == key_hash,
+        )
+    )
+    if existing is not None:
+        existing_snapshot = existing.settings_snapshot or {}
+        recorded = existing_snapshot.get("config_digest")
+        existing_domain = str(existing_snapshot.get("domain_profile") or "general").casefold()
+        if (recorded and recorded != config_digest) or (not recorded and existing_domain != domain_profile):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IDEMPOTENCY_CONFIG_MISMATCH",
+                    "message": "该请求编号已用于不同的翻译参数，请重新确认参数后再提交",
+                    "run_id": existing.id,
+                },
+            )
+        return _translation_run_dict(session, existing)
+    # (preflight_id, generation) is unique; a second run for the same preflight
+    # must surface as a conflict rather than an IntegrityError 500.
+    occupied = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.preflight_id == preflight.id,
+            TranslationRunRecord.generation == 1,
+        )
+    )
+    if occupied is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PREFLIGHT_ALREADY_RUN",
+                "message": "该预检已创建翻译任务，请重新预检后再翻译",
+                "run_id": occupied.id,
+            },
+        )
     from qyunslation.glossary.termbase import runtime_termbase_version
     from qyunslation.pipeline import resolve_pipeline_mode
     from qyunslation.pipeline.run_snapshot import build_run_model_snapshot
@@ -2127,6 +2223,10 @@ async def create_translation_run(
             "ad_prompt_text": ad_prompt_text,
             "semantic_qa_mode": (os.environ.get("QYUNSLATION_AD_SEMANTIC_QA_MODE") or "shadow").strip().casefold(),
             "bilingual": body.bilingual,
+            # Only the PDF executor can emit a source/translation pair; other formats
+            # always produce the translation alone, and the snapshot must say so.
+            "bilingual_effective": bool(body.bilingual) and preflight.source_format.casefold() == "pdf",
+            "config_digest": config_digest,
             "auto_ocr_workaround": True,
             "document_classification": classification,
             "model_profile_id": model_profile_id,
@@ -2230,7 +2330,7 @@ def patch_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_owned(session, run_id=run_id, identity=identity)
+    run = _run_writable(session, run_id=run_id, identity=identity)
     changes: dict[str, Any] = {}
     if body.display_name is not None:
         clean_name = body.display_name.strip()
@@ -2262,7 +2362,7 @@ def restore_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_owned(session, run_id=run_id, identity=identity)
+    run = _run_writable(session, run_id=run_id, identity=identity)
     run.archived_at = None
     run.archived_by = None
     record_audit(
@@ -2280,11 +2380,14 @@ def delete_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> Response:
-    run = _run_owned(session, run_id=run_id, identity=identity)
+    run = _run_writable(session, run_id=run_id, identity=identity)
     _refresh_translation_run(session, run)
     if run.status not in _RUN_TERMINAL:
         raise HTTPException(status_code=409, detail="only terminal translation runs can be deleted")
 
+    # Files are removed only after the database transaction commits: a failed commit
+    # must never leave rows that point at files that are already gone.
+    doomed_files: list[Path] = []
     artifacts = list(
         session.scalars(
             select(TranslationArtifact).where(
@@ -2294,9 +2397,7 @@ def delete_translation_run(
         )
     )
     for artifact in artifacts:
-        path = _artifact_path(artifact)
-        if path.is_file():
-            path.unlink()
+        doomed_files.append(_artifact_path(artifact))
         session.delete(artifact)
 
     preflight = session.get(PreflightRecord, run.preflight_id)
@@ -2308,19 +2409,57 @@ def delete_translation_run(
         )
         .limit(1)
     )
-    if preflight is not None and sibling is None:
-        path = _preflight_path(preflight)
-        if path.is_file():
-            path.unlink()
+    preflight_removed = preflight is not None and sibling is None
+    if preflight_removed:
+        doomed_files.append(_preflight_path(preflight))
         session.delete(preflight)
+
+    # ReviewDecision rows cascade with the run; keep their substance in the audit log.
+    decisions = list(
+        session.scalars(
+            select(ReviewDecision)
+            .where(ReviewDecision.run_id == run.id)
+            .order_by(ReviewDecision.created_at)
+        )
+    )
+    run_id_value = run.id
     session.delete(run)
     record_audit(
         session,
         actor_sub=identity.user_sub,
         action="translation_run.delete",
-        extra={"run_id": run_id},
+        extra={
+            "run_id": run_id_value,
+            "generation": run.generation,
+            "status": run.status,
+            "quality_state": run.quality_state,
+            "preflight_removed": preflight_removed,
+            "review_decisions": [
+                {
+                    "generation": row.generation,
+                    "decision": row.decision,
+                    "user_id": row.user_id,
+                    "comment": row.comment,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in decisions
+            ],
+        },
     )
+    session.commit()
+    _unlink_quietly(doomed_files)
     return Response(status_code=204)
+
+
+def _unlink_quietly(paths: list[Path]) -> None:
+    """Best-effort file cleanup after a committed delete; leftovers are orphan-GC work
+    (scripts/plan072-gc-orphans.py) and must not turn a completed delete into an error."""
+    for path in paths:
+        try:
+            if path.is_file():
+                path.unlink()
+        except Exception:
+            logger.warning("could not remove file after delete: %s", path, exc_info=True)
 
 
 @router.get("/translation-runs/{run_id}/artifacts")
@@ -2962,7 +3101,7 @@ async def cancel_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_owned(session, run_id=run_id, identity=identity)
+    run = _run_writable(session, run_id=run_id, identity=identity)
     _refresh_translation_run(session, run)
     if run.status in _RUN_TERMINAL:
         return _translation_run_dict(session, run)
