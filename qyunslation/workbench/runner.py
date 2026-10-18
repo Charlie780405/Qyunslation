@@ -265,6 +265,10 @@ def build_pdf2zh_command(
         command.append("--ocr-workaround")
     if options.get("disable_rich_text_translate") is True:
         command.append("--disable-rich-text-translate")
+    # The workbench's "source/translation pair" option; absent means the CLI default
+    # (both outputs), so legacy snapshots keep their behaviour.
+    if options.get("bilingual") is False:
+        command.append("--no-dual")
     command.append(str(input_path))
     return command
 

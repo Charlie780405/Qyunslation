@@ -229,7 +229,7 @@ def test_translation_run_rejects_same_source_and_target_language(client):
 def test_translation_run_cannot_be_deleted_while_active(client, monkeypatch):
     from qyunslation.api import v1 as api_v1_module
 
-    async def leave_running(*, run, preflight, target_language):
+    async def leave_running(*, run, preflight, target_language, **_kwargs):
         run.status = "translating"
         run.stage = "text"
 

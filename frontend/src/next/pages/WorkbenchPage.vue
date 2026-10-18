@@ -29,11 +29,19 @@
             <span class="qy-inline-hint"><span v-if="workbenchState.domainProfile === 'ad'" class="qy-status-badge is-pending" role="status">AD 内部测试版</span>AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
           </div>
           <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
-          <label class="qy-dropzone" :class="{ 'is-selected': selectedFile }" for="workbench-file">
-            <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" accept=".pdf,.docx,.pptx,.txt,.md" @change="selectFile" />
+          <label
+            class="qy-dropzone"
+            :class="{ 'is-selected': selectedFile, 'is-dragging': dragging }"
+            for="workbench-file"
+            @dragenter.prevent="onDragOver"
+            @dragover.prevent="onDragOver"
+            @dragleave="onDragLeave"
+            @drop.prevent="onDrop"
+          >
+            <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" :accept="ACCEPT_ATTRIBUTE" @change="selectFile" />
             <DocumentArrowUpIcon aria-hidden="true" />
             <strong>{{ selectedFile ? selectedFile.name : '拖放文件到这里，或点击选择' }}</strong>
-            <span>{{ selectedFile ? formatSize(selectedFile.size) : '支持 PDF、DOCX、PPTX、TXT、Markdown' }}</span>
+            <span>{{ selectedFile ? formatSize(selectedFile.size) : '支持 PDF、DOCX、PPTX、TXT、Markdown、PNG、JPG' }}</span>
           </label>
           <div v-if="uploadMessage" class="qy-callout" :class="uploadError ? 'qy-callout-warning' : 'qy-callout-info'" role="status">
             <InformationCircleIcon aria-hidden="true" /><span>{{ uploadMessage }}</span>
@@ -143,7 +151,8 @@
           <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification" @change="refreshModelProfiles"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
           <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in modelProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
           <p v-if="selectedModelProfile" class="qy-muted">外发范围：{{ egressLabel(selectedModelProfile) }}</p>
-          <label class="qy-check-field"><input v-model="workbenchState.bilingual" type="checkbox" /><span>生成源译对照稿</span></label>
+          <label class="qy-check-field"><input v-model="workbenchState.bilingual" data-field="bilingual" type="checkbox" :disabled="!bilingualSupported" /><span>生成源译对照稿</span></label>
+          <p v-if="!bilingualSupported" class="qy-muted">仅 PDF 支持源译对照；当前格式只输出译文。</p>
         </div>
       </aside>
     </div>
@@ -194,6 +203,10 @@ const showArchived = ref(false);
 let pollTimer;
 let pollRequest = 0;
 
+// Keep in step with PREFLIGHT_ALLOWED_EXTENSIONS in qyunslation/api/v1.py.
+const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg'];
+const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',');
+const dragging = ref(false);
 const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
 const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
@@ -206,6 +219,13 @@ const documentProfileOptions = computed(() =>
   workbenchState.domainProfile === 'ad' ? AD_DOCUMENT_PROFILES : GENERAL_DOCUMENT_PROFILES,
 );
 const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
+// Only the PDF executor can emit a source/translation pair (see bilingual_effective on the server).
+const currentFormat = computed(() => {
+  if (preflight.value?.format) return String(preflight.value.format).toLowerCase();
+  const name = selectedFile.value?.name || '';
+  return name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+});
+const bilingualSupported = computed(() => !currentFormat.value || currentFormat.value === 'pdf');
 const modelProfiles = ref([]);
 const selectedModelProfile = computed(
   () => modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId) || null,
@@ -222,7 +242,9 @@ function buildIdempotencyKey() {
     workbenchState.targetLanguage,
     workbenchState.profile,
     workbenchState.domainProfile,
-    workbenchState.bilingual ? '1' : '0',
+    workbenchState.classification,
+    workbenchState.modelProfileId,
+    workbenchState.bilingual && bilingualSupported.value ? '1' : '0',
   ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
 }
 
@@ -308,12 +330,50 @@ function progressText(run) {
   return run?.progress === null || run?.progress === undefined ? '处理中，进度计算中' : `${run.progress}%`;
 }
 
-function selectFile(event) {
-  selectedFile.value = event.target.files?.[0] || null;
+function applyFile(file, notice = '') {
+  selectedFile.value = file;
   preflight.value = null;
   uploadProgress.value = 0;
-  uploadMessage.value = selectedFile.value ? '文件已选择，点击“开始预检”查看结构和风险。' : '';
+  uploadMessage.value = file ? `${notice}文件已选择，点击“开始预检”查看结构和风险。` : '';
   uploadError.value = false;
+}
+
+function selectFile(event) {
+  applyFile(event.target.files?.[0] || null);
+}
+
+function hasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files');
+}
+
+function onDragOver(event) {
+  if (hasFiles(event)) dragging.value = true;
+}
+
+function onDragLeave(event) {
+  // Moving between the zone's children fires dragleave on the zone; only clear
+  // the highlight when the pointer really left it.
+  if (event.currentTarget?.contains?.(event.relatedTarget)) return;
+  dragging.value = false;
+}
+
+function onDrop(event) {
+  dragging.value = false;
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (!files.length) return;
+  const file = files[0];
+  const extension = file.name.includes('.') ? `.${file.name.split('.').pop().toLowerCase()}` : '';
+  if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+    uploadError.value = true;
+    uploadMessage.value = `不支持的文件格式“${extension || file.name}”。请使用 PDF、DOCX、PPTX、TXT、Markdown、PNG 或 JPG。`;
+    return;
+  }
+  applyFile(file, files.length > 1 ? '一次只能处理一个文件，已使用第一个。' : '');
+}
+
+// A file dropped outside the zone must not navigate the tab away to the file.
+function ignoreStrayFileDrop(event) {
+  if (hasFiles(event)) event.preventDefault();
 }
 
 function formatSize(bytes) {
@@ -370,7 +430,7 @@ async function startTranslation() {
       target_language: workbenchState.targetLanguage,
       profile: workbenchState.profile,
       domain_profile: workbenchState.domainProfile,
-      bilingual: workbenchState.bilingual,
+      bilingual: workbenchState.bilingual && bilingualSupported.value,
       document_classification: workbenchState.classification,
       model_profile_id: workbenchState.modelProfileId,
     }, key);
@@ -501,6 +561,8 @@ async function deleteRun(run) {
 }
 
 onMounted(async () => {
+  window.addEventListener('dragover', ignoreStrayFileDrop);
+  window.addEventListener('drop', ignoreStrayFileDrop);
   await sessionStore.load();
   await restoreWorkbenchSession(sessionStore.user);
   await refreshModelProfiles();
@@ -528,5 +590,9 @@ watch(
 watch(showArchived, refreshRuns);
 watch(() => workbenchState.classification, refreshModelProfiles);
 watch(workbenchState, () => scheduleWorkbenchPreferenceSave(), { deep: true });
-onUnmounted(() => window.clearTimeout(pollTimer));
+onUnmounted(() => {
+  window.clearTimeout(pollTimer);
+  window.removeEventListener('dragover', ignoreStrayFileDrop);
+  window.removeEventListener('drop', ignoreStrayFileDrop);
+});
 </script>

@@ -74,6 +74,7 @@
 .qy-panel-status { color: var(--qy-text-secondary); font-size: 12px; white-space: nowrap; }
 .qy-dropzone { min-height: 188px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; border: 1px dashed #A9C1CB; border-radius: var(--qy-radius-panel); color: var(--qy-text-secondary); background: #F8FBFC; text-align: center; cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
 .qy-dropzone:hover, .qy-dropzone.is-selected { border-color: var(--qy-interactive); background: #F0F7F9; }
+.qy-dropzone.is-dragging { border-style: solid; border-color: var(--qy-interactive); background: #E3F1F5; }
 .qy-dropzone > svg { width: 32px; height: 32px; color: var(--qy-interactive); }
 .qy-dropzone strong { color: var(--qy-text-primary); font-size: 14px; }
 .qy-dropzone span { font-size: 12px; }
