@@ -35,6 +35,7 @@ from qyunslation.persist.models import (
     DocumentTermCandidate,
     Job,
     PreflightRecord,
+    QaDisposition,
     QaItem,
     ReviewDecision,
     ReviewDraft,
@@ -1496,6 +1497,149 @@ def _maybe_run_auto_qa(
     _run_qa_pass(session, run, runner_state, trigger="auto")
 
 
+_CLOSING_ACTIONS = frozenset(
+    {"grant_waiver", "revoke_waiver", "confirm_false_positive", "reject_false_positive", "acknowledge"}
+)
+_CLOSED_BY = frozenset({"grant_waiver", "confirm_false_positive", "acknowledge"})
+_QA_GATE_STATES = frozenset({"qa_blocked", "review_ready", "qa_degraded", "qa_unavailable"})
+
+
+def _current_output_digest(session: Session, run: TranslationRunRecord) -> str | None:
+    """Digest of the output the run's current verdict was produced for."""
+    from qyunslation.persist.models import QaCheckRound
+
+    return session.scalar(
+        select(QaCheckRound.artifact_digest)
+        .where(
+            QaCheckRound.run_id == run.id,
+            QaCheckRound.generation == run.generation,
+            QaCheckRound.status == "succeeded",
+        )
+        .order_by(QaCheckRound.round_no.desc())
+        .limit(1)
+    )
+
+
+def _qa_dispositions_by_fingerprint(
+    session: Session, run: TranslationRunRecord
+) -> dict[str, list[QaDisposition]]:
+    rows = session.scalars(
+        select(QaDisposition)
+        .where(QaDisposition.run_id == run.id, QaDisposition.generation == run.generation)
+        .order_by(QaDisposition.created_at, QaDisposition.id)
+    )
+    grouped: dict[str, list[QaDisposition]] = {}
+    for row in rows:
+        grouped.setdefault(row.fingerprint, []).append(row)
+    return grouped
+
+
+def _effective_item_state(
+    history: list[QaDisposition], digest: str | None
+) -> dict[str, Any]:
+    """What the dispositions say about one finding *for the current output*.
+
+    Only dispositions made against the same output count; an exception granted for earlier
+    output never silently covers different output.
+    """
+    valid = [row for row in history if row.artifact_digest == digest]
+    closing = next((row for row in reversed(valid) if row.action in _CLOSING_ACTIONS), None)
+    report = next((row for row in reversed(valid) if row.action == "report_false_positive"), None)
+    closed = closing is not None and closing.action in _CLOSED_BY
+    pending_report = (
+        report is not None and not closed and (closing is None or closing.created_at < report.created_at)
+    )
+    if closed:
+        status = {
+            "grant_waiver": "waived",
+            "confirm_false_positive": "false_positive_confirmed",
+            "acknowledge": "acknowledged",
+        }[closing.action]
+    elif pending_report:
+        status = "false_positive_reported"
+    else:
+        status = "open"
+    last = valid[-1] if valid else None
+    return {
+        "status": status,
+        "closed": closed,
+        "pending_report": report if pending_report else None,
+        "last": last,
+        "closing": closing,
+        "previous": bool(history) and not valid,
+    }
+
+
+def _reconcile_with_dispositions(session: Session, run: TranslationRunRecord) -> None:
+    """Recompute what is still open after a check or a disposition, and the verdict that follows.
+
+    ``qa_summary.blocker`` stays what the checker found; ``open_blocker`` is what still stands
+    between the run and delivery once valid dispositions are applied. The delivery gate reads
+    the latter. Nothing here deletes or edits a finding.
+    """
+    session.flush()
+    items = list(
+        session.scalars(
+            select(QaItem).where(
+                QaItem.run_id == run.id,
+                QaItem.generation == run.generation,
+                QaItem.is_current.is_(True),
+            )
+        )
+    )
+    digest = _current_output_digest(session, run)
+    grouped = _qa_dispositions_by_fingerprint(session, run)
+    open_blockers = waived = confirmed = acknowledged = unavailable = 0
+    for item in items:
+        state = _effective_item_state(grouped.get(_item_fingerprint(item), []), digest)
+        if item.severity == "blocker":
+            if state["closed"]:
+                waived += state["status"] == "waived"
+                confirmed += state["status"] == "false_positive_confirmed"
+            else:
+                open_blockers += 1
+        elif item.severity == "unavailable":
+            unavailable += 1
+        elif item.severity == "warning" and state["status"] == "acknowledged":
+            acknowledged += 1
+    summary = dict(run.qa_summary or {})
+    summary.update(
+        {"open_blocker": open_blockers, "waived": waived, "false_positive_confirmed": confirmed,
+         "acknowledged": acknowledged}
+    )
+    run.qa_summary = summary
+    if run.status != "gated" or (run.quality_state or "draft") not in _QA_GATE_STATES:
+        return
+    semantic_degraded = bool((run.term_summary or {}).get("semantic_degraded")) or any(
+        item.code == "AD_QA_DEGRADED" for item in items
+    )
+    if open_blockers:
+        new_state = "qa_blocked"
+    elif unavailable:
+        new_state = "qa_unavailable"
+    elif semantic_degraded:
+        new_state = "qa_degraded"
+    else:
+        new_state = "review_ready"
+    if new_state != run.quality_state:
+        run.quality_state = new_state
+        run.stage = _GATE_STAGE_BY_QUALITY.get(new_state, run.stage)
+        run.updated_at = datetime.now(timezone.utc)
+        try:
+            from qyunslation.pipeline.event_store import persist_buffer
+            from qyunslation.pipeline.events import StageEventBuffer
+
+            buf = StageEventBuffer()
+            if new_state == "review_ready":
+                buf.emit("qa", "completed", message="质量问题已处理完毕，无未处理的阻断项", progress=100.0)
+                buf.emit("review", "running", message="等待人工审校")
+            elif new_state == "qa_blocked":
+                buf.emit("qa", "blocked", message=f"仍有 {open_blockers} 项阻断问题未处理", progress=100.0)
+            persist_buffer(session, run_id=run.id, generation=run.generation, buffer=buf)
+        except Exception:
+            pass
+
+
 class StaleQaResult(Exception):
     """The output being checked changed while the check ran; its verdict must not be stored."""
 
@@ -1723,6 +1867,8 @@ def _run_qa_pass(
     run.quality_state = quality_state_from_findings(findings, semantic_degraded=semantic_degraded)
     run.stage = _GATE_STAGE_BY_QUALITY.get(run.quality_state, "review")
     run.updated_at = datetime.now(timezone.utc)
+    # Dispositions made against this same output (waivers, confirmed false positives) still apply.
+    _reconcile_with_dispositions(session, run)
     try:
         from qyunslation.pipeline.event_store import persist_buffer
         from qyunslation.pipeline.events import StageEventBuffer
@@ -2041,7 +2187,9 @@ def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
         .order_by(TranslationRunRecord.generation.desc())
         .limit(1)
     )
-    qa_blockers = int((run.qa_summary or {}).get("blocker") or 0)
+    summary = run.qa_summary or {}
+    # PLAN-078b: findings closed by a valid disposition no longer block; raw counts stay visible.
+    qa_blockers = int(summary["open_blocker"] if "open_blocker" in summary else (summary.get("blocker") or 0))
     extraction_degraded = (
         str((run.term_summary or {}).get("extraction_status") or "").casefold() == "degraded"
     )
@@ -3298,10 +3446,18 @@ def list_translation_run_events(
     return {"items": [event_to_dict(row) for row in rows], "generation": run.generation}
 
 
-def _qa_item_payload(row: QaItem) -> dict[str, Any]:
+def _qa_item_payload(
+    row: QaItem,
+    *,
+    history: list[QaDisposition] | None = None,
+    digest: str | None = None,
+    viewer: tuple[str, str] | None = None,
+    run: TranslationRunRecord | None = None,
+) -> dict[str, Any]:
     from qyunslation.pipeline.qa import registry
 
     info = registry.rule_for(row.code)
+    rule_class = row.rule_class or info.rule_class
     location = dict(row.location_json or {})
     location.setdefault("anchors", [])
     if not location["anchors"]:
@@ -3309,6 +3465,12 @@ def _qa_item_payload(row: QaItem) -> dict[str, Any]:
             "unlocatable_reason",
             info.unlocatable_reason if info.locatable == "none" else "检查没有返回具体位置",
         )
+    history = history or []
+    state = _effective_item_state(history, digest)
+    last = state["last"]
+    allowed: list[str] = []
+    if viewer is not None and run is not None and run.status == "gated" and (run.quality_state or "draft") in _QA_GATE_STATES:
+        allowed = registry.allowed_actions(rule_class, viewer[1], is_writer=run.actor_sub == viewer[0])
     return {
         "id": row.id,
         "category": row.category,
@@ -3317,16 +3479,33 @@ def _qa_item_payload(row: QaItem) -> dict[str, Any]:
         "message": row.message,
         "object_id": row.object_id,
         "evidence": row.evidence_json,
-        "resolved": row.resolved,
+        "resolved": bool(state["closed"] or row.resolved),
         "title": info.title,
         "why": info.why,
         "how": info.how,
-        "rule_class": row.rule_class or info.rule_class,
+        "rule_class": rule_class,
         "fingerprint": _item_fingerprint(row),
         "location": location,
         "round_id": row.round_id,
         "is_current": bool(row.is_current),
         "batchable": info.batchable,
+        "status": state["status"],
+        "previous_disposition": state["previous"],
+        "disposition": _disposition_dict(last) if last is not None else None,
+        "history": [_disposition_dict(h) for h in history],
+        "allowed_dispositions": allowed,
+    }
+
+
+def _disposition_dict(row: QaDisposition) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "action": row.action,
+        "reason": row.reason,
+        "actor_sub": row.actor_sub,
+        "actor_role": row.actor_role,
+        "self_review": bool(row.self_review),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
@@ -3364,12 +3543,200 @@ def list_qa_items(
     if not include_history:
         stmt = stmt.where(QaItem.is_current.is_(True))
     rows = list(session.scalars(stmt.order_by(QaItem.created_at)))
+    grouped = _qa_dispositions_by_fingerprint(session, run)
+    digest = _current_output_digest(session, run)
+    viewer = (identity.user_sub, _cached_role(session, identity))
     return {
-        "items": [_qa_item_payload(row) for row in rows],
+        "items": [
+            _qa_item_payload(
+                row,
+                history=grouped.get(_item_fingerprint(row), []),
+                digest=digest,
+                viewer=viewer,
+                run=run,
+            )
+            for row in rows
+        ],
         "summary": run.qa_summary or {},
         "quality_state": run.quality_state,
         "check": _qa_check_info(session, run),
     }
+
+
+class QaDispositionBody(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    reason: str = Field(default="", max_length=1000)
+    expected_round_id: str | None = Field(default=None, max_length=36)
+
+
+class QaDispositionBatchBody(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    reason: str = Field(default="", max_length=1000)
+    item_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+def _disposition_error(status: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _apply_disposition(
+    session: Session,
+    run: TranslationRunRecord,
+    identity: IdentityContext,
+    item: QaItem | None,
+    *,
+    action: str,
+    reason: str,
+    expected_round_id: str | None = None,
+) -> QaDisposition:
+    """Record one disposition after every rule check. Raises HTTPException; writes only on success."""
+    from qyunslation.pipeline.qa import registry
+
+    if item is None or item.run_id != run.id or item.generation != run.generation:
+        raise _disposition_error(404, "ITEM_NOT_FOUND", "没有找到这条质量问题")
+    if run.status != "gated" or (run.quality_state or "draft") not in _QA_GATE_STATES:
+        if run.status == "gated" and (run.quality_state or "draft") == "draft":
+            raise _disposition_error(409, "QA_CHECK_RUNNING", "质量检查正在进行，完成后才能处置")
+        raise _disposition_error(409, "NOT_AT_GATE", "任务当前不在质量闸门，不能处置质量问题")
+    if not item.is_current:
+        raise _disposition_error(409, "ITEM_SUPERSEDED", "这条问题属于旧一轮检查，请刷新后处理最新的问题")
+    if expected_round_id is not None and expected_round_id != (item.round_id or ""):
+        raise _disposition_error(409, "STALE_ROUND", "检查结果已更新，请刷新后再处置")
+    info = registry.rule_for(item.code)
+    rule_class = item.rule_class or info.rule_class
+    classes = registry.ACTION_CLASSES.get(action)
+    if classes is None:
+        raise _disposition_error(422, "UNKNOWN_ACTION", "不支持的处置动作")
+    if rule_class not in classes:
+        raise _disposition_error(
+            422, "ACTION_NOT_ALLOWED_FOR_CLASS", f"该类问题不允许此处置（{info.title}）；请按建议修复后重新检查"
+        )
+    role = _cached_role(session, identity)
+    is_writer = run.actor_sub == identity.user_sub
+    if action not in registry.allowed_actions(rule_class, role, is_writer=is_writer):
+        raise _disposition_error(403, "DISPOSITION_FORBIDDEN", "当前账号没有权限执行此处置")
+    clean_reason = (reason or "").strip()
+    if len(clean_reason) < 10:
+        raise _disposition_error(422, "REASON_REQUIRED", "请写明理由（至少 10 个字），它会被记入审计")
+
+    fingerprint = _item_fingerprint(item)
+    digest = _current_output_digest(session, run)
+    history = _qa_dispositions_by_fingerprint(session, run).get(fingerprint, [])
+    state = _effective_item_state(history, digest)
+    last = state["last"]
+    if last is not None and last.action == action and last.actor_sub == identity.user_sub:
+        return last  # repeating the same decision is a no-op, not a second record
+    if action == "confirm_false_positive":
+        pending = state["pending_report"]
+        if pending is None:
+            raise _disposition_error(409, "NO_REPORT_TO_CONFIRM", "没有待确认的误报反馈")
+        if pending.actor_sub == identity.user_sub:
+            raise _disposition_error(409, "NEEDS_SECOND_PERSON", "误报需要由反馈人以外的人确认")
+    elif action == "reject_false_positive":
+        if state["pending_report"] is None:
+            raise _disposition_error(409, "NO_REPORT_TO_REJECT", "没有待处理的误报反馈")
+    elif action == "revoke_waiver":
+        if state["closing"] is None or state["closing"].action != "grant_waiver":
+            raise _disposition_error(409, "NOTHING_TO_REVOKE", "这条问题没有可撤销的例外")
+    elif action == "grant_waiver" and state["closed"]:
+        return state["closing"]
+
+    row = QaDisposition(
+        run_id=run.id,
+        generation=run.generation,
+        fingerprint=fingerprint,
+        code=item.code,
+        rule_class=rule_class,
+        round_id=item.round_id,
+        artifact_digest=digest,
+        action=action,
+        reason=clean_reason[:1000],
+        evidence_json={"severity": item.severity, "title": info.title},
+        actor_sub=identity.user_sub,
+        actor_role=role,
+        self_review=bool(is_writer and action != "report_false_positive"),
+    )
+    session.add(row)
+    if not item.fingerprint:  # old finding: store the identity we just relied on
+        item.fingerprint, item.rule_class = fingerprint, rule_class
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="qa.disposition",
+        extra={
+            "run_id": run.id,
+            "generation": run.generation,
+            "code": item.code,
+            "rule_class": rule_class,
+            "fingerprint": fingerprint,
+            "disposition": action,
+            "self_review": row.self_review,
+        },
+    )
+    session.flush()
+    return row
+
+
+def _item_response(session: Session, run: TranslationRunRecord, item: QaItem, identity: IdentityContext) -> dict[str, Any]:
+    grouped = _qa_dispositions_by_fingerprint(session, run)
+    return _qa_item_payload(
+        item,
+        history=grouped.get(_item_fingerprint(item), []),
+        digest=_current_output_digest(session, run),
+        viewer=(identity.user_sub, _cached_role(session, identity)),
+        run=run,
+    )
+
+
+@router.post("/translation-runs/{run_id}/qa-items/{item_id}/dispositions")
+def post_qa_disposition(
+    run_id: str,
+    item_id: str,
+    body: QaDispositionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    item = session.get(QaItem, item_id)
+    _apply_disposition(
+        session, run, identity, item,
+        action=body.action, reason=body.reason, expected_round_id=body.expected_round_id,
+    )
+    _reconcile_with_dispositions(session, run)
+    return _item_response(session, run, item, identity)
+
+
+@router.post("/translation-runs/{run_id}/qa-dispositions/batch")
+def post_qa_dispositions_batch(
+    run_id: str,
+    body: QaDispositionBatchBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Apply one decision to several findings of the *same* low-risk code; each is checked alone."""
+    from qyunslation.pipeline.qa import registry
+
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    items = {item_id: session.get(QaItem, item_id) for item_id in dict.fromkeys(body.item_ids)}
+    found = [item for item in items.values() if item is not None and item.run_id == run.id]
+    codes = {item.code for item in found}
+    if len(codes) > 1:
+        raise _disposition_error(422, "MIXED_CODES", "批量处置只能针对同一类问题")
+    for code in codes:
+        if not registry.rule_for(code).batchable:
+            raise _disposition_error(422, "NOT_BATCHABLE", "这类问题必须逐项处理，不支持批量")
+    results: list[dict[str, Any]] = []
+    for item_id, item in items.items():
+        try:
+            _apply_disposition(session, run, identity, item, action=body.action, reason=body.reason)
+            results.append({"item_id": item_id, "outcome": "succeeded"})
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"code": "ERROR", "message": str(exc.detail)}
+            results.append(
+                {"item_id": item_id, "outcome": "failed", "code": detail.get("code"), "message": detail.get("message")}
+            )
+    _reconcile_with_dispositions(session, run)
+    return {"results": results}
 
 
 @router.get("/translation-runs/{run_id}/review-draft")
