@@ -8,11 +8,11 @@
             type="button"
             class="qy-qa-item"
             :aria-pressed="selectedId === keyOf(item)"
-            :aria-label="`检查 QA 项 ${item.code}：${item.message}`"
+            :aria-label="`检查 QA 项（${severityLabel(item.severity)}）${item.code}：${item.message}`"
             @click="$emit('select', selectedId === keyOf(item) ? '' : keyOf(item))"
           >
-            <strong>{{ item.severity }}</strong>
-            <span>{{ item.code }}</span>
+            <strong>{{ severityLabel(item.severity) }}</strong>
+            <span class="qy-qa-code">{{ item.code }}</span>
             <span class="qy-qa-message">{{ item.message }}</span>
             <em v-if="item.resolved" class="qy-qa-resolved">已解决</em>
           </button>
@@ -44,7 +44,7 @@
         <h3>相关 QA</h3>
         <ul class="qy-object-qa">
           <li v-for="item in matches" :key="item.id" :data-severity="item.severity">
-            <strong>{{ item.severity }}</strong> {{ item.category || '—' }} · {{ item.code }}
+            <strong>{{ severityLabel(item.severity) }}</strong> {{ item.category || '—' }} · {{ item.code }}
             <p>{{ item.message }}</p>
             <details v-if="hasEvidence(item)">
               <summary>证据</summary>
@@ -59,6 +59,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { severityLabel } from '../labels.js';
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -126,6 +127,8 @@ const detail = computed(() => {
 .qy-qa-message { flex-basis: 100%; color: #2d3744; }
 .qy-qa-resolved { color: #1c6b3a; font-style: normal; }
 li[data-severity='blocker'] strong { color: #8b1e1e; }
+li[data-severity='unavailable'] strong { color: #7a5200; }
+.qy-qa-code { color: #5b6573; font-size: .8rem; }
 .qy-object-fields { display: grid; grid-template-columns: max-content 1fr; gap: .25rem .75rem; margin: 0; }
 .qy-object-fields dt { color: #3b4452; }
 .qy-object-fields dd { margin: 0; overflow-wrap: anywhere; }

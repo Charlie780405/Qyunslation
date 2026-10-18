@@ -56,4 +56,6 @@ def test_model_profiles_filter_by_classification(client):
     resp = client.get("/api/v1/model-profiles?classification=confidential", headers=_headers())
     assert resp.status_code == 200
     ids = {item["profile_id"] for item in resp.json()["items"]}
-    assert ids == {"internal-qwen-quality"}
+    # Confidential material may use only in-house models: the translator and (PLAN-078a)
+    # the in-house term extractor; never an external one.
+    assert ids == {"internal-qwen-quality", "term-internal-qwen"}

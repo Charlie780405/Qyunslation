@@ -6,8 +6,9 @@
           <router-link class="qy-link-button" to="/workbench">← 任务列表</router-link>
           <h1>{{ run?.display_name || run?.filename || '任务详情' }}</h1>
           <p>
-            状态 {{ run?.status || '…' }} · 阶段 {{ run?.stage || '…' }} ·
-            质量 {{ run?.quality_state || 'draft' }}
+            <strong class="qy-lifecycle" :data-lifecycle="lifecycleOf(run)">{{ run ? lifecycleLabel(run) : '…' }}</strong> ·
+            阶段 {{ run ? stageLabel(run.stage) : '…' }} ·
+            质量 {{ qualityLabel(run?.quality_state) }}
             <span v-if="run?.domain_profile === 'ad'" class="qy-badge qy-ad-badge">AD 专业模式</span>
             <span v-if="run?.quality_state === 'legacy_unverified'" class="qy-badge">旧版未验证</span>
             <span v-if="run?.quality_state === 'qa_degraded'" class="qy-badge qy-status-badge is-pending">语义 QA 降级</span>
@@ -34,24 +35,36 @@
             v-if="run?.quality_state === 'review_ready'"
             class="qy-secondary-button"
             type="button"
+            :disabled="Boolean(busyAction)"
             @click="requestChanges"
           >请求修改</button>
           <button
-            v-if="run?.quality_state === 'qa_blocked'"
+            v-if="can(run, 'requalify') && ['qa_action', 'qa_unavailable'].includes(lifecycleOf(run))"
             class="qy-primary-button"
             type="button"
+            :disabled="Boolean(busyAction)"
+            :aria-busy="busyAction === 'requalify'"
             @click="requalify"
-          >重新 QA</button>
+          >{{ busyAction === 'requalify' ? '正在检查…' : '重新检查' }}</button>
           <button
-            v-if="run?.status === 'interrupted'"
+            v-if="can(run, 'resume') && run?.status === 'interrupted'"
             class="qy-primary-button"
             type="button"
+            :disabled="Boolean(busyAction)"
             @click="resumeRun"
           >从断点续跑</button>
+          <button
+            v-if="can(run, 'discard')"
+            class="qy-secondary-button"
+            type="button"
+            :disabled="Boolean(busyAction)"
+            @click="discardRun"
+          >放弃本版本</button>
           <button
             v-if="run?.quality_state === 'legacy_unverified'"
             class="qy-secondary-button"
             type="button"
+            :disabled="Boolean(busyAction)"
             @click="retryV2"
           >使用新版流水线重试</button>
           <a
@@ -71,6 +84,11 @@
         </div>
       </header>
 
+      <section v-if="lifecycleBanner" class="qy-panel qy-lifecycle-banner" :data-lifecycle="lifecycleOf(run)" aria-live="polite">
+        <strong>{{ lifecycleBanner.title }}</strong>
+        <p>{{ lifecycleBanner.body }}</p>
+      </section>
+      <p v-if="actionNotice" class="qy-panel qy-run-detail-notice" role="status">{{ actionNotice }}</p>
       <p v-if="loadError" class="qy-panel qy-run-detail-error" role="alert">
         {{ loadError }}
         <button type="button" class="qy-secondary-button" aria-label="重新加载任务详情" @click="refresh">重试</button>
@@ -164,6 +182,13 @@ import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import TermReviewPanel from '../components/TermReviewPanel.vue';
 import { useRunDetailView } from '../stores/runDetail.js';
+import {
+  can,
+  lifecycleLabel,
+  lifecycleOf,
+  qualityLabel,
+  stageLabel,
+} from '../labels.js';
 import { useSessionStore } from '../stores/session.js';
 
 const props = defineProps({ runId: { type: String, default: '' } });
@@ -188,6 +213,9 @@ const reviewError = ref('');
 const termPanelError = ref('');
 const termEnriching = ref(false);
 const reviewComment = ref('');
+const busyAction = ref('');
+const actionNotice = ref('');
+let autoSelectDone = false;
 const canManageTerms = computed(() => sessionStore.hasCapability('can_manage_terms'));
 const isRunOwner = computed(() => Boolean(
   run.value?.actor_sub && sessionStore.user?.sub && run.value.actor_sub === sessionStore.user.sub,
@@ -220,6 +248,27 @@ const formalGateMessage = computed(() => {
   return `尚有 ${gate.unresolved_term_count || 0} 条术语、${gate.unconfirmed_affiliation_count || 0} 条单位译名或 ${gate.qa_blockers || 0} 个 QA 阻断项未处理`;
 });
 
+const lifecycleBanner = computed(() => {
+  const state = lifecycleOf(run.value);
+  const pending = run.value?.pending_counts || {};
+  if (state === 'qa_unavailable') {
+    return {
+      title: '质量检查未完成',
+      body: '检查服务当时无法运行，这不代表译文有问题，也不能当作检查通过。服务恢复后请点击“重新检查”。',
+    };
+  }
+  if (state === 'qa_action') {
+    return {
+      title: `还有 ${pending.qa_blockers || 0} 个阻断问题需要处理`,
+      body: '处理方式：核对问题处的原文和译文，修正后重新翻译或由有权限的人确认；处理完成后点击“重新检查”。',
+    };
+  }
+  if (state === 'changes_requested') {
+    return { title: '已退回修改', body: '本版本已被复核人退回，请根据意见重新翻译或放弃本版本。' };
+  }
+  return null;
+});
+
 const OPEN_TERM_STATUSES = new Set(['pending', 'pending_admin', 'violation']);
 
 function visibleTermItems(items) {
@@ -243,6 +292,7 @@ async function refresh({ includeTerms = true } = {}) {
     events.value = ev.items || [];
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
+    selectFirstBlockerOnce();
     if (includeTerms) {
       try {
         await loadTerms();
@@ -295,24 +345,63 @@ async function approve() {
   }
 }
 
-async function requestChanges() {
-  await api.postReviewDecision(runId.value, { decision: 'request_changes', comment: reviewComment.value || null });
-  await refresh();
+// pending -> success/failure feedback for every action, and no double submission.
+async function runAction(name, task, { success = '', failure = '操作失败' } = {}) {
+  if (busyAction.value) return false;
+  busyAction.value = name;
+  reviewError.value = '';
+  actionNotice.value = '';
+  try {
+    await task();
+    actionNotice.value = success;
+    return true;
+  } catch (error) {
+    reviewError.value = error?.message || failure;
+    return false;
+  } finally {
+    busyAction.value = '';
+    await refresh();
+  }
 }
 
-async function resumeRun() {
-  await api.resumeRun(runId.value);
-  await refresh();
+function selectFirstBlockerOnce() {
+  if (autoSelectDone || route.query.tab !== 'qa' || view.selectedObjectId.value) return;
+  const first = qaItems.value.find((item) => item.severity === 'blocker' && !item.resolved)
+    || qaItems.value.find((item) => item.severity === 'unavailable' && !item.resolved);
+  if (!first) return;
+  autoSelectDone = true;
+  view.selectObject(first.object_id || `qa:${first.id}`);
 }
 
-async function requalify() {
-  await api.requalifyRun(runId.value);
-  await refresh();
+function requestChanges() {
+  return runAction(
+    'request_changes',
+    () => api.postReviewDecision(runId.value, { decision: 'request_changes', comment: reviewComment.value || null }),
+    { success: '已退回修改。', failure: '退回修改失败' },
+  );
 }
 
-async function retryV2() {
-  await api.retryRun(runId.value, { pipeline: 'v2' });
-  await refresh();
+function resumeRun() {
+  return runAction('resume', () => api.resumeRun(runId.value), { success: '已从断点续跑。', failure: '续跑失败' });
+}
+
+function requalify() {
+  return runAction('requalify', () => api.requalifyRun(runId.value), {
+    success: '已重新检查，结果已更新。',
+    failure: '重新检查失败',
+  });
+}
+
+function retryV2() {
+  return runAction('retry_v2', () => api.retryRun(runId.value, { pipeline: 'v2' }), {
+    success: '已用新版流水线重新提交。',
+    failure: '重试失败',
+  });
+}
+
+function discardRun() {
+  if (!window.confirm('放弃本版本后将无法继续处理其中的质量问题（审计记录会保留）。确定放弃吗？')) return false;
+  return runAction('discard', () => api.cancelRun(runId.value), { success: '已放弃本版本。', failure: '放弃失败' });
 }
 
 async function decideTerm(item, payload) {

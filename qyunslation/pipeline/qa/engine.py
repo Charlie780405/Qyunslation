@@ -9,7 +9,7 @@ from typing import Any
 @dataclass
 class QaFinding:
     category: str
-    severity: str  # blocker | warning | info
+    severity: str  # blocker | unavailable | warning | info
     code: str
     message: str
     object_id: str | None = None
@@ -138,7 +138,7 @@ def run_deterministic_qa(
 
 
 def summarize(findings: list[QaFinding]) -> dict[str, int]:
-    summary = {"blocker": 0, "warning": 0, "info": 0}
+    summary = {"blocker": 0, "unavailable": 0, "warning": 0, "info": 0}
     for item in findings:
         if item.severity in summary:
             summary[item.severity] += 1
@@ -148,6 +148,10 @@ def summarize(findings: list[QaFinding]) -> dict[str, int]:
 def quality_state_from_findings(findings: list[QaFinding], *, semantic_degraded: bool = False) -> str:
     if any(item.severity == "blocker" for item in findings):
         return "qa_blocked"
+    # The checker could not run to completion: that says nothing about the translation,
+    # so it must neither read as a quality failure nor be passed as "no problems".
+    if any(item.severity == "unavailable" for item in findings):
+        return "qa_unavailable"
     if semantic_degraded or any(item.code == "AD_QA_DEGRADED" for item in findings):
         return "qa_degraded"
     return "review_ready"

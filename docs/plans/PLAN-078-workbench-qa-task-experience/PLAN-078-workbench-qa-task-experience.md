@@ -279,6 +279,8 @@ QA 类别（由规则注册表定义）：
 | C4 术语 | `TERM_HIGH_RISK_CONFLICT`、`TERM_FORBIDDEN_TARGET`、`TERM_TARGET_MISSING`、`AD_TERM_MISSING` | 修复（术语裁决后生成修订版），或由 R/A 逐项授权例外（如上下文不适用） |
 | 警告 | `LATIN_RESIDUE`、`FALLBACK_PRESENT`、`LITERAL_MISSING_URL`；`LITERAL_MISSING_DOSE/FREQ`（D2 评估期） | 确认已阅；同代码可批量，但 DOSE/FREQ 只能逐项确认 |
 
+说明：对 `gated` 的任务，“取消”按钮不再出现，改为“放弃本版本”（接口仍是 `cancel`，状态变为 `cancelled`，质量状态保留）；上表“取消”一列对“待处理质量问题/质量检查未完成/待人工复核/已退回修改”的 `—` 应理解为“没有取消，只有放弃”。
+
 注：`LITERAL_MISSING_DOSE/FREQ` 目前是 warning（`pdf_inspect.py:79`）。按 D2，本期保持 warning，但从“可批量确认”中排除，只能逐项确认并填写理由。等 078b b9 的误报率报告出来后，再决定是否升为 C1。
 
 ## 6. 改动边界

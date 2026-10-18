@@ -18,7 +18,7 @@
         <div class="qy-panel qy-upload-panel">
           <div class="qy-panel-heading">
             <div><span class="qy-step-index">01</span><div><h2>上传文档</h2><p>先做结构预检，再决定是否开始翻译。</p></div></div>
-            <span class="qy-panel-status">尚未开始</span>
+            <span class="qy-panel-status">{{ uploadStatusLabel }}</span>
           </div>
           <div class="qy-language-fields" aria-label="翻译语言">
             <label class="qy-field"><span>源语言</span><select v-model="workbenchState.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
@@ -49,7 +49,7 @@
           <div v-if="activeRun" class="qy-live-progress" role="status" aria-live="polite">
             <div class="qy-live-progress-heading">
               <div class="qy-live-progress-title"><span class="qy-live-indicator" aria-hidden="true"></span><strong>翻译实时进度</strong></div>
-              <span>{{ displayStatus(activeRun) }}</span>
+              <span>{{ lifecycleLabel(activeRun) }}</span>
             </div>
             <div class="qy-live-progress-meta">
               <strong>{{ liveSummary(activeRun) }}</strong>
@@ -64,22 +64,14 @@
               :aria-valuenow="activeRun.progress === null || activeRun.progress === undefined ? undefined : activeRun.progress"
               :aria-valuetext="progressText(activeRun)"
             ><span :style="activeRun.progress === null || activeRun.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, activeRun.progress))}%` }"></span></div>
-            <button
-              v-if="activeRun.quality_state === 'qa_blocked' || activeRun.quality_state === 'review_ready'"
-              class="qy-link-button"
-              type="button"
-              @click="openRun(activeRun)"
-            >
-              {{ activeRun.quality_state === 'qa_blocked' ? '查看 QA 拦截项' : '进入人工复核' }}
-            </button>
           </div>
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
             <span class="qy-status-badge" :class="preflight.state === 'ready' ? 'is-ready' : 'is-pending'">{{ preflight.state === 'ready' ? '预检通过' : '需要处理' }}</span>
-            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready' || activeRun?.preflight_id === preflight.id" @click="startTranslation">
+            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready' || Boolean(runForPreflight)" @click="startTranslation">
               <ArrowPathIcon v-if="startingRun" class="qy-spin" aria-hidden="true" />
               <PlayIcon v-else aria-hidden="true" />
-              {{ startingRun ? '正在创建任务…' : activeRun?.preflight_id === preflight.id ? '翻译进行中' : '确认并开始翻译' }}
+              {{ startingRun ? '正在创建任务…' : runForPreflight ? '该文件已创建任务' : '确认并开始翻译' }}
             </button>
           </div>
           <div class="qy-panel-actions">
@@ -105,7 +97,7 @@
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
               <div class="qy-task-details">
                 <strong>{{ run.display_name || run.filename || run.file_name || '未命名文档' }}</strong>
-                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · {{ displayStatus(run) }} · {{ stageLabel(run.stage) }}<template v-if="run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
+                <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · <strong class="qy-lifecycle" :data-lifecycle="lifecycleOf(run)">{{ lifecycleLabel(run) }}</strong><template v-if="isActive(run)"> · {{ stageLabel(run.stage) }}</template><template v-if="isActive(run) && run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
                 <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ liveSummary(run) }}</span><span>{{ progressText(run) }}</span></div>
                 <div v-if="isActive(run)" class="qy-task-progress" :class="{ 'is-indeterminate': run.progress === null || run.progress === undefined }" role="progressbar" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="run.progress === null || run.progress === undefined ? undefined : run.progress" :aria-valuetext="progressText(run)"><span :style="run.progress === null || run.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
                 <div v-if="run.artifacts?.length" class="qy-task-artifacts">
@@ -113,14 +105,15 @@
                 </div>
               </div>
               <div class="qy-task-actions" @click.stop>
-                <button v-if="isActive(run)" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
-                <button v-else-if="canResume(run)" class="qy-link-button" type="button" @click="resumeRunAction(run)">续跑</button>
+                <button v-if="can(run, 'cancel')" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
+                <button v-if="entryLabel(run)" class="qy-link-button qy-task-entry" type="button" @click="openRun(run, entryTab(run))">{{ entryLabel(run) }}</button>
+                <button v-if="can(run, 'resume') && lifecycleOf(run) === 'interrupted'" class="qy-link-button" type="button" @click="resumeRunAction(run)">续跑</button>
                 <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="retryRun(run, { pipeline: 'v2' })">新版重试</button>
-                <button v-else-if="canRetry(run)" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
-                <button v-if="run.archived" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
-                <button v-else-if="isTerminal(run)" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
-                <button v-if="isTerminal(run)" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
-                <button class="qy-link-button" type="button" @click="renameRun(run)">重命名</button>
+                <button v-else-if="can(run, 'retry') && ['failed', 'cancelled'].includes(lifecycleOf(run))" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
+                <button v-if="can(run, 'restore')" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
+                <button v-else-if="can(run, 'archive')" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
+                <button v-if="can(run, 'delete')" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
+                <button v-if="can(run, 'rename')" class="qy-link-button" type="button" @click="renameRun(run)">重命名</button>
                 <ChevronRightIcon aria-hidden="true" />
               </div>
             </article>
@@ -138,10 +131,11 @@
           <span class="qy-eyebrow">TASK FLOW</span>
           <h2>真实阶段事件</h2>
           <p class="qy-muted">进度只反映服务端事件，不伪造已完成。</p>
+          <p v-if="focusRun" class="qy-muted qy-timeline-owner">当前任务：{{ focusRun.display_name || focusRun.filename || '未命名文档' }}（{{ lifecycleLabel(focusRun) }}）</p>
           <StageTimeline
             :events="activeEvents"
-            :current-stage="activeRun?.stage || ''"
-            :quality-state="activeRun?.quality_state || 'draft'"
+            :current-stage="focusRun?.stage || ''"
+            :quality-state="focusRun?.quality_state || 'draft'"
           />
         </div>
         <div v-if="showAdvanced" class="qy-panel qy-settings-card">
@@ -149,7 +143,7 @@
           <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option v-for="option in documentProfileOptions" :key="option">{{ option }}</option></select></label>
           <p v-if="workbenchState.domainProfile === 'ad'" class="qy-muted">AD 模式只支持医学研究文献与临床研究文档。</p>
           <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification" @change="refreshModelProfiles"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
-          <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in modelProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
+          <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in translatorProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
           <p v-if="selectedModelProfile" class="qy-muted">外发范围：{{ egressLabel(selectedModelProfile) }}</p>
           <label class="qy-check-field"><input v-model="workbenchState.bilingual" data-field="bilingual" type="checkbox" :disabled="!bilingualSupported" /><span>生成源译对照稿</span></label>
           <p v-if="!bilingualSupported" class="qy-muted">仅 PDF 支持源译对照；当前格式只输出译文。</p>
@@ -173,6 +167,14 @@ import {
   workbenchState,
 } from '../stores/workbench.js';
 import StageTimeline from '../components/StageTimeline.vue';
+import {
+  can,
+  isExecuting,
+  lifecycleLabel,
+  lifecycleOf,
+  stageLabel,
+  todoCount,
+} from '../labels.js';
 import {
   AdjustmentsHorizontalIcon,
   ArrowPathIcon,
@@ -207,10 +209,19 @@ let pollRequest = 0;
 const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg'];
 const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',');
 const dragging = ref(false);
-const activeStatuses = new Set(['queued', 'scanning', 'translating', 'rendering']);
-const terminalStatuses = new Set(['review_ready', 'succeeded', 'failed', 'cancelled', 'blocked', 'degraded']);
 const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
+// The side timeline always describes one explicit task: the running one, else the newest.
+const focusRun = computed(() => activeRun.value || runs.value[0] || null);
+const runForPreflight = computed(() => (
+  preflight.value ? runs.value.find((item) => item.preflight_id === preflight.value.id) || null : null
+));
+const uploadStatusLabel = computed(() => {
+  if (uploading.value) return '上传预检中';
+  if (preflight.value) return preflight.value.state === 'ready' ? '预检通过，待确认参数' : '预检发现问题';
+  if (selectedFile.value) return '待预检';
+  return '等待选择文件';
+});
 const adEnabled = computed(() => Boolean(sessionStore.user?.capabilities?.ad_enabled));
 // Mirrors SUPPORTED_AD_DOCUMENTS on the server; AD rejects any other profile with 422.
 const AD_DOCUMENT_PROFILES = ['医学研究文献', '临床研究文档'];
@@ -227,6 +238,7 @@ const currentFormat = computed(() => {
 });
 const bilingualSupported = computed(() => !currentFormat.value || currentFormat.value === 'pdf');
 const modelProfiles = ref([]);
+const translatorProfiles = computed(() => modelProfiles.value.filter((item) => !item.role || item.role === 'translator'));
 const selectedModelProfile = computed(
   () => modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId) || null,
 );
@@ -248,26 +260,9 @@ function buildIdempotencyKey() {
   ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
 }
 
-function statusLabel(status) {
-  return ({ queued: '排队中', scanning: '结构分析', translating: '翻译中', rendering: '渲染中', review_ready: '待复核', succeeded: '已完成', failed: '失败', cancelled: '已取消', blocked: '已阻断', degraded: '降级完成', interrupted: '已中断' })[status] || '待处理';
-}
-
-function displayStatus(run) {
-  if (!run) return '待处理';
-  if (run.quality_state === 'qa_blocked') {
-    const blockers = run.qa_summary?.blocker || 0;
-    return `QA 拦截 ${blockers} 项`;
-  }
-  if (run.quality_state === 'qa_degraded') return '语义 QA 降级，暂不可批准';
-  if (run.quality_state === 'review_ready') return '待人工复核';
-  return statusLabel(run.status);
-}
-
 function liveSummary(run) {
   if (!run) return '';
-  if (run.quality_state === 'qa_blocked') return '版式已完成，等待 QA 处置';
-  if (run.quality_state === 'qa_degraded') return '确定性 QA 通过，语义 QA 不可用';
-  if (run.quality_state === 'review_ready') return 'QA 已通过，等待人工复核';
+  if (lifecycleOf(run) === 'qa_checking') return '翻译完成，正在做质量检查';
   if (run.status === 'translating' && run.progress_message) return run.progress_message;
   return stageMessage(run);
 }
@@ -293,33 +288,31 @@ async function refreshModelProfiles() {
   }
 }
 
-function stageLabel(stage) {
-  return ({ validation: '预检', structure: '结构', text: '正文', table_figure: '表格与图注', layout: '版式', rendering: '版式', qa: 'QA', review: '复核', export: '导出' })[stage] || '处理中';
-}
-
 function isActive(run) {
-  return activeStatuses.has(run.status);
-}
-
-function isTerminal(run) {
-  return terminalStatuses.has(run.status);
-}
-
-function canRetry(run) {
-  return ['failed', 'cancelled', 'blocked', 'degraded'].includes(run.status);
-}
-
-function canResume(run) {
-  return run.status === 'interrupted';
+  return isExecuting(run);
 }
 
 function canRetryV2(run) {
-  return run.quality_state === 'legacy_unverified' || canRetry(run);
+  return run.quality_state === 'legacy_unverified' && can(run, 'retry');
 }
 
-function openRun(run) {
+// One click from a task row to what the person has to do next.
+function entryLabel(run) {
+  const lifecycle = lifecycleOf(run);
+  if (lifecycle === 'qa_action') return `处理质量问题（${todoCount(run)}）`;
+  if (lifecycle === 'qa_unavailable') return '查看并重新检查';
+  if (lifecycle === 'review') return run.formal_gate && run.formal_gate.passed === false ? '处理待办项' : '去复核';
+  if (lifecycle === 'changes_requested') return '查看退回意见';
+  return '';
+}
+
+function entryTab(run) {
+  return ['qa_action', 'qa_unavailable'].includes(lifecycleOf(run)) ? 'qa' : 'review';
+}
+
+function openRun(run, tab = '') {
   if (!run?.id) return;
-  router.push(`/workbench/${run.id}`);
+  router.push(tab ? { path: `/workbench/${run.id}`, query: { tab } } : `/workbench/${run.id}`);
 }
 
 function stageMessage(run) {
