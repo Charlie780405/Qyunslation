@@ -2800,3 +2800,103 @@ input[type="range"]::-webkit-slider-thumb {
 @media (max-width: 860px) { .qy-sidebar { display: none; } .qy-main-content { padding: 26px 20px 80px; } .qy-mobile-nav { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(3, 1fr); min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: rgba(255,255,255,.97); border-top: 1px solid var(--qy-border); } .qy-mobile-nav-item { display: grid; place-items: center; align-content: center; gap: 2px; color: var(--qy-text-secondary); text-decoration: none; font-size: 11px; } .qy-mobile-nav-item svg { width: 20px; height: 20px; } .qy-mobile-nav-item.router-link-active { color: var(--qy-primary); font-weight: 700; } .qy-workbench-grid, .qy-term-layout { grid-template-columns: 1fr; } .qy-term-detail { order: -1; } .qy-detail-placeholder { min-height: 160px; } .qy-settings-layout { grid-template-columns: 1fr; } .qy-settings-nav { display: flex; overflow-x: auto; } .qy-settings-nav button { flex: 0 0 auto; } .qy-settings-nav button svg:last-child { display: none; } }
 @media (max-width: 640px) { .qy-topbar { height: 58px; padding: 0 16px; } .qy-brand small { display: none; } .qy-main-content { padding: 22px 14px 84px; } .qy-page-head { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; } .qy-page-head-actions, .qy-page-head-actions > * { width: 100%; } .qy-page-head-actions > * { justify-content: center; } .qy-upload-panel, .qy-task-panel, .qy-side-card, .qy-settings-card, .qy-settings-section { padding: 18px; } .qy-language-fields { grid-template-columns: 1fr; gap: 8px; } .qy-task-toolbar { flex-wrap: wrap; justify-content: flex-end; } .qy-task-row { align-items: flex-start; } .qy-task-actions { flex-wrap: wrap; justify-content: flex-end; } .qy-term-toolbar { flex-wrap: wrap; } .qy-search-field { flex-basis: 100%; } .qy-term-toolbar > select { flex: 1; } .qy-policy-list > div { grid-template-columns: 1fr; gap: 3px; } .qy-login-page { display: block; background: var(--qy-paper); } .qy-login-panel { width: 100%; min-height: 100vh; padding: 42px 24px; } .qy-login-brand { margin-bottom: 42px; } .qy-login-aside { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+/* generated from QyunsApps@4f289eb3792e (tokens sha256:1db8c44ec9cc) — do not edit */
+:root {
+  color-scheme: light;
+  --qa-color-brand-50: #edf8fa;
+  --qa-color-brand-100: #d0eff3;
+  --qa-color-brand-200: #a5dee8;
+  --qa-color-brand-300: #5fccd5;
+  --qa-color-brand-400: #00B1B7;
+  --qa-color-brand-500: #008d96;
+  --qa-color-brand-600: #006A84;
+  --qa-color-brand-700: #005870;
+  --qa-color-brand-800: #00465a;
+  --qa-color-brand-900: #003545;
+  --qa-color-brand-950: #00222e;
+  --qa-radius-sm: 6px;
+  --qa-radius-md: 10px;
+  --qa-radius-lg: 12px;
+  --qa-space-1: 4px;
+  --qa-space-2: 8px;
+  --qa-space-3: 12px;
+  --qa-space-4: 16px;
+  --qa-space-5: 20px;
+  --qa-space-6: 24px;
+  --qa-space-8: 32px;
+  --qa-space-10: 40px;
+  --qa-space-12: 48px;
+  --qa-font-sans: "PingFang SC", "Microsoft YaHei UI", "Source Han Sans SC", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --qa-font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --qa-shadow-sm: 0 1px 2px rgba(15, 20, 27, 0.06);
+  --qa-shadow-md: 0 4px 12px rgba(15, 20, 27, 0.10);
+  --qa-motion-fast: 120ms;
+  --qa-motion-base: 160ms;
+  --qa-motion-slow: 200ms;
+  --qa-size-touch-target: 44px;
+  --qa-size-appbar-height: 48px;
+  --qa-bp-tablet: 768px;
+  --qa-bp-desktop: 1024px;
+  --qa-color-bg: #ffffff;
+  --qa-color-surface: #ffffff;
+  --qa-color-surface-muted: #f6f7f9;
+  --qa-color-text: #181d26;
+  --qa-color-text-muted: #4b5563;
+  --qa-color-border: #dddddd;
+  --qa-color-accent: #006A84;
+  --qa-color-accent-hover: #005870;
+  --qa-color-accent-contrast: #ffffff;
+  --qa-color-focus: #006A84;
+  --qa-color-success: #166534;
+  --qa-color-success-bg: #dcfce7;
+  --qa-color-warning: #92400e;
+  --qa-color-warning-bg: #fef3c7;
+  --qa-color-danger: #b91c1c;
+  --qa-color-danger-bg: #fee2e2;
+  --qa-color-info: #1d4ed8;
+  --qa-color-info-bg: #dbeafe;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --qa-color-bg: #0f141b;
+  --qa-color-surface: #171d27;
+  --qa-color-surface-muted: #1f2733;
+  --qa-color-text: #e6e9ef;
+  --qa-color-text-muted: #a3adbd;
+  --qa-color-border: #2f3948;
+  --qa-color-accent: #5fccd5;
+  --qa-color-accent-hover: #a5dee8;
+  --qa-color-accent-contrast: #00222e;
+  --qa-color-focus: #5fccd5;
+  --qa-color-success: #86efac;
+  --qa-color-success-bg: #14301f;
+  --qa-color-warning: #fcd34d;
+  --qa-color-warning-bg: #3a2a0a;
+  --qa-color-danger: #fca5a5;
+  --qa-color-danger-bg: #3b1414;
+  --qa-color-info: #93c5fd;
+  --qa-color-info-bg: #13243f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --qa-motion-fast: 0ms;
+    --qa-motion-base: 0ms;
+    --qa-motion-slow: 0ms;
+  }
+}
+/* QyunsApps 在 qyunslation /next 里的适配（手写，不是生成文件）。放在 next.css 之后加载。 */
+
+/* 统一品牌色：把 qyunslation 的主色映射到 QyunsApps 的 brand-600 / brand-700（原 #005076 / #003B57）。 */
+:root {
+  --qy-primary: var(--qa-color-brand-600);
+  --qy-primary-hover: var(--qa-color-brand-700);
+}
+
+/* 顶栏（48px）挂在 #app 之上，页面里用 100vh 的两处要让出这 48px，否则整页会多出一截滚动。 */
+body.qyuns-appbar-on .qy-app-shell { min-height: calc(100vh - var(--qa-size-appbar-height, 48px)); }
+body.qyuns-appbar-on .qy-body { min-height: calc(100vh - 64px - var(--qa-size-appbar-height, 48px)); }
+@media (max-width: 640px) {
+  body.qyuns-appbar-on .qy-body { min-height: calc(100vh - 58px - var(--qa-size-appbar-height, 48px)); }
+}
