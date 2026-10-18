@@ -1733,7 +1733,30 @@ def _swap_current_items(
             )
         )
     )
-    old = {_item_fingerprint(i): i for i in previous if i.severity in _DIFF_SEVERITIES}
+    baseline = "previous_round" if previous else None
+    if not previous:
+        origin = (run.settings_snapshot or {}).get("revision_of") or {}
+        if origin.get("run_id"):
+            previous_version = list(
+                session.scalars(
+                    select(QaItem).where(
+                        QaItem.run_id == origin["run_id"],
+                        QaItem.generation == int(origin.get("generation") or 1),
+                        QaItem.is_current.is_(True),
+                    )
+                )
+            )
+            if previous_version:
+                baseline = "previous_version"
+                previous = []  # nothing of *this* version to retire
+                compare = previous_version
+            else:
+                compare = []
+        else:
+            compare = []
+    else:
+        compare = previous
+    old = {_item_fingerprint(i): i for i in compare if i.severity in _DIFF_SEVERITIES}
     new = {i.fingerprint: i for i in new_items if i.severity in _DIFF_SEVERITIES}
 
     def describe(item: QaItem) -> dict[str, Any]:
@@ -1749,7 +1772,7 @@ def _swap_current_items(
     for item in new_items:
         session.add(item)
     return {
-        "baseline": "previous_round" if previous else None,
+        "baseline": baseline,
         "new": len([fp for fp in new if fp not in old]),
         "resolved": len([fp for fp in old if fp not in new]),
         "persisting": len([fp for fp in new if fp in old]),
@@ -2288,6 +2311,18 @@ def _qa_check_info(session: Session, run: TranslationRunRecord) -> dict[str, Any
     }
 
 
+def _superseding_run_id(session: Session, run: TranslationRunRecord) -> str | None:
+    return session.scalar(
+        select(TranslationRunRecord.id)
+        .where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.generation > run.generation,
+        )
+        .order_by(TranslationRunRecord.generation)
+        .limit(1)
+    )
+
+
 def _run_next_action(lifecycle: str, gate: dict[str, Any]) -> str | None:
     if lifecycle == "review":
         return "review" if gate.get("passed") else "resolve_gate_items"
@@ -2324,6 +2359,7 @@ def _run_allowed_actions(
     add("discard", writer and at_gate)
     add("resume", run.status == "interrupted")
     add("retry", ended)
+    add("revise", ended and lifecycle != "completed")
     add("requalify", lifecycle in {"qa_action", "qa_unavailable", "review"})
     add("open_qa", lifecycle in {"qa_action", "qa_unavailable"})
     add("approve", reviewer and lifecycle == "review" and bool(gate.get("passed")))
@@ -2359,6 +2395,7 @@ def _translation_run_dict(
     return {
         "lifecycle": lifecycle,
         "next_action": _run_next_action(lifecycle, gate),
+        "superseded_by": _superseding_run_id(session, run),
         "qa_check": _qa_check_info(session, run),
         "pending_counts": {
             "qa_blockers": gate["qa_blockers"],
@@ -3453,6 +3490,7 @@ def _qa_item_payload(
     digest: str | None = None,
     viewer: tuple[str, str] | None = None,
     run: TranslationRunRecord | None = None,
+    prior: dict[str, QaDisposition] | None = None,
 ) -> dict[str, Any]:
     from qyunslation.pipeline.qa import registry
 
@@ -3491,10 +3529,36 @@ def _qa_item_payload(
         "batchable": info.batchable,
         "status": state["status"],
         "previous_disposition": state["previous"],
+        # An exception granted for the previous *version* is shown, never silently inherited.
+        "prior_version_disposition": (
+            _disposition_dict(prior[_item_fingerprint(row)])
+            if prior and not state["closed"] and _item_fingerprint(row) in prior
+            else None
+        ),
         "disposition": _disposition_dict(last) if last is not None else None,
         "history": [_disposition_dict(h) for h in history],
         "allowed_dispositions": allowed,
     }
+
+
+def _prior_version_dispositions(session: Session, run: TranslationRunRecord) -> dict[str, QaDisposition]:
+    """Latest *closing* disposition per finding on the version this one was revised from."""
+    origin = (run.settings_snapshot or {}).get("revision_of") or {}
+    if not origin.get("run_id"):
+        return {}
+    rows = session.scalars(
+        select(QaDisposition)
+        .where(
+            QaDisposition.run_id == origin["run_id"],
+            QaDisposition.generation == int(origin.get("generation") or 1),
+            QaDisposition.action.in_(tuple(_CLOSING_ACTIONS)),
+        )
+        .order_by(QaDisposition.created_at, QaDisposition.id)
+    )
+    latest: dict[str, QaDisposition] = {}
+    for row in rows:
+        latest[row.fingerprint] = row
+    return {fp: row for fp, row in latest.items() if row.action in _CLOSED_BY}
 
 
 def _disposition_dict(row: QaDisposition) -> dict[str, Any]:
@@ -3546,6 +3610,7 @@ def list_qa_items(
     grouped = _qa_dispositions_by_fingerprint(session, run)
     digest = _current_output_digest(session, run)
     viewer = (identity.user_sub, _cached_role(session, identity))
+    prior = _prior_version_dispositions(session, run)
     return {
         "items": [
             _qa_item_payload(
@@ -3554,6 +3619,7 @@ def list_qa_items(
                 digest=digest,
                 viewer=viewer,
                 run=run,
+                prior=prior,
             )
             for row in rows
         ],
@@ -4043,6 +4109,110 @@ async def cancel_translation_run(
     return _translation_run_dict(session, run, identity=identity)
 
 
+def _ensure_preflight_usable(
+    session: Session, preflight: PreflightRecord | None, *, actor_sub: str
+) -> PreflightRecord:
+    """A task that already uses a source file may keep using it after the 24h pre-check window.
+
+    The window exists to clean up uploads nobody turned into a task. Retrying, resuming or
+    revising is exactly "a task needs its source again", so the window is re-armed instead of
+    forcing a new upload. Only a source that is really gone is an error, and it says so.
+    """
+    if preflight is None:
+        raise _disposition_error(409, "SOURCE_UNAVAILABLE", "找不到该任务的原文件，请重新上传后翻译")
+    if (preflight.status or "") != "ready":
+        raise _disposition_error(409, "PREFLIGHT_NOT_READY", "原文件预检未通过，不能继续")
+    try:
+        present = _preflight_path(preflight).is_file()
+    except HTTPException:
+        present = False
+    if not present:
+        raise _disposition_error(409, "SOURCE_UNAVAILABLE", "原文件已被清理，无法继续，请重新上传后翻译")
+    if _preflight_dict(preflight)["state"] == "expired":
+        preflight.expires_at = datetime.now(timezone.utc) + timedelta(hours=PREFLIGHT_TTL_HOURS)
+        record_audit(
+            session,
+            actor_sub=actor_sub,
+            action="preflight.rearm",
+            extra={"preflight_id": preflight.id, "reason": "task_still_uses_source"},
+        )
+        session.flush()
+    return preflight
+
+
+async def _spawn_next_generation(
+    session: Session,
+    run: TranslationRunRecord,
+    identity: IdentityContext,
+    *,
+    key_prefix: str,
+    snap: dict[str, Any],
+) -> TranslationRunRecord:
+    """Create (once) the next version of a run from its frozen configuration and start it."""
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    _ensure_preflight_usable(session, preflight, actor_sub=identity.user_sub)
+    next_generation = run.generation + 1
+    existing = session.scalar(
+        select(TranslationRunRecord).where(
+            TranslationRunRecord.preflight_id == run.preflight_id,
+            TranslationRunRecord.generation == next_generation,
+        )
+    )
+    if existing is not None:
+        return existing
+    key = hashlib.sha256(f"{key_prefix}:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
+    snap = dict(snap)
+    snap["revision_of"] = {"run_id": run.id, "generation": run.generation}
+    new = TranslationRunRecord(
+        preflight_id=run.preflight_id,
+        tenant_id=run.tenant_id,
+        actor_sub=identity.user_sub,
+        idempotency_key_hash=hashlib.sha256(key.encode("utf-8")).hexdigest(),
+        generation=next_generation,
+        direction=run.direction,
+        profile=run.profile,
+        display_name=run.display_name,
+        settings_snapshot=snap,
+        status="queued",
+        stage="validation",
+        quality_state="draft",
+        document_classification=run.document_classification,
+        model_profile_id=run.model_profile_id,
+        term_summary={"status": "snapshot_pending"},
+        qa_summary={"blocker": 0, "warning": 0, "info": 0},
+    )
+    session.add(new)
+    session.flush()
+    _carry_frozen_ad_prompt(session, run, new)
+    await _launch_translation_run(
+        run=new,
+        preflight=preflight,
+        target_language=_run_target_language(new.direction),
+        session=session,
+    )
+    return new
+
+
+def _approved_affiliation_overrides(session: Session, run: TranslationRunRecord) -> dict[str, str]:
+    segments = list(
+        session.scalars(
+            select(ReviewSegment).where(
+                ReviewSegment.translation_run_id == run.id,
+                ReviewSegment.generation == run.generation,
+                ReviewSegment.role == "affiliation",
+                ReviewSegment.status == "approved",
+            )
+        ).all()
+    )
+    return {
+        segment.source_text: segment.revised_text
+        for segment in segments
+        if segment.revised_text
+        and segment.revised_text.strip()
+        and segment.revised_text.strip() != (segment.machine_text or "").strip()
+    }
+
+
 def _carry_frozen_ad_prompt(session: Session, source: TranslationRunRecord, target: TranslationRunRecord) -> None:
     """New generations of an AD run must reuse the frozen prompt text.
 
@@ -4103,52 +4273,53 @@ async def retry_translation_run(
     if run.status not in _RUN_TERMINAL:
         raise HTTPException(status_code=409, detail="only terminal translation runs can be retried")
     preflight = session.get(PreflightRecord, run.preflight_id)
-    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
-        raise HTTPException(status_code=409, detail="preflight is not ready")
-    next_generation = run.generation + 1
-    existing = session.scalar(
-        select(TranslationRunRecord).where(
-            TranslationRunRecord.preflight_id == run.preflight_id,
-            TranslationRunRecord.generation == next_generation,
-        )
-    )
-    if existing is not None:
-        return _translation_run_dict(session, existing, identity=identity)
-    key = hashlib.sha256(f"retry:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
+    _ensure_preflight_usable(session, preflight, actor_sub=identity.user_sub)
     snap = dict(run.settings_snapshot or {})
     requested_pipeline = ((body.pipeline if body else None) or "").strip().casefold()
     if requested_pipeline == "v2":
         snap["pipeline"] = "v2"
         snap["pipeline_requested"] = "v2"
         snap["retry_of"] = {"run_id": run.id, "generation": run.generation}
-    retry = TranslationRunRecord(
-        preflight_id=run.preflight_id,
-        tenant_id=run.tenant_id,
-        actor_sub=identity.user_sub,
-        idempotency_key_hash=hashlib.sha256(key.encode("utf-8")).hexdigest(),
-        generation=next_generation,
-        direction=run.direction,
-        profile=run.profile,
-        display_name=run.display_name,
-        settings_snapshot=snap,
-        status="queued",
-        stage="validation",
-        quality_state="draft",
-        document_classification=run.document_classification,
-        model_profile_id=run.model_profile_id,
-        term_summary={"status": "snapshot_pending"},
-        qa_summary={"blocker": 0, "warning": 0, "info": 0},
-    )
-    session.add(retry)
-    session.flush()
-    _carry_frozen_ad_prompt(session, run, retry)
-    await _launch_translation_run(
-        run=retry,
-        preflight=preflight,
-        target_language=_run_target_language(retry.direction),
-        session=session,
-    )
+    retry = await _spawn_next_generation(session, run, identity, key_prefix="retry", snap=snap)
     return _translation_run_dict(session, retry, identity=identity)
+
+
+class RevisionBody(BaseModel):
+    pipeline: str | None = Field(default=None, max_length=32)
+    apply_review_corrections: bool = False
+
+
+@router.post("/translation-runs/{run_id}/revisions", status_code=201)
+async def create_translation_revision(
+    run_id: str,
+    body: RevisionBody | None = None,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Fix-and-recheck: a new version from the same frozen configuration.
+
+    The old version is frozen (superseded) and keeps its findings; the new version's first
+    check reports what changed against it. Calling this again returns the same new version.
+    """
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _refresh_translation_run(session, run)
+    if run.status not in _RUN_TERMINAL:
+        raise HTTPException(status_code=409, detail="only runs that have finished executing can be revised")
+    snap = dict(run.settings_snapshot or {})
+    requested_pipeline = ((body.pipeline if body else None) or "").strip().casefold()
+    if requested_pipeline == "v2":
+        snap["pipeline"] = "v2"
+        snap["pipeline_requested"] = "v2"
+    if body is not None and body.apply_review_corrections:
+        if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+            raise HTTPException(status_code=403, detail="reviewer role required")
+        overrides = _approved_affiliation_overrides(session, run)
+        if not overrides:
+            raise HTTPException(status_code=409, detail="no edited affiliation translations to apply")
+        snap["review_overrides"] = overrides
+        snap["correction_of"] = {"run_id": run.id, "generation": run.generation}
+    revision = await _spawn_next_generation(session, run, identity, key_prefix="retry", snap=snap)
+    return _translation_run_dict(session, revision, identity=identity)
 
 
 @router.post("/translation-runs/{run_id}/resume")
@@ -4162,8 +4333,7 @@ async def resume_translation_run(
     if run.status not in _RUN_RESUMABLE:
         raise HTTPException(status_code=409, detail="only interrupted runs can be resumed")
     preflight = session.get(PreflightRecord, run.preflight_id)
-    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
-        raise HTTPException(status_code=409, detail="preflight is not ready")
+    _ensure_preflight_usable(session, preflight, actor_sub=identity.user_sub)
     _clear_persisted_executor_outputs(run)
     # Resuming produces new output; the verdict for the previous output no longer applies
     # and the run must be checked again when its executor finishes.
@@ -4485,63 +4655,15 @@ async def apply_run_corrections(
     )
     if newer:
         raise HTTPException(status_code=409, detail="this artifact has already been superseded")
-    segments = list(
-        session.scalars(
-            select(ReviewSegment).where(
-                ReviewSegment.translation_run_id == run.id,
-                ReviewSegment.generation == run.generation,
-                ReviewSegment.role == "affiliation",
-                ReviewSegment.status == "approved",
-            )
-        ).all()
-    )
-    overrides = {
-        segment.source_text: segment.revised_text
-        for segment in segments
-        if segment.revised_text
-        and segment.revised_text.strip()
-        and segment.revised_text.strip() != (segment.machine_text or "").strip()
-    }
+    overrides = _approved_affiliation_overrides(session, run)
     if not overrides:
         raise HTTPException(status_code=409, detail="no edited affiliation translations to apply")
-    preflight = session.get(PreflightRecord, run.preflight_id)
-    if preflight is None or _preflight_dict(preflight)["state"] != "ready":
-        raise HTTPException(status_code=409, detail="preflight is not ready")
-    next_generation = run.generation + 1
     snap = {
         **dict(run.settings_snapshot or {}),
         "review_overrides": overrides,
         "correction_of": {"run_id": run.id, "generation": run.generation},
     }
-    retry = TranslationRunRecord(
-        preflight_id=run.preflight_id,
-        tenant_id=run.tenant_id,
-        actor_sub=identity.user_sub,
-        idempotency_key_hash=hashlib.sha256(
-            f"correction:{run.id}:{next_generation}".encode("utf-8")
-        ).hexdigest(),
-        generation=next_generation,
-        direction=run.direction,
-        profile=run.profile,
-        display_name=run.display_name,
-        settings_snapshot=snap,
-        status="queued",
-        stage="validation",
-        quality_state="draft",
-        document_classification=run.document_classification,
-        model_profile_id=run.model_profile_id,
-        term_summary={"status": "snapshot_pending"},
-        qa_summary={"blocker": 0, "warning": 0, "info": 0},
-    )
-    session.add(retry)
-    session.flush()
-    _carry_frozen_ad_prompt(session, run, retry)
-    await _launch_translation_run(
-        run=retry,
-        preflight=preflight,
-        target_language=_run_target_language(retry.direction),
-        session=session,
-    )
+    retry = await _spawn_next_generation(session, run, identity, key_prefix="correction", snap=snap)
     return _translation_run_dict(session, retry, identity=identity)
 
 
