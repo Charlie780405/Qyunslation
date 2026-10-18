@@ -1,0 +1,14 @@
+/* QyunsApps 在 qyunslation /next 里的适配（手写，不是生成文件）。放在 next.css 之后加载。 */
+
+/* 统一品牌色：把 qyunslation 的主色映射到 QyunsApps 的 brand-600 / brand-700（原 #005076 / #003B57）。 */
+:root {
+  --qy-primary: var(--qa-color-brand-600);
+  --qy-primary-hover: var(--qa-color-brand-700);
+}
+
+/* 顶栏（48px）挂在 #app 之上，页面里用 100vh 的两处要让出这 48px，否则整页会多出一截滚动。 */
+body.qyuns-appbar-on .qy-app-shell { min-height: calc(100vh - var(--qa-size-appbar-height, 48px)); }
+body.qyuns-appbar-on .qy-body { min-height: calc(100vh - 64px - var(--qa-size-appbar-height, 48px)); }
+@media (max-width: 640px) {
+  body.qyuns-appbar-on .qy-body { min-height: calc(100vh - 58px - var(--qa-size-appbar-height, 48px)); }
+}

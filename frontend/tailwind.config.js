@@ -1,5 +1,8 @@
+import qyunsappsPreset from './src/next/vendor/tw3-preset.cjs'; // QyunsApps 生成的品牌色阶与语义色（不手改）
+
 /** @type {import('tailwindcss').Config} */
 export default {
+  presets: [qyunsappsPreset],
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",

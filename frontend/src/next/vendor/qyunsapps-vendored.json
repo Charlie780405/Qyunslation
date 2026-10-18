@@ -1,0 +1,9 @@
+{
+  "generatedBy": "QyunsApps infra/scripts/sync-vendored.sh",
+  "note": "生成文件，不要手改；用 QyunsApps 的 sync-vendored.sh --write 更新",
+  "files": {
+    "frontend/src/next/vendor/tokens.css": "40f5c09dbb662417dd3057b3203e35810a81eb4b62e7bccdd9e237f663ce7a85",
+    "frontend/src/next/vendor/tw3-preset.cjs": "6fe4e2ba73e3904f27259f6a0ae6be41c6af3a68c9e9056ac2ba857a86d6d491",
+    "frontend/public/qyuns-appbar.js": "827d5c8f169a3605fdba542797a7f707b37e83bdf96dbdbac130fddc23b8bb2a"
+  }
+}
