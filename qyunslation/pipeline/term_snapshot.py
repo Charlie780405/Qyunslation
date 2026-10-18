@@ -104,7 +104,11 @@ def snapshot_is_consistent(snapshot: dict[str, Any] | None) -> bool:
 
 
 def check_terms_in_translation(
-    snapshot: dict[str, Any], translated_text: str
+    snapshot: dict[str, Any],
+    translated_text: str,
+    *,
+    source_pages: list[str] | None = None,
+    translated_pages: list[str] | None = None,
 ) -> list[QaFinding]:
     """与 RunDetail 检查器读同一快照；快照被篡改则报 blocker。"""
     if not snapshot_is_consistent(snapshot):
@@ -116,9 +120,23 @@ def check_terms_in_translation(
                 message="术语快照哈希与内容不一致，无法证明 QA 与检查器同源",
             )
         ]
+    from qyunslation.pipeline.qa import locate
+
     findings: list[QaFinding] = []
     text = translated_text or ""
     folded = text.casefold()
+    source_segments = locate.segments_from_pages(source_pages) if source_pages else []
+    translated_segments = locate.segments_from_pages(translated_pages) if translated_pages else []
+
+    def where(segments, needle: str, side: str) -> dict[str, Any]:
+        folded_needle = needle.casefold()
+        return locate.location(
+            [
+                locate.anchor(side, seg, needle)
+                for seg in locate.find_segments(segments, lambda s, n=folded_needle: n in s.text.casefold(), limit=2)
+            ]
+        )
+
     for term in snapshot.get("terms") or []:
         if not term.get("hard_constraint"):
             continue
@@ -140,6 +158,7 @@ def check_terms_in_translation(
                             "forbidden": forbidden,
                             "source_hits": source_hits,
                         },
+                        location=where(translated_segments, forbidden, "translated"),
                     )
                 )
         if target and target.casefold() not in folded:
@@ -154,6 +173,7 @@ def check_terms_in_translation(
                         "expected": target,
                         "source_hits": source_hits,
                     },
+                    location=where(source_segments, term["source_term"], "source"),
                 )
             )
     return findings

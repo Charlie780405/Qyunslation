@@ -1343,6 +1343,8 @@ def _inspect_run_outputs(
                 target_text=facts["translated"].text,
                 direction_label=run.direction,
                 settings_snapshot=run.settings_snapshot,
+                source_pages=facts["source"].pages,
+                target_pages=facts["translated"].pages,
             )
             findings.extend(ad_findings)
         else:
@@ -1359,7 +1361,14 @@ def _inspect_run_outputs(
                     source_text=facts["source"].text,
                     document_profile=_document_profile_from_run(run),
                 )
-                findings.extend(check_terms_in_translation(snapshot, facts["translated"].text))
+                findings.extend(
+                    check_terms_in_translation(
+                        snapshot,
+                        facts["translated"].text,
+                        source_pages=facts["source"].pages,
+                        translated_pages=facts["translated"].pages,
+                    )
+                )
             except Exception:
                 snapshot = None
     if snapshot is not None:

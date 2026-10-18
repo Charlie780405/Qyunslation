@@ -8,6 +8,7 @@ from qyunslation.pipeline.ad_prompt import detect_domain_evidence
 from qyunslation.pipeline.ad_qa import QaContext, run_ad_deterministic_qa
 from qyunslation.pipeline.ad_semantic import orchestrate_ad_semantic_qa
 from qyunslation.pipeline.ad_termbase import build_ad_term_policy
+from qyunslation.pipeline.qa import locate
 from qyunslation.pipeline.qa.engine import QaFinding
 
 
@@ -21,6 +22,8 @@ def inspect_ad_text_pair(
     target_text: str,
     direction_label: str,
     settings_snapshot: dict[str, Any] | None,
+    source_pages: list[str] | None = None,
+    target_pages: list[str] | None = None,
 ) -> tuple[list[QaFinding], dict[str, Any], bool]:
     findings: list[QaFinding] = []
     direction = _direction_from_run(direction_label)
@@ -44,6 +47,8 @@ def inspect_ad_text_pair(
                 direction=direction,
                 terms=ad_policy.get("terms") or {},
                 aliases=ad_policy.get("aliases") or {},
+                source_segments=tuple(locate.segments_from_pages(source_pages)) if source_pages else None,
+                target_segments=tuple(locate.segments_from_pages(target_pages)) if target_pages else None,
             )
         )
     )
