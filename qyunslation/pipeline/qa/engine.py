@@ -14,6 +14,9 @@ class QaFinding:
     message: str
     object_id: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
+    # PLAN-078b: where the problem is. {"anchors": [{"side", "page"|"paragraph", "label", "excerpt"}],
+    # "unlocatable_reason": str | None}; empty means the rule could not say.
+    location: dict[str, Any] = field(default_factory=dict)
 
 
 def run_deterministic_qa(
