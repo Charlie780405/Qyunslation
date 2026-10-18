@@ -78,7 +78,10 @@ def test_cancel_layout_complete_run_stays_cancelled(client, monkeypatch, tmp_pat
     )
     assert created.status_code == 201
     run_id = created.json()["id"]
-    assert created.json()["status"] == "translating"
+    # The executor already finished: the run waits at the quality gate, not "translating".
+    assert created.json()["status"] == "gated"
+    assert "cancel" not in created.json()["allowed_actions"]
+    assert "discard" in created.json()["allowed_actions"]
 
     cancelled = client.post(f"/api/v1/translation-runs/{run_id}/cancel", headers=_headers())
     assert cancelled.status_code == 200

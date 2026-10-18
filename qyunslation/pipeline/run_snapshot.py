@@ -37,7 +37,8 @@ def egress_scope(*, classification: str, translator_id: str | None, term_id: str
     translator = PROFILES.get(translator_id or "")
     if translator is not None and translator.provider not in {"ollama", "internal"}:
         return "full_document"
-    if term_id and (PROFILES.get(term_id) is not None):
+    term = PROFILES.get(term_id or "")
+    if term is not None and term.provider not in {"ollama", "internal"}:
         return "redacted_term_snippets"
     return "none"
 

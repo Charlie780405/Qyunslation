@@ -86,7 +86,7 @@ def test_office_v2_run_reaches_review_ready_and_materialises_after_approval(clie
     assert detail["settings"]["pipeline"] == "v2"
     assert detail["quality_state"] == "review_ready", detail
     assert detail["stage"] == "review"
-    assert detail["status"] == "translating"
+    assert detail["status"] == "gated"  # executor done; waiting for a person, not "translating"
     assert detail["artifacts"] == []
 
     # Polling again must be idempotent: no second QA pass, no duplicated events.

@@ -363,12 +363,15 @@ def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = N
     from qyunslation.gateway.provider import get_profile_provider
     from qyunslation.pipeline.model_profiles import deepseek_configured
 
+    from qyunslation.pipeline.model_profiles import default_term_profile_id
+
     classification = str(run.document_classification or "internal").strip().casefold()
     term_profile = str((run.settings_snapshot or {}).get("term_model_profile_id") or "").strip()
-    if not term_profile and classification != "confidential" and deepseek_configured():
-        term_profile = "term-deepseek-flash"
     if not term_profile:
-        return None
+        term_profile = default_term_profile_id(classification)
+    if classification == "confidential" and term_profile == "term-deepseek-flash":
+        # Never route confidential material to an external model, whatever the snapshot says.
+        term_profile = "term-internal-qwen"
     try:
         return get_profile_provider(term_profile)
     except Exception:

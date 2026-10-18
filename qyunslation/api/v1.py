@@ -17,7 +17,7 @@ from typing import Any, Generator
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.persist import repo
@@ -1084,9 +1084,20 @@ class TranslationRunPatchBody(BaseModel):
     archived: bool | None = None
 
 
+# "gated" = the executor has finished and the run waits at the quality gate (QA action,
+# human review, requested changes). It is not executing, so it can be archived, deleted
+# or retried like any other ended run (PLAN-078a).
+_RUN_EXECUTING = frozenset({"queued", "scanning", "translating", "rendering"})
 _RUN_TERMINAL = frozenset(
-    {"succeeded", "failed", "cancelled", "blocked", "degraded", "interrupted"}
+    {"succeeded", "failed", "cancelled", "blocked", "degraded", "interrupted", "gated"}
 )
+_GATE_STAGE_BY_QUALITY = {
+    "qa_blocked": "qa",
+    "qa_unavailable": "qa",
+    "review_ready": "review",
+    "qa_degraded": "review",
+    "changes_requested": "review",
+}
 _RUN_RESUMABLE = frozenset({"interrupted", "degraded", "failed", "cancelled", "blocked"})
 
 
@@ -1273,7 +1284,7 @@ def _inspect_run_outputs(
             findings = [
                 QaFinding(
                     category="ad",
-                    severity="blocker",
+                    severity="unavailable",
                     code="AD_QA_SOURCE_UNAVAILABLE",
                     message="AD 任务缺少可 QA 的译文产物",
                 )
@@ -1366,21 +1377,103 @@ def _inspect_run_outputs(
     return findings, snapshot, facts if facts else None
 
 
+_EXECUTOR_OUTPUT_DIR = "executor-outputs"
+
+
+def _executor_output_dir(run: TranslationRunRecord) -> Path | None:
+    try:
+        from qyunslation.workbench.runner import get_pdf2zh_runner
+
+        return (
+            get_pdf2zh_runner()._run_dir(
+                tenant_id=run.tenant_id, run_id=run.id, generation=run.generation
+            )
+            / _EXECUTOR_OUTPUT_DIR
+        )
+    except Exception:
+        return None
+
+
+def _persist_executor_outputs(run: TranslationRunRecord, task_state: dict[str, Any]) -> None:
+    """Copy in-memory (Office/image) executor outputs beside the run.
+
+    The Office service keeps outputs in memory and temp dirs and releases them after a
+    TTL or restart. A run waiting at the quality gate may be approved long after that,
+    so the files and their manifest must outlive the executor (PLAN-078a, H2).
+    """
+    base = _executor_output_dir(run)
+    if base is None or (base / "manifest.json").is_file():
+        return
+    manifest: dict[str, Any] = {
+        "downloadable_files": {},
+        "attachment_files": {},
+        "original_filename": task_state.get("original_filename"),
+    }
+    for group in ("downloadable_files", "attachment_files"):
+        for key, meta in (task_state.get(group) or {}).items():
+            if not isinstance(meta, dict) or not meta.get("path"):
+                continue
+            source = Path(str(meta["path"]))
+            if not source.is_file():
+                continue
+            safe_key = re.sub(r"[^A-Za-z0-9_.-]", "_", str(key))[:64] or "file"
+            target = base / group / safe_key / Path(str(meta.get("filename") or source.name)).name
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+            except OSError:
+                logger.warning("could not persist executor output %s", source, exc_info=True)
+                continue
+            manifest[group][str(key)] = {
+                "path": str(target.relative_to(base)),
+                "filename": target.name,
+            }
+    if not manifest["downloadable_files"]:
+        return
+    (base / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+
+def _persisted_executor_state(run: TranslationRunRecord) -> dict[str, Any] | None:
+    base = _executor_output_dir(run)
+    if base is None or not (base / "manifest.json").is_file():
+        return None
+    try:
+        manifest = json.loads((base / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    state: dict[str, Any] = {
+        "download_ready": True,
+        "is_processing": False,
+        "error_flag": False,
+        "persisted": True,
+        "original_filename": manifest.get("original_filename"),
+    }
+    for group in ("downloadable_files", "attachment_files"):
+        state[group] = {
+            key: {"path": str(base / meta["path"]), "filename": meta.get("filename")}
+            for key, meta in (manifest.get(group) or {}).items()
+            if isinstance(meta, dict) and meta.get("path")
+        }
+    if not any(Path(meta["path"]).is_file() for meta in state["downloadable_files"].values()):
+        return None
+    return state
+
+
+def _clear_persisted_executor_outputs(run: TranslationRunRecord) -> None:
+    base = _executor_output_dir(run)
+    if base is not None and base.is_dir():
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _maybe_run_auto_qa(
     session: Session,
     run: TranslationRunRecord,
     runner_state: dict[str, Any] | None = None,
 ) -> None:
     """PLAN-071e：layout 完成后跑确定性 QA，写入 qa_item 与 quality_state。"""
-    if (run.quality_state or "draft") not in {"draft", "qa_blocked", "review_ready", "qa_degraded"}:
-        return
-    if run.stage not in {"layout", "qa"} and run.status not in {"translating", "rendering"}:
-        # Still allow when layout_complete just set stage=layout.
-        pass
     if (run.quality_state or "draft") != "draft":
-        # Only the evaluators set qa_blocked/review_ready/qa_degraded; a run with
-        # zero persisted qa_items must not be re-evaluated on every poll (it
-        # floods the event ledger with 版式完成/QA 通过 triplets).
+        # Only the evaluators move a run off "draft"; a run that already has a verdict
+        # must not be re-evaluated on every poll (it floods the event ledger).
         return
     existing = session.scalar(
         select(QaItem.id).where(
@@ -1389,12 +1482,39 @@ def _maybe_run_auto_qa(
     )
     if existing:
         return
+    _run_qa_pass(session, run, runner_state, trigger="auto")
+
+
+def _run_qa_pass(
+    session: Session,
+    run: TranslationRunRecord,
+    runner_state: dict[str, Any] | None = None,
+    *,
+    trigger: str = "auto",
+) -> None:
+    """One QA evaluation for the run's current output: first check and re-check share it."""
     from qyunslation.pipeline.qa import (
         QaFinding,
         quality_state_from_findings,
         run_deterministic_qa,
         summarize,
     )
+
+    if trigger == "requalify":
+        # Old items stay visible while the check runs; they are swapped for the new
+        # verdict atomically when this transaction commits.
+        session.query(QaItem).filter(
+            QaItem.run_id == run.id, QaItem.generation == run.generation
+        ).delete(synchronize_session=False)
+    if runner_state is None and run.external_task_id:
+        try:
+            from qyunslation.workbench.runner import get_pdf2zh_task_state
+
+            runner_state = get_pdf2zh_task_state(run.external_task_id)
+        except Exception:
+            runner_state = None
+    if runner_state is None:
+        runner_state = _persisted_executor_state(run)
 
     inspected, term_snapshot, facts = _inspect_run_outputs(session, run, runner_state)
     if term_snapshot is not None:
@@ -1437,12 +1557,14 @@ def _maybe_run_auto_qa(
                 "extraction_status": "degraded",
                 "degradation_reason": type(exc).__name__,
             }
+            # The checker (term model / evidence) failed; the translation itself was not judged.
             inspected.append(
                 QaFinding(
                     category="terminology",
-                    severity="blocker",
+                    severity="unavailable",
                     code="TERM_EXTRACTION_DEGRADED",
-                    message="专业术语或单位审校证据提取失败，不能按零候选继续批准",
+                    message="术语与单位审校服务未能完成检查（不代表译文有问题），服务恢复后请重新检查",
+                    evidence={"reason": type(exc).__name__},
                 )
             )
     findings = run_deterministic_qa(
@@ -1462,6 +1584,7 @@ def _maybe_run_auto_qa(
         )
         evidence.setdefault("rule_version", "076-qa-v1")
         evidence.setdefault("repair_attempt", 0)
+        evidence.setdefault("trigger", trigger)
         session.add(
             QaItem(
                 run_id=run.id,
@@ -1477,23 +1600,147 @@ def _maybe_run_auto_qa(
     run.qa_summary = summarize(findings)
     semantic_degraded = bool((term_snapshot or {}).get("semantic_degraded"))
     run.quality_state = quality_state_from_findings(findings, semantic_degraded=semantic_degraded)
-    run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
+    run.stage = _GATE_STAGE_BY_QUALITY.get(run.quality_state, "review")
+    run.updated_at = datetime.now(timezone.utc)
     try:
         from qyunslation.pipeline.event_store import persist_buffer
         from qyunslation.pipeline.events import StageEventBuffer
 
         buf = StageEventBuffer()
-        blockers = int((run.qa_summary or {}).get("blocker") or 0)
+        summary = run.qa_summary or {}
+        blockers = int(summary.get("blocker") or 0)
+        unavailable = int(summary.get("unavailable") or 0)
+        if trigger == "auto":
+            buf.emit("layout", "completed", message="版式完成")
+        prefix = "重新检查：" if trigger == "requalify" else ""
         if run.quality_state == "qa_blocked":
-            buf.emit("layout", "completed", message="版式完成")
-            buf.emit("qa", "blocked", message=f"QA 拦截 {blockers} 项", progress=100.0)
+            buf.emit("qa", "blocked", message=f"{prefix}QA 拦截 {blockers} 项", progress=100.0)
+        elif run.quality_state == "qa_unavailable":
+            buf.emit(
+                "qa",
+                "blocked",
+                message=f"{prefix}质量检查未完成（{unavailable} 项检查无法运行），不代表译文有问题",
+                progress=100.0,
+            )
         else:
-            buf.emit("layout", "completed", message="版式完成")
-            buf.emit("qa", "completed", message="确定性 QA 通过", progress=100.0)
+            buf.emit("qa", "completed", message=f"{prefix}确定性 QA 通过", progress=100.0)
             buf.emit("review", "running", message="等待人工审校")
         persist_buffer(session, run_id=run.id, generation=run.generation, buffer=buf)
     except Exception:
         pass
+
+
+def _record_round_failure(session: Session, run: TranslationRunRecord, error_name: str) -> None:
+    """The check itself crashed: say so, instead of leaving the run "checking" forever."""
+    session.query(QaItem).filter(
+        QaItem.run_id == run.id, QaItem.generation == run.generation
+    ).delete(synchronize_session=False)
+    session.add(
+        QaItem(
+            run_id=run.id,
+            generation=run.generation,
+            category="integrity",
+            severity="unavailable",
+            code="QA_ROUND_FAILED",
+            message="质量检查执行失败（系统错误，不代表译文有问题），请重新检查；反复出现请联系管理员",
+            evidence_json={"error": error_name, "rule_version": "076-qa-v1"},
+        )
+    )
+    run.qa_summary = {"blocker": 0, "unavailable": 1, "warning": 0, "info": 0}
+    run.quality_state = "qa_unavailable"
+    run.stage = "qa"
+    run.updated_at = datetime.now(timezone.utc)
+
+
+def _execute_qa_round(session: Session, run: TranslationRunRecord, round_row: Any) -> None:
+    """Run one registered round (exactly one worker can claim it)."""
+    from qyunslation.pipeline.qa import rounds
+
+    if not rounds.claim_round(session, round_row.id):
+        return
+    if (
+        run.status != "gated"
+        or run.generation != round_row.generation
+        or (run.quality_state or "draft") != "draft"
+    ):
+        # The run moved on (discarded, retried, deleted...); a stale verdict must not land.
+        rounds.finish_round(session, round_row.id, ok=False, error_code="superseded")
+        return
+    try:
+        _run_qa_pass(session, run, None, trigger=round_row.trigger)
+        rounds.finish_round(session, round_row.id, ok=True)
+    except Exception as exc:
+        logger.exception("QA round failed for run %s", run.id)
+        _record_round_failure(session, run, type(exc).__name__)
+        rounds.finish_round(session, round_row.id, ok=False, error_code=type(exc).__name__[:64])
+
+
+def _execute_qa_round_background(run_id: str, round_id: str) -> None:
+    """Worker entry point: own session, commit when done."""
+    from qyunslation.persist import db as persist_db
+    from qyunslation.persist.models import QaCheckRound
+
+    if persist_db.SessionLocal is None:
+        return
+    with persist_db.SessionLocal() as session:
+        try:
+            run = session.get(TranslationRunRecord, run_id)
+            round_row = session.get(QaCheckRound, round_id)
+            if run is None or round_row is None:
+                return
+            _execute_qa_round(session, run, round_row)
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("QA round %s could not be completed", round_id)
+
+
+def _schedule_qa_round(session: Session, run: TranslationRunRecord, *, trigger: str) -> None:
+    """Register a QA round and arrange for it to run; safe to call from a read path."""
+    from qyunslation.pipeline.qa import rounds
+
+    round_row, created = rounds.ensure_round(session, run.id, run.generation, trigger=trigger)
+    if round_row is None or not created:
+        return  # a live round already owns this check
+    if rounds.qa_mode() == "inline":
+        _execute_qa_round(session, run, round_row)
+        return
+    run_id, round_id = run.id, round_row.id
+
+    def _dispatch(_session: Session) -> None:
+        rounds.submit_background(_execute_qa_round_background, run_id, round_id)
+
+    # Dispatch only after the request's transaction commits, so the worker can see the round.
+    event.listen(session, "after_commit", _dispatch, once=True)
+
+
+def _gate_run(
+    session: Session, run: TranslationRunRecord, executor_state: dict[str, Any] | None
+) -> None:
+    """The executor has finished: park the run at the quality gate and make sure it is checked.
+
+    Before PLAN-078a the run stayed "translating" here, so the UI kept animating progress
+    and offered only "cancel" while the task was really waiting for a person. The QA pass
+    also ran inside whichever GET happened to notice first; it now runs as a registered
+    round (see qyunslation.pipeline.qa.rounds) so it happens once, off the request path.
+    """
+    run.progress = None
+    if (run.stage or "") in {"", "validation", "structure", "ocr", "text", "table_figure"}:
+        run.stage = "layout"
+    run.status = "gated"
+    if (run.quality_state or "draft") == "draft":
+        has_verdict = session.scalar(
+            select(QaItem.id).where(
+                QaItem.run_id == run.id, QaItem.generation == run.generation
+            ).limit(1)
+        )
+        if not has_verdict:
+            run.stage = "qa"
+            _schedule_qa_round(session, run, trigger="auto")
+    stage = _GATE_STAGE_BY_QUALITY.get(run.quality_state or "")
+    if stage:
+        run.stage = stage
+    run.updated_at = datetime.now(timezone.utc)
 
 
 def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str | None:
@@ -1530,24 +1777,14 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
             return str(progress_message) if progress_message else None
         if status == "layout_complete":
             # PLAN-071b：执行器完成 ≠ 正式产物；禁止伪装 export/100%。
-            run.status = "translating"
-            run.stage = str(runner_state.get("stage") or "layout")
-            run.progress = None
-            _maybe_run_auto_qa(session, run, runner_state)
-            if run.quality_state == "review_ready":
-                run.stage = "review"
-            elif run.quality_state == "qa_blocked":
-                run.stage = "qa"
-            run.updated_at = datetime.now(timezone.utc)
+            # PLAN-078a：也不再伪装成“翻译中”，而是停在质量闸门（gated）。
+            _gate_run(session, run, runner_state)
             return str(progress_message) if progress_message else None
         if status == "succeeded":
             from qyunslation.pipeline import run_pipeline_mode
 
             if run_pipeline_mode(run.settings_snapshot) == "v2":
-                run.status = "translating"
-                run.stage = "layout"
-                run.progress = None
-                run.updated_at = datetime.now(timezone.utc)
+                _gate_run(session, run, runner_state)
                 return str(progress_message) if progress_message else None
             run.status = "succeeded"
             run.stage = "export"
@@ -1584,11 +1821,13 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
     except Exception:
         task_state = None
     if not task_state:
+        # The Office service forgets finished tasks after a restart or its TTL. A run that
+        # already reached the gate keeps its outputs on disk and must stay where it is.
+        task_state = _persisted_executor_state(run)
+    if not task_state:
         from qyunslation.workbench.heartbeat import is_heartbeat_stale, mark_interrupted
 
-        if run.status in {"queued", "scanning", "translating", "rendering"} and is_heartbeat_stale(
-            run
-        ):
+        if run.status in _RUN_EXECUTING and is_heartbeat_stale(run):
             mark_interrupted(
                 session,
                 run,
@@ -1614,14 +1853,9 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
                 run.completed_at = run.completed_at or datetime.now(timezone.utc)
                 _materialize_artifacts(session, run=run, task_state=task_state)
             else:
-                run.status = "translating"
-                run.stage = "layout"
-                run.progress = None
-                _maybe_run_auto_qa(session, run, task_state)
-                if run.quality_state == "review_ready":
-                    run.stage = "review"
-                elif run.quality_state == "qa_blocked":
-                    run.stage = "qa"
+                if not task_state.get("persisted"):
+                    _persist_executor_outputs(run, task_state)
+                _gate_run(session, run, task_state)
         else:
             run.status = "succeeded"
             run.stage = "export"
@@ -1688,10 +1922,15 @@ def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
         reasons.append("term_extraction_degraded")
     if (run.quality_state or "") == "qa_degraded":
         reasons.append("qa_degraded")
+    if (run.quality_state or "") == "qa_unavailable":
+        reasons.append("qa_unavailable")
+    if run.status == "gated" and (run.quality_state or "draft") == "draft":
+        reasons.append("qa_checking")
     return {
         "passed": not reasons,
         "reasons": reasons,
         "qa_blockers": qa_blockers,
+        "qa_unavailable": int((run.qa_summary or {}).get("unavailable") or 0),
         "unresolved_term_count": len(unresolved_terms),
         "unresolved_term_ids": unresolved_terms,
         "unconfirmed_affiliation_count": len(unresolved_affiliations),
@@ -1701,7 +1940,116 @@ def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
     }
 
 
-def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
+def _cached_role(session: Session, identity: IdentityContext) -> str:
+    """Role lookup hits the database; a list response needs it once, not once per row."""
+    cache = session.info.setdefault("qy_roles", {})
+    key = (identity.tenant_slug if hasattr(identity, "tenant_slug") else "", identity.user_sub)
+    if key not in cache:
+        cache[key] = _effective_role(session, identity)
+    return cache[key]
+
+
+_LIFECYCLE_BY_QUALITY = {
+    "qa_blocked": "qa_action",
+    "qa_unavailable": "qa_unavailable",
+    "review_ready": "review",
+    "qa_degraded": "review",
+    "changes_requested": "changes_requested",
+}
+
+
+def _run_lifecycle(run: TranslationRunRecord) -> str:
+    """One user-facing phase derived from status + quality_state (single source for the UI)."""
+    status = run.status
+    quality = run.quality_state or "draft"
+    if status in _RUN_EXECUTING:
+        return "executing"
+    if status == "gated":
+        return "qa_checking" if quality == "draft" else _LIFECYCLE_BY_QUALITY.get(quality, "review")
+    if status == "succeeded":
+        return "completed"
+    if status in {"failed", "blocked", "degraded"}:
+        return "failed"
+    if status in {"interrupted", "cancelled"}:
+        return status
+    return "failed"
+
+
+_NEXT_ACTION_BY_LIFECYCLE = {
+    "qa_action": "fix_quality_issues",
+    "qa_unavailable": "retry_qa",
+    "changes_requested": "create_revision",
+    "interrupted": "resume",
+    "failed": "retry",
+    "cancelled": "retry",
+    "completed": "download",
+}
+
+
+def _qa_check_info(session: Session, run: TranslationRunRecord) -> dict[str, Any] | None:
+    if run.status != "gated":
+        return None
+    from qyunslation.pipeline.qa import rounds
+
+    latest = rounds.latest_round(session, run.id, run.generation)
+    if latest is None:
+        return None
+    return {
+        "round_no": latest.round_no,
+        "status": latest.status,
+        "trigger": latest.trigger,
+        "error_code": latest.error_code,
+    }
+
+
+def _run_next_action(lifecycle: str, gate: dict[str, Any]) -> str | None:
+    if lifecycle == "review":
+        return "review" if gate.get("passed") else "resolve_gate_items"
+    return _NEXT_ACTION_BY_LIFECYCLE.get(lifecycle)
+
+
+def _run_allowed_actions(
+    session: Session,
+    identity: IdentityContext,
+    run: TranslationRunRecord,
+    lifecycle: str,
+    gate: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> list[str]:
+    """What this caller may do now. The server enforces the same rules on each endpoint."""
+    role = _cached_role(session, identity)
+    writer = run.actor_sub == identity.user_sub or role in {"admin", "owner"}
+    reviewer = role in {"reviewer", "term_admin", "admin", "owner"}
+    ended = lifecycle not in {"executing", "qa_checking"}
+    at_gate = lifecycle in {"qa_action", "qa_unavailable", "review", "changes_requested"}
+    archived = run.archived_at is not None
+    actions: list[str] = []
+
+    def add(name: str, condition: bool) -> None:
+        if condition and name not in actions:
+            actions.append(name)
+
+    add("open", True)
+    add("rename", writer)
+    add("restore", writer and archived)
+    add("archive", writer and ended and not archived)
+    add("delete", writer and ended)
+    add("cancel", writer and lifecycle == "executing")
+    add("discard", writer and at_gate)
+    add("resume", run.status == "interrupted")
+    add("retry", ended)
+    add("requalify", lifecycle in {"qa_action", "qa_unavailable", "review"})
+    add("open_qa", lifecycle in {"qa_action", "qa_unavailable"})
+    add("approve", reviewer and lifecycle == "review" and bool(gate.get("passed")))
+    add("request_changes", reviewer and lifecycle == "review")
+    add("reject", reviewer and lifecycle == "review")
+    add("download", lifecycle == "completed" and any(item.get("formal_export") for item in artifacts))
+    return actions
+
+
+def _translation_run_dict(
+    session: Session, run: TranslationRunRecord, identity: IdentityContext | None = None
+) -> dict[str, Any]:
     """Project the durable ledger plus current legacy-service state."""
     progress_message = _refresh_translation_run(session, run)
     preflight = session.get(PreflightRecord, run.preflight_id)
@@ -1719,7 +2067,24 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
             .order_by(TranslationArtifact.created_at)
         )
     )
+    gate = _formal_gate(session, run)
+    artifact_rows = [_artifact_dict(item, run.id) for item in artifacts]
+    lifecycle = _run_lifecycle(run)
     return {
+        "lifecycle": lifecycle,
+        "next_action": _run_next_action(lifecycle, gate),
+        "qa_check": _qa_check_info(session, run),
+        "pending_counts": {
+            "qa_blockers": gate["qa_blockers"],
+            "qa_unavailable": gate["qa_unavailable"],
+            "unresolved_terms": gate["unresolved_term_count"],
+            "unconfirmed_affiliations": gate["unconfirmed_affiliation_count"],
+        },
+        "allowed_actions": (
+            _run_allowed_actions(session, identity, run, lifecycle, gate, artifact_rows)
+            if identity is not None
+            else []
+        ),
         "id": run.id,
         "actor_sub": run.actor_sub,
         "project_id": None,
@@ -1749,8 +2114,8 @@ def _translation_run_dict(session: Session, run: TranslationRunRecord) -> dict[s
         "model_profile_id": getattr(run, "model_profile_id", None),
         "qa_summary": run.qa_summary or {},
         "term_summary": run.term_summary or {},
-        "formal_gate": _formal_gate(session, run),
-        "artifacts": [_artifact_dict(item, run.id) for item in artifacts],
+        "formal_gate": gate,
+        "artifacts": artifact_rows,
         "degradation_reason": run.degradation_reason,
         "external_task_id": run.external_task_id,
         "created_at": run.created_at.isoformat(),
@@ -2099,11 +2464,10 @@ async def create_translation_run(
     )
     model_profile_id = body.model_profile_id or preflight.model_profile_id
     term_profile_id = body.term_model_profile_id
-    if term_profile_id is None and classification.strip().casefold() != "confidential":
-        from qyunslation.pipeline.model_profiles import deepseek_configured
+    if term_profile_id is None:
+        from qyunslation.pipeline.model_profiles import default_term_profile_id
 
-        if deepseek_configured():
-            term_profile_id = "term-deepseek-flash"
+        term_profile_id = default_term_profile_id(classification)
     try:
         classification, model_profile_id, term_profile_id = validate_selection(
             classification=classification,
@@ -2144,7 +2508,7 @@ async def create_translation_run(
                     "run_id": existing.id,
                 },
             )
-        return _translation_run_dict(session, existing)
+        return _translation_run_dict(session, existing, identity=identity)
     # (preflight_id, generation) is unique; a second run for the same preflight
     # must surface as a conflict rather than an IntegrityError 500.
     occupied = session.scalar(
@@ -2290,7 +2654,7 @@ async def create_translation_run(
     await _launch_translation_run(
         run=run, preflight=preflight, target_language=target_language, session=session
     )
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 @router.get("/translation-runs")
@@ -2311,7 +2675,7 @@ def list_translation_runs(
         stmt = stmt.where(TranslationRunRecord.status == status)
     stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(page_size)
     rows = list(session.scalars(stmt))
-    return {"items": [_translation_run_dict(session, row) for row in rows]}
+    return {"items": [_translation_run_dict(session, row, identity=identity) for row in rows]}
 
 
 @router.get("/translation-runs/{run_id}")
@@ -2320,7 +2684,7 @@ def get_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return _translation_run_dict(session, _run_owned(session, run_id=run_id, identity=identity))
+    return _translation_run_dict(session, _run_owned(session, run_id=run_id, identity=identity), identity=identity)
 
 
 @router.patch("/translation-runs/{run_id}")
@@ -2353,7 +2717,7 @@ def patch_translation_run(
             action="translation_run.update",
             extra={"run_id": run.id, "changes": changes},
         )
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 @router.post("/translation-runs/{run_id}/restore")
@@ -2371,7 +2735,7 @@ def restore_translation_run(
         action="translation_run.restore",
         extra={"run_id": run.id},
     )
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 @router.delete("/translation-runs/{run_id}", status_code=204)
@@ -2952,9 +3316,10 @@ def post_review_decision(
         except Exception:
             pass
     elif decision == "request_changes":
-        run.quality_state = "draft"
-        run.stage = "text"
-        run.status = "translating"
+        # Nothing re-executes here: the run is parked until someone creates a revision.
+        run.quality_state = "changes_requested"
+        run.stage = "review"
+        run.status = "gated"
     else:
         run.quality_state = "draft"
         run.status = "failed"
@@ -2962,7 +3327,7 @@ def post_review_decision(
         run.degradation_reason = "rejected by reviewer"
         run.completed_at = datetime.now(timezone.utc)
     run.updated_at = datetime.now(timezone.utc)
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 def _preview_target(path: Path, media: str, filename: str) -> tuple[Path, str, str]:
@@ -3103,9 +3468,10 @@ async def cancel_translation_run(
 ) -> dict[str, Any]:
     run = _run_writable(session, run_id=run_id, identity=identity)
     _refresh_translation_run(session, run)
-    if run.status in _RUN_TERMINAL:
-        return _translation_run_dict(session, run)
-    if run.external_task_id:
+    discarding = run.status == "gated"
+    if run.status in _RUN_TERMINAL and not discarding:
+        return _translation_run_dict(session, run, identity=identity)
+    if run.external_task_id and not discarding:
         try:
             from qyunslation.workbench.runner import (
                 cancel_pdf2zh_task,
@@ -3123,10 +3489,12 @@ async def cancel_translation_run(
     run.status = "cancelled"
     run.stage = "qa"
     run.progress = run.progress if run.progress is not None else None
-    run.degradation_reason = "translation cancelled by user"
+    run.degradation_reason = (
+        "discarded by user at the quality gate" if discarding else "translation cancelled by user"
+    )
     run.completed_at = run.completed_at or datetime.now(timezone.utc)
     run.updated_at = datetime.now(timezone.utc)
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 def _carry_frozen_ad_prompt(session: Session, source: TranslationRunRecord, target: TranslationRunRecord) -> None:
@@ -3199,7 +3567,7 @@ async def retry_translation_run(
         )
     )
     if existing is not None:
-        return _translation_run_dict(session, existing)
+        return _translation_run_dict(session, existing, identity=identity)
     key = hashlib.sha256(f"retry:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
     snap = dict(run.settings_snapshot or {})
     requested_pipeline = ((body.pipeline if body else None) or "").strip().casefold()
@@ -3234,7 +3602,7 @@ async def retry_translation_run(
         target_language=_run_target_language(retry.direction),
         session=session,
     )
-    return _translation_run_dict(session, retry)
+    return _translation_run_dict(session, retry, identity=identity)
 
 
 @router.post("/translation-runs/{run_id}/resume")
@@ -3250,6 +3618,14 @@ async def resume_translation_run(
     preflight = session.get(PreflightRecord, run.preflight_id)
     if preflight is None or _preflight_dict(preflight)["state"] != "ready":
         raise HTTPException(status_code=409, detail="preflight is not ready")
+    _clear_persisted_executor_outputs(run)
+    # Resuming produces new output; the verdict for the previous output no longer applies
+    # and the run must be checked again when its executor finishes.
+    session.query(QaItem).filter(
+        QaItem.run_id == run.id, QaItem.generation == run.generation
+    ).delete(synchronize_session=False)
+    run.quality_state = "draft"
+    run.qa_summary = {"blocker": 0, "unavailable": 0, "warning": 0, "info": 0}
     run.status = "queued"
     run.stage = "validation"
     run.progress = None
@@ -3264,7 +3640,7 @@ async def resume_translation_run(
         session=session,
         resume=True,
     )
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 def _requalify_translation_run(
@@ -3273,48 +3649,18 @@ def _requalify_translation_run(
     *,
     runner_state: dict[str, Any] | None = None,
 ) -> None:
-    """PLAN-073b：用修复后的术语规则重跑确定性 QA，不重新翻译。"""
-    from qyunslation.pipeline.qa import quality_state_from_findings, run_deterministic_qa, summarize
+    """PLAN-073b：用修复后的规则/术语重新检查，不重新翻译。
 
-    session.query(QaItem).filter(
-        QaItem.run_id == run.id,
-        QaItem.generation == run.generation,
-    ).delete(synchronize_session=False)
-    if runner_state is None and run.external_task_id:
-        try:
-            from qyunslation.workbench.runner import get_pdf2zh_task_state
+    PLAN-078a: it is the same pass as the first check (term extraction, degraded-service
+    handling, rule version, events), run as a new round. Registering is idempotent: a
+    second click while a round is live changes nothing.
+    """
+    from qyunslation.pipeline.qa import rounds
 
-            runner_state = get_pdf2zh_task_state(run.external_task_id)
-        except Exception:
-            runner_state = None
-    inspected, term_snapshot, _facts = _inspect_run_outputs(session, run, runner_state)
-    if term_snapshot is not None:
-        run.term_summary = term_snapshot
-    findings = run_deterministic_qa(
-        manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
-        term_summary=run.term_summary,
-        settings_snapshot={**(run.settings_snapshot or {}), "generation": run.generation},
-        translated_text_sample=None,
-        logo_present=None,
-    )
-    findings.extend(inspected)
-    for finding in findings:
-        session.add(
-            QaItem(
-                run_id=run.id,
-                generation=run.generation,
-                category=finding.category,
-                severity=finding.severity,
-                code=finding.code,
-                message=finding.message,
-                object_id=finding.object_id,
-                evidence_json=finding.evidence,
-            )
-        )
-    run.qa_summary = summarize(findings)
-    run.quality_state = quality_state_from_findings(findings)
-    run.stage = "qa" if run.quality_state == "qa_blocked" else "review"
-    run.updated_at = datetime.now(timezone.utc)
+    if rounds.active_round(session, run.id, run.generation) is None:
+        run.quality_state = "draft"
+        run.stage = "qa"
+    _schedule_qa_round(session, run, trigger="requalify")
 
 
 @router.post("/translation-runs/{run_id}/requalify")
@@ -3325,11 +3671,19 @@ async def requalify_translation_run(
 ) -> dict[str, Any]:
     run = _run_owned(session, run_id=run_id, identity=identity)
     _refresh_translation_run(session, run)
-    if run.status not in {"translating", "rendering", "review_ready"} and run.quality_state != "qa_blocked":
-        raise HTTPException(status_code=409, detail="run is not ready for requalify")
+    if run.status == "gated" and (run.quality_state or "draft") == "draft":
+        # A check is already running (double click, second tab): answer with its state.
+        return _translation_run_dict(session, run, identity=identity)
+    if run.status != "gated" or (run.quality_state or "draft") not in {
+        "qa_blocked",
+        "qa_unavailable",
+        "qa_degraded",
+        "review_ready",
+    }:
+        raise HTTPException(status_code=409, detail="run is not at the quality gate")
     _requalify_translation_run(session, run)
     session.flush()
-    return _translation_run_dict(session, run)
+    return _translation_run_dict(session, run, identity=identity)
 
 
 @router.get("/translation-runs/{run_id}/term-candidates")
@@ -3642,7 +3996,7 @@ async def apply_run_corrections(
         target_language=_run_target_language(retry.direction),
         session=session,
     )
-    return _translation_run_dict(session, retry)
+    return _translation_run_dict(session, retry, identity=identity)
 
 
 class PreferencesBody(BaseModel):

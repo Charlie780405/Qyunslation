@@ -38,6 +38,18 @@ PROFILES: dict[str, ModelProfile] = {
         label="DeepSeek Flash（公开资料）",
         experimental=True,
     ),
+    # PLAN-078a / D1: structured term extraction on the Taizhou in-house Qwen. Nothing
+    # leaves the network, so it is the only term model confidential material may use.
+    "term-internal-qwen": ModelProfile(
+        profile_id="term-internal-qwen",
+        role="term_suggester",
+        provider="ollama",
+        model_id=os.environ.get("QYUNSLATION_TERM_MODEL_ID")
+        or os.environ.get("DOCUTRANSLATE_MODEL_ID")
+        or os.environ.get("QYUNSLATION_MODEL_ID")
+        or "qwen3.6:35b-a3b",
+        label="内网 Qwen（术语抽取，无外发）",
+    ),
     "term-deepseek-flash": ModelProfile(
         profile_id="term-deepseek-flash",
         role="term_suggester",
@@ -61,14 +73,32 @@ def allowed_profiles(classification: str) -> list[ModelProfile]:
     if c not in CLASSIFICATIONS:
         c = "internal"
     if c == "confidential":
-        return [PROFILES["internal-qwen-quality"]]
+        return [PROFILES["internal-qwen-quality"], PROFILES["term-internal-qwen"]]
     if c == "internal":
-        return [PROFILES["internal-qwen-quality"], PROFILES["term-deepseek-flash"]]
+        return [
+            PROFILES["internal-qwen-quality"],
+            PROFILES["term-internal-qwen"],
+            PROFILES["term-deepseek-flash"],
+        ]
     return [
         PROFILES["internal-qwen-quality"],
         PROFILES["public-deepseek-flash"],
+        PROFILES["term-internal-qwen"],
         PROFILES["term-deepseek-flash"],
     ]
+
+
+def default_term_profile_id(classification: str) -> str:
+    """Term model used when the request names none.
+
+    Confidential material is pinned to the in-house model. Other levels keep the
+    DeepSeek helper when it is configured (unchanged behaviour) and otherwise use the
+    in-house model instead of silently running with no term model at all.
+    """
+    c = (classification or "internal").strip().casefold()
+    if c != "confidential" and deepseek_configured():
+        return "term-deepseek-flash"
+    return "term-internal-qwen"
 
 
 def validate_selection(
@@ -94,7 +124,7 @@ def validate_selection(
     if term_id:
         if term_id not in allowed or allowed[term_id].role != "term_suggester":
             raise ValueError("term model not allowed for classification")
-        if c == "confidential":
+        if c == "confidential" and allowed[term_id].provider not in {"ollama", "internal"}:
             raise ValueError("confidential forbids external term model")
         if allowed[term_id].provider == "deepseek" and not deepseek_configured():
             raise ValueError("deepseek not configured")

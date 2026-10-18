@@ -79,6 +79,7 @@ def _make_client(monkeypatch, tmp_path: Path, *, translate: bool, term_model_ava
         else _UnavailableStructuredTermProvider()
     )
     monkeypatch.setattr("qyunslation.gateway.provider.get_provider", lambda **_kwargs: provider)
+    monkeypatch.setattr("qyunslation.gateway.provider.get_profile_provider", lambda *a, **k: provider)
     Base.metadata.create_all(init_engine("sqlite+pysqlite:///:memory:"))
     app = FastAPI()
     app.include_router(api_v1_router)
@@ -163,12 +164,14 @@ def test_term_model_failure_is_a_blocker_instead_of_zero_candidates(monkeypatch,
     ) as client:
         run_id, state = _run_to_review(client, HEADERS, tmp_path, "term-model-degraded")
         items = client.get(f"/api/v1/translation-runs/{run_id}/qa-items", headers=HEADERS).json()
-        assert state["quality_state"] == "qa_blocked"
+        # PLAN-078a: a term-model outage is "the check could not run", not a quality verdict.
+        assert state["quality_state"] == "qa_unavailable"
         assert "TERM_EXTRACTION_DEGRADED" in {item["code"] for item in items["items"]}
         run = client.get(f"/api/v1/translation-runs/{run_id}", headers=HEADERS).json()
         assert run["term_summary"]["extraction_status"] == "degraded"
         assert run["formal_gate"]["term_extraction_degraded"] is True
         assert run["formal_gate"]["passed"] is False
+        assert run["qa_summary"]["blocker"] == 0
     reset_engine()
 
 

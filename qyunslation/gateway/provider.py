@@ -140,7 +140,11 @@ def get_profile_provider(profile_id: str | None = None, *, api_key: str | None =
             if model == "deepseek-flash":
                 model = "deepseek-chat"
             return QwenOllamaProvider(model_id=model, base_url=base, api_key=key)
-        return get_provider(api_key=api_key)
+        provider = get_provider(api_key=api_key)
+        # The term profile may name a different in-house model than the translator.
+        if model_profile.role == "term_suggester" and isinstance(provider, QwenOllamaProvider):
+            provider.model_id = model_profile.model_id or provider.model_id
+        return provider
     return get_provider(profile=pid or None, api_key=api_key)
 
 

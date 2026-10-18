@@ -26,7 +26,6 @@
             <component :is="item.icon" aria-hidden="true" /><span>{{ item.label }}</span>
           </RouterLink>
         </nav>
-        <div class="qy-sidebar-footer"><span class="qy-status-dot" aria-hidden="true"></span><span>工作区服务正常</span></div>
       </aside>
       <main class="qy-main-content"><slot /></main>
     </div>

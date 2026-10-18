@@ -83,7 +83,7 @@ const displayStages = computed(() => {
     if (stage === 'review' && props.qualityState === 'review_ready' && (!event || event.state === 'pending')) {
       state = 'running';
     }
-    if (stage === 'qa' && props.qualityState === 'qa_blocked') state = 'blocked';
+    if (stage === 'qa' && ['qa_blocked', 'qa_unavailable'].includes(props.qualityState)) state = 'blocked';
     const className = {
       'is-complete': state === 'completed',
       'is-current': state === 'running',
