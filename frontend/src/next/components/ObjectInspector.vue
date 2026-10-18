@@ -1,6 +1,6 @@
 <template>
   <aside class="qy-inspector" role="complementary" aria-label="对象检查器">
-    <section aria-labelledby="qy-qa-heading">
+    <section v-if="showList" aria-labelledby="qy-qa-heading">
       <h2 id="qy-qa-heading">QA 项 <small>({{ items.length }})</small></h2>
       <ul v-if="items.length" class="qy-qa-list">
         <li v-for="item in items" :key="item.id" :data-severity="item.severity">
@@ -64,6 +64,8 @@ import { severityLabel } from '../labels.js';
 const props = defineProps({
   items: { type: Array, default: () => [] },
   selectedId: { type: String, default: '' },
+  // The QA list itself lives in QaTodoPanel on the detail page; the inspector keeps object detail.
+  showList: { type: Boolean, default: true },
 });
 defineEmits(['select']);
 

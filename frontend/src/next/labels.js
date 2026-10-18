@@ -146,3 +146,86 @@ export function can(run, action) {
     default: return false;
   }
 }
+
+// ---- PLAN-078b: QA findings, dispositions and delivery checklist -------------------------
+
+export const RULE_CLASS_LABELS = {
+  C1: '关键事实',
+  C2: '版式与元数据',
+  C3: '检查未完成',
+  C4: '术语',
+  W: '警告',
+  I: '提示',
+};
+
+export const ITEM_STATUS_LABELS = {
+  open: '待处理',
+  false_positive_reported: '已反馈误报，待确认',
+  false_positive_confirmed: '误报已确认',
+  waived: '已授权例外',
+  acknowledged: '已确认已阅',
+};
+
+export const ACTION_LABELS = {
+  report_false_positive: '反馈误报',
+  confirm_false_positive: '确认误报',
+  reject_false_positive: '驳回误报反馈',
+  grant_waiver: '授权例外',
+  revoke_waiver: '撤销例外',
+  acknowledge: '确认已阅',
+};
+
+export const ACTION_HELP = {
+  report_false_positive: '认为这是检查规则的误判时使用。反馈本身不会放行，需由另一位术语管理员或管理员确认。',
+  confirm_false_positive: '核对原文后确认这是规则误判。需由反馈人以外的人完成，会记入审计。',
+  reject_false_positive: '核对后认为问题真实存在，驳回误报反馈；问题仍需修复。',
+  grant_waiver: '仅用于版式、元数据和术语类问题：说明为何可以带着它交付。理由会记入审计。',
+  revoke_waiver: '撤销之前授权的例外，问题重新计入阻断。',
+  acknowledge: '确认已阅读这条警告；警告本身不阻断交付。',
+};
+
+export const GATE_REASON_LABELS = {
+  qa_blockers: '仍有未处理的阻断问题',
+  qa_unavailable: '质量检查未完成',
+  qa_checking: '质量检查进行中',
+  qa_degraded: '语义检查未完成',
+  unresolved_terms: '有待审核的术语',
+  unconfirmed_affiliations: '有未确认的单位译名',
+  superseded_artifact: '已有更新的版本',
+  term_extraction_degraded: '术语抽取未完成',
+};
+
+export function ruleClassLabel(ruleClass) {
+  return RULE_CLASS_LABELS[ruleClass] || '';
+}
+
+export function itemStatusLabel(status) {
+  return ITEM_STATUS_LABELS[status || 'open'] || '待处理';
+}
+
+export function actionLabel(action) {
+  return ACTION_LABELS[action] || action;
+}
+
+export function anchorText(anchor) {
+  if (!anchor) return '';
+  const side = anchor.side === 'translated' ? '译文' : '原文';
+  if (anchor.page) return `${side}第 ${anchor.page} 页`;
+  if (anchor.paragraph) return `${side}第 ${anchor.paragraph} 段`;
+  return side;
+}
+
+// A finding still stands between the run and delivery unless a valid disposition closed it.
+export function isOpenItem(item) {
+  if (item.resolved) return false;
+  return !['false_positive_confirmed', 'waived', 'acknowledged'].includes(item.status || 'open');
+}
+
+const SEVERITY_ORDER = { blocker: 0, unavailable: 1, warning: 2, info: 3 };
+
+export function sortItems(items) {
+  return [...items].sort((a, b) => (
+    (Number(isOpenItem(b)) - Number(isOpenItem(a)))
+    || ((SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9))
+  ));
+}

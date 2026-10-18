@@ -125,6 +125,32 @@ describe('task list follows the server lifecycle', () => {
     wrapper.unmount();
   });
 
+  it('puts a todo bar above everything that counts what needs a person', async () => {
+    const { wrapper, router } = await mountWith([
+      run({ id: 'a' }),
+      run({ id: 'b', lifecycle: 'qa_unavailable', quality_state: 'qa_unavailable', pending_counts: { qa_unavailable: 1 } }),
+      run({ id: 'c', lifecycle: 'review', quality_state: 'review_ready', pending_counts: {}, formal_gate: { passed: true } }),
+      run({ id: 'd', status: 'succeeded', lifecycle: 'completed', quality_state: 'approved', pending_counts: {} }),
+    ]);
+    const bar = wrapper.find('[data-todo-bar]');
+    expect(bar.exists()).toBe(true);
+    expect(bar.text()).toContain('2 个任务需要处理质量问题');
+    expect(bar.text()).toContain('1 个待人工复核');
+    await bar.find('button').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/workbench/a');
+    expect(router.currentRoute.value.query.tab).toBe('qa');
+    wrapper.unmount();
+  });
+
+  it('shows no todo bar when nothing needs attention', async () => {
+    const { wrapper } = await mountWith([
+      run({ id: 'd', status: 'succeeded', lifecycle: 'completed', quality_state: 'approved', pending_counts: {} }),
+    ]);
+    expect(wrapper.find('[data-todo-bar]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it('does not claim "not started" while a file is waiting for its pre-check', async () => {
     const { wrapper } = await mountWith([]);
     expect(wrapper.find('.qy-upload-panel .qy-panel-status').text()).toBe('等待选择文件');

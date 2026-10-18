@@ -80,7 +80,7 @@
             :href="translatedPreviewUrl"
             target="_blank"
             rel="noopener"
-          >译文预览</a>
+          >{{ run?.quality_state === 'approved' ? '译文预览' : '译文预览（非正式）' }}</a>
         </div>
       </header>
 
@@ -94,6 +94,19 @@
         <button type="button" class="qy-secondary-button" aria-label="重新加载任务详情" @click="refresh">重试</button>
       </p>
       <p v-if="reviewError" class="qy-panel qy-run-detail-error" role="alert">{{ reviewError }}</p>
+
+      <QaTodoPanel
+        v-if="showQaPanel"
+        :run="run"
+        :items="qaItems"
+        :selected-id="view.selectedObjectId.value"
+        :busy="busyAction"
+        :on-dispose="disposeItem"
+        :on-batch="disposeBatch"
+        @select="view.selectObject"
+        @locate="locateAnchor"
+        @revise="reviseRun"
+      />
 
       <section class="qy-panel qy-run-stages" aria-labelledby="qy-stage-heading">
         <h2 id="qy-stage-heading">阶段事件</h2>
@@ -145,6 +158,7 @@
           <ObjectInspector
             :items="qaItems"
             :selected-id="view.selectedObjectId.value"
+            :show-list="false"
             @select="view.selectObject"
           />
         </section>
@@ -172,11 +186,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
 import AffiliationReviewPanel from '../components/AffiliationReviewPanel.vue';
+import QaTodoPanel from '../components/QaTodoPanel.vue';
 import DualCanvasViewer from '../components/DualCanvasViewer.vue';
 import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
@@ -247,6 +262,11 @@ const formalGateMessage = computed(() => {
   if (!gate || gate.passed) return '';
   return `尚有 ${gate.unresolved_term_count || 0} 条术语、${gate.unconfirmed_affiliation_count || 0} 条单位译名或 ${gate.qa_blockers || 0} 个 QA 阻断项未处理`;
 });
+
+const showQaPanel = computed(() => Boolean(run.value) && (
+  qaItems.value.length > 0
+  || ['qa_action', 'qa_unavailable', 'review', 'changes_requested', 'qa_checking'].includes(lifecycleOf(run.value))
+));
 
 const lifecycleBanner = computed(() => {
   const state = lifecycleOf(run.value);
@@ -365,8 +385,11 @@ async function runAction(name, task, { success = '', failure = '操作失败' } 
 }
 
 function selectFirstBlockerOnce() {
-  if (autoSelectDone || route.query.tab !== 'qa' || view.selectedObjectId.value) return;
-  const first = qaItems.value.find((item) => item.severity === 'blocker' && !item.resolved)
+  if (autoSelectDone || view.selectedObjectId.value) return;
+  const wanted = route.query.item;
+  if (!wanted && route.query.tab !== 'qa') return;
+  const first = (wanted && qaItems.value.find((item) => item.id === wanted))
+    || qaItems.value.find((item) => item.severity === 'blocker' && !item.resolved)
     || qaItems.value.find((item) => item.severity === 'unavailable' && !item.resolved);
   if (!first) return;
   autoSelectDone = true;
@@ -397,6 +420,33 @@ function retryV2() {
     success: '已用新版流水线重新提交。',
     failure: '重试失败',
   });
+}
+
+// The panel shows failures itself, so these rethrow instead of swallowing them.
+async function disposeItem(item, action, reason) {
+  await api.postQaDisposition(runId.value, item.id, {
+    action,
+    reason,
+    ...(item.round_id ? { expected_round_id: item.round_id } : {}),
+  });
+  await refresh({ includeTerms: false });
+}
+
+async function disposeBatch(payload) {
+  const response = await api.postQaDispositionsBatch(runId.value, payload);
+  await refresh({ includeTerms: false });
+  return response;
+}
+
+function locateAnchor(anchor) {
+  if (anchor?.page) view.setPage(anchor.page);
+}
+
+function reviseRun() {
+  return runAction('revise', async () => {
+    const created = await api.createRevision(runId.value, {});
+    if (created?.id) await router.push({ path: `/workbench/${created.id}`, query: { tab: 'qa' } });
+  }, { success: '', failure: '生成修订版失败' });
 }
 
 function discardRun() {
@@ -479,6 +529,15 @@ async function applyCorrections() {
     reviewError.value = error?.message || '重新生成失败';
   }
 }
+
+watch(runId, async (next, previous) => {
+  if (!next || next === previous) return;
+  autoSelectDone = false;
+  run.value = null;
+  qaItems.value = [];
+  events.value = [];
+  await refresh();
+});
 
 onMounted(async () => {
   await sessionStore.load();
