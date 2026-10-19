@@ -87,5 +87,7 @@ env = [
     "DOCUTRANSLATE_CONVERT_ENGINE=",
     "DOCUTRANSLATE_MINERU_TOKEN=test-mineru-token",
     "DOCUTRANSLATE_PROXY_ENABLED=false",
-    "QYUNSLATION_QA_MODE=inline"
+    "QYUNSLATION_QA_MODE=inline",
+    # PLAN-078f: most fixtures upload placeholder bytes; the probe's own tests switch it back on.
+    "QYUNSLATION_PREFLIGHT_PROBE=0"
 ]

@@ -27,8 +27,15 @@
           </RouterLink>
         </nav>
       </aside>
-      <main class="qy-main-content"><slot /></main>
+      <main class="qy-main-content">
+        <div v-if="connection.offline.value" class="qy-offline-banner" role="alert" data-offline-banner>
+          <ArrowPathIcon class="qy-spin" aria-hidden="true" />
+          <span>连接中断，正在重试。页面上的内容是上次加载的，恢复连接后会自动更新。</span>
+        </div>
+        <slot />
+      </main>
     </div>
+    <ConfirmDialog />
 
     <nav class="qy-mobile-nav" aria-label="移动端导航">
       <RouterLink v-for="item in navItems" :key="item.to" :to="item.to" class="qy-mobile-nav-item">
@@ -42,9 +49,12 @@
 import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useSessionStore } from '../stores/session.js';
+import { connection } from '../stores/connection.js';
+import ConfirmDialog from './ConfirmDialog.vue';
 import { DEFAULT_END_SESSION_URL } from '../qyuns/logout.js';
 import {
   AdjustmentsHorizontalIcon,
+  ArrowPathIcon,
   ArrowRightOnRectangleIcon,
   BookOpenIcon,
   DocumentTextIcon,

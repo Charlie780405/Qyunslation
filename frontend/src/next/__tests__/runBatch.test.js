@@ -348,13 +348,26 @@ describe('the recycle bin', () => {
 describe('deleting from a row', () => {
   it('says the task goes to the bin and can be restored', async () => {
     const { wrapper } = await mountPage(page([run('a')]));
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await wrapper.findAll('.qy-task-row button').find((b) => b.text() === '删除').trigger('click');
     await flushPromises();
-    expect(confirm.mock.calls[0][0]).toContain('回收站');
+    const dialog = document.body.querySelector('[data-confirm-dialog]');
+    expect(dialog.textContent).toContain('回收站');
+    expect(apiMock.deleteRun).not.toHaveBeenCalled(); // nothing happens until it is confirmed
+    document.body.querySelector('[data-confirm-ok]').click();
+    await flushPromises();
     expect(apiMock.deleteRun).toHaveBeenCalledWith('a');
     wrapper.unmount();
-    confirm.mockRestore();
+  });
+
+  it('does not delete when the question is cancelled with Esc', async () => {
+    const { wrapper } = await mountPage(page([run('a')]));
+    await wrapper.findAll('.qy-task-row button').find((b) => b.text() === '删除').trigger('click');
+    await flushPromises();
+    document.body.querySelector('[data-confirm-dialog]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(document.body.querySelector('[data-confirm-dialog]')).toBeNull();
+    expect(apiMock.deleteRun).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 });
 

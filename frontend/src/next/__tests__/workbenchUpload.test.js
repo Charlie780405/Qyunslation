@@ -19,6 +19,8 @@ const apiMock = vi.hoisted(() => ({
   createTranslationRun: vi.fn(async () => ({ id: 'run-1' })),
 }));
 vi.mock('../api.js', () => ({ api: apiMock }));
+// Hashing is covered in fileHash.test.js; here it would only add timing to the upload flow.
+vi.mock('../lib/fileHash.js', () => ({ sha256Hex: async () => null }));
 
 import WorkbenchPage from '../pages/WorkbenchPage.vue';
 import { useSessionStore } from '../stores/session.js';

@@ -356,13 +356,8 @@ def _normalize_suggested_target(source_term: str, suggested: str, *, source_cont
     return text
 
 
-def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = None) -> Any | None:
-    """Pick the compliant term suggester for structured extraction and DeepSeek hints."""
-    if explicit is not None:
-        return explicit
-    from qyunslation.gateway.provider import get_profile_provider
-    from qyunslation.pipeline.model_profiles import deepseek_configured
-
+def term_profile_id_for_run(run: TranslationRunRecord) -> str:
+    """The term model a run will use (one rule for extraction, enrichment and what the page shows)."""
     from qyunslation.pipeline.model_profiles import default_term_profile_id
 
     classification = str(run.document_classification or "internal").strip().casefold()
@@ -372,6 +367,31 @@ def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = N
     if classification == "confidential" and term_profile == "term-deepseek-flash":
         # Never route confidential material to an external model, whatever the snapshot says.
         term_profile = "term-internal-qwen"
+    return term_profile
+
+
+def term_suggester_info(run: TranslationRunRecord) -> dict[str, Any]:
+    """PLAN-078f f6: who will see the term snippets if the person asks for suggestions (shown before the click)."""
+    from qyunslation.pipeline.model_profiles import PROFILES
+
+    profile_id = term_profile_id_for_run(run)
+    profile = PROFILES.get(profile_id)
+    external = profile is not None and profile.provider not in {"ollama", "internal"}
+    return {
+        "profile_id": profile_id,
+        "label": profile.label if profile else profile_id,
+        "provider": profile.provider if profile else None,
+        "egress_scope": "redacted_term_snippets" if external else "none",
+    }
+
+
+def resolve_term_provider(run: TranslationRunRecord, *, explicit: Any | None = None) -> Any | None:
+    """Pick the compliant term suggester for structured extraction and DeepSeek hints."""
+    if explicit is not None:
+        return explicit
+    from qyunslation.gateway.provider import get_profile_provider
+
+    term_profile = term_profile_id_for_run(run)
     try:
         return get_profile_provider(term_profile)
     except Exception:
