@@ -75,6 +75,18 @@ export const api = {
   restoreRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' }),
   deleteRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   cancelRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
+  restoreRunFromTrash: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/restore-from-trash`, { method: 'POST' }),
+  purgeRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/purge`, { method: 'POST' }),
+  // "Select every match": the server freezes the ids so a later batch acts on exactly those tasks.
+  createRunSelection: (payload) => apiRequest(`${API_PREFIX}/translation-runs/selection`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  batchRuns: (payload, key) => apiRequest(`${API_PREFIX}/translation-runs/batch`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify(payload),
+  }),
   retryRun: (runId, payload = {}) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/retry`, {
     method: 'POST',
     body: JSON.stringify(payload),

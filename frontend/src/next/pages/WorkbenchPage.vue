@@ -104,7 +104,24 @@
             <button class="qy-secondary-button" type="button" @click="refreshRuns">重试</button>
           </div>
           <div v-else-if="runs.length" class="qy-task-list" :aria-busy="list.status.value === 'loading'">
-            <article v-for="run in runs" :key="run.id" class="qy-task-row" :data-run-id="run.id" tabindex="-1" @click="openRun(run)">
+            <div class="qy-select-head" data-select-head>
+              <label class="qy-check-field">
+                <input type="checkbox" data-select-page :checked="list.pageSelected.value" @change="togglePage" />
+                <span>全选本页</span>
+              </label>
+              <span v-if="list.allMatching.value" class="qy-muted" data-select-banner>
+                已选择全部 {{ list.allMatching.value.count }} 条筛选结果
+              </span>
+              <span v-else-if="list.pageSelected.value && list.total.value > runs.length" class="qy-muted" data-select-banner>
+                已选择本页 {{ runs.length }} 项 ·
+                <button class="qy-link-button" type="button" data-select-all :disabled="list.selectionBusy.value" @click="selectEverything">选择全部 {{ list.total.value }} 条筛选结果</button>
+              </span>
+              <span v-if="list.selectionNotice.value" class="qy-muted" role="status" data-select-notice>{{ list.selectionNotice.value }}</span>
+            </div>
+            <article v-for="run in runs" :key="run.id" class="qy-task-row" :class="{ 'is-selected': list.isSelected(run.id), 'is-trashed': isTrash }" :data-run-id="run.id" tabindex="-1" @click="onRowClick(run)">
+              <label class="qy-row-check" @click.stop>
+                <input type="checkbox" data-row-select :checked="list.isSelected(run.id)" :aria-label="`选择 ${rowName(run)}`" @change="list.toggle(run.id)" />
+              </label>
               <div class="qy-task-file-icon"><DocumentTextIcon aria-hidden="true" /></div>
               <div class="qy-task-details">
                 <div v-if="renaming?.id === run.id" class="qy-rename" @click.stop>
@@ -128,24 +145,40 @@
                 <span>{{ run.source_language || 'English' }} → {{ run.target_language || '简体中文' }} · <strong class="qy-lifecycle" :data-lifecycle="lifecycleOf(run)">{{ lifecycleLabel(run) }}</strong><template v-if="isActive(run)"> · {{ stageLabel(run.stage) }}</template><template v-if="isActive(run) && run.progress !== null && run.progress !== undefined"> · {{ run.progress }}%</template><template v-if="run.quality_state === 'legacy_unverified'"> · 旧版未验证</template></span>
                 <div v-if="isActive(run)" class="qy-task-live-line"><span class="qy-live-indicator" aria-hidden="true"></span><span>{{ liveSummary(run) }}</span><span>{{ progressText(run) }}</span></div>
                 <div v-if="isActive(run)" class="qy-task-progress" :class="{ 'is-indeterminate': run.progress === null || run.progress === undefined }" role="progressbar" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="run.progress === null || run.progress === undefined ? undefined : run.progress" :aria-valuetext="progressText(run)"><span :style="run.progress === null || run.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, run.progress))}%` }"></span></div>
-                <div v-if="run.artifacts?.length" class="qy-task-artifacts">
+                <span v-if="isTrash" class="qy-trash-note" data-trash-note>
+                  <template v-if="run.purge_status === 'pending'">正在永久清除…</template>
+                  <template v-else-if="run.purge_status === 'failed'">永久清除失败，管理员可以重试</template>
+                  <template v-else>已在回收站 · 还剩 {{ run.trash_days_left ?? '—' }} 天后永久清除</template>
+                </span>
+                <div v-if="run.artifacts?.length && !isTrash" class="qy-task-artifacts">
                   <a v-for="artifact in run.artifacts" :key="artifact.id" :href="artifact.download_url" download @click.stop>{{ artifact.filename }}</a>
                 </div>
               </div>
               <div class="qy-task-actions" @click.stop>
-                <button v-if="can(run, 'cancel')" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
-                <button v-if="entryLabel(run)" class="qy-link-button qy-task-entry" type="button" @click="openRun(run, entryTab(run))">{{ entryLabel(run) }}</button>
-                <button v-if="can(run, 'resume') && lifecycleOf(run) === 'interrupted'" class="qy-link-button" type="button" @click="openResume(run)">续跑</button>
-                <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="openRevision(run, { pipeline: 'v2' })">新版重试</button>
-                <button v-else-if="can(run, 'retry') && ['failed', 'cancelled'].includes(lifecycleOf(run))" class="qy-link-button" type="button" @click="openRevision(run)">重试</button>
-                <button class="qy-link-button" type="button" @click="copyConfig(run)">复制配置</button>
-                <button v-if="can(run, 'restore')" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
-                <button v-else-if="can(run, 'archive')" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
-                <button v-if="can(run, 'delete')" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
-                <button v-if="can(run, 'rename')" class="qy-link-button" type="button" @click="renameRun(run)">重命名</button>
-                <ChevronRightIcon aria-hidden="true" />
+                <template v-if="isTrash">
+                  <button v-if="can(run, 'restore_from_trash')" class="qy-link-button" type="button" data-trash-restore @click="restoreFromTrash(run)">恢复</button>
+                  <button v-if="can(run, 'purge')" class="qy-link-button qy-danger-link" type="button" data-trash-purge @click="askPurge(run)">永久清除</button>
+                </template>
+                <template v-else>
+                  <button v-if="can(run, 'cancel')" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
+                  <button v-if="entryLabel(run)" class="qy-link-button qy-task-entry" type="button" @click="openRun(run, entryTab(run))">{{ entryLabel(run) }}</button>
+                  <button v-if="can(run, 'resume') && lifecycleOf(run) === 'interrupted'" class="qy-link-button" type="button" @click="openResume(run)">续跑</button>
+                  <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="openRevision(run, { pipeline: 'v2' })">新版重试</button>
+                  <button v-else-if="can(run, 'retry') && ['failed', 'cancelled'].includes(lifecycleOf(run))" class="qy-link-button" type="button" @click="openRevision(run)">重试</button>
+                  <button class="qy-link-button" type="button" @click="copyConfig(run)">复制配置</button>
+                  <button v-if="can(run, 'restore')" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
+                  <button v-else-if="can(run, 'archive')" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
+                  <button v-if="can(run, 'delete')" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
+                  <button v-if="can(run, 'rename')" class="qy-link-button" type="button" @click="renameRun(run)">重命名</button>
+                </template>
+                <ChevronRightIcon v-if="!isTrash" aria-hidden="true" />
               </div>
             </article>
+          </div>
+          <div v-else-if="isTrash" class="qy-empty-state" data-trash-empty>
+            <ClockIcon aria-hidden="true" />
+            <strong>回收站里没有任务</strong>
+            <span>删除的任务会在这里保留 30 天，期间可以恢复。</span>
           </div>
           <div v-else-if="list.filtered.value" class="qy-empty-state" data-run-nomatch>
             <MagnifyingGlassIcon aria-hidden="true" />
@@ -158,6 +191,7 @@
             <strong>还没有翻译任务</strong>
             <span>上传一份文档后，预检结果会显示在这里。</span>
           </div>
+          <p v-if="batchError" class="qy-field-error" role="alert" data-batch-error>{{ batchError }}</p>
           <div v-if="list.nextCursor.value" class="qy-load-more" data-run-more>
             <button class="qy-secondary-button" type="button" :disabled="list.loadingMore.value" @click="list.loadMore()">
               {{ list.loadingMore.value ? '加载中…' : `加载更多（已显示 ${runs.length} / 共 ${list.total.value}）` }}
@@ -180,6 +214,21 @@
         </div>
       </aside>
     </div>
+
+    <BatchActionBar
+      ref="batchBar"
+      :count="list.selectionCount.value"
+      :rows="list.selectedRows.value"
+      :all-matching="Boolean(list.allMatching.value)"
+      :excluded-count="list.allMatching.value ? list.allMatching.value.excluded.size : 0"
+      :in-trash="isTrash"
+      :busy="batchBusy"
+      :result="batchResult"
+      @run="runBatch"
+      @clear="list.clearSelection()"
+      @retry-failed="retryFailed"
+      @dismiss-result="batchResult = null"
+    />
 
     <RunConfirmDrawer
       v-if="drawer"
@@ -214,6 +263,7 @@ import {
 } from '../stores/workbench.js';
 import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import RunListToolbar from '../components/RunListToolbar.vue';
+import BatchActionBar from '../components/BatchActionBar.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import {
   can,
@@ -245,6 +295,10 @@ const uploadError = ref(false);
 const uploading = ref(false);
 const uploadProgress = ref(0);
 const runs = list.items;
+const batchBar = ref(null);
+const batchBusy = ref(false);
+const batchResult = ref(null);
+const batchError = ref('');
 const renaming = ref(null); // { id, value, original, version, saving, error }
 const renameInput = ref(null);
 const activeEvents = ref([]);
@@ -267,7 +321,9 @@ const runForPreflight = computed(() => (
   preflight.value ? runs.value.find((item) => item.preflight_id === preflight.value.id) || null : null
 ));
 // What needs a person right now, across every task in the list.
+const isTrash = computed(() => list.filters.archived === 'trash');
 const todoSummary = computed(() => {
+  if (isTrash.value) return null;
   const needsAction = runs.value.filter((item) => ['qa_action', 'qa_unavailable'].includes(lifecycleOf(item)));
   const needsReview = runs.value.filter((item) => lifecycleOf(item) === 'review');
   // The list may be filtered or paged, so unfiltered counts come from the server's facets.
@@ -438,6 +494,74 @@ function entryTab(run) {
   return ['qa_action', 'qa_unavailable'].includes(lifecycleOf(run)) ? 'qa' : 'review';
 }
 
+function rowName(run) {
+  return run.display_name || run.filename || run.file_name || '未命名文档';
+}
+
+function onRowClick(run) {
+  if (!isTrash.value) openRun(run); // a task in the bin cannot be opened, only restored
+}
+
+function togglePage(event) {
+  if (event.target.checked) list.selectPage();
+  else list.clearSelection();
+}
+
+async function selectEverything() {
+  batchError.value = '';
+  try {
+    await list.selectAllMatching();
+  } catch (error) {
+    batchError.value = error.message || '无法选择全部筛选结果';
+  }
+}
+
+// One path for a batch and for "retry the failed ones": run, show the answer, refresh, drop the selection.
+async function applyBatch(action, options) {
+  batchBusy.value = true;
+  batchError.value = '';
+  try {
+    batchResult.value = await list.runBatch(action, options);
+    list.clearSelection();
+    await refreshRuns();
+  } catch (error) {
+    if (error.status === 410) list.clearSelection('这次选择已过期，请重新选择。');
+    batchError.value = error.message || '批量操作失败';
+  } finally {
+    batchBusy.value = false;
+  }
+}
+
+function runBatch(action) {
+  batchResult.value = null;
+  return applyBatch(action);
+}
+
+function retryFailed() {
+  const result = batchResult.value;
+  if (!result) return Promise.resolve();
+  const ids = result.items.filter((item) => item.outcome === 'failed').map((item) => item.id);
+  return applyBatch(result.action, { onlyIds: ids });
+}
+
+async function restoreFromTrash(run) {
+  try {
+    await api.restoreRunFromTrash(run.id);
+    uploadError.value = false;
+    uploadMessage.value = `已恢复“${rowName(run)}”。`;
+    await refreshRuns();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '恢复失败';
+  }
+}
+
+async function askPurge(run) {
+  list.selectOnly(run.id);
+  await nextTick();
+  batchBar.value?.ask('purge');
+}
+
 function openRun(run, tab = '') {
   if (!run?.id) return;
   listView.scrollY = window.scrollY;
@@ -567,6 +691,9 @@ async function refreshRuns() {
 
 // Filters live in the URL: reload, share and back all land on the same list.
 async function changeFilters(next) {
+  if (list.selectionCount.value) list.selectionNotice.value = '筛选或视图已变化，之前的选择已清空。';
+  batchResult.value = null;
+  batchError.value = '';
   list.applyFilters(next);
   await router.replace({ query: { ...route.query, ...clearedFilterQuery(), ...filtersToQuery(list.filters) } });
   await reloadList();
@@ -676,14 +803,17 @@ async function commitRename(reset = false) {
 }
 
 async function deleteRun(run) {
-  if (!window.confirm(`确定删除任务“${run.display_name || run.filename || '未命名文档'}”吗？此操作不可恢复。`)) return;
+  if (!window.confirm(`把任务“${rowName(run)}”移入回收站吗？30 天内可以在“回收站”里恢复。`)) return;
   try {
     await api.deleteRun(run.id);
     const deletedSelectedPreflight = preflight.value?.id === run.preflight_id;
     if (deletedSelectedPreflight) {
       preflight.value = null;
       uploadError.value = false;
-      uploadMessage.value = '任务已删除，原预检记录也已清理。请重新开始预检。';
+      uploadMessage.value = '任务已移入回收站。这份预检对应的任务不在列表里了，请重新开始预检。';
+    } else {
+      uploadError.value = false;
+      uploadMessage.value = '已移入回收站，30 天内可在“回收站”里恢复。';
     }
     await refreshRuns();
   } catch (error) {

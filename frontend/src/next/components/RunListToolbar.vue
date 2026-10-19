@@ -21,6 +21,7 @@
       <option value="active">未归档</option>
       <option value="archived">仅已归档</option>
       <option value="all">全部</option>
+      <option value="trash">回收站</option>
     </select>
     <select class="qy-input" data-run-format :value="modelValue.format" aria-label="文件格式" @change="emitChange({ format: $event.target.value })">
       <option value="">全部格式</option>

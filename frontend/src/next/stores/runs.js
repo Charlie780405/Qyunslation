@@ -50,18 +50,38 @@ export function hasActiveFilters(filters) {
   return FILTER_KEYS.some((key) => (key === 'lifecycle' ? filters.lifecycle.length > 0 : filters[key] !== DEFAULT_FILTERS[key] && !['sort', 'order'].includes(key)));
 }
 
+// The recycle bin is a view of the same list: `archived=trash` in the URL, `trash=true` on the wire.
 function requestParams(filters, extra = {}) {
   const params = {};
   for (const key of FILTER_KEYS) {
     const value = filters[key];
     if (key === 'lifecycle') {
       if (value.length) params.lifecycle = value.join(',');
+    } else if (key === 'archived' && value === 'trash') {
+      params.trash = 'true';
     } else if (value) {
       params[key] = value;
     }
   }
   return { ...params, ...extra };
 }
+
+// The same filters as a body for POST /translation-runs/selection.
+export function filtersToSelectionBody(filters) {
+  const trash = filters.archived === 'trash';
+  return {
+    q: filters.q || null,
+    lifecycle: [...filters.lifecycle],
+    format: filters.format ? filters.format.split(',').filter(Boolean) : [],
+    direction: filters.direction || null,
+    domain: filters.domain || null,
+    archived: trash ? 'all' : filters.archived,
+    trash,
+    group_versions: true,
+  };
+}
+
+export const BATCH_CHUNK = 200;
 
 export function createRunListStore() {
   const filters = reactive({ ...DEFAULT_FILTERS, lifecycle: [] });
@@ -88,6 +108,7 @@ export function createRunListStore() {
     const mine = ++sequence;
     epoch += 1;
     status.value = 'loading';
+    if (selectedIds.value.size || allMatching.value) clearSelection(selectionNotice.value);
     try {
       const response = await api.listRuns(requestParams(filters, { page_size: PAGE_SIZE }));
       if (mine !== sequence) return false;
@@ -158,7 +179,107 @@ export function createRunListStore() {
     }
   }
 
+  // ---- selection (PLAN-078e) ---------------------------------------------------------------------------
+  // Either a set of ticked rows, or "everything the filters match" frozen on the server (a token plus
+  // the rows the person then unticked). A filter, sort or view change always starts a new selection.
+  const selectedIds = ref(new Set());
+  const allMatching = ref(null); // { token, count, scope, excluded: Set }
+  const selectionNotice = ref('');
+  const selectionBusy = ref(false);
+
+  const selectionCount = computed(() => (
+    allMatching.value
+      ? Math.max(0, allMatching.value.count - allMatching.value.excluded.size)
+      : selectedIds.value.size
+  ));
+  const pageSelected = computed(() => items.value.length > 0 && items.value.every((item) => isSelected(item.id)));
+  const selectedRows = computed(() => items.value.filter((item) => isSelected(item.id)));
+
+  function isSelected(id) {
+    return allMatching.value ? !allMatching.value.excluded.has(id) : selectedIds.value.has(id);
+  }
+
+  function toggle(id) {
+    selectionNotice.value = '';
+    if (allMatching.value) {
+      const excluded = new Set(allMatching.value.excluded);
+      if (excluded.has(id)) excluded.delete(id); else excluded.add(id);
+      allMatching.value = { ...allMatching.value, excluded };
+      return;
+    }
+    const next = new Set(selectedIds.value);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    selectedIds.value = next;
+  }
+
+  function selectPage() {
+    selectionNotice.value = '';
+    allMatching.value = null;
+    selectedIds.value = new Set([...selectedIds.value, ...items.value.map((item) => item.id)]);
+  }
+
+  function selectOnly(id) {
+    selectionNotice.value = '';
+    allMatching.value = null;
+    selectedIds.value = new Set([id]);
+  }
+
+  function clearSelection(notice = '') {
+    allMatching.value = null;
+    selectedIds.value = new Set();
+    selectionNotice.value = notice;
+  }
+
+  async function selectAllMatching() {
+    selectionBusy.value = true;
+    try {
+      const response = await api.createRunSelection(filtersToSelectionBody(filters));
+      allMatching.value = {
+        token: response.selection_token,
+        count: response.count,
+        scope: response.scope,
+        excluded: new Set(),
+      };
+      selectedIds.value = new Set();
+      selectionNotice.value = '';
+    } finally {
+      selectionBusy.value = false;
+    }
+  }
+
+  function newAttemptId() {
+    return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  // Run one action over the selection (or over `onlyIds`, for "retry the failed ones") and return one
+  // combined result. Explicit ids go out in chunks the server accepts; each chunk has its own key.
+  async function runBatch(action, { onlyIds = null } = {}) {
+    const attempt = newAttemptId();
+    const combined = { action, requested: 0, succeeded: 0, failed: 0, skipped: 0, items: [] };
+    const merge = (part) => {
+      combined.requested += part.requested;
+      combined.succeeded += part.succeeded;
+      combined.failed += part.failed;
+      combined.skipped += part.skipped;
+      combined.items.push(...part.items);
+    };
+    if (!onlyIds && allMatching.value) {
+      merge(await api.batchRuns({
+        action,
+        selection_token: allMatching.value.token,
+        exclude_ids: [...allMatching.value.excluded],
+      }, `${attempt}:all`));
+      return combined;
+    }
+    const ids = onlyIds || [...selectedIds.value];
+    for (let start = 0; start < ids.length; start += BATCH_CHUNK) {
+      merge(await api.batchRuns({ action, ids: ids.slice(start, start + BATCH_CHUNK) }, `${attempt}:${start}`));
+    }
+    return combined;
+  }
+
   function reset() {
+    clearSelection();
     sequence += 1;
     epoch += 1;
     applyFilters({});
@@ -193,6 +314,20 @@ export function createRunListStore() {
     refresh,
     reset,
     patchItem,
+    selectedIds,
+    allMatching,
+    selectionNotice,
+    selectionBusy,
+    selectionCount,
+    pageSelected,
+    selectedRows,
+    isSelected,
+    toggle,
+    selectPage,
+    selectOnly,
+    clearSelection,
+    selectAllMatching,
+    runBatch,
   };
 }
 
