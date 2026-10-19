@@ -91,7 +91,11 @@ def test_retry_allocates_new_generation_without_overwriting_original(client):
     repeated = client.post(f"/api/v1/translation-runs/{created['id']}/retry", headers=headers())
     assert repeated.status_code == 201
     assert repeated.json()["id"] == retry.json()["id"]
-    assert len(client.get("/api/v1/translation-runs", headers=headers()).json()["items"]) == 2
+    # PLAN-078d: the default list shows one row per task (its newest version); both versions still exist.
+    grouped = client.get("/api/v1/translation-runs", headers=headers()).json()["items"]
+    assert [item["id"] for item in grouped] == [retry.json()["id"]]
+    every = client.get("/api/v1/translation-runs", headers=headers(), params={"group_versions": "false"}).json()["items"]
+    assert len(every) == 2
 
 
 def test_completed_runner_outputs_are_copied_and_downloaded_by_opaque_artifact_id(

@@ -65,9 +65,12 @@ export const api = {
     return apiRequest(`${API_PREFIX}/translation-runs${query ? `?${query}` : ''}`);
   },
   getRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`),
-  patchRun: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, {
+  getRunVersions: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/versions`),
+  // `nameVersion` goes out as If-Match so a rename made from a stale page is refused (NAME_CONFLICT).
+  patchRun: (runId, payload, { nameVersion } = {}) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+    ...(nameVersion === undefined || nameVersion === null ? {} : { headers: { 'If-Match': String(nameVersion) } }),
   }),
   restoreRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/restore`, { method: 'POST' }),
   deleteRun: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),

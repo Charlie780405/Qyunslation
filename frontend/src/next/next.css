@@ -265,6 +265,25 @@
 .qy-login-vertical-label { position: absolute; right: 26px; bottom: 30px; color: rgba(255,255,255,.5); font-size: 10px; letter-spacing: .16em; writing-mode: vertical-rl; }
 
 @media (max-width: 1100px) { .qy-sidebar { width: 200px; } .qy-main-content { padding: 30px 24px 52px; } .qy-workbench-grid, .qy-term-layout { grid-template-columns: minmax(0, 1fr) 290px; } }
+/* PLAN-078d: task list search, filters, rename, paging */
+.qy-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.qy-list-search { display: flex; align-items: center; flex: 1 1 220px; min-width: 160px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); background: #fff; }
+.qy-list-search:focus-within { border-color: var(--qy-interactive); box-shadow: var(--qy-focus); }
+.qy-list-search svg { width: 18px; margin-left: 10px; color: var(--qy-text-secondary); }
+.qy-list-search .qy-input { flex: 1; border: 0; box-shadow: none; background: transparent; }
+.qy-list-toolbar .qy-input, .qy-rename .qy-input { min-height: 36px; padding: 0 10px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); color: var(--qy-text-primary); background: #fff; font: inherit; }
+.qy-list-toolbar .qy-input:focus, .qy-rename .qy-input:focus { outline: none; border-color: var(--qy-interactive); box-shadow: var(--qy-focus); }
+.qy-list-chips { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.qy-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--qy-border); border-radius: 14px; color: var(--qy-text-secondary); background: #fff; font-size: 12px; cursor: pointer; }
+.qy-chip.is-on { border-color: var(--qy-primary); color: var(--qy-primary); background: #EAF4F6; font-weight: 700; }
+.qy-chip-count { font-variant-numeric: tabular-nums; opacity: .8; }
+.qy-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.qy-rename .qy-input { flex: 1 1 200px; }
+.qy-field-error { flex-basis: 100%; color: #B42318; font-size: 12px; }
+.qy-version-tag { margin-left: 6px; color: var(--qy-text-secondary); font-size: 11px; font-weight: 600; }
+.qy-inline-alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 8px 12px; border: 1px solid #F2C94C; border-radius: var(--qy-radius-control); background: #FFF8E1; font-size: 12px; }
+.qy-load-more { display: flex; justify-content: center; margin-top: 12px; }
+.qy-task-row:focus-visible { outline: none; box-shadow: var(--qy-focus); }
 @media (max-width: 860px) { .qy-sidebar { display: none; } .qy-main-content { padding: 26px 20px 80px; } .qy-mobile-nav { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(3, 1fr); min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: rgba(255,255,255,.97); border-top: 1px solid var(--qy-border); } .qy-mobile-nav-item { display: grid; place-items: center; align-content: center; gap: 2px; color: var(--qy-text-secondary); text-decoration: none; font-size: 11px; } .qy-mobile-nav-item svg { width: 20px; height: 20px; } .qy-mobile-nav-item.router-link-active { color: var(--qy-primary); font-weight: 700; } .qy-workbench-grid, .qy-term-layout { grid-template-columns: 1fr; } .qy-term-detail { order: -1; } .qy-detail-placeholder { min-height: 160px; } .qy-settings-layout { grid-template-columns: 1fr; } .qy-settings-nav { display: flex; overflow-x: auto; } .qy-settings-nav button { flex: 0 0 auto; } .qy-settings-nav button svg:last-child { display: none; } }
 @media (max-width: 640px) { .qy-topbar { height: 58px; padding: 0 16px; } .qy-brand small { display: none; } .qy-main-content { padding: 22px 14px 84px; } .qy-page-head { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; } .qy-page-head-actions, .qy-page-head-actions > * { width: 100%; } .qy-page-head-actions > * { justify-content: center; } .qy-upload-panel, .qy-task-panel, .qy-side-card, .qy-settings-card, .qy-settings-section { padding: 18px; } .qy-language-fields { grid-template-columns: 1fr; gap: 8px; } .qy-task-toolbar { flex-wrap: wrap; justify-content: flex-end; } .qy-task-row { align-items: flex-start; } .qy-task-actions { flex-wrap: wrap; justify-content: flex-end; } .qy-term-toolbar { flex-wrap: wrap; } .qy-search-field { flex-basis: 100%; } .qy-term-toolbar > select { flex: 1; } .qy-policy-list > div { grid-template-columns: 1fr; gap: 3px; } .qy-login-page { display: block; background: var(--qy-paper); } .qy-login-panel { width: 100%; min-height: 100vh; padding: 42px 24px; } .qy-login-brand { margin-bottom: 42px; } .qy-login-aside { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }

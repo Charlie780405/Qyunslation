@@ -186,6 +186,8 @@ class TranslationRunRecord(Base):
     direction: Mapped[str] = mapped_column(String(64), nullable=False)
     profile: Mapped[str] = mapped_column(String(128), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # PLAN-078d: bumped on every rename; lets two browser tabs notice they edited the same name.
+    name_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     settings_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

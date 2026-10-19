@@ -5,20 +5,21 @@ from __future__ import annotations
 import os
 import re
 import json
+import base64
 import hashlib
 import logging
 import mimetypes
 import shutil
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import event, select
+from sqlalchemy import and_, case, event, func, literal, or_, select, tuple_
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.persist import repo
@@ -1153,7 +1154,8 @@ class ReviewDraftBody(BaseModel):
 
 
 class TranslationRunPatchBody(BaseModel):
-    display_name: str | None = Field(default=None, max_length=256)
+    display_name: str | None = Field(default=None, max_length=1000)
+    reset_display_name: bool = False  # explicit "back to the original file name"
     archived: bool | None = None
 
 
@@ -2253,8 +2255,89 @@ def _refresh_translation_run(session: Session, run: TranslationRunRecord) -> str
 _FINAL_TERM_STATUSES = frozenset({"approved", "rejected", "applied"})
 
 
-def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
+@dataclass
+class _ListContext:
+    """Everything the projection of a page of runs needs, fetched with a handful of queries
+    instead of several per row (PLAN-078d)."""
+
+    preflights: dict[str, PreflightRecord]
+    artifacts: dict[str, list[TranslationArtifact]]
+    terms: dict[str, list[str]]
+    affiliations: dict[tuple[str, int], list[str]]
+    chains: dict[str, list[tuple[int, str]]]  # preflight id -> [(generation, run id)] ascending
+    qa_checks: dict[str, Any]  # run id -> latest QaCheckRound of its current generation
+
+
+def _build_list_context(session: Session, runs: list[TranslationRunRecord]) -> _ListContext:
+    from qyunslation.persist.models import QaCheckRound
+
+    run_ids = [run.id for run in runs]
+    preflight_ids = list({run.preflight_id for run in runs})
+    if not run_ids:
+        return _ListContext({}, {}, {}, {}, {}, {})
+    preflights = {
+        row.id: row for row in session.scalars(select(PreflightRecord).where(PreflightRecord.id.in_(preflight_ids)))
+    }
+    artifacts: dict[str, list[TranslationArtifact]] = {}
+    for row in session.scalars(
+        select(TranslationArtifact)
+        .where(TranslationArtifact.run_id.in_(run_ids))
+        .order_by(TranslationArtifact.created_at)
+    ):
+        artifacts.setdefault(row.run_id, []).append(row)
+    terms: dict[str, list[str]] = {}
+    for run_id, term_id in session.execute(
+        select(DocumentTermCandidate.translation_run_id, DocumentTermCandidate.id).where(
+            DocumentTermCandidate.translation_run_id.in_(run_ids),
+            DocumentTermCandidate.status.not_in(_FINAL_TERM_STATUSES),
+        )
+    ):
+        terms.setdefault(run_id, []).append(term_id)
+    affiliations: dict[tuple[str, int], list[str]] = {}
+    for run_id, generation, segment_id in session.execute(
+        select(ReviewSegment.translation_run_id, ReviewSegment.generation, ReviewSegment.id).where(
+            ReviewSegment.translation_run_id.in_(run_ids),
+            ReviewSegment.role == "affiliation",
+            ReviewSegment.status != "approved",
+        )
+    ):
+        affiliations.setdefault((run_id, generation), []).append(segment_id)
+    chains: dict[str, list[tuple[int, str]]] = {}
+    for preflight_id, generation, run_id in session.execute(
+        select(TranslationRunRecord.preflight_id, TranslationRunRecord.generation, TranslationRunRecord.id)
+        .where(TranslationRunRecord.preflight_id.in_(preflight_ids))
+        .order_by(TranslationRunRecord.generation)
+    ):
+        chains.setdefault(preflight_id, []).append((generation, run_id))
+    generation_of = {run.id: run.generation for run in runs}
+    qa_checks: dict[str, Any] = {}
+    for row in session.scalars(
+        select(QaCheckRound)
+        .where(QaCheckRound.run_id.in_([run.id for run in runs if run.status == "gated"]))
+        .order_by(QaCheckRound.round_no)
+    ):
+        if row.generation == generation_of.get(row.run_id):
+            qa_checks[row.run_id] = row
+    return _ListContext(preflights, artifacts, terms, affiliations, chains, qa_checks)
+
+
+def _needs_refresh(run: TranslationRunRecord) -> bool:
+    """Only a run whose state can still change underneath us is re-read from its executor."""
+    return run.status in _RUN_EXECUTING or (
+        run.status == "gated" and (run.quality_state or "draft") == "draft"
+    )
+
+
+def _formal_gate(
+    session: Session, run: TranslationRunRecord, ctx: _ListContext | None = None
+) -> dict[str, Any]:
     """Unified publication gate for QA, affiliation review, terms, and generations."""
+    if ctx is not None:
+        unresolved_terms = list(ctx.terms.get(run.id, []))
+        unresolved_affiliations = list(ctx.affiliations.get((run.id, run.generation), []))
+        newer = [item for item in ctx.chains.get(run.preflight_id, []) if item[0] > run.generation]
+        superseding_run_id = newer[-1][1] if newer else None
+        return _gate_from(run, unresolved_terms, unresolved_affiliations, superseding_run_id)
     unresolved_terms = list(
         session.scalars(
             select(DocumentTermCandidate.id).where(
@@ -2282,6 +2365,15 @@ def _formal_gate(session: Session, run: TranslationRunRecord) -> dict[str, Any]:
         .order_by(TranslationRunRecord.generation.desc())
         .limit(1)
     )
+    return _gate_from(run, unresolved_terms, unresolved_affiliations, superseding_run_id)
+
+
+def _gate_from(
+    run: TranslationRunRecord,
+    unresolved_terms: list[str],
+    unresolved_affiliations: list[str],
+    superseding_run_id: str | None,
+) -> dict[str, Any]:
     summary = run.qa_summary or {}
     # PLAN-078b: findings closed by a valid disposition no longer block; raw counts stay visible.
     qa_blockers = int(summary["open_blocker"] if "open_blocker" in summary else (summary.get("blocker") or 0))
@@ -2365,12 +2457,14 @@ _NEXT_ACTION_BY_LIFECYCLE = {
 }
 
 
-def _qa_check_info(session: Session, run: TranslationRunRecord) -> dict[str, Any] | None:
+def _qa_check_info(
+    session: Session, run: TranslationRunRecord, ctx: _ListContext | None = None
+) -> dict[str, Any] | None:
     if run.status != "gated":
         return None
     from qyunslation.pipeline.qa import rounds
 
-    latest = rounds.latest_round(session, run.id, run.generation)
+    latest = ctx.qa_checks.get(run.id) if ctx is not None else rounds.latest_round(session, run.id, run.generation)
     if latest is None:
         return None
     return {
@@ -2383,7 +2477,12 @@ def _qa_check_info(session: Session, run: TranslationRunRecord) -> dict[str, Any
     }
 
 
-def _superseding_run_id(session: Session, run: TranslationRunRecord) -> str | None:
+def _superseding_run_id(
+    session: Session, run: TranslationRunRecord, ctx: _ListContext | None = None
+) -> str | None:
+    if ctx is not None:
+        newer = [item for item in ctx.chains.get(run.preflight_id, []) if item[0] > run.generation]
+        return newer[0][1] if newer else None
     return session.scalar(
         select(TranslationRunRecord.id)
         .where(
@@ -2442,33 +2541,43 @@ def _run_allowed_actions(
 
 
 def _translation_run_dict(
-    session: Session, run: TranslationRunRecord, identity: IdentityContext | None = None
+    session: Session,
+    run: TranslationRunRecord,
+    identity: IdentityContext | None = None,
+    ctx: _ListContext | None = None,
 ) -> dict[str, Any]:
-    """Project the durable ledger plus current legacy-service state."""
-    progress_message = _refresh_translation_run(session, run)
-    preflight = session.get(PreflightRecord, run.preflight_id)
+    """Project the durable ledger plus current legacy-service state.
+
+    With ``ctx`` (a page of runs) the caller has already refreshed what needed refreshing and
+    everything else comes from the preloaded context.
+    """
+    progress_message = None if ctx is not None else _refresh_translation_run(session, run)
+    preflight = ctx.preflights.get(run.preflight_id) if ctx is not None else session.get(PreflightRecord, run.preflight_id)
     settings = dict(run.settings_snapshot or {})
     source_language, target_language, _ = _normalize_language_pair(
         settings.get("source_language"), settings.get("target_language"), run.direction
     )
-    artifacts = list(
-        session.scalars(
-            select(TranslationArtifact)
-            .where(
-                TranslationArtifact.run_id == run.id,
-                TranslationArtifact.tenant_id == run.tenant_id,
+    if ctx is not None:
+        artifacts = ctx.artifacts.get(run.id, [])
+    else:
+        artifacts = list(
+            session.scalars(
+                select(TranslationArtifact)
+                .where(
+                    TranslationArtifact.run_id == run.id,
+                    TranslationArtifact.tenant_id == run.tenant_id,
+                )
+                .order_by(TranslationArtifact.created_at)
             )
-            .order_by(TranslationArtifact.created_at)
         )
-    )
-    gate = _formal_gate(session, run)
+    gate = _formal_gate(session, run, ctx)
     artifact_rows = [_artifact_dict(item, run.id) for item in artifacts]
     lifecycle = _run_lifecycle(run)
     return {
         "lifecycle": lifecycle,
         "next_action": _run_next_action(lifecycle, gate),
-        "superseded_by": _superseding_run_id(session, run),
-        "qa_check": _qa_check_info(session, run),
+        "superseded_by": _superseding_run_id(session, run, ctx),
+        "qa_check": _qa_check_info(session, run, ctx),
         "pending_counts": {
             "qa_blockers": gate["qa_blockers"],
             "qa_unavailable": gate["qa_unavailable"],
@@ -2495,6 +2604,7 @@ def _translation_run_dict(
         "prompt_snapshot": dict(settings.get("prompt_snapshot") or {}) or None,
         "settings": settings,
         "display_name": run.display_name,
+        "name_version": run.name_version or 0,
         "archived": run.archived_at is not None,
         "archived_at": run.archived_at.isoformat() if run.archived_at else None,
         "status": run.status,
@@ -2534,6 +2644,64 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
     ):
         raise HTTPException(status_code=404, detail="translation run not found")
     return run
+
+
+_WRITER_ACTIONS = frozenset({"rename", "archive", "restore", "delete", "cancel", "discard"})
+
+
+def _is_run_writer(session: Session, identity: IdentityContext, run: TranslationRunRecord) -> bool:
+    return run.actor_sub == identity.user_sub or _cached_role(session, identity) in {"admin", "owner"}
+
+
+def _require_run_writer(session: Session, identity: IdentityContext, run: TranslationRunRecord) -> None:
+    if not _is_run_writer(session, identity, run):
+        raise _disposition_error(
+            403, "RUN_OWNER_REQUIRED", "仅任务提交人或管理员可以修改、归档、取消或删除该任务"
+        )
+
+
+def _authorize_run_action(
+    session: Session, identity: IdentityContext, run: TranslationRunRecord, action: str
+) -> None:
+    """The server-side twin of ``allowed_actions``: who may do what, in which state (PLAN-078d).
+
+    Seeing a task is not authority over it. Writer actions need the submitter or an admin; and
+    every action must make sense for the task's current phase, so a running task is never
+    archived or deleted underneath its executor.
+    """
+    lifecycle = _run_lifecycle(run)
+    if action in _run_allowed_actions(session, identity, run, lifecycle, {"passed": False}, []):
+        return
+    if action in _WRITER_ACTIONS:
+        _require_run_writer(session, identity, run)
+    raise _disposition_error(
+        409,
+        "ACTION_NOT_ALLOWED_IN_STATE",
+        f"任务当前处于“{lifecycle}”阶段，不能执行该操作",
+    )
+
+
+def _clean_task_name(raw: str) -> str:
+    import unicodedata
+
+    name = (raw or "").strip()
+    if not name:
+        raise _disposition_error(
+            422, "NAME_REQUIRED", "任务名称不能为空；要使用原文件名请选择“恢复为原文件名”"
+        )
+    if len(name) > 120 or any(unicodedata.category(ch) in {"Cc", "Cf", "Zl", "Zp"} for ch in name):
+        raise _disposition_error(422, "NAME_INVALID", "任务名称最长 120 个字符，且不能包含换行或控制字符")
+    return name
+
+
+def _parse_if_match(raw: str) -> int:
+    text = raw.strip()
+    if text.startswith("W/"):
+        text = text[2:]
+    try:
+        return int(text.strip('"'))
+    except ValueError as exc:
+        raise _disposition_error(400, "INVALID_IF_MATCH", "If-Match 必须是任务名称的版本号") from exc
 
 
 def _run_writable(session: Session, *, run_id: str, identity: IdentityContext) -> TranslationRunRecord:
@@ -3324,25 +3492,261 @@ async def create_translation_run(
     return _translation_run_dict(session, run, identity=identity)
 
 
+_LIFECYCLE_NAMES = (
+    "executing", "qa_checking", "qa_action", "qa_unavailable", "review", "changes_requested",
+    "failed", "interrupted", "cancelled", "completed",
+)
+
+
+def _lifecycle_sql(status: Any, quality: Any) -> Any:
+    """SQL twin of _run_lifecycle, so the list can filter and count by the same phases the UI shows."""
+    q = func.coalesce(quality, "draft")
+    gated = status == "gated"
+    return case(
+        (status.in_(tuple(_RUN_EXECUTING)), "executing"),
+        (and_(gated, q == "draft"), "qa_checking"),
+        (and_(gated, q == "qa_blocked"), "qa_action"),
+        (and_(gated, q == "qa_unavailable"), "qa_unavailable"),
+        (and_(gated, q == "changes_requested"), "changes_requested"),
+        (gated, "review"),
+        (status == "succeeded", "completed"),
+        (status.in_(("failed", "blocked", "degraded")), "failed"),
+        (status == "interrupted", "interrupted"),
+        (status == "cancelled", "cancelled"),
+        else_="failed",
+    )
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _split_values(values: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for value in values or []:
+        out.extend(part.strip() for part in str(value).split(",") if part.strip())
+    return out
+
+
+def _encode_cursor(payload: dict[str, Any]) -> str:
+    return base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+
+
+def _decode_cursor(raw: str) -> dict[str, Any]:
+    try:
+        return json.loads(base64.urlsafe_b64decode(raw.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_CURSOR", "message": "分页游标无效，请从第一页重新开始"}) from exc
+
+
+def _run_query_filters(
+    *,
+    session: Session,
+    identity: IdentityContext,
+    q: str | None,
+    formats: list[str],
+    direction: str | None,
+    domain: str | None,
+    created_from: date | None,
+    created_to: date | None,
+) -> list[Any]:
+    """Conditions that describe *which runs match*, applied before versions are grouped."""
+    tenant = _tenant_bundle(session, identity)
+    conditions: list[Any] = [TranslationRunRecord.tenant_id == tenant.id]
+    if _cached_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
+        conditions.append(TranslationRunRecord.actor_sub == identity.user_sub)
+    if q and q.strip():
+        needle = _like_escape(q.strip().lower())
+        conditions.append(
+            or_(
+                func.lower(TranslationRunRecord.display_name).like(f"%{needle}%", escape="\\"),
+                func.lower(PreflightRecord.source_filename).like(f"%{needle}%", escape="\\"),
+                func.lower(TranslationRunRecord.id).like(f"{needle}%", escape="\\"),
+            )
+        )
+    if formats:
+        conditions.append(func.lower(PreflightRecord.source_format).in_([f.lower().lstrip(".") for f in formats]))
+    if direction:
+        conditions.append(TranslationRunRecord.direction == direction)
+    if domain:
+        conditions.append(
+            func.coalesce(TranslationRunRecord.settings_snapshot["domain_profile"].as_string(), "general") == domain.lower()
+        )
+    if created_from:
+        conditions.append(TranslationRunRecord.created_at >= datetime.combine(created_from, dtime.min, tzinfo=timezone.utc))
+    if created_to:
+        conditions.append(
+            TranslationRunRecord.created_at < datetime.combine(created_to + timedelta(days=1), dtime.min, tzinfo=timezone.utc)
+        )
+    return conditions
+
+
 @router.get("/translation-runs")
 def list_translation_runs(
+    q: str | None = Query(default=None, max_length=200),
+    lifecycle: list[str] | None = Query(default=None),
+    format: list[str] | None = Query(default=None),
+    direction: str | None = Query(default=None, max_length=64),
+    domain: str | None = Query(default=None, max_length=32),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
+    archived: str | None = Query(default=None, pattern="^(active|archived|all)$"),
+    sort: str = Query(default="created", pattern="^(created|updated|name)$"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    cursor: str | None = Query(default=None, max_length=512),
+    group_versions: bool = Query(default=True),
     status: str | None = Query(default=None),
     include_archived: bool = Query(default=False),
     page_size: int = Query(default=100, ge=1, le=100),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    tenant = _tenant_bundle(session, identity)
-    stmt = select(TranslationRunRecord).where(TranslationRunRecord.tenant_id == tenant.id)
-    if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
-        stmt = stmt.where(TranslationRunRecord.actor_sub == identity.user_sub)
-    if not include_archived:
-        stmt = stmt.where(TranslationRunRecord.archived_at.is_(None))
+    """Search, filter, sort and page the tenant's tasks on the server (PLAN-078d).
+
+    Matching (``q``, format, direction, domain, dates) is applied to every version of a task;
+    the versions are then grouped so each task shows its newest matching version, and the
+    task's *state* (lifecycle, archived) is that version's. Pagination is keyset-based, so it
+    stays stable while tasks are being created or changed.
+    """
+    TR, PF = TranslationRunRecord, PreflightRecord
+    wanted_lifecycles = _split_values(lifecycle)
+    unknown = [name for name in wanted_lifecycles if name not in _LIFECYCLE_NAMES]
+    if unknown:
+        return {"items": [], "next_cursor": None, "total": 0, "facets": {"lifecycle": {}, "total": 0}, "page_size": page_size}
+    archived_mode = archived or ("all" if include_archived else "active")
+
+    sort_expression = {
+        "created": TR.created_at,
+        "updated": TR.updated_at,
+        "name": func.lower(func.coalesce(TR.display_name, PF.source_filename, "")),
+    }[sort]
+    ranking = (
+        func.row_number().over(partition_by=TR.preflight_id, order_by=TR.generation.desc())
+        if group_versions
+        else literal(1)
+    )
+    ranked = (
+        select(
+            TR.id.label("id"),
+            TR.status.label("st"),
+            TR.quality_state.label("qs"),
+            TR.archived_at.label("ar"),
+            sort_expression.label("sk"),
+            ranking.label("rn"),
+        )
+        .select_from(TR)
+        .join(PF, PF.id == TR.preflight_id, isouter=True)
+        .where(
+            *_run_query_filters(
+                session=session, identity=identity, q=q, formats=_split_values(format), direction=direction,
+                domain=domain, created_from=created_from, created_to=created_to,
+            )
+        )
+        .subquery()
+    )
+    task_state = [ranked.c.rn == 1]
+    if archived_mode == "active":
+        task_state.append(ranked.c.ar.is_(None))
+    elif archived_mode == "archived":
+        task_state.append(ranked.c.ar.is_not(None))
     if status:
-        stmt = stmt.where(TranslationRunRecord.status == status)
-    stmt = stmt.order_by(TranslationRunRecord.created_at.desc()).limit(page_size)
-    rows = list(session.scalars(stmt))
-    return {"items": [_translation_run_dict(session, row, identity=identity) for row in rows]}
+        task_state.append(ranked.c.st == status)
+    phase = _lifecycle_sql(ranked.c.st, ranked.c.qs)
+    conditions = list(task_state)
+    if wanted_lifecycles:
+        conditions.append(phase.in_(wanted_lifecycles))
+
+    total = session.scalar(select(func.count()).select_from(ranked).where(*conditions)) or 0
+    facet_rows = session.execute(
+        select(phase.label("phase"), func.count()).select_from(ranked).where(*task_state).group_by(phase)
+    ).all()
+    facets = {name: count for name, count in facet_rows if count}
+
+    sort_column, id_column = ranked.c.sk, ranked.c.id
+    page_query = select(ranked.c.id, ranked.c.sk).where(*conditions)
+    if cursor:
+        position = _decode_cursor(cursor)
+        if position.get("sort") != sort or position.get("order") != order:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_CURSOR", "message": "分页游标与当前排序不一致，请从第一页重新开始"})
+        value: Any = position.get("sk")
+        if sort in {"created", "updated"}:
+            try:
+                value = datetime.fromisoformat(str(value))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail={"code": "INVALID_CURSOR", "message": "分页游标无效"}) from exc
+        marker = tuple_(sort_column, id_column)
+        point = tuple_(value, position.get("id"))
+        page_query = page_query.where(marker < point if order == "desc" else marker > point)
+    ordering = (sort_column.desc(), id_column.desc()) if order == "desc" else (sort_column.asc(), id_column.asc())
+    rows = session.execute(page_query.order_by(*ordering).limit(page_size + 1)).all()
+    has_more = len(rows) > page_size
+    rows = rows[:page_size]
+    next_cursor = None
+    if has_more and rows:
+        last_id, last_sort = rows[-1]
+        next_cursor = _encode_cursor(
+            {
+                "sort": sort,
+                "order": order,
+                "id": last_id,
+                "sk": last_sort.isoformat() if isinstance(last_sort, datetime) else last_sort,
+            }
+        )
+
+    ids = [row[0] for row in rows]
+    by_id = {run.id: run for run in session.scalars(select(TR).where(TR.id.in_(ids)))} if ids else {}
+    runs = [by_id[i] for i in ids if i in by_id]
+    for run in runs:
+        if _needs_refresh(run):
+            _refresh_translation_run(session, run)
+    ctx = _build_list_context(session, runs)
+    items = []
+    for run in runs:
+        payload = _translation_run_dict(session, run, identity=identity, ctx=ctx)
+        if group_versions:
+            payload["version_count"] = len(ctx.chains.get(run.preflight_id, [])) or 1
+        items.append(payload)
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "total": total,
+        "facets": {"lifecycle": facets, "total": sum(facets.values())},
+        "page_size": page_size,
+    }
+
+
+@router.get("/translation-runs/{run_id}/versions")
+def list_translation_run_versions(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Every version (generation) of the task this run belongs to, oldest first."""
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    chain = list(
+        session.scalars(
+            select(TranslationRunRecord)
+            .where(TranslationRunRecord.preflight_id == run.preflight_id, TranslationRunRecord.tenant_id == run.tenant_id)
+            .order_by(TranslationRunRecord.generation)
+        )
+    )
+    items = []
+    for index, version in enumerate(chain):
+        items.append(
+            {
+                "id": version.id,
+                "generation": version.generation,
+                "status": version.status,
+                "quality_state": version.quality_state or "draft",
+                "lifecycle": _run_lifecycle(version),
+                "display_name": version.display_name,
+                "archived": version.archived_at is not None,
+                "created_at": version.created_at.isoformat(),
+                "superseded_by": chain[index + 1].id if index + 1 < len(chain) else None,
+                "current": version.id == run.id,
+            }
+        )
+    return {"items": items}
 
 
 @router.get("/translation-runs/{run_id}")
@@ -3358,25 +3762,45 @@ def get_translation_run(
 def patch_translation_run(
     run_id: str,
     body: TranslationRunPatchBody,
+    if_match: str | None = Header(default=None, alias="If-Match"),
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_writable(session, run_id=run_id, identity=identity)
+    run = _run_owned(session, run_id=run_id, identity=identity)
     changes: dict[str, Any] = {}
-    if body.display_name is not None:
-        clean_name = body.display_name.strip()
-        run.display_name = clean_name or None
-        changes["display_name"] = bool(clean_name)
+    if body.display_name is not None or body.reset_display_name:
+        _authorize_run_action(session, identity, run, "rename")
+        if if_match is not None and _parse_if_match(if_match) != (run.name_version or 0):
+            current = run.display_name
+            if current is None:
+                preflight = session.get(PreflightRecord, run.preflight_id)
+                current = preflight.source_filename if preflight else None
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "NAME_CONFLICT",
+                    "message": "该任务的名称已在其他页面被修改",
+                    "current_name": current,
+                    "current_version": run.name_version or 0,
+                },
+            )
+        new_name = None if body.reset_display_name else _clean_task_name(body.display_name or "")
+        if new_name != run.display_name:
+            run.display_name = new_name
+            run.name_version = (run.name_version or 0) + 1
+            changes["display_name"] = "reset" if new_name is None else "changed"
     if body.archived is not None:
-        if body.archived and run.status not in _RUN_TERMINAL:
-            raise HTTPException(status_code=409, detail="only terminal translation runs can be archived")
-        if body.archived:
-            run.archived_at = datetime.now(timezone.utc)
-            run.archived_by = identity.user_sub
+        if (run.archived_at is not None) != body.archived:
+            _authorize_run_action(session, identity, run, "archive" if body.archived else "restore")
+            if body.archived:
+                run.archived_at = datetime.now(timezone.utc)
+                run.archived_by = identity.user_sub
+            else:
+                run.archived_at = None
+                run.archived_by = None
+            changes["archived"] = body.archived
         else:
-            run.archived_at = None
-            run.archived_by = None
-        changes["archived"] = body.archived
+            _require_run_writer(session, identity, run)  # already in that state: nothing to do, but not for strangers
     if changes:
         record_audit(
             session,
@@ -3393,15 +3817,17 @@ def restore_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_writable(session, run_id=run_id, identity=identity)
-    run.archived_at = None
-    run.archived_by = None
-    record_audit(
-        session,
-        actor_sub=identity.user_sub,
-        action="translation_run.restore",
-        extra={"run_id": run.id},
-    )
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _require_run_writer(session, identity, run)
+    if run.archived_at is not None:
+        run.archived_at = None
+        run.archived_by = None
+        record_audit(
+            session,
+            actor_sub=identity.user_sub,
+            action="translation_run.restore",
+            extra={"run_id": run.id},
+        )
     return _translation_run_dict(session, run, identity=identity)
 
 
@@ -3411,10 +3837,9 @@ def delete_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> Response:
-    run = _run_writable(session, run_id=run_id, identity=identity)
+    run = _run_owned(session, run_id=run_id, identity=identity)
     _refresh_translation_run(session, run)
-    if run.status not in _RUN_TERMINAL:
-        raise HTTPException(status_code=409, detail="only terminal translation runs can be deleted")
+    _authorize_run_action(session, identity, run, "delete")
 
     # Files are removed only after the database transaction commits: a failed commit
     # must never leave rows that point at files that are already gone.
@@ -4422,7 +4847,8 @@ async def cancel_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    run = _run_writable(session, run_id=run_id, identity=identity)
+    run = _run_owned(session, run_id=run_id, identity=identity)
+    _require_run_writer(session, identity, run)
     _refresh_translation_run(session, run)
     discarding = run.status == "gated"
     if run.status in _RUN_TERMINAL and not discarding:
@@ -4519,10 +4945,11 @@ async def _spawn_next_generation(
     key = hashlib.sha256(f"{key_prefix}:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
     snap = dict(snap)
     snap["revision_of"] = {"run_id": run.id, "generation": run.generation}
+    snap["requested_by"] = identity.user_sub
     new = TranslationRunRecord(
         preflight_id=run.preflight_id,
         tenant_id=run.tenant_id,
-        actor_sub=identity.user_sub,
+        actor_sub=run.actor_sub,  # the task keeps its submitter; who asked is recorded below
         idempotency_key_hash=hashlib.sha256(key.encode("utf-8")).hexdigest(),
         generation=next_generation,
         direction=run.direction,
