@@ -314,3 +314,9 @@ git branch -d <name>                                 # 只删已合并的分支
 - 非阻断时候选列表默认折叠，只显示一行摘要。
 
 **风险与限制：** `enforce` 没有经过 shadow 观察期；只有一个任务的样本。缩写过滤会少列一些只出现一次且无定义的缩写，它们仍可在后续任务里因重复出现被列出。乱码放行现在只靠复核人看页面，没有第二人把关。
+
+### 13.1 上线记录
+
+- 提交 `c8f653e`（修复）、`96bb1cd`（构建产物），已推送 `origin/main`；`scripts/deploy-translate-stack.sh` 在 `96bb1cd` 上运行，前置门禁与路由探测通过，两个服务 active，7860 返回 200。部署时运行中的任务与 QA 轮次均为 0，无迁移。
+- 门禁模式：**`enforce`**，通过 systemd drop-in `~/.config/systemd/user/qyunslation-office.service.d/plan079-mode.conf` 设置，线上进程环境里已确认。回滚：删除该文件，`systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service`，门禁回到 `legacy`。
+- 现网任务 `eb7e4876` 只读核对：门禁原因只剩 `qa_blockers`；123 条候选仅作显示。当前 4 个阻断：两个乱码（现为 C2，复核人可授权例外）、一个作者元数据（C2，可授权例外）、**一个 `LITERAL_MISSING_IND`（申报编号缺失，仍是 C1：必须修复，或由另一位管理员确认误报）**。最后这一个不在本次放宽范围内。
