@@ -24,22 +24,37 @@ def upgrade() -> None:
         "document_term_candidate",
         ["translation_run_id", "status"],
     )
-    op.create_foreign_key(
-        "fk_document_term_candidate_translation_run",
-        "document_term_candidate",
-        "translation_run_record",
-        ["translation_run_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        # SQLite cannot ALTER a constraint in place; the batch mode rebuilds the table (test/dev only).
+        with op.batch_alter_table("document_term_candidate") as batch:
+            batch.create_foreign_key(
+                "fk_document_term_candidate_translation_run",
+                "translation_run_record",
+                ["translation_run_id"],
+                ["id"],
+                ondelete="CASCADE",
+            )
+    else:
+        op.create_foreign_key(
+            "fk_document_term_candidate_translation_run",
+            "document_term_candidate",
+            "translation_run_record",
+            ["translation_run_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_document_term_candidate_translation_run",
-        "document_term_candidate",
-        type_="foreignkey",
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("document_term_candidate") as batch:
+            batch.drop_constraint("fk_document_term_candidate_translation_run", type_="foreignkey")
+    else:
+        op.drop_constraint(
+            "fk_document_term_candidate_translation_run",
+            "document_term_candidate",
+            type_="foreignkey",
+        )
     op.drop_index("ix_document_term_candidate_translation_run", table_name="document_term_candidate")
     op.drop_column("document_term_candidate", "translation_run_id")
     op.drop_column("concept", "applies_to_profiles")

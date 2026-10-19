@@ -25,14 +25,25 @@ def upgrade() -> None:
         "review_segment",
         ["translation_run_id", "generation", "role", "status"],
     )
-    op.create_foreign_key(
-        "fk_review_segment_translation_run",
-        "review_segment",
-        "translation_run_record",
-        ["translation_run_id"],
-        ["id"],
-        ondelete="CASCADE",
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        # SQLite cannot ALTER a constraint in place; the batch mode rebuilds the table (test/dev only).
+        with op.batch_alter_table("review_segment") as batch:
+            batch.create_foreign_key(
+                "fk_review_segment_translation_run",
+                "translation_run_record",
+                ["translation_run_id"],
+                ["id"],
+                ondelete="CASCADE",
+            )
+    else:
+        op.create_foreign_key(
+            "fk_review_segment_translation_run",
+            "review_segment",
+            "translation_run_record",
+            ["translation_run_id"],
+            ["id"],
+            ondelete="CASCADE",
+        )
     op.add_column(
         "document_term_candidate",
         sa.Column("extraction_metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
@@ -41,7 +52,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("document_term_candidate", "extraction_metadata")
-    op.drop_constraint("fk_review_segment_translation_run", "review_segment", type_="foreignkey")
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("review_segment") as batch:
+            batch.drop_constraint("fk_review_segment_translation_run", type_="foreignkey")
+    else:
+        op.drop_constraint("fk_review_segment_translation_run", "review_segment", type_="foreignkey")
     op.drop_index("ix_review_segment_translation_run", table_name="review_segment")
     op.drop_column("review_segment", "bbox")
     op.drop_column("review_segment", "page_no")

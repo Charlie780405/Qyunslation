@@ -43,7 +43,7 @@ def _emitted_codes() -> tuple[set[str], set[str]]:
             elif name == "_finding" and node.args:
                 harvest(node.args[0])
     # codes produced by helper detectors and constants rather than direct QaFinding calls
-    literals |= {"IL_MARKUP_LEAK", "TEXT_ENCODING_ARTIFACT"}
+    literals |= {"IL_MARKUP_LEAK", "TEXT_ENCODING_ARTIFACT", "TEXT_ENCODING_INHERITED"}
     return literals, prefixes
 
 

@@ -611,6 +611,24 @@ def _preflight_dict(record: PreflightRecord) -> dict[str, Any]:
     }
 
 
+async def _refresh_language_hint(
+    existing: PreflightRecord, reused: dict[str, Any], source_language: str | None
+) -> None:
+    """A reused pre-check keeps its old issues, including the language hint computed for the language chosen
+    then. When the person now picks another source language, recompute only that hint from the stored file."""
+    stored = (reused.get("recommended") or {}).get("source_language")
+    if not source_language or source_language == stored:
+        return
+    path = _preflight_path(existing)
+    if not path.is_file():
+        return
+    probe = await asyncio.to_thread(probe_document, path, f".{existing.source_format}", source_language)
+    fresh = [item for item in probe.issues if item.get("code") == "LANGUAGE_MISMATCH"]
+    reused["issues"] = [
+        item for item in reused.get("issues") or [] if item.get("code") != "LANGUAGE_MISMATCH"
+    ] + fresh
+
+
 @router.post("/preflights", status_code=201)
 async def create_preflight(
     file: UploadFile = File(...),
@@ -683,6 +701,7 @@ async def create_preflight(
             reused["reused"] = True
             reused["source_language"] = source_language
             reused["target_language"] = target_language
+            await _refresh_language_hint(existing, reused, source_language)
             return reused
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1012,6 +1031,7 @@ async def complete_upload_session(
             reused["reused"] = True
             reused["source_language"] = source_language
             reused["target_language"] = target_language
+            await _refresh_language_hint(existing, reused, source_language)
             return reused
     preflight_id = str(uuid.uuid4())
     relative_key = f"{tenant.id}/{preflight_id}{suffix}"
@@ -1891,6 +1911,7 @@ def _run_qa_pass(
         run_deterministic_qa,
         summarize,
     )
+    from qyunslation.pipeline.qa.term_review import term_gate_mode
 
     if runner_state is None and run.external_task_id:
         try:
@@ -1935,6 +1956,15 @@ def _run_qa_pass(
                     evidence={"reason": type(exc).__name__},
                 )
             )
+    if term_gate_mode() == "shadow":
+        # Shadow must be harmless: a bug here may not turn a healthy QA round into a failed one.
+        try:
+            _term_review_findings(session, run, inspected)
+        except Exception:
+            logger.warning("plan079 shadow evaluation failed for run %s", run.id, exc_info=True)
+    else:
+        # ``enforce`` fails closed: an error fails the round ("check not completed"), never a silent pass.
+        inspected.extend(_term_review_findings(session, run, inspected))
     findings = run_deterministic_qa(
         manifest={"objects": [{"id": "placeholder"}]} if run.manifest_version else {},
         term_summary=run.term_summary,
@@ -2313,6 +2343,53 @@ def _build_list_context(session: Session, runs: list[TranslationRunRecord]) -> _
     return _ListContext(preflights, artifacts, terms, chains, qa_checks)
 
 
+def _term_review_findings(session: Session, run: TranslationRunRecord, existing: list[Any]) -> list[Any]:
+    """PLAN-079: document-level term risks as C4 QA items (``enforce`` only; ``shadow`` just records them)."""
+    from qyunslation.pipeline.qa.term_review import review_required_findings, term_gate_mode, violation_findings
+
+    mode = term_gate_mode()
+    if mode == "legacy":
+        return []
+    if str((run.term_summary or {}).get("extraction_status") or "").casefold() == "degraded":
+        return []  # the term checker did not run; nothing can be concluded either way
+    candidates = list(
+        session.scalars(
+            select(DocumentTermCandidate)
+            .where(DocumentTermCandidate.translation_run_id == run.id)
+            .options(selectinload(DocumentTermCandidate.occurrences))
+        )
+    )
+    findings, overflow = review_required_findings(candidates, (run.term_summary or {}).get("terms"))
+    covered = [
+        str((f.evidence or {}).get("concept_id"))
+        for f in existing
+        if f.severity == "blocker" and f.code.startswith("TERM_") and (f.evidence or {}).get("concept_id")
+    ]
+    violations = violation_findings(candidates, covered)
+    findings = [*findings, *violations]
+    unresolved = [c.id for c in candidates if c.status not in _FINAL_TERM_STATUSES]
+    # Only what the term policy itself decides. The rest of the gate (``qa_checking``, the previous round's
+    # blocker count, ...) is in flux while this round runs and is identical under both policies.
+    legacy_reasons = ["unresolved_terms"] if unresolved else []
+    new_reasons = ["qa_blockers"] if findings else []
+    summary = dict(run.term_summary or {})
+    summary["gate_shadow"] = {
+        "mode": mode,
+        "legacy_term_reasons": legacy_reasons,
+        "new_term_reasons": new_reasons,
+        "review_required": len(findings) - len(violations),
+        "violation_findings": len(violations),
+        "review_overflow": overflow,
+        "unresolved_candidates": len(unresolved),
+    }
+    run.term_summary = summary
+    logger.info(
+        "plan079.gate_shadow run_id=%s generation=%s mode=%s legacy=%s new=%s review_required=%s",
+        run.id, run.generation, mode, ",".join(legacy_reasons), ",".join(new_reasons), len(findings),
+    )
+    return findings if mode == "enforce" else []
+
+
 def _needs_refresh(run: TranslationRunRecord) -> bool:
     """Only a run whose state can still change underneath us is re-read from its executor."""
     return run.status in _RUN_EXECUTING or (
@@ -2353,6 +2430,8 @@ def _gate_from(
     run: TranslationRunRecord,
     unresolved_terms: list[str],
     superseding_run_id: str | None,
+    *,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     summary = run.qa_summary or {}
     # PLAN-078b: findings closed by a valid disposition no longer block; raw counts stay visible.
@@ -2360,10 +2439,16 @@ def _gate_from(
     extraction_degraded = (
         str((run.term_summary or {}).get("extraction_status") or "").casefold() == "degraded"
     )
+    from qyunslation.pipeline.qa.term_review import term_gate_mode
+
+    # PLAN-079: in ``enforce`` the delivery gate reads QA items only; undecided vocabulary candidates
+    # (``unresolved_terms``) stay visible as a count but no longer block. ``legacy`` and ``shadow``
+    # keep the old decision; ``shadow`` additionally records what ``enforce`` would have decided.
+    gate_mode = mode or term_gate_mode()
     reasons: list[str] = []
     if qa_blockers:
         reasons.append("qa_blockers")
-    if unresolved_terms:
+    if unresolved_terms and gate_mode != "enforce":
         reasons.append("unresolved_terms")
     if superseding_run_id:
         reasons.append("superseded_artifact")
@@ -2387,6 +2472,7 @@ def _gate_from(
         "unconfirmed_affiliation_ids": [],
         "superseding_run_id": superseding_run_id,
         "term_extraction_degraded": extraction_degraded,
+        "term_gate_mode": gate_mode,
     }
 
 

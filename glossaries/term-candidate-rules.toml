@@ -1,5 +1,5 @@
 # PLAN-063：术语候选准入规则。改 version 必须 bump 并登记 fingerprint。
-version = "074-v1"
+version = "079-v1"
 
 [thresholds]
 min_source_chars = 3
@@ -24,6 +24,18 @@ denylist = [
   "MAY", "HAS", "HAD", "THIS", "THAT", "WITH", "FROM", "INTO",
   "NOVEMBER", "UNIVERSITY", "HOSPITAL", "PHARMA",
   "ICU", "SPF",
+]
+
+# PLAN-079：统计方法与常见学术搭配不进词库候选（可审查、随版本提交）。
+# 整句匹配，按单复数归一；批准词库里已有的词不受影响（排除只决定“是否进候选”）。
+phrase_denylist = [
+  "sensitivity analysis", "subgroup analysis", "post hoc analysis", "primary analysis",
+  "interim analysis", "statistical analysis", "regression analysis", "logistic regression",
+  "cox regression", "multiple imputation", "mixed model", "mixed-effects model",
+  "linear mixed model", "least squares mean", "kaplan-meier", "log-rank test",
+  "chi-square test", "fisher exact test", "wilcoxon test", "mann-whitney u test", "t-test",
+  "standard deviation", "confidence interval", "hazard ratio", "odds ratio", "relative risk",
+  "p value", "effect size", "baseline characteristics",
 ]
 
 [include]

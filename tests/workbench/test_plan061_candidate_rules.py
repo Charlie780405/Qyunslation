@@ -15,7 +15,7 @@ from qyunslation.workbench.evidence import BilingualTermEvidence, classify_risk,
 
 
 def test_rules_version_matches_toml():
-    assert rules_version() == "074-v1"
+    assert rules_version() == "079-v1"
 
 
 def test_numeric_dose_and_ratio_tokens_are_excluded():
@@ -86,3 +86,13 @@ def test_registry_ids_are_not_extracted():
     sources = {row["source_term"] for row in rows}
     assert "NCT03131648" not in sources
     assert "ChiCTR2100041234" not in sources
+
+
+def test_plan079_statistical_methods_do_not_become_candidates():
+    from qyunslation.glossary.candidate_rules import EXCLUDE_PHRASE, should_exclude_from_termbase
+
+    for phrase in ("sensitivity analysis", "Sensitivity Analyses", "subgroup analyses", "t-test", "Hazard Ratios"):
+        assert should_exclude_from_termbase(phrase) == (True, EXCLUDE_PHRASE), phrase
+    # drugs, targets and diseases are untouched
+    for term in ("dupilumab", "atopic dermatitis", "IL-13", "analysis"):
+        assert should_exclude_from_termbase(term)[0] is False, term

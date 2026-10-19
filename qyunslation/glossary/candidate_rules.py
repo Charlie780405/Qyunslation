@@ -19,6 +19,7 @@ EXCLUDE_EMPTY = "EMPTY"
 EXCLUDE_CELL_PRESERVE = "CELL_PRESERVE"
 EXCLUDE_PATTERN = "PATTERN"
 EXCLUDE_DENYLIST = "DENYLIST"
+EXCLUDE_PHRASE = "PHRASE"
 EXCLUDE_TOO_SHORT = "TOO_SHORT"
 EXCLUDE_TOO_LONG = "TOO_LONG"
 EXCLUDE_JUNK = "JUNK"
@@ -67,9 +68,23 @@ class CandidateRules:
     delegate_cell_preserve: bool
     exclude_patterns: tuple[re.Pattern[str], ...]
     denylist: frozenset[str]
+    phrase_denylist: frozenset[str]
     include_patterns: tuple[tuple[str, re.Pattern[str]], ...]
     high_types: frozenset[str]
     abbreviation_is_high: bool
+
+
+def phrase_key(text: str) -> str:
+    """Case/hyphen/space-insensitive key with simple plural folding (analyses -> analysis)."""
+    words = re.sub(r"[\s\-_/]+", " ", (text or "").casefold()).strip().split(" ")
+    folded: list[str] = []
+    for word in words:
+        if word.endswith("ses") and len(word) > 4:
+            word = word[:-2] + "s" if word.endswith("yses") is False else word[:-3] + "sis"
+        elif word.endswith("s") and not word.endswith(("ss", "is", "us")) and len(word) > 3:
+            word = word[:-1]
+        folded.append(word)
+    return " ".join(w for w in folded if w)
 
 
 def _compile_patterns(values: list[str] | None) -> tuple[re.Pattern[str], ...]:
@@ -116,6 +131,7 @@ def load_rules(path: str | None = None) -> CandidateRules:
         delegate_cell_preserve=bool(exclude.get("delegate_cell_preserve", True)),
         exclude_patterns=_compile_patterns(exclude.get("patterns")),
         denylist=frozenset(denylist),
+        phrase_denylist=frozenset(phrase_key(item) for item in exclude.get("phrase_denylist") or [] if item),
         include_patterns=include_patterns,
         high_types=frozenset(
             str(item).strip().casefold()
@@ -135,6 +151,7 @@ def rules_fingerprint(path: str | None = None) -> str:
     current = load_rules(path)
     payload = {
         "denylist": sorted(current.denylist),
+        "phrases": sorted(current.phrase_denylist),
         "patterns": [item.pattern for item in current.exclude_patterns],
         "include": [(name, item.pattern) for name, item in current.include_patterns],
     }
@@ -168,6 +185,8 @@ def should_exclude_from_termbase(
     normalized = normalize_source(source)
     if normalized in current.denylist:
         return True, EXCLUDE_DENYLIST
+    if current.phrase_denylist and phrase_key(source) in current.phrase_denylist:
+        return True, EXCLUDE_PHRASE
     hit = include_hit(source, rules=current)
     if _DRUG_FRAGMENT.fullmatch(source):
         return True, EXCLUDE_FRAGMENT

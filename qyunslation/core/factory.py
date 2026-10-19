@@ -165,7 +165,11 @@ def create_workflow_from_payload(payload: TranslatePayload, logger: logging.Logg
             # ``termbase_policy`` and its version travel with the request for
             # provenance and QA, but translator dataclasses intentionally only
             # receive the derived ``glossary_dict`` hard constraints.
-            dump_exclude = {"workflow_type", "termbase_policy", "termbase_version"}
+            # ``domain_profile`` / ``document_profile`` are consumed above (prompt compilation) and by the
+            # term policy; no translator dataclass takes them, so passing them on raises TypeError.
+            dump_exclude = {
+                "workflow_type", "termbase_policy", "termbase_version", "domain_profile", "document_profile",
+            }
             # 特定类型的特殊参数需要保留，例如 json_paths, insert_mode 等
             # model_dump 会自动包含定义在 param_type 中的所有字段
             translator_args = payload.model_dump(exclude=dump_exclude, exclude_none=True)

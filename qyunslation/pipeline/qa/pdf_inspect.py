@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ from qyunslation.structure.frontmatter import AFFILIATION, AUTHOR, classify_fron
 from qyunslation.structure.text_sanitize import (
     _CONTROL_RE,
     _MOJIBAKE_RE,
+    artifact_evidence,
     detect_text_artifacts,
 )
 
@@ -258,6 +260,72 @@ def _page_hits(pages: list[str] | None, predicate) -> list[tuple[int, str]]:
     return [(i, page) for i, page in enumerate(pages or [], start=1) if predicate(page)]
 
 
+def _merge_families(parts: list[dict[str, list[str]]]) -> dict[str, list[str]]:
+    merged: dict[str, set[str]] = {}
+    for part in parts:
+        for family, marks in part.items():
+            merged.setdefault(family, set()).update(marks)
+    return {family: sorted(marks)[:8] for family, marks in merged.items()}
+
+
+def _encoding_findings(
+    translated_text: str, translated_pages: list[str] | None, source_pages: list[str] | None
+) -> list[QaFinding]:
+    """PLAN-079 D: a garbled-text blocker that says which detector fired on which code points, and
+    that does not blame the translation for characters the source PDF already carries on the same page."""
+    hits = [
+        (number, artifact_evidence(page))
+        for number, page in enumerate(translated_pages or [], start=1)
+        if artifact_evidence(page)
+    ]
+    message = "译文包含不可打印字符或编码乱码，必须重新生成"
+    if not hits:
+        return [
+            QaFinding(
+                category="integrity", severity="blocker", code="TEXT_ENCODING_ARTIFACT", message=message,
+                evidence={"detectors": artifact_evidence(translated_text), "pages": []},
+                location=locate.location([]),
+            )
+        ]
+    comparable = bool(source_pages) and len(source_pages or []) == len(translated_pages or [])
+    # The source-inheritance downgrade is opt-in until PLAN-079 stage B2 has labelled samples; by default every
+    # garbled page stays a blocker, exactly as before.
+    inheritance = os.environ.get("QYUNSLATION_ENCODING_INHERITANCE", "0").strip().casefold() in {"1", "true", "on"}
+    blocking: list[tuple[int, dict[str, list[str]]]] = []
+    inherited: list[tuple[int, dict[str, list[str]]]] = []
+    for number, evidence in hits:
+        in_source = artifact_evidence(source_pages[number - 1]) if (comparable and inheritance) else {}
+        (inherited if set(in_source) & set(evidence) else blocking).append((number, evidence))
+    out: list[QaFinding] = []
+    pages = translated_pages or []
+    if blocking:
+        out.append(
+            QaFinding(
+                category="integrity", severity="blocker", code="TEXT_ENCODING_ARTIFACT", message=message,
+                evidence={
+                    "detectors": _merge_families([e for _, e in blocking]),
+                    "pages": [n for n, _ in blocking],
+                    "source_compared": comparable,
+                },
+                location=locate.location(
+                    [locate.page_anchor("translated", n, "乱码或不可打印字符", _artifact_excerpt(pages[n - 1])) for n, _ in blocking]
+                ),
+            )
+        )
+    if inherited:
+        out.append(
+            QaFinding(
+                category="integrity", severity="warning", code="TEXT_ENCODING_INHERITED",
+                message="译文中的异常字符在源文同一页也存在，多半来自源文本身",
+                evidence={"detectors": _merge_families([e for _, e in inherited]), "pages": [n for n, _ in inherited]},
+                location=locate.location(
+                    [locate.page_anchor("translated", n, "源文同页也有异常字符", _artifact_excerpt(pages[n - 1])) for n, _ in inherited]
+                ),
+            )
+        )
+    return out
+
+
 def _artifact_excerpt(page: str) -> str | None:
     for pattern in ("\ufffd",):
         at = page.find(pattern)
@@ -338,24 +406,19 @@ def check_translation_text(
             )
         )
     for code in detect_text_artifacts(translated_text):
+        if code == "TEXT_ENCODING_ARTIFACT":
+            findings.extend(_encoding_findings(translated_text, translated_pages, source_pages))
+            continue
         findings.append(
             QaFinding(
                 category="integrity",
                 severity="blocker",
                 code=code,
-                message=(
-                    "译文包含中间标记残留，必须重新清洗并生成"
-                    if code == "IL_MARKUP_LEAK"
-                    else "译文包含不可打印字符或编码乱码，必须重新生成"
-                ),
+                message="译文包含中间标记残留，必须重新清洗并生成",
                 location=locate.location(
                     [
-                        locate.page_anchor(
-                            "translated", number,
-                            "内部标记残留" if code == "IL_MARKUP_LEAK" else "乱码或不可打印字符",
-                            _artifact_excerpt(page) if code != "IL_MARKUP_LEAK" else None,
-                        )
-                        for number, page in _page_hits(translated_pages, lambda p, c=code: c in detect_text_artifacts(p))[:5]
+                        locate.page_anchor("translated", number, "内部标记残留")
+                        for number, _ in _page_hits(translated_pages, lambda p, c=code: c in detect_text_artifacts(p))[:5]
                     ]
                 ),
             )
