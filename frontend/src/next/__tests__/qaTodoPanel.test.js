@@ -20,6 +20,7 @@ const apiMock = vi.hoisted(() => ({
   postQaDisposition: vi.fn(),
   postQaDispositionsBatch: vi.fn(),
   createRevision: vi.fn(),
+  listModelProfiles: vi.fn(),
   previewUrl: (id, side) => `/api/v1/translation-runs/${id}/preview/${side}`,
 }));
 vi.mock('../api.js', () => ({ api: apiMock }));
@@ -122,6 +123,8 @@ beforeEach(() => {
   apiMock.postQaDisposition.mockResolvedValue({});
   apiMock.postQaDispositionsBatch.mockResolvedValue({ results: [] });
   apiMock.createRevision.mockResolvedValue({ id: 'run-2' });
+  apiMock.resumeRun.mockResolvedValue({});
+  apiMock.listModelProfiles.mockResolvedValue({ items: [{ profile_id: 'internal-qwen-quality', label: '内网 Qwen 质量档', role: 'translator', provider: 'ollama', configured: true }] });
 });
 
 afterEach(() => {
@@ -261,13 +264,33 @@ describe('QA todo panel', () => {
     wrapper.unmount();
   });
 
-  it('creates a revision and opens it on its quality todo', async () => {
+  it('asks for confirmation before creating a revision, then opens it on its quality todo', async () => {
     const { wrapper, router } = await mountPage();
     await byText(panel(wrapper), '生成修订版').trigger('click');
+    await flushPromises();
+    const dialog = document.body.querySelector('[data-run-confirm]');
+    expect(dialog).not.toBeNull();
+    expect(apiMock.createRevision).not.toHaveBeenCalled(); // nothing starts before the person confirms
+    expect(dialog.textContent).toContain('冻结');
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent.includes('确认并生成修订版')).click();
     await flushPromises();
     expect(apiMock.createRevision).toHaveBeenCalledWith('run-1', {});
     expect(router.currentRoute.value.path).toBe('/workbench/run-2');
     expect(router.currentRoute.value.query.tab).toBe('qa');
+    wrapper.unmount();
+  });
+
+  it('resuming an interrupted task confirms the frozen configuration first', async () => {
+    apiMock.getRun.mockResolvedValue({ ...RUN, status: 'interrupted', lifecycle: 'interrupted', quality_state: 'draft', allowed_actions: ['open', 'resume', 'retry', 'archive', 'delete'] });
+    apiMock.getQaItems.mockResolvedValue({ items: [] });
+    const { wrapper } = await mountPage();
+    await byText(wrapper, '从断点续跑').trigger('click');
+    await flushPromises();
+    expect(apiMock.resumeRun).not.toHaveBeenCalled();
+    const dialog = document.body.querySelector('[data-run-confirm]');
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent.includes('按原配置续跑')).click();
+    await flushPromises();
+    expect(apiMock.resumeRun).toHaveBeenCalledWith('run-1');
     wrapper.unmount();
   });
 

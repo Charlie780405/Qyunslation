@@ -250,6 +250,11 @@ export const api = {
       request.send(body);
     });
   },
+  validateRun: (payload) => apiRequest(`${API_PREFIX}/translation-runs/validate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  copyPreflight: (preflightId) => apiRequest(`${API_PREFIX}/preflights/${encodeURIComponent(preflightId)}/copy`, { method: 'POST' }),
   createTranslationRun: (payload, idempotencyKey) => apiRequest(`${API_PREFIX}/translation-runs`, {
     method: 'POST',
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},

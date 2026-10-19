@@ -26,6 +26,16 @@ def client(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("QYUNSLATION_RUNNER_ROOT", str(tmp_path / "runs"))
     monkeypatch.setenv("QYUNSLATION_PIPELINE_ROOT", str(tmp_path / "pipeline"))
     monkeypatch.setenv("QYUNSLATION_TERM_SUGGEST", "0")
+
+    # The test only needs a run record. Without this the real pdf2zh_next is started on a
+    # fake PDF and is left running after the test finishes.
+    from qyunslation.api import v1 as api_v1_module
+
+    async def _no_launch(*, run, preflight, target_language, **_kwargs):
+        run.status = "failed"
+        run.stage = "qa"
+
+    monkeypatch.setattr(api_v1_module, "_launch_translation_run", _no_launch)
     engine = init_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     app = FastAPI()

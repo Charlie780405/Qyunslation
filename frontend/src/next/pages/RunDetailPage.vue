@@ -164,6 +164,14 @@
         </section>
       </div>
 
+      <RunConfirmDrawer
+        v-if="drawer && run"
+        :mode="drawer.mode"
+        :run="run"
+        :on-submit="submitDrawer"
+        @close="drawer = null"
+      />
+
       <p v-if="!logVisible" class="qy-log-toggle">
         <button type="button" class="qy-link-button" @click="logVisible = true">显示技术日志</button>
       </p>
@@ -192,6 +200,7 @@ import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
 import AffiliationReviewPanel from '../components/AffiliationReviewPanel.vue';
 import QaTodoPanel from '../components/QaTodoPanel.vue';
+import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import DualCanvasViewer from '../components/DualCanvasViewer.vue';
 import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
@@ -229,6 +238,7 @@ const termPanelError = ref('');
 const termEnriching = ref(false);
 const reviewComment = ref('');
 const busyAction = ref('');
+const drawer = ref(null); // { mode: 'revision' | 'resume', extra? }
 const actionNotice = ref('');
 let autoSelectDone = false;
 const canManageTerms = computed(() => sessionStore.hasCapability('can_manage_terms'));
@@ -405,7 +415,7 @@ function requestChanges() {
 }
 
 function resumeRun() {
-  return runAction('resume', () => api.resumeRun(runId.value), { success: '已从断点续跑。', failure: '续跑失败' });
+  drawer.value = { mode: 'resume' };
 }
 
 function requalify() {
@@ -416,10 +426,7 @@ function requalify() {
 }
 
 function retryV2() {
-  return runAction('retry_v2', () => api.retryRun(runId.value, { pipeline: 'v2' }), {
-    success: '已用新版流水线重新提交。',
-    failure: '重试失败',
-  });
+  drawer.value = { mode: 'revision', extra: { pipeline: 'v2' } };
 }
 
 // The panel shows failures itself, so these rethrow instead of swallowing them.
@@ -443,10 +450,27 @@ function locateAnchor(anchor) {
 }
 
 function reviseRun() {
-  return runAction('revise', async () => {
-    const created = await api.createRevision(runId.value, {});
-    if (created?.id) await router.push({ path: `/workbench/${created.id}`, query: { tab: 'qa' } });
-  }, { success: '', failure: '生成修订版失败' });
+  drawer.value = { mode: 'revision', extra: {} };
+}
+
+// The drawer shows failures itself, so this rethrows instead of swallowing them.
+async function submitDrawer(submission) {
+  const current = drawer.value;
+  if (!current) return;
+  if (current.mode === 'resume') {
+    await api.resumeRun(runId.value);
+    actionNotice.value = '已从断点续跑。';
+    drawer.value = null;
+    await refresh();
+    return;
+  }
+  const overrides = submission.overrides || {};
+  const created = await api.createRevision(runId.value, {
+    ...current.extra,
+    ...(Object.keys(overrides).length ? { overrides } : {}),
+  });
+  drawer.value = null;
+  if (created?.id) await router.push({ path: `/workbench/${created.id}`, query: { tab: 'qa' } });
 }
 
 function discardRun() {
