@@ -145,7 +145,7 @@ describe('run detail follows the server lifecycle', () => {
   it('a link with tab=qa opens on the first blocking issue', async () => {
     const { wrapper, router } = await mountPage('/workbench/run-1?tab=qa');
     expect(router.currentRoute.value.query.obj).toBe('obj-9');
-    expect(wrapper.find('[data-field="source"]').text()).toBe('IND 123456');
+    expect(wrapper.find('.qy-run-inspector').exists()).toBe(false);
     wrapper.unmount();
   });
 

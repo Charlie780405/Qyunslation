@@ -1,5 +1,5 @@
 <template>
-  <AppShell>
+  <AppShell class="qy-run-detail-shell">
     <div class="qy-run-detail">
       <header class="qy-panel qy-run-detail-head">
         <div>
@@ -157,14 +157,6 @@
             @update:sync-scroll="view.setSync"
           />
         </section>
-        <section class="qy-panel qy-run-inspector">
-          <ObjectInspector
-            :items="qaItems"
-            :selected-id="view.selectedObjectId.value"
-            :show-list="false"
-            @select="view.selectObject"
-          />
-        </section>
       </div>
 
       <RunConfirmDrawer
@@ -205,7 +197,6 @@ import AffiliationReviewPanel from '../components/AffiliationReviewPanel.vue';
 import QaTodoPanel from '../components/QaTodoPanel.vue';
 import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import DualCanvasViewer from '../components/DualCanvasViewer.vue';
-import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import TermReviewPanel from '../components/TermReviewPanel.vue';
 import { useRunDetailView } from '../stores/runDetail.js';
@@ -645,17 +636,14 @@ onUnmounted(() => {
 .qy-log-section h2 { display: flex; gap: .75rem; align-items: center; }
 .qy-run-detail-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
 .qy-run-detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-.qy-run-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
-.qy-run-viewer, .qy-run-inspector, .qy-run-stages, .qy-log-section { padding: .75rem; min-width: 0; }
+.qy-run-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.qy-run-viewer, .qy-run-stages, .qy-log-section { padding: .75rem; min-width: 0; }
 .qy-run-detail-error { display: flex; gap: 1rem; align-items: center; padding: .75rem; color: #8b1e1e; }
 .qy-log-section h2 { margin: 0 0 .5rem; font-size: 1rem; }
 .qy-log-drawer { max-height: 240px; overflow: auto; font-size: .8rem; margin: 0; }
 .qy-badge { margin-left: .5rem; padding: .1rem .4rem; border: 1px solid currentColor; }
 .qy-review-comment { display: grid; gap: .35rem; min-width: min(420px, 100%); }
 .qy-review-comment textarea { width: 100%; min-height: 4.5rem; }
-@media (max-width: 1023px) {
-  .qy-run-detail-grid { grid-template-columns: 1fr; }
-}
 @media (max-width: 900px) {
   .qy-run-detail-head { flex-direction: column; }
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="qy-app-shell">
+  <div class="qy-app-shell" :class="{ 'is-sidebar-collapsed': sidebarCollapsed }">
     <header class="qy-topbar">
       <RouterLink class="qy-brand" to="/workbench" aria-label="返回翻译工作台">
         <img src="/app-assets/qyunslation-mark.png" alt="" class="qy-brand-mark" />
@@ -21,9 +21,29 @@
 
     <div class="qy-body">
       <aside class="qy-sidebar" aria-label="主导航">
-        <nav class="qy-nav-list">
-          <RouterLink v-for="item in navItems" :key="item.to" :to="item.to" class="qy-nav-item">
-            <component :is="item.icon" aria-hidden="true" /><span>{{ item.label }}</span>
+        <button
+          class="qy-sidebar-toggle"
+          type="button"
+          :aria-label="sidebarCollapsed ? '展开主导航' : '收起主导航'"
+          :aria-expanded="!sidebarCollapsed"
+          aria-controls="qy-primary-navigation"
+          :title="sidebarCollapsed ? '展开主导航' : '收起主导航'"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          <ChevronDoubleRightIcon v-if="sidebarCollapsed" aria-hidden="true" />
+          <ChevronDoubleLeftIcon v-else aria-hidden="true" />
+          <span>{{ sidebarCollapsed ? '展开侧栏' : '收起侧栏' }}</span>
+        </button>
+        <nav id="qy-primary-navigation" class="qy-nav-list">
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.to"
+            :to="item.to"
+            class="qy-nav-item"
+            :aria-label="sidebarCollapsed ? item.label : undefined"
+            :title="sidebarCollapsed ? item.label : undefined"
+          >
+            <component :is="item.icon" aria-hidden="true" /><span v-if="!sidebarCollapsed">{{ item.label }}</span>
           </RouterLink>
         </nav>
       </aside>
@@ -46,7 +66,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useSessionStore } from '../stores/session.js';
 import { connection } from '../stores/connection.js';
@@ -57,12 +77,15 @@ import {
   ArrowPathIcon,
   ArrowRightOnRectangleIcon,
   BookOpenIcon,
+  ChevronDoubleLeftIcon,
+  ChevronDoubleRightIcon,
   DocumentTextIcon,
   InformationCircleIcon,
 } from '@heroicons/vue/24/outline';
 
 const router = useRouter();
 const session = useSessionStore();
+const sidebarCollapsed = ref(false);
 const navItems = [
   { to: '/workbench', label: '翻译工作台', icon: DocumentTextIcon },
   { to: '/termbase', label: '专业词库', icon: BookOpenIcon },

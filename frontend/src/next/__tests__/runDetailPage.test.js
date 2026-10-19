@@ -103,7 +103,7 @@ afterEach(() => {
 });
 
 describe('RunDetailPage', () => {
-  it('selecting a QA item writes obj to the URL and shows only available fields', async () => {
+  it('selecting a QA item writes obj to the URL without an object inspector', async () => {
     const { wrapper, router } = await mountPage('/workbench/run-1');
     const buttons = wrapper.findAll('.qy-qa-item');
     expect(buttons).toHaveLength(2);
@@ -111,22 +111,17 @@ describe('RunDetailPage', () => {
     await buttons[0].trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.query.obj).toBe('obj-1');
-    expect(wrapper.find('[data-field="source"]').text()).toBe('Dupilumab');
-    expect(wrapper.find('[data-field="translation"]').text()).toBe('度普利尤单抗');
-    expect(wrapper.find('[data-field="terms"]').text()).toBe('—');
-    expect(wrapper.find('[data-field="history"]').text()).toBe('—');
+    expect(wrapper.find('.qy-run-inspector').exists()).toBe(false);
 
     await buttons[1].trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.query.obj).toBe('qa:q2');
-    expect(wrapper.find('[data-field="source"]').text()).toBe('—');
-    expect(wrapper.find('[data-field="object_id"]').text()).toBe('—');
     wrapper.unmount();
   });
 
-  it('restores the selected object from the URL', async () => {
+  it('restores the view state from the URL without an object inspector', async () => {
     const { wrapper } = await mountPage('/workbench/run-1?obj=obj-1&page=2&zoom=1.5&sync=0');
-    expect(wrapper.find('[data-field="source"]').text()).toBe('Dupilumab');
+    expect(wrapper.find('.qy-run-inspector').exists()).toBe(false);
     expect(wrapper.find('input[aria-label="当前页码"]').element.value).toBe('2');
     expect(wrapper.find('.qy-viewer-zoom').text()).toBe('150%');
     expect(wrapper.find('[aria-label="同步滚动"]').attributes('aria-pressed')).toBe('false');
