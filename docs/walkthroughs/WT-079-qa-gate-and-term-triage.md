@@ -152,3 +152,143 @@ F14：`TermbasePage` 的加载失败现在显示可重试的提示；`stores/wor
 
 **结论：** 部署后的默认行为与之前相比，门禁不变；乱码阻断在“大写葡/西语名”上放宽，docx/pptx 从报错变为可用，其余为 UI 修正。源文继承降级和 E2/E3 影子灰度都没有在默认路径上启用。
 
+
+## 11. 上线记录（2026-10-19）
+
+- 提交：`4ade192`（docs）、`018dda7`（后端）、`e5c7d79`（前端）、`134ec71`（构建产物），合并为 `183d6c0`（`--no-ff`），已推送 `origin/main` 与 `origin/docs/plan-079-qa-gate-triage`。
+- 部署：`scripts/deploy-translate-stack.sh` 在 `183d6c0` 上运行。部署前门禁：迁移对齐（`078e0001`，无新迁移）、前端构建新鲜、路由探测通过；sidecar 指纹 `7542777de0fd` 本地与线上一致；`pdf2zh.service`、`qyunslation-office.service` 均 active。
+- 部署时运行中的翻译任务：0；运行中的 QA 轮次：0。
+- 线上核对：8010 的 `/next/` 引用新资源 `index-DIydkICa.js`；`/api/v1/settings/schema` 未登录返回 401；7860 返回 200（pdf2zh 重启后约 5 秒就绪）。日志中唯一匹配 "error" 的一行是 OCR 能力状态（`vision: stub`），不是故障。
+- **门禁模式：部署时为 `legacy`（默认）。`shadow` 观察尚未开始**，见 §12。
+
+## 12. 尚需用户手动完成的步骤（含命令）
+
+所有命令在 `/home/dev/qyunslation` 下执行。需要读取 `.env` 的命令都用子 shell 加载，且不打印取值。
+
+**E2：开启 shadow 观察（需要你确认后再做，它开始计一周的观察期）**
+
+```bash
+mkdir -p ~/.config/systemd/user/qyunslation-office.service.d
+printf '[Service]\nEnvironment=QYUNSLATION_TERM_GATE_MODE=shadow\n' \
+  > ~/.config/systemd/user/qyunslation-office.service.d/plan079-mode.conf
+systemctl --user daemon-reload          # 当前 pdf2zh 的 NeedDaemonReload=no，reload 不会改动它
+systemctl --user restart qyunslation-office.service
+systemctl --user is-active qyunslation-office.service
+```
+
+一周后看差异报告（只读）：
+
+```bash
+(set -a; . ./.env >/dev/null 2>&1; set +a; .venv/bin/python scripts/qa/plan079_shadow_report.py --limit 50)
+```
+
+逐个抽查 `inspect_released_runs`（旧口径阻断、新口径放行的任务），确认没有真实高风险缺陷被放过。
+
+**E3：切换为 enforce（抽查通过后）**
+
+```bash
+printf '[Service]\nEnvironment=QYUNSLATION_TERM_GATE_MODE=enforce\n' \
+  > ~/.config/systemd/user/qyunslation-office.service.d/plan079-mode.conf
+systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service
+```
+
+**回滚（任何时候）：**
+
+```bash
+rm ~/.config/systemd/user/qyunslation-office.service.d/plan079-mode.conf
+systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service
+```
+
+**F0：确认生产 PostgreSQL 口令（只看是否为默认值，不打印取值）**
+
+```bash
+if ! grep -q '^QYUNSLATION_PG_PASSWORD=.\+' .env; then echo "未设置：compose 使用默认值，需要轮换"
+elif grep -q '^QYUNSLATION_PG_PASSWORD=qyunslation_dev_only$' .env; then echo "仍是默认值，需要轮换"
+else echo "已自定义"; fi
+```
+
+如需轮换，要先停机，并核对 `docs/runbooks/pg-loopback-binding.md`。注意：改 `.env` 里的变量不会改已初始化数据库的密码，必须在数据库内执行 `ALTER USER ... PASSWORD ...`。
+
+**F4：术语证据回填（写生产库，需批准）。** 任务 ID 已确认为 `eb7e4876-d6af-4ca8-9a4b-249a778cd35c`。
+
+```bash
+set -a; . ./.env >/dev/null 2>&1; set +a
+# 先备份（D5 推荐）
+pg_dump --data-only -t document_term_candidate -t document_term_occurrence \
+  "${QYUNSLATION_DATABASE_URL/postgresql+psycopg/postgresql}" > "backup-term-$(date +%F).sql"
+.venv/bin/python scripts/backfill-term-evidence-sentences.py eb7e4876-d6af-4ca8-9a4b-249a778cd35c          # 只演练
+.venv/bin/python scripts/backfill-term-evidence-sentences.py eb7e4876-d6af-4ca8-9a4b-249a778cd35c --apply  # 确认演练结果后
+```
+
+**F7：排序规则版本告警（写生产库，需维护窗口和批准）**
+
+```bash
+set -a; . ./.env >/dev/null 2>&1; set +a
+PGURL="${QYUNSLATION_DATABASE_URL/postgresql+psycopg/postgresql}"
+# 1. 生成逐个索引的 REINDEX 清单（只读），先审阅
+psql "$PGURL" -At -c "select 'REINDEX INDEX CONCURRENTLY '||quote_ident(n.nspname)||'.'||quote_ident(ic.relname)||';' from pg_index i join pg_class ic on ic.oid=i.indexrelid join pg_class tc on tc.oid=i.indrelid join pg_namespace n on n.oid=tc.relnamespace join pg_am am on am.oid=ic.relam and am.amname='btree' where n.nspname='public' and exists (select 1 from unnest(string_to_array(i.indcollation::text,' ')::oid[]) o where o=100)" > reindex.sql
+wc -l reindex.sql
+# 2. 批准后执行，再刷新版本
+psql "$PGURL" -f reindex.sql
+psql "$PGURL" -c "ALTER DATABASE qyunslation REFRESH COLLATION VERSION;"
+psql "$PGURL" -c "select datcollversion, pg_database_collation_actual_version(oid) from pg_database where datname=current_database();"
+```
+
+两个版本相等即完成。需要数据库属主权限。
+
+**F3：线上 SSO/边缘 smoke（QyunsApps 002g）**
+
+仓库里的 `QyunsApps/tests/adopters/qyunslation-qyuns-browser.mjs` 用的是拦截请求的本地构建，不会访问真实服务。真实 SSO/边缘 smoke 按 QyunsApps 002g 的 runbook 执行。本地的离线检查：
+
+```bash
+cd /home/dev/QyunsApps && QYUNSLATION_REPO=/home/dev/qyunslation node tests/adopters/qyunslation-qyuns-browser.mjs
+```
+
+**F1：登录后的真实页面走查（需要测试账号，不要把账号密码发到对话里）**
+
+打开 `https://translate.qyunsgen.com/next/workbench`，登录后检查：运行详情的 QA 待办、点"在对照视图定位"；术语审核中的逐条出处与完整句子；参数确认抽屉（只打开，不提交）；不点击批准、清除、翻译。结论告诉我，我记入 WT-079。
+
+**F9：QyunsApps 侧应用 Authentik 蓝图并做授权码往返（在 QyunsApps 仓执行）**
+
+```bash
+cd /home/dev/QyunsApps && python3 authentik/scripts/blueprint_check.py    # 先检查
+# 按 QyunsApps 的 authentik 应用流程执行 apply（由你完成）
+```
+
+然后在浏览器里走一次 SSO 登录和登出。本仓蓝图的 `client_secret` 占位风险见 `deploy/authentik/blueprints/README.md`，apply 前务必确认容器里已设置真实的 `QYUNSLATION_OIDC_CLIENT_SECRET`。
+
+**F15：对象存储决策证据（只能由你读取）**
+
+证据清单见 `docs/assessments/object-storage-ownership.md` 的表格。第 1、2、4 项需要你在 qyunsgen 侧查看（例如 `mc du <alias>/<bucket>`，`<alias>` 是你本地的 mc 别名）。不要把 access key 发给我。
+
+**F13：f8 导航层级的决策**
+
+在 WT-078 的 f8 评估里选 A/B/C 之一，然后对方案做截图对比。这一步没有命令。
+
+**F16：Authentik runtime 迁出**
+
+需要 QyunsApps 002e 的单独批准。本次不做。
+
+**F17：分支与 worktree 清理（逐项确认后删除）**
+
+```bash
+git branch --merged main | sed 's/^[+* ]*//'        # 已合并的分支，先审阅
+git worktree list                                    # 先列 worktree，它们会占用分支
+git worktree remove <path>                           # 对每个待删除的 worktree 逐个执行
+git branch -d <name>                                 # 只删已合并的分支
+```
+
+`feat/PLAN-077-qyunsapps-platform-adoption` 的 worktree 在 `/home/dev/.codex/worktrees/qyunsapps-plan002/qyunslation-plan077`，要先移除 worktree 才能删分支。未合并分支按 D10 保留。
+
+**决策 D5–D10（推荐项）**
+
+| 决策 | 推荐 | 对应步骤 |
+| --- | --- | --- |
+| D5 回填方式 | a：逐个任务演练后 `--apply`，写入前备份 | F4 |
+| D6 排序规则刷新 | a：先只读检查，逐个 REINDEX，再刷新版本 | F7 |
+| D7 文档分支合并时机 | a：已随阶段 A 代码合并，无需再做 | F11（已完成） |
+| D8 对象存储迁移 | a：先补证据，决定前不迁移 | F15 |
+| D9 Authentik 迁出 | a：另立计划，单独批准 | F16 |
+| D10 分支清理 | a：只删已合并分支 | F17 |
+
+**还未发生的事：** E2/E3 的观察与切换、F0、F1、F3 的 SSO smoke、F4、F7、F9、F13、F15、F16、F17。F6 的 `pdf2zh.service` 单元状态经核对已是 `NeedDaemonReload=no`，视为完成；如需审阅单元内容，用 `systemctl --user cat pdf2zh.service`。
