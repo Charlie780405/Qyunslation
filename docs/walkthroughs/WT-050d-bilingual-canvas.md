@@ -7,3 +7,14 @@
 - 页定位：检查器页码 + `qy050:goto-page`；百分比滚动只作降级
 - 高清/缩放/旋转沿用 `apply-pdf2zh-viewer.py` / `preview-dpi`
 - 原文画布无编辑控件（只读）
+
+## 生产上线记录：译文预览显示纯译文
+
+- 代码提交：`8c03442db4a42bb3fd44fa6986c5330bdc428bac`（`fix: preview standalone translation in translated pane`），已推送 `origin/main`。
+- 行为：任务同时产出 `*.mono.pdf` 与 `*.dual.pdf` 时，译文预览优先取纯译文；原文仍由原文栏单独显示。双栏同步滚动由现有查看器默认开启。
+- 部署时间：2026-10-19 16:01（UTC+8），运行 `bash scripts/deploy-translate-stack.sh`；无数据库迁移。
+- 部署门禁：迁移对齐、前端构建新鲜、API 路由注册均通过；sidecar 本地/远端指纹一致（`7542777de0fd`）；`pdf2zh.service` 与 `qyunslation-office.service` 均为 active。
+- 上线后健康检查：公网 `/next/`、公网 `/api/v1/health`、本机 GUI `/` 均返回 HTTP 200。
+- 代码检查：`py_compile` 与 `git diff --check` 通过；未运行聚焦测试。
+- 浏览器走查：**BLOCKED**，当前环境没有 Chrome DevTools MCP，未能验证登录后的预览内容、同步滚动和控制台状态。
+- LIVE 术语闭环：不适用；本次只调整译文预览的产物选择。未改动生产数据。
