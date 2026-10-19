@@ -80,7 +80,22 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/events${query ? `?${query}` : ''}`);
   },
-  getQaItems: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/qa-items`),
+  getQaItems: (runId, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/qa-items${query ? `?${query}` : ''}`);
+  },
+  postQaDisposition: (runId, itemId, payload) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/qa-items/${encodeURIComponent(itemId)}/dispositions`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
+  postQaDispositionsBatch: (runId, payload) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/qa-dispositions/batch`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
+  createRevision: (runId, payload = {}) => apiRequest(
+    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/revisions`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
   postReviewDecision: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-decision`, {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -12,9 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from qyunslation.pipeline.qa import locate
 from qyunslation.pipeline.qa.engine import QaFinding
 from qyunslation.structure.frontmatter import AUTHOR, classify_frontmatter_text
-from qyunslation.structure.text_sanitize import detect_text_artifacts
+from qyunslation.structure.text_sanitize import (
+    _CONTROL_RE,
+    _MOJIBAKE_RE,
+    detect_text_artifacts,
+)
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 URL_RE = re.compile(r"https?://[^\s)>\]，。；]+")
@@ -35,6 +40,7 @@ class PdfFacts:
     page_count: int
     text: str
     image_hashes: set[str] = field(default_factory=set)
+    pages: list[str] = field(default_factory=list)  # text of each page (index 0 = page 1)
     first_page_image_hashes: set[str] = field(default_factory=set)
 
 
@@ -46,18 +52,103 @@ def _compact(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
 
 
+_LITERAL_PATTERNS: dict[str, tuple[re.Pattern[str], Any]] = {
+    "email": (EMAIL_RE, lambda raw: raw.lower()),
+    "url": (URL_RE, lambda raw: raw.rstrip(".,;")),
+    "ind": (IND_RE, lambda raw: re.sub(r"[\s-]", "", raw).upper()),
+    "dose": (DOSE_RE, lambda raw: re.sub(r"\s", "", raw).lower()),
+    "freq": (FREQ_RE, lambda raw: raw.upper()),
+}
+
+
+def iter_literal_matches(text: str, kind: str):
+    """Yield (normalised value, (start, end)) for every protected literal of ``kind``."""
+    pattern, normalise = _LITERAL_PATTERNS[kind]
+    for match in pattern.finditer(text or ""):
+        yield normalise(match.group(0)), match.span()
+
+
 def extract_protected_literals(text: str) -> dict[str, set[str]]:
-    return {
-        "email": {m.group(0).lower() for m in EMAIL_RE.finditer(text)},
-        "url": {m.group(0).rstrip(".,;") for m in URL_RE.finditer(text)},
-        "ind": {re.sub(r"[\s-]", "", m.group(0)).upper() for m in IND_RE.finditer(text)},
-        "dose": {re.sub(r"\s", "", m.group(0)).lower() for m in DOSE_RE.finditer(text)},
-        "freq": {m.group(0).upper() for m in FREQ_RE.finditer(text)},
-    }
+    return {kind: {value for value, _span in iter_literal_matches(text, kind)} for kind in _LITERAL_PATTERNS}
+
+
+def _literal_anchors(
+    kind: str, missing: list[str], source_text: str, source_pages: list[str] | None
+) -> list[dict[str, Any]]:
+    segments = locate.segments_from_pages(source_pages) if source_pages else locate.segments_from_text(source_text)
+    wanted = set(missing)
+    anchors: list[dict[str, Any]] = []
+    for segment in segments:
+        for value, (start, end) in iter_literal_matches(segment.text, kind):
+            if value in wanted:
+                anchors.append(
+                    locate.anchor("source", segment, value, locate.excerpt(segment.text, start, end))
+                )
+                wanted.discard(value)  # one place per value is enough to go and look
+        if len(anchors) >= locate.MAX_ANCHORS or not wanted:
+            break
+    return anchors
+
+
+# ---- equivalent writings (PLAN-078b b9 / D2) --------------------------------------------------------
+# A Chinese translation of "300 mg" or "Q2W" is often written 300毫克 / 每2周. The value must still be
+# there with the *same number* and an *equivalent unit or schedule*; anything else is still flagged.
+
+_DOSE_UNIT_ALIASES: dict[str, tuple[str, ...]] = {
+    "mg": ("mg", "毫克"),
+    "g": ("g", "克"),
+    "kg": ("kg", "千克", "公斤"),
+    "ml": ("ml", "毫升"),
+    "mcg": ("mcg", "μg", "µg", "微克"),
+    "μg": ("mcg", "μg", "µg", "微克"),
+    "µg": ("mcg", "μg", "µg", "微克"),
+    "iu": ("iu", "国际单位"),
+    "mg/kg": ("mg/kg", "毫克/千克", "毫克/公斤", "毫克每千克", "毫克每公斤"),
+    "%": ("%",),
+}
+_ZH_NUMERAL = {"1": "一", "2": "二两", "3": "三", "4": "四", "5": "五", "6": "六", "8": "八", "10": "十", "12": "十二"}
+_FREQ_PATTERNS: dict[str, tuple[str, ...]] = {
+    "QD": (r"每[日天]一次", r"每[日天]1次", r"一[日天]一次", r"一[日天]1次", r"每[日天]给药一次"),
+    "BID": (r"每[日天][两二2]次", r"一[日天][两二2]次"),
+    "TID": (r"每[日天][三3]次", r"一[日天][三3]次"),
+}
+
+
+def _fold_for_match(text: str) -> str:
+    import unicodedata
+
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or "")).lower()
+
+
+def _dose_present(value: str, translated_text: str) -> bool:
+    compact = _fold_for_match(translated_text)
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(.+)", value)
+    if not match:
+        return value in compact
+    number, unit = match.group(1), match.group(2).lower()
+    for alias in _DOSE_UNIT_ALIASES.get(unit, (unit,)):
+        # the number must stand alone (300 is not part of 1300 or 300.5) and be followed by the unit
+        if re.search(rf"(?<![\d.]){re.escape(number)}{re.escape(alias.lower())}", compact):
+            return True
+    return False
+
+
+def _freq_present(value: str, translated_text: str) -> bool:
+    compact = _fold_for_match(translated_text)
+    token = value.lower()
+    if re.search(rf"(?<![a-z]){re.escape(token)}(?![a-z])", compact):
+        return True
+    weekly = re.fullmatch(r"q(\d+)w", token)
+    if weekly:
+        n = weekly.group(1)
+        zh = _ZH_NUMERAL.get(n, "")
+        numerals = rf"(?:{n}" + (rf"|[{zh}]" if zh else "") + ")"
+        return bool(re.search(rf"每(?:隔)?{numerals}周", compact))
+    return any(re.search(pattern, compact) for pattern in _FREQ_PATTERNS.get(value.upper(), ()))
 
 
 def check_protected_literals(
-    source_text: str, translated_text: str
+    source_text: str, translated_text: str, *, source_pages: list[str] | None = None
 ) -> list[QaFinding]:
     findings: list[QaFinding] = []
     translated_compact = _compact(translated_text).lower()
@@ -69,6 +160,10 @@ def check_protected_literals(
                 present = value in translated_ind
             else:
                 present = _compact(value).lower() in translated_compact
+                if not present and kind == "dose":
+                    present = _dose_present(value, translated_text)
+                elif not present and kind == "freq":
+                    present = _freq_present(value, translated_text)
             if not present:
                 missing.append(value)
         if not missing:
@@ -80,6 +175,7 @@ def check_protected_literals(
                 code=f"LITERAL_MISSING_{kind.upper()}",
                 message=f"原文受保护 {kind} 在译文中缺失或被改写：{', '.join(missing[:5])}",
                 evidence={"kind": kind, "missing": missing[:20], "total_source": len(values)},
+                location=locate.location(_literal_anchors(kind, missing, source_text, source_pages)),
             )
         )
     return findings
@@ -93,7 +189,9 @@ def _author_metadata_lines(text: str) -> list[str]:
     ]
 
 
-def check_author_metadata(source_text: str, translated_text: str) -> list[QaFinding]:
+def check_author_metadata(
+    source_text: str, translated_text: str, *, source_pages: list[str] | None = None
+) -> list[QaFinding]:
     """Author metadata is immutable; punctuation changes block publication."""
     authors = _author_metadata_lines(source_text)
     translated = _norm(translated_text)
@@ -107,24 +205,68 @@ def check_author_metadata(source_text: str, translated_text: str) -> list[QaFind
             code="AUTHOR_METADATA_CHANGED",
             message="作者元数据缺失或被改写，必须与源文逐行一致",
             evidence={"missing": missing[:20], "total_source": len(authors)},
+            location=locate.location(
+                [
+                    locate.anchor("source", seg, line[:60], locate.snippet(line))
+                    for line in missing[:locate.MAX_ANCHORS]
+                    for seg in locate.find_segments(
+                        locate.segments_from_pages(source_pages) if source_pages else locate.segments_from_text(source_text),
+                        lambda s, _line=line: _norm(_line) in _norm(s.text),
+                        limit=1,
+                    )
+                ]
+            ),
         )
     ]
 
 
-def latin_residue_ratio(text: str, *, protected: set[str] | None = None) -> float:
-    """含长英文串的行占非空行比例（译文目标为中文时用于疑似漏翻译）。"""
+def _residue_lines(text: str, protected: set[str] | None = None) -> tuple[list[str], int]:
+    """(lines that look like untranslated English, number of non-empty lines)."""
     lines = [ln for ln in (text or "").splitlines() if ln.strip()]
-    if not lines:
-        return 0.0
     protected = protected or set()
-    hit = 0
+    hits: list[str] = []
     for line in lines:
         probe = line
         for token in protected:
             probe = probe.replace(token, " ")
         if LATIN_RUN_RE.search(probe) and not CJK_RE.search(probe):
-            hit += 1
-    return hit / len(lines)
+            hits.append(line)
+    return hits, len(lines)
+
+
+def latin_residue_ratio(text: str, *, protected: set[str] | None = None) -> float:
+    """含长英文串的行占非空行比例（译文目标为中文时用于疑似漏翻译）。"""
+    hits, total = _residue_lines(text, protected)
+    return len(hits) / total if total else 0.0
+
+
+def _page_hits(pages: list[str] | None, predicate) -> list[tuple[int, str]]:
+    return [(i, page) for i, page in enumerate(pages or [], start=1) if predicate(page)]
+
+
+def _artifact_excerpt(page: str) -> str | None:
+    for pattern in ("\ufffd",):
+        at = page.find(pattern)
+        if at >= 0:
+            return locate.excerpt(page, at, at + 1, radius=30)
+    for regex in (_CONTROL_RE, _MOJIBAKE_RE):
+        match = regex.search(page)
+        if match:
+            return locate.excerpt(page, match.start(), match.end(), radius=30)
+    return None
+
+
+def _residue_anchors(pages: list[str] | None, protected: set[str]) -> list[dict[str, Any]]:
+    scored: list[tuple[float, int, str]] = []
+    for number, page in enumerate(pages or [], start=1):
+        hits, total = _residue_lines(page, protected)
+        if hits:
+            scored.append((len(hits) / total, number, hits[0]))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        locate.page_anchor("translated", number, f"英文残留行约占本页 {ratio:.0%}", locate.snippet(first, 120))
+        for ratio, number, first in scored[:5]
+    ]
 
 
 def check_translation_text(
@@ -134,6 +276,8 @@ def check_translation_text(
     target_is_chinese: bool = True,
     residue_warn: float = 0.35,
     residue_block: float = 0.8,
+    source_pages: list[str] | None = None,
+    translated_pages: list[str] | None = None,
 ) -> list[QaFinding]:
     findings: list[QaFinding] = []
     if not _norm(translated_text):
@@ -152,6 +296,16 @@ def check_translation_text(
                 severity="blocker",
                 code="ORDINAL_ARTIFACT",
                 message="出现序数上标伪影（如 ^{th}）",
+                location=locate.location(
+                    [
+                        locate.page_anchor(
+                            "translated", number, "序数上标伪影",
+                            locate.excerpt(page, m.start(), m.end(), radius=30),
+                        )
+                        for number, page in _page_hits(translated_pages, ORDINAL_ARTIFACT_RE.search)[:5]
+                        for m in [ORDINAL_ARTIFACT_RE.search(page)]
+                    ]
+                ),
             )
         )
     if "Fallback to simple translation" in translated_text:
@@ -161,6 +315,12 @@ def check_translation_text(
                 severity="warning",
                 code="FALLBACK_PRESENT",
                 message="存在 fallback 段落，需人工确认",
+                location=locate.location(
+                    [
+                        locate.page_anchor("translated", number, "回退翻译段落")
+                        for number, _ in _page_hits(translated_pages, lambda p: "Fallback to simple translation" in p)[:5]
+                    ]
+                ),
             )
         )
     for code in detect_text_artifacts(translated_text):
@@ -174,10 +334,20 @@ def check_translation_text(
                     if code == "IL_MARKUP_LEAK"
                     else "译文包含不可打印字符或编码乱码，必须重新生成"
                 ),
+                location=locate.location(
+                    [
+                        locate.page_anchor(
+                            "translated", number,
+                            "内部标记残留" if code == "IL_MARKUP_LEAK" else "乱码或不可打印字符",
+                            _artifact_excerpt(page) if code != "IL_MARKUP_LEAK" else None,
+                        )
+                        for number, page in _page_hits(translated_pages, lambda p, c=code: c in detect_text_artifacts(p))[:5]
+                    ]
+                ),
             )
         )
-    findings.extend(check_protected_literals(source_text, translated_text))
-    findings.extend(check_author_metadata(source_text, translated_text))
+    findings.extend(check_protected_literals(source_text, translated_text, source_pages=source_pages))
+    findings.extend(check_author_metadata(source_text, translated_text, source_pages=source_pages))
 
     if target_is_chinese:
         protected = set().union(
@@ -192,6 +362,7 @@ def check_translation_text(
                     code="UNTRANSLATED_BODY",
                     message=f"译文大部分行仍为英文（{ratio:.0%}），疑似未翻译",
                     evidence={"latin_line_ratio": round(ratio, 3)},
+                    location=locate.location(_residue_anchors(translated_pages, protected)),
                 )
             )
         elif ratio >= residue_warn:
@@ -202,6 +373,7 @@ def check_translation_text(
                     code="LATIN_RESIDUE",
                     message=f"译文含较多英文残留行（{ratio:.0%}），需人工复核",
                     evidence={"latin_line_ratio": round(ratio, 3)},
+                    location=locate.location(_residue_anchors(translated_pages, protected)),
                 )
             )
     return findings
@@ -241,6 +413,7 @@ def read_pdf_facts(path: Path) -> PdfFacts | None:
             text="\n".join(texts),
             image_hashes=hashes,
             first_page_image_hashes=first,
+            pages=texts,
         )
     finally:
         doc.close()
@@ -290,9 +463,14 @@ def inspect_pdf_pair(
             translated_text=translated.text,
             # A bilingual PDF intentionally retains source-language body text.
             target_is_chinese=target_is_chinese and output_kind == "mono",
+            source_pages=source.pages,
+            translated_pages=translated.pages,
         )
         for finding in current:
             finding.evidence.setdefault("output_kind", output_kind)
+            for item in finding.location.get("anchors", []):
+                if item.get("side") == "translated":
+                    item.setdefault("output_kind", output_kind)
         findings.extend(current)
         if source.page_count != translated.page_count:
             findings.append(
@@ -320,6 +498,7 @@ def inspect_pdf_pair(
                         "source_first_page_images": len(source.first_page_image_hashes),
                         "output_kind": output_kind,
                     },
+                    location=locate.location([locate.page_anchor("source", 1, "首页图片（疑似标识或印章）")]),
                 )
             )
     translated = outputs.get("mono") or outputs["dual"]

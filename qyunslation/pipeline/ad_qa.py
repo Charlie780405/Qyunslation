@@ -14,6 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from qyunslation.pipeline.qa import locate
 from qyunslation.pipeline.qa.engine import QaFinding
 
 
@@ -24,6 +25,9 @@ class QaContext:
     direction: str
     terms: Mapping[str, str] = field(default_factory=dict)
     aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # PLAN-078b: optional page-aware text (PDF); without it paragraphs of the plain text are used.
+    source_segments: tuple[locate.Segment, ...] | None = None
+    target_segments: tuple[locate.Segment, ...] | None = None
 
 
 _FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９．", "0123456789.")
@@ -230,8 +234,57 @@ def _has_negation(text: str) -> bool:
     return bool(_NEGATION_EN.search(text or "") or _NEGATION_ZH.search(text or ""))
 
 
-def _finding(code: str, message: str, *, evidence: dict | None = None, severity: str = "blocker") -> QaFinding:
-    return QaFinding(category="ad", severity=severity, code=code, message=message, evidence=evidence or {})
+def _finding(
+    code: str,
+    message: str,
+    *,
+    evidence: dict | None = None,
+    severity: str = "blocker",
+    location: dict | None = None,
+) -> QaFinding:
+    return QaFinding(
+        category="ad",
+        severity=severity,
+        code=code,
+        message=message,
+        evidence=evidence or {},
+        location=location or {},
+    )
+
+
+def _number_anchors(
+    missing: list[str],
+    added: list[str],
+    source_segments: list[locate.Segment],
+    target_segments: list[locate.Segment],
+) -> list[dict]:
+    """Where the missing numbers sit in the source and where the unexpected ones sit in the translation."""
+    anchors: list[dict] = []
+    for side, values, segments in (
+        ("source", missing[:8], source_segments),
+        ("translated", added[:8], target_segments),
+    ):
+        if not values:
+            continue
+        numbered = [(segment, set(_numbers(segment.text))) for segment in segments]
+        for value in values:
+            for segment, numbers in numbered:
+                if value in numbers:
+                    anchors.append(locate.anchor(side, segment, value))
+                    break  # the first occurrence is enough to go and look
+    return anchors
+
+
+def _sentences(segments: list[locate.Segment], predicate, *, limit: int = 3) -> list[dict]:
+    anchors: list[dict] = []
+    for segment in segments:
+        for sentence in re.split(r"(?<=[.!?。！？；;])\s*", segment.text):
+            if sentence.strip() and predicate(sentence):
+                anchors.append(locate.anchor("source", segment, locate.snippet(sentence, 60), locate.snippet(sentence, 220)))
+                break
+        if len(anchors) >= limit:
+            break
+    return anchors
 
 
 def _contains(text: str, term: str) -> bool:
@@ -250,6 +303,8 @@ def run_ad_deterministic_qa(context: QaContext) -> list[QaFinding]:
     findings: list[QaFinding] = []
     source = context.source or ""
     target = context.target or ""
+    source_segments = list(context.source_segments or locate.segments_from_text(source))
+    target_segments = list(context.target_segments or locate.segments_from_text(target))
 
     source_numbers, target_numbers = Counter(_numbers(source)), Counter(_numbers(target))
     missing = sorted((source_numbers - target_numbers).elements())
@@ -260,6 +315,7 @@ def run_ad_deterministic_qa(context: QaContext) -> list[QaFinding]:
                 "AD_NUMBER_DRIFT",
                 "保护性数字、剂量或统计量在译文中发生变化",
                 evidence={"missing_in_target": missing[:20], "unexpected_in_target": added[:20]},
+                location=locate.location(_number_anchors(missing, added, source_segments, target_segments)),
             )
         )
 
@@ -275,6 +331,16 @@ def run_ad_deterministic_qa(context: QaContext) -> list[QaFinding]:
                     "AD_TERM_MISSING",
                     f"批准术语未按策略出现：{source_term} → {target_term}",
                     evidence={"source_term": source_term, "expected_target": target_term, "accepted_aliases": accepted[1:]},
+                    location=locate.location(
+                        [
+                            locate.anchor("source", segment, source_term)
+                            for segment in locate.find_segments(
+                                source_segments,
+                                lambda seg, term=source_term: _contains(unicodedata.normalize("NFKC", seg.text), term),
+                                limit=2,
+                            )
+                        ]
+                    ),
                 )
             )
 
@@ -288,6 +354,7 @@ def run_ad_deterministic_qa(context: QaContext) -> list[QaFinding]:
                 "AD_NEGATION_DRIFT",
                 "否定语义在译文中发生变化",
                 evidence={"source_negative": source_negative, "target_negative": target_negative},
+                location=locate.location(_sentences(source_segments, _has_negation)),
             )
         )
 
@@ -304,6 +371,13 @@ def run_ad_deterministic_qa(context: QaContext) -> list[QaFinding]:
                 "AD_MODALITY_DRIFT",
                 "义务、许可或禁止情态在译文中发生变化",
                 evidence={"source_modality": sorted(source_modality), "target_modality": sorted(target_modality), "dropped": dropped},
+                location=locate.location(
+                    _sentences(
+                        source_segments,
+                        lambda sentence: bool(_STRONG_OBLIGATION.search(sentence))
+                        or bool(_modality_classes(sentence) & set(dropped)),
+                    )
+                ),
             )
         )
 

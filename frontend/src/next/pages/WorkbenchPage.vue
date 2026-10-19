@@ -13,6 +13,17 @@
       </div>
     </section>
 
+    <section v-if="todoSummary" class="qy-panel qy-todo-bar" data-todo-bar role="status" aria-live="polite">
+      <span class="qy-todo-text">
+        <strong v-if="todoSummary.action">{{ todoSummary.action }} 个任务需要处理质量问题</strong>
+        <template v-if="todoSummary.action && todoSummary.review"> · </template>
+        <span v-if="todoSummary.review">{{ todoSummary.review }} 个待人工复核</span>
+      </span>
+      <button class="qy-secondary-button" type="button" @click="openRun(todoSummary.first, entryTab(todoSummary.first))">
+        {{ todoSummary.action ? '去处理' : '去复核' }}
+      </button>
+    </section>
+
     <div class="qy-workbench-grid">
       <section class="qy-workbench-main">
         <div class="qy-panel qy-upload-panel">
@@ -216,6 +227,17 @@ const focusRun = computed(() => activeRun.value || runs.value[0] || null);
 const runForPreflight = computed(() => (
   preflight.value ? runs.value.find((item) => item.preflight_id === preflight.value.id) || null : null
 ));
+// What needs a person right now, across every task in the list.
+const todoSummary = computed(() => {
+  const needsAction = runs.value.filter((item) => ['qa_action', 'qa_unavailable'].includes(lifecycleOf(item)));
+  const needsReview = runs.value.filter((item) => lifecycleOf(item) === 'review');
+  if (!needsAction.length && !needsReview.length) return null;
+  return {
+    action: needsAction.length,
+    review: needsReview.length,
+    first: needsAction[0] || needsReview[0],
+  };
+});
 const uploadStatusLabel = computed(() => {
   if (uploading.value) return '上传预检中';
   if (preflight.value) return preflight.value.state === 'ready' ? '预检通过，待确认参数' : '预检发现问题';

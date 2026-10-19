@@ -31,5 +31,7 @@ def test_resume_clears_the_old_verdict_so_new_output_is_rechecked(monkeypatch, t
         assert body["quality_state"] == "draft"
         assert body["qa_summary"].get("blocker", 0) == 0
         with persist_db.SessionLocal() as session:
-            assert session.scalars(select(QaItem).where(QaItem.run_id == run_id)).all() == []
+            # PLAN-078b: the old verdict is kept as history but no longer counts as current.
+            rows = session.scalars(select(QaItem).where(QaItem.run_id == run_id)).all()
+            assert rows and not any(row.is_current for row in rows)
     reset_engine()

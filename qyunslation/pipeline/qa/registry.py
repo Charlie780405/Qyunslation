@@ -1,0 +1,275 @@
+# SPDX-License-Identifier: MPL-2.0
+"""PLAN-078b：QA 规则注册表（中文文案、处置类别、定位能力、指纹与规则集版本）。
+
+Every QA finding code the pipeline can emit is declared here once. The registry answers:
+what does this mean for the reader (title / why / how), what may be done about it (class and
+disposition rules), whether it can point at a place in the document, and what makes two
+findings "the same problem" across re-checks (fingerprint).
+
+Classes (see PLAN-078 §5.2):
+
+* ``C1`` critical fact (numbers, units, negation, missing text, garbled output): can only be
+  fixed, or confirmed as a rule false positive by a second person. Never waivable.
+* ``C2`` layout / metadata: fix, or a reviewer waives it with a reason.
+* ``C3`` the checker could not run (or its integrity failed): says nothing about the
+  translation; re-run the check. No dispositions.
+* ``C4`` terminology: fix, or a reviewer waives it with a reason.
+* ``W`` warning: acknowledge (does not block delivery).
+* ``I`` information.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+C1, C2, C3, C4, WARN, INFO = "C1", "C2", "C3", "C4", "W", "I"
+
+
+@dataclass(frozen=True)
+class RuleInfo:
+    code: str
+    rule_class: str
+    title: str
+    why: str
+    how: str
+    # "page" = anchors name a document page; "excerpt" = anchors quote the text; "none" = whole-document rule
+    locatable: str = "none"
+    unlocatable_reason: str = "该规则按全文统计，不对应单一位置"
+    batchable: bool = False
+    # Fields that make two findings the same problem across re-checks (empty = code + place only).
+    identity_keys: tuple[str, ...] = ()
+
+
+def _r(code: str, rule_class: str, title: str, why: str, how: str, **kw: Any) -> tuple[str, RuleInfo]:
+    return code, RuleInfo(code=code, rule_class=rule_class, title=title, why=why, how=how, **kw)
+
+
+_RULES: dict[str, RuleInfo] = dict(
+    [
+        # ---- C1: critical facts -------------------------------------------------------------
+        _r("AD_NUMBER_DRIFT", C1, "数字、剂量或统计量与原文不一致",
+           "剂量、百分比、样本量等数值改变会直接改变临床含义，不能带着这类差异交付。",
+           "对照下方“原文位置”核对译文中是否漏译或改写了这些数值，修正后重新翻译；若确认是规则把格式差异误判为缺失，请反馈误报，由另一位术语管理员或管理员确认。",
+           locatable="excerpt", identity_keys=("missing_in_target", "unexpected_in_target")),
+        _r("AD_NEGATION_DRIFT", C1, "否定含义在译文中丢失",
+           "“没有/不”之类的否定被漏掉会把原文意思译反。",
+           "核对原文中含否定的句子在译文里是否仍表达否定，修正后重新检查。",
+           locatable="excerpt"),
+        _r("AD_MODALITY_DRIFT", C1, "义务、许可或禁止的语气发生变化",
+           "“必须/禁止/可以”的差异会改变方案或说明书的约束力。",
+           "核对原文中的 must / shall / prohibited 等表述在译文里是否保持同等强度，修正后重新检查。"),
+        _r("AD_REPAIR_FACT_DRIFT", C1, "自动修复改变了受保护的事实",
+           "语义修复步骤改动了数字、剂量等受保护内容，修复结果不可信。",
+           "不要采用自动修复结果，请重新翻译；如反复出现请联系管理员。"),
+        _r("UNTRANSLATED_BODY", C1, "译文大部分仍是外文，疑似未翻译",
+           "整段未翻译的内容无法交付。",
+           "查看下方页面，确认是否真的漏译（扫描件、图片文字或表格最常见），必要时开启 OCR 后重新翻译。",
+           locatable="page", identity_keys=("output_kind",)),
+        _r("EMPTY_TRANSLATION", C1, "译文为空",
+           "没有译文，无法交付。", "检查翻译引擎和模型是否可用，然后重新翻译。"),
+        _r("LITERAL_MISSING_EMAIL", C1, "原文中的邮箱地址在译文中缺失或被改写",
+           "联系方式被改动可能导致无法联系到责任方。",
+           "对照原文位置，把邮箱原样保留在译文中，然后重新检查。",
+           locatable="excerpt", identity_keys=("kind", "missing")),
+        _r("LITERAL_MISSING_IND", C1, "原文中的 IND / NCT 编号在译文中缺失或被改写",
+           "试验或申报编号错误会让监管文件无法对应。",
+           "对照原文位置，把编号原样保留在译文中，然后重新检查。",
+           locatable="excerpt", identity_keys=("kind", "missing")),
+        _r("TEXT_ENCODING_ARTIFACT", C1, "译文含乱码或不可打印字符",
+           "乱码意味着文字在转换中损坏。",
+           "查看下方页面中的乱码位置，重新翻译（必要时换用文本型 PDF 或原始 Word 文档）。",
+           locatable="page", identity_keys=("output_kind",)),
+        _r("IL_MARKUP_LEAK", C1, "译文中残留内部排版标记",
+           "内部标记泄漏到正文会让文档无法阅读。",
+           "请重新翻译；如反复出现请联系管理员。",
+           locatable="page", identity_keys=("output_kind",)),
+        # ---- C2: layout / metadata ------------------------------------------------------------
+        _r("LOGO_MISSING", C2, "原文首页图片（疑似标识或印章）未在译文中保留",
+           "机构标识或印章缺失可能让文件失去效力。",
+           "查看译文首页是否确有标识缺失；若只是图片被重新编码，由复核人说明理由后授权例外。",
+           locatable="page", identity_keys=("output_kind",)),
+        _r("PAGE_COUNT_MISMATCH", C2, "译文页数与原文不一致",
+           "页数变化通常意味着内容溢出、缺页或版式损坏。",
+           "对照原文和译文检查是否有缺页或内容溢出；确属排版差异时由复核人说明理由后授权例外。",
+           unlocatable_reason="页数差异不属于某一页", identity_keys=("output_kind",)),
+        _r("AUTHOR_METADATA_CHANGED", C2, "作者信息与原文不完全一致",
+           "作者与单位信息要求与原文逐行一致。",
+           "对照原文位置，把作者行改回与原文一致；若只是换行或标点造成的差异，由复核人说明理由后授权例外。",
+           locatable="page", identity_keys=("missing",)),
+        _r("ORDINAL_ARTIFACT", C2, "出现序数上标伪影（如 ^{th}）",
+           "排版残留会出现在正文中。", "重新翻译，必要时手工修正对应文字。"),
+        _r("MANIFEST_EMPTY_OBJECTS", C2, "文档结构中没有可处理的对象",
+           "没有识别到任何文字或表格对象，译文不可信。", "确认文件是否为空白或纯图片，必要时开启 OCR 后重新预检。"),
+        _r("GENERATION_MISMATCH", C2, "结构清单与任务版本不一致",
+           "说明检查对象可能来自旧版本。", "请重新检查；如仍出现请联系管理员。"),
+        _r("AD_DOMAIN_EVIDENCE_MISSING", C2, "原文缺少可验证的专业领域依据",
+           "无法证明该文档属于所选专业领域，专业规则可能不适用。",
+           "确认文档领域选择是否正确；确属该领域但缺少锚点时由复核人说明理由后授权例外。"),
+        # ---- C3: the checker could not run -----------------------------------------------------
+        _r("TERM_EXTRACTION_DEGRADED", C3, "术语与单位审校服务未能完成检查",
+           "检查服务当时无法运行，这不代表译文有问题，但也不能当作检查通过。",
+           "等术语模型服务恢复后点击“重新检查”。"),
+        _r("AD_QA_SOURCE_UNAVAILABLE", C3, "缺少可供检查的译文文件",
+           "没有译文文件，质量检查无法进行。", "确认翻译是否真正完成，必要时重新翻译。"),
+        _r("QA_INPUT_UNAVAILABLE", C3, "无法读取原文或译文 PDF",
+           "文本和版式检查没有执行，不能当作检查通过。", "确认文件未损坏后点击“重新检查”。"),
+        _r("QA_ROUND_FAILED", C3, "质量检查执行失败（系统错误）",
+           "检查过程本身出错，不代表译文有问题。", "点击“重新检查”；反复出现请联系管理员。"),
+        _r("TERM_SNAPSHOT_INCONSISTENT", C3, "术语快照校验失败",
+           "无法证明本次检查使用的术语与检查器一致。", "点击“重新检查”；仍失败请联系管理员。"),
+        _r("AD_QA_DEGRADED", C3, "语义检查不可用或超时",
+           "确定性检查已通过，但语义检查没有完成，暂不可批准。", "服务恢复后点击“重新检查”。"),
+        # ---- C4: terminology --------------------------------------------------------------------
+        _r("TERM_HIGH_RISK_CONFLICT", C4, "高风险术语未使用批准译名",
+           "药名、适应症等高风险术语必须与术语库一致。",
+           "对照下方证据把译名改成批准译法后重新翻译；若上下文确实不适用，由复核人说明理由后授权例外。",
+           identity_keys=("concept_id", "expected")),
+        _r("TERM_FORBIDDEN_TARGET", C4, "出现被禁用的术语译法",
+           "该译法已被术语库明确禁止。", "改用批准译法后重新翻译。", identity_keys=("concept_id", "forbidden")),
+        _r("TERM_TARGET_MISSING", C4, "批准的术语译名未出现在译文中",
+           "术语不一致会影响全文统一性。", "核对译文是否使用了其他译法；确属同义表达时可授权例外。",
+           identity_keys=("concept_id", "expected"), batchable=True),
+        _r("AD_TERM_MISSING", C4, "批准术语未按策略出现",
+           "专业术语应按术语库使用批准译法。", "核对译文用词，必要时重新翻译；同义表达可授权例外。",
+           identity_keys=("source_term", "expected_target")),
+        # ---- warnings ---------------------------------------------------------------------------
+        _r("LATIN_RESIDUE", WARN, "译文中英文残留较多",
+           "可能有未翻译的段落，也可能只是药名、缩写或参考文献。",
+           "查看下方页面确认；属于正常保留的内容可确认已阅。", locatable="page", identity_keys=("output_kind",),
+           batchable=True),
+        _r("FALLBACK_PRESENT", WARN, "存在回退翻译的段落", "回退段落的质量没有经过完整流程。",
+           "人工复核这些段落。", batchable=True),
+        _r("LITERAL_MISSING_URL", WARN, "原文中的网址在译文中缺失或被改写", "网址被改写可能导致链接失效。",
+           "对照原文位置核对网址。", locatable="excerpt", identity_keys=("kind", "missing"), batchable=True),
+        # D2: kept as warnings, and deliberately NOT batchable until their false-positive rate is known.
+        _r("LITERAL_MISSING_DOSE", WARN, "原文中的剂量在译文中缺失或被改写",
+           "剂量错误后果严重；本检查目前只作警告，须逐项确认。",
+           "对照原文位置逐项核对剂量。", locatable="excerpt", identity_keys=("kind", "missing")),
+        _r("LITERAL_MISSING_FREQ", WARN, "原文中的给药频次在译文中缺失或被改写",
+           "频次错误会改变用药方案；本检查目前只作警告，须逐项确认。",
+           "对照原文位置逐项核对频次。", locatable="excerpt", identity_keys=("kind", "missing")),
+        _r("TERM_SNAPSHOT_PENDING", WARN, "术语快照尚未完成", "术语检查可能不完整。", "稍后重新检查。", batchable=True),
+        _r("DRUG_NAME_DRIFT", WARN, "译文出现术语库之外的药名", "可能混入了其他药物的名称。", "核对药名。"),
+        # ---- info -------------------------------------------------------------------------------
+        _r("QA_INSPECTION_SUMMARY", INFO, "确定性 QA 取证摘要", "记录本轮检查的输入范围。", "无需处理。"),
+    ]
+)
+
+
+def rule_for(code: str) -> RuleInfo:
+    """Registered rule, or a conservative C1 placeholder for a code nobody declared."""
+    info = _RULES.get(code)
+    if info is not None:
+        return info
+    logger.warning("unregistered QA code %s; treating it as a critical-fact rule", code)
+    return RuleInfo(
+        code=code,
+        rule_class=C1,
+        title=f"未登记检查项（{code}）",
+        why="该检查项尚未登记处理说明，按关键事实处理，不能放行。",
+        how="请联系管理员登记该检查项。",
+    )
+
+
+def is_registered(code: str) -> bool:
+    return code in _RULES
+
+
+def all_rules() -> list[RuleInfo]:
+    return list(_RULES.values())
+
+
+# ------------------------------------------------------------------------------------------------
+# fingerprints: "is this the same problem as last round?"
+# ------------------------------------------------------------------------------------------------
+
+
+def fingerprint(code: str, object_id: str | None, evidence: dict[str, Any] | None, location: dict[str, Any] | None = None) -> str:
+    """Stable identity of a finding across re-checks of the same output."""
+    info = rule_for(code)
+    evidence = evidence or {}
+    parts: dict[str, Any] = {"code": code}
+    if object_id:
+        parts["object_id"] = object_id
+    for key in info.identity_keys:
+        if key in evidence:
+            value = evidence[key]
+            parts[key] = sorted(map(str, value)) if isinstance(value, (list, set, tuple)) else value
+    if not info.identity_keys and location:
+        anchors = location.get("anchors") or []
+        if anchors:
+            parts["anchor"] = {k: anchors[0].get(k) for k in ("side", "page", "paragraph")}
+    canonical = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# ------------------------------------------------------------------------------------------------
+# rule set version: changes whenever the registry or any rule implementation changes
+# ------------------------------------------------------------------------------------------------
+
+_RULE_FILES = (
+    "pipeline/qa/engine.py",
+    "pipeline/qa/pdf_inspect.py",
+    "pipeline/qa/registry.py",
+    "pipeline/ad_qa.py",
+    "pipeline/ad_inspection.py",
+    "pipeline/term_snapshot.py",
+    "structure/text_sanitize.py",
+)
+
+
+@lru_cache(maxsize=1)
+def rule_set_version() -> str:
+    digest = hashlib.sha256()
+    root = Path(__file__).resolve().parents[2]
+    for relative in _RULE_FILES:
+        path = root / relative
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(relative.encode("utf-8"))
+    return f"qa-{digest.hexdigest()[:12]}"
+
+
+# ------------------------------------------------------------------------------------------------
+# disposition policy (who may do what with a finding of a given class)
+# ------------------------------------------------------------------------------------------------
+
+REVIEWER_ROLES = frozenset({"reviewer", "term_admin", "admin", "owner"})
+CONFIRMER_ROLES = frozenset({"term_admin", "admin", "owner"})
+
+#: action -> classes it applies to
+ACTION_CLASSES: dict[str, frozenset[str]] = {
+    "acknowledge": frozenset({WARN}),
+    "report_false_positive": frozenset({C1, C2, C4, WARN}),
+    "confirm_false_positive": frozenset({C1}),
+    "reject_false_positive": frozenset({C1}),
+    "grant_waiver": frozenset({C2, C4}),
+    "revoke_waiver": frozenset({C2, C4}),
+}
+
+
+def allowed_actions(rule_class: str, role: str, *, is_writer: bool) -> list[str]:
+    """Dispositions this caller may attempt on a finding of ``rule_class`` (server re-checks each)."""
+    out: list[str] = []
+    for action, classes in ACTION_CLASSES.items():
+        if rule_class not in classes:
+            continue
+        if action in {"confirm_false_positive", "reject_false_positive"}:
+            allowed = role in CONFIRMER_ROLES
+        elif action in {"grant_waiver", "revoke_waiver"}:
+            allowed = role in REVIEWER_ROLES
+        elif action == "acknowledge":
+            allowed = role in REVIEWER_ROLES or is_writer
+        else:  # report_false_positive: any reviewer, or the submitter
+            allowed = role in REVIEWER_ROLES or is_writer
+        if allowed:
+            out.append(action)
+    return out

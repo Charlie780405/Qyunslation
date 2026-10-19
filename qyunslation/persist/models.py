@@ -326,9 +326,47 @@ class QaCheckRound(Base):
     trigger: Mapped[str] = mapped_column(String(32), nullable=False, default="auto")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # PLAN-078b: what this round was checked against and what changed since the previous one.
+    rule_set_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    artifact_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    diff_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class QaDisposition(Base):
+    """PLAN-078b：对一条 QA 问题的处置记录（只追加，不修改、不删除）。
+
+    The effective state of a finding is its newest disposition. Dispositions are tied to the
+    finding's fingerprint and to the output (artifact digest) they were made against, so a
+    waiver never silently carries over to different output.
+    """
+
+    __tablename__ = "qa_disposition"
+    __table_args__ = (
+        Index("ix_qa_disposition_run_fp", "run_id", "generation", "fingerprint"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("translation_run_record.id", ondelete="CASCADE"), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_class: Mapped[str] = mapped_column(String(8), nullable=False)
+    round_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    artifact_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1024), nullable=False)
+    evidence_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    self_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
@@ -400,6 +438,14 @@ class QaItem(Base):
     evidence_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     reviewer_note: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # PLAN-078b: which check round produced it, what makes it "the same problem" across
+    # re-checks, where it is in the document, and whether it is the run's current verdict.
+    # Superseded items are kept (is_current = False) so a re-check never erases history.
+    round_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    location_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    rule_class: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
