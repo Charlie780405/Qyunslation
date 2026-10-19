@@ -90,6 +90,63 @@ def _literal_anchors(
     return anchors
 
 
+# ---- equivalent writings (PLAN-078b b9 / D2) --------------------------------------------------------
+# A Chinese translation of "300 mg" or "Q2W" is often written 300毫克 / 每2周. The value must still be
+# there with the *same number* and an *equivalent unit or schedule*; anything else is still flagged.
+
+_DOSE_UNIT_ALIASES: dict[str, tuple[str, ...]] = {
+    "mg": ("mg", "毫克"),
+    "g": ("g", "克"),
+    "kg": ("kg", "千克", "公斤"),
+    "ml": ("ml", "毫升"),
+    "mcg": ("mcg", "μg", "µg", "微克"),
+    "μg": ("mcg", "μg", "µg", "微克"),
+    "µg": ("mcg", "μg", "µg", "微克"),
+    "iu": ("iu", "国际单位"),
+    "mg/kg": ("mg/kg", "毫克/千克", "毫克/公斤", "毫克每千克", "毫克每公斤"),
+    "%": ("%",),
+}
+_ZH_NUMERAL = {"1": "一", "2": "二两", "3": "三", "4": "四", "5": "五", "6": "六", "8": "八", "10": "十", "12": "十二"}
+_FREQ_PATTERNS: dict[str, tuple[str, ...]] = {
+    "QD": (r"每[日天]一次", r"每[日天]1次", r"一[日天]一次", r"一[日天]1次", r"每[日天]给药一次"),
+    "BID": (r"每[日天][两二2]次", r"一[日天][两二2]次"),
+    "TID": (r"每[日天][三3]次", r"一[日天][三3]次"),
+}
+
+
+def _fold_for_match(text: str) -> str:
+    import unicodedata
+
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or "")).lower()
+
+
+def _dose_present(value: str, translated_text: str) -> bool:
+    compact = _fold_for_match(translated_text)
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(.+)", value)
+    if not match:
+        return value in compact
+    number, unit = match.group(1), match.group(2).lower()
+    for alias in _DOSE_UNIT_ALIASES.get(unit, (unit,)):
+        # the number must stand alone (300 is not part of 1300 or 300.5) and be followed by the unit
+        if re.search(rf"(?<![\d.]){re.escape(number)}{re.escape(alias.lower())}", compact):
+            return True
+    return False
+
+
+def _freq_present(value: str, translated_text: str) -> bool:
+    compact = _fold_for_match(translated_text)
+    token = value.lower()
+    if re.search(rf"(?<![a-z]){re.escape(token)}(?![a-z])", compact):
+        return True
+    weekly = re.fullmatch(r"q(\d+)w", token)
+    if weekly:
+        n = weekly.group(1)
+        zh = _ZH_NUMERAL.get(n, "")
+        numerals = rf"(?:{n}" + (rf"|[{zh}]" if zh else "") + ")"
+        return bool(re.search(rf"每(?:隔)?{numerals}周", compact))
+    return any(re.search(pattern, compact) for pattern in _FREQ_PATTERNS.get(value.upper(), ()))
+
+
 def check_protected_literals(
     source_text: str, translated_text: str, *, source_pages: list[str] | None = None
 ) -> list[QaFinding]:
@@ -103,6 +160,10 @@ def check_protected_literals(
                 present = value in translated_ind
             else:
                 present = _compact(value).lower() in translated_compact
+                if not present and kind == "dose":
+                    present = _dose_present(value, translated_text)
+                elif not present and kind == "freq":
+                    present = _freq_present(value, translated_text)
             if not present:
                 missing.append(value)
         if not missing:
