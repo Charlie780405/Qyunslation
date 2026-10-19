@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import LoginPage from './pages/LoginPage.vue';
 import WorkbenchPage from './pages/WorkbenchPage.vue';
 import RunDetailPage from './pages/RunDetailPage.vue';
+import RunCompletePage from './pages/RunCompletePage.vue';
 import TermbasePage from './pages/TermbasePage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { useSessionStore } from './stores/session.js';
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/', redirect: '/workbench' },
     { path: '/workbench', name: 'workbench', component: WorkbenchPage },
     { path: '/workbench/:runId', name: 'workbench-run', component: RunDetailPage, props: true },
+    { path: '/workbench/:runId/complete', name: 'workbench-complete', component: RunCompletePage, props: true },
     { path: '/termbase', name: 'termbase', component: TermbasePage },
     { path: '/settings', name: 'settings', component: SettingsPage },
     {

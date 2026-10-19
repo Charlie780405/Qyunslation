@@ -154,3 +154,59 @@ def test_a_confirmer_clears_a_false_positive_on_a_critical_fact_without_a_second
         assert _post(client, run_id, other, REVIEWER, "report_false_positive", "核对原文后确认编号完整").status_code == 200
         assert _post(client, run_id, other, REVIEWER, "confirm_false_positive", "我自己确认自己的反馈").status_code == 403
     reset_engine()
+
+
+def test_the_same_finding_on_a_regenerated_version_is_one_click_to_carry_over(monkeypatch, tmp_path):
+    """Reported: a false positive confirmed on version 1 came back identical on version 2 and had to be redone by hand."""
+    from sqlalchemy import select
+
+    from _plan078_flow import ADMIN, OWNER, make_client, run_to_gate
+    from qyunslation.persist import db as persist_db
+    from qyunslation.persist.models import QaDisposition
+    from test_plan078b_dispositions import _inject, _item, _post, _run
+    from test_plan078b_revisions import _poll, _revise
+
+    ind = ("blocker", "LITERAL_MISSING_IND", {"kind": "ind", "missing": ["PIND000000"]})
+    with make_client(monkeypatch, tmp_path, translate=True) as client:
+        run_id, _ = run_to_gate(client, OWNER, tmp_path, "carry-over")
+        (first,) = _inject(run_id, [ind])
+        assert _post(client, run_id, first, ADMIN, "report_false_positive", "核对原文第3页后确认编号完整保留").status_code == 200
+        assert _post(client, run_id, first, ADMIN, "confirm_false_positive", "已复核原文和译文，同意这是检查误报，放行。").status_code == 200
+
+        new = _revise(client, run_id, ADMIN).json()
+        _poll(client, new["id"])
+        (again,) = _inject(new["id"], [ind])  # the rule says the same thing about the new output
+        shown = _item(client, new["id"], again, ADMIN)
+        assert shown["status"] == "open"  # not inherited silently
+        carry = shown["remedies"][0]
+        assert carry["id"] == "carry_over" and carry["recommended"] is True
+        assert (carry["action"], carry["then"]) == ("report_false_positive", "confirm_false_positive")
+        assert "上一版" in carry["why"] and len(carry["reason"]) >= 10
+        assert not any(r["recommended"] for r in shown["remedies"][1:])
+
+        # one click = the same two audited steps, with the earlier reason carried in
+        assert _post(client, new["id"], again, ADMIN, carry["action"], carry["reason"]).status_code == 200
+        assert _post(client, new["id"], again, ADMIN, carry["then"], carry["reason"]).status_code == 200
+        assert _item(client, new["id"], again, ADMIN)["status"] == "false_positive_confirmed"
+        assert _run(client, new["id"])["quality_state"] == "review_ready"
+    reset_engine()
+
+
+def test_an_approved_version_can_be_revised_to_change_and_update_the_result(monkeypatch, tmp_path):
+    from _plan078_flow import ADMIN, OWNER, make_client, run_to_gate
+    from test_plan078b_revisions import _revise
+
+    with make_client(monkeypatch, tmp_path, translate=True) as client:
+        run_id, state = run_to_gate(client, OWNER, tmp_path, "approved-revise")
+        assert state["quality_state"] == "review_ready"
+        done = client.post(f"/api/v1/translation-runs/{run_id}/review-decision", headers=ADMIN, json={"decision": "approve"})
+        assert done.status_code in {200, 201}, done.text
+        body = client.get(f"/api/v1/translation-runs/{run_id}", headers=ADMIN).json()
+        assert body["lifecycle"] == "completed" and "download" in body["allowed_actions"]
+        assert "revise" in body["allowed_actions"]  # back to QA, change something, regenerate
+        created = _revise(client, run_id, ADMIN)
+        assert created.status_code == 201 and created.json()["generation"] == 2
+        old = client.get(f"/api/v1/translation-runs/{run_id}", headers=ADMIN).json()
+        assert old["superseded_by"] == created.json()["id"]
+        assert old["artifacts"], "the delivered version keeps its files"
+    reset_engine()

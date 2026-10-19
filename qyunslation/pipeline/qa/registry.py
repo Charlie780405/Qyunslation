@@ -230,6 +230,35 @@ def one_step_false_positive() -> dict[str, Any]:
     }
 
 
+_CARRY_OVER_ACTIONS = {
+    "grant_waiver": ("grant_waiver", "", "授权了例外"),
+    "confirm_false_positive": ("report_false_positive", "confirm_false_positive", "确认为误报"),
+    "acknowledge": ("acknowledge", "", "确认已阅"),
+}
+
+
+def carry_over_remedy(prior_action: str, prior_reason: str, prior_actor: str, can_confirm: bool) -> dict[str, Any] | None:
+    """"Same conclusion as on the previous version", for a finding that came back identical after a regeneration.
+
+    A disposition is never inherited silently (the new version's output is different), so it must be given
+    again; this makes giving it again one click with the earlier reason already written in.
+    """
+    spec = _CARRY_OVER_ACTIONS.get(prior_action)
+    if spec is None:
+        return None
+    action, then, verb = spec
+    if prior_action == "confirm_false_positive" and not can_confirm:
+        then = ""  # may report it again, but somebody with confirm rights has to finish it
+    short = (prior_reason or "").strip().replace("\n", " ")
+    return _remedy(
+        "carry_over", "disposition", "沿用上一版的结论",
+        f"上一版已由 {prior_actor} {verb}：{short[:60]}。这一版的输出重新生成过，需要再确认一次；"
+        "同一个问题原样出现时，一键沿用，理由已预填，核对页面后提交即可。",
+        action=action, reason=f"沿用上一版的结论：{short}"[:1000].ljust(10, "。"), recommended=True,
+        **({"then": then} if then else {}),
+    )
+
+
 def pending_report_remedies(can_confirm: bool) -> list[dict[str, Any]]:
     """What to do while a false-positive report on a critical fact is waiting for confirmation."""
     locate = _remedy("locate", "locate", "先看问题所在的页面", "对照原文和译文，再决定确认还是驳回。")

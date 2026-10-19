@@ -41,6 +41,13 @@
       >{{ option.label }}（{{ option.count }}）</button>
     </div>
 
+    <p v-if="carryOverItems.length" class="qy-qa-carry" data-qa-carry-over>
+      <button type="button" class="qy-remedy-btn is-primary" :disabled="Boolean(busy) || submitting" @click="carryOverAll">
+        沿用上一版的全部结论（{{ carryOverItems.length }} 项）
+      </button>
+      <span class="qy-muted">上一版已经处理过、这一版原样再次出现的问题，一键按上一版的结论和理由再确认一次；每一项仍是单独的、记入审计的处置。</span>
+    </p>
+
     <p v-if="batchGroups.length && !batchCode" class="qy-qa-batch-entry">
       <button
         v-for="group in batchGroups"
@@ -284,7 +291,7 @@ const emptyText = computed(() => (
 const selected = computed(() => currentItems.value.find((entry) => keyOf(entry) === props.selectedId) || null);
 
 const canRevise = computed(() => Boolean(props.run) && can(props.run, 'revise')
-  && ['qa_action', 'qa_unavailable', 'review', 'changes_requested'].includes(lifecycleOf(props.run)));
+  && ['qa_action', 'qa_unavailable', 'review', 'changes_requested', 'completed'].includes(lifecycleOf(props.run)));
 
 const nextStep = computed(() => {
   const run = props.run;
@@ -345,6 +352,32 @@ const checkLine = computed(() => {
   if (check.rule_set_version) parts.push(`规则集 ${check.rule_set_version}`);
   return parts.join(' · ');
 });
+
+// ---- carry the previous version's conclusions over, in one go --------------------------------
+const carryRemedyOf = (entry) => (entry.remedies || []).find((remedy) => remedy.id === 'carry_over');
+const carryOverItems = computed(() => openItems.value.filter((entry) => carryRemedyOf(entry)));
+
+async function carryOverAll() {
+  if (submitting.value || !props.onDispose) return;
+  submitting.value = true;
+  error.value = '';
+  notice.value = '';
+  let done = 0;
+  try {
+    for (const entry of [...carryOverItems.value]) {
+      const remedy = carryRemedyOf(entry);
+      for (const step of [remedy.action, remedy.then].filter(Boolean)) {
+        await props.onDispose(entry, step, remedy.reason);
+      }
+      done += 1;
+    }
+    notice.value = `已沿用上一版的结论：${done} 项`;
+  } catch (failure) {
+    error.value = `${done ? `已处理 ${done} 项，` : ''}在下一项停下：${failure?.message || '处置失败，请稍后重试'}`;
+  } finally {
+    submitting.value = false;
+  }
+}
 
 // ---- remedies: concrete ways out of the selected problem ------------------------------------
 // The server proposes them per problem and per person; here only the ones that can run in this task state stay.
@@ -533,6 +566,7 @@ li[data-severity='unavailable'] .qy-qa-item strong { color: #7a5200; }
 .qy-remedy-tag { padding: 0 .4rem; font-size: .7rem; font-weight: 600; color: #005076; background: #fff; border-radius: 999px; }
 .qy-remedy-hint { margin: .5rem 0 0; font-size: .85rem; color: #3b4452; min-height: 1.3em; }
 .qy-remedy-info { display: grid; gap: .1rem; margin: 0 0 .5rem; padding: .35rem .6rem; font-size: .85rem; background: #fff8e6; border-left: 3px solid #d97706; }
+.qy-qa-carry { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; margin: .5rem 0; }
 .qy-qa-more { margin-top: .6rem; }
 .qy-qa-more > summary { cursor: pointer; font-size: .85rem; color: #4a5565; }
 .qy-qa-more .qy-qa-actions { margin-top: .4rem; display: flex; flex-wrap: wrap; gap: .4rem; }

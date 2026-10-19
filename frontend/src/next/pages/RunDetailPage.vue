@@ -32,6 +32,20 @@
             :title="formalGateMessage"
             @click="approve"
           >批准正式产物</button>
+          <router-link
+            v-if="run?.quality_state === 'approved'"
+            class="qy-primary-button"
+            :to="`/workbench/${runId}/complete`"
+            data-action="go-export"
+          >前往导出</router-link>
+          <button
+            v-if="run?.quality_state === 'approved' && can(run, 'revise')"
+            class="qy-secondary-button"
+            type="button"
+            :disabled="Boolean(busyAction)"
+            data-action="revise-approved"
+            @click="reviseRun"
+          >生成修订版</button>
           <button
             v-if="run?.quality_state === 'review_ready'"
             class="qy-secondary-button"
@@ -403,7 +417,9 @@ async function approve() {
   try {
     await api.postReviewDecision(runId.value, { decision: 'approve', comment: reviewComment.value || null });
     reviewError.value = '';
-    await refresh();
+    // The formal files only matter once approved, so leave the QA page for the page that has the downloads.
+    // The QA page stays one click away from there for further changes.
+    await router.push(`/workbench/${runId.value}/complete`);
   } catch (error) {
     reviewError.value = error?.message || '正式稿批准失败';
   }

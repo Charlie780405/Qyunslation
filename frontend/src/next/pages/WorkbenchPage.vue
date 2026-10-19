@@ -500,10 +500,12 @@ function entryLabel(run) {
   if (lifecycle === 'qa_unavailable') return '查看并重新检查';
   if (lifecycle === 'review') return run.formal_gate && run.formal_gate.passed === false ? '处理待办项' : '去复核';
   if (lifecycle === 'changes_requested') return '查看退回意见';
+  if (lifecycle === 'completed' && run.quality_state === 'approved') return '导出';
   return '';
 }
 
 function entryTab(run) {
+  if (lifecycleOf(run) === 'completed') return 'export';
   return ['qa_action', 'qa_unavailable'].includes(lifecycleOf(run)) ? 'qa' : 'review';
 }
 
@@ -577,6 +579,10 @@ async function askPurge(run) {
 
 function openRun(run, tab = '') {
   if (!run?.id) return;
+  if (lifecycleOf(run) === 'completed' && run.quality_state === 'approved' && tab === 'export') {
+    router.push(`/workbench/${run.id}/complete`);
+    return;
+  }
   listView.scrollY = window.scrollY;
   listView.openedId = run.id;
   router.push(tab ? { path: `/workbench/${run.id}`, query: { tab } } : `/workbench/${run.id}`);

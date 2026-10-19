@@ -2600,7 +2600,8 @@ def _run_allowed_actions(
     add("discard", writer and at_gate)
     add("resume", run.status == "interrupted")
     add("retry", ended)
-    add("revise", ended and lifecycle != "completed")
+    # A finished (approved) version can be revised too: that is how a delivered result is changed and updated.
+    add("revise", ended)
     add("requalify", lifecycle in {"qa_action", "qa_unavailable", "review"})
     add("open_qa", lifecycle in {"qa_action", "qa_unavailable"})
     add("approve", reviewer and lifecycle == "review" and bool(gate.get("passed")))
@@ -5044,11 +5045,16 @@ def _qa_item_payload(
         "disposition": _disposition_dict(last) if last is not None else None,
         "history": [_disposition_dict(h) for h in history],
         "allowed_dispositions": allowed,
-        "remedies": _remedies_for_item(row, rule_class, allowed, state),
+        "remedies": _remedies_for_item(
+            row, rule_class, allowed, state,
+            prior.get(_item_fingerprint(row)) if prior else None,
+        ),
     }
 
 
-def _remedies_for_item(row: QaItem, rule_class: str, allowed: list[str], state: dict[str, Any]) -> list[dict[str, Any]]:
+def _remedies_for_item(
+    row: QaItem, rule_class: str, allowed: list[str], state: dict[str, Any], prior: QaDisposition | None = None
+) -> list[dict[str, Any]]:
     """Clickable ways out of this finding, limited to what this person can run on this item right now."""
     from qyunslation.pipeline.qa import registry
 
@@ -5073,6 +5079,11 @@ def _remedies_for_item(row: QaItem, rule_class: str, allowed: list[str], state: 
                 evidence.get("source_term") or evidence.get("source_norm") or evidence.get("expected") or ""
             )[:80]}
         out.append(remedy)
+    if prior is not None and state["pending_report"] is None:
+        carry = registry.carry_over_remedy(prior.action, prior.reason, prior.actor_sub, can_confirm)
+        if carry is not None and carry["action"] in allowed:
+            # The same finding came back on a regenerated version: offer the earlier conclusion first.
+            out = [carry] + [{**item, "recommended": False} for item in out]
     return out
 
 

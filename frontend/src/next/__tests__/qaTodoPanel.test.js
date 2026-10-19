@@ -102,6 +102,7 @@ async function mountPage(url = '/workbench/run-1') {
       { path: '/termbase', component: { template: '<div />' } },
       { path: '/settings', component: { template: '<div />' } },
       { path: '/workbench/:runId', name: 'workbench-run', component: RunDetailPage, props: true },
+      { path: '/workbench/:runId/complete', component: { template: '<div data-complete-stub />' } },
     ],
   });
   router.push(url);
@@ -284,6 +285,77 @@ describe('QA todo panel', () => {
     const box = wrapper.find('[data-qa-remedies]');
     expect(box.find('[data-remedy-info]').text()).toContain('等待有确认权限的人确认');
     expect(box.findAll('[data-remedy]').map((b) => b.attributes('data-remedy'))).toEqual(['revise']);
+    wrapper.unmount();
+  });
+
+  it('approving the formal version takes you straight to the page with the downloads', async () => {
+    apiMock.getRun.mockResolvedValue({
+      ...RUN, status: 'gated', quality_state: 'review_ready', lifecycle: 'review', next_action: 'review',
+      formal_gate: { passed: true, reasons: [], qa_blockers: 0, term_gate_mode: 'enforce' },
+      pending_counts: { qa_blockers: 0, qa_unavailable: 0, unresolved_terms: 0 }, qa_summary: { blocker: 1, open_blocker: 0, waived: 1 },
+    });
+    apiMock.postReviewDecision.mockResolvedValue({});
+    const { wrapper, router } = await mountPage();
+    await wrapper.find('[data-action="formal-approve"]').trigger('click');
+    await flushPromises();
+    expect(apiMock.postReviewDecision).toHaveBeenCalledWith('run-1', expect.objectContaining({ decision: 'approve' }));
+    expect(router.currentRoute.value.path).toBe('/workbench/run-1/complete');
+    wrapper.unmount();
+  });
+
+  it('a failed approval stays on the QA page and says why', async () => {
+    apiMock.getRun.mockResolvedValue({
+      ...RUN, status: 'gated', quality_state: 'review_ready', lifecycle: 'review',
+      formal_gate: { passed: true, reasons: [] }, pending_counts: { qa_blockers: 0 }, qa_summary: { blocker: 0, open_blocker: 0 },
+    });
+    apiMock.postReviewDecision.mockRejectedValue(new Error('正式稿批准失败：版本已被取代'));
+    const { wrapper, router } = await mountPage();
+    await wrapper.find('[data-action="formal-approve"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/workbench/run-1');
+    expect(wrapper.text()).toContain('版本已被取代');
+    wrapper.unmount();
+  });
+
+  it('an approved version links to the export page and can be revised from the QA page', async () => {
+    apiMock.getRun.mockResolvedValue({
+      ...RUN, status: 'succeeded', quality_state: 'approved', lifecycle: 'completed', next_action: 'download',
+      allowed_actions: ['open', 'revise', 'download'], formal_gate: { passed: true, reasons: [] },
+      pending_counts: { qa_blockers: 0 }, qa_summary: { blocker: 1, open_blocker: 0, waived: 1 },
+    });
+    const { wrapper } = await mountPage();
+    expect(wrapper.find('[data-action="go-export"]').attributes('href')).toBe('/next/workbench/run-1/complete');
+    expect(wrapper.find('[data-action="revise-approved"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('carries every conclusion of the previous version over in one go, step by step', async () => {
+    const carry = (action, then) => ({ id: 'carry_over', kind: 'disposition', label: '沿用上一版的结论', why: '上一版已处理。', action, ...(then ? { then } : {}), reason: '沿用上一版的结论：已核对原文，编号完整保留。', recommended: true });
+    apiMock.getQaItems.mockResolvedValue({ items: [
+      { ...ITEMS[0], id: 'c1', remedies: [carry('report_false_positive', 'confirm_false_positive')] },
+      { ...ITEMS[1], id: 'c2', remedies: [carry('grant_waiver')] },
+    ] });
+    const { wrapper } = await mountPage();
+    const button = wrapper.find('[data-qa-carry-over] button');
+    expect(button.text()).toContain('2 项');
+    await button.trigger('click');
+    await flushPromises();
+    expect(apiMock.postQaDisposition.mock.calls.map((c) => [c[1], c[2].action])).toEqual([
+      ['c1', 'report_false_positive'], ['c1', 'confirm_false_positive'], ['c2', 'grant_waiver'],
+    ]);
+    expect(apiMock.postQaDisposition.mock.calls[0][2].reason).toContain('沿用上一版');
+    wrapper.unmount();
+  });
+
+  it('stops carrying over at the first failure and says how far it got', async () => {
+    const carry = { id: 'carry_over', kind: 'disposition', label: '沿用', why: 'x', action: 'grant_waiver', reason: '沿用上一版的结论：已核对。', recommended: true };
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[1], id: 'c1', remedies: [carry] }, { ...ITEMS[2], id: 'c2', remedies: [carry] }] });
+    apiMock.postQaDisposition.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('没有权限'));
+    const { wrapper } = await mountPage();
+    await wrapper.find('[data-qa-carry-over] button').trigger('click');
+    await flushPromises();
+    expect(panel(wrapper).find('[role="alert"]').text()).toContain('已处理 1 项');
+    expect(panel(wrapper).find('[role="alert"]').text()).toContain('没有权限');
     wrapper.unmount();
   });
 

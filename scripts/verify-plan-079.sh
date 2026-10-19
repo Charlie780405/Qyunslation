@@ -65,6 +65,13 @@ if [[ -d "$ROOT/frontend/node_modules" ]]; then
       else
         fail "browser locate check (see $LOGDIR/verify-plan-079-browser.log)"
       fi
+      # 批准 -> 完成页（下载）-> 回到 QA 页
+      if QY_BUILD_DIR="$BUILD_DIR" QY_PLAYWRIGHT_DIR="$PW_DIR" \
+          node "$ROOT/scripts/browser/plan079-complete-check.mjs" >"$LOGDIR/verify-plan-079-complete-browser.log" 2>&1; then
+        pass "browser approve-to-export flow ($(tail -1 "$LOGDIR/verify-plan-079-complete-browser.log"))"
+      else
+        fail "browser approve-to-export flow (see $LOGDIR/verify-plan-079-complete-browser.log)"
+      fi
       # F8：上传页拖放、空闲/执行中的轮询请求数（Chromium + WebKit）
       if QY_BUILD_DIR="$BUILD_DIR" QY_PLAYWRIGHT_DIR="$PW_DIR" \
           node "$ROOT/scripts/browser/plan079-workbench-check.mjs" >"$LOGDIR/verify-plan-079-workbench-browser.log" 2>&1; then
