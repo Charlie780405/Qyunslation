@@ -45,4 +45,11 @@ bash scripts/plan074-live-regression.py
 - 英文研究单位段与已识别的英文作者姓名在翻译阶段按原文保留；这些原文不会被英文残留 QA 误报。
 - QA 不再创建新的单位审核段；旧单位记录不再出现在 `/next`，也不再阻挡正式稿批准。
 - 中译英时，文档中已存在的英文单位/姓名原文会原样保留；没有英文原文的中文名称仍按原翻译流程处理。
-- 生产部署与验证结果将在本节补记。
+
+### 生产发布
+
+- 变更提交：`a672262`（`main`，已推送 `origin/main`）。
+- 部署：`scripts/deploy-translate-stack.sh` — **PASS**；migration aligned、frontend build fresh、API routes registered；`pdf2zh.service` 与 `qyunslation-office.service` 均 active；sidecar 本地/远端指纹一致（`7542777de0fd`）。
+- 健康检查：本机 GUI `/`、公网 `/next/`、公网 `/api/v1/health`、带认证的 sidecar health 均 HTTP 200。公网页面引用新资源 `index-BiX4OdPw.js`、`index-CxUYWDDV.css`、`index-legacy-OO8704Kx.js`。
+- 验证：Python `py_compile`、前端 `vue-tsc --noEmit`、Vite production build — **PASS**。pytest/Vitest 未运行；浏览器视觉验收 **BLOCKED**（当前会话没有 Chrome DevTools/浏览器自动化工具）。
+- 术语库闭环：本次未修改术语候选批准或复用行为，未执行新的生产术语裁决。
