@@ -150,13 +150,24 @@ describe('run detail follows the server lifecycle', () => {
   });
 
   it('abandoning a gated version asks first, then calls cancel', async () => {
-    const confirmSpy = vi.fn(() => true);
-    vi.stubGlobal('confirm', confirmSpy);
     const { wrapper } = await mountPage('/workbench/run-1');
     await buttonByText(wrapper, '放弃本版本').trigger('click');
     await flushPromises();
-    expect(confirmSpy).toHaveBeenCalled();
+    expect(document.body.querySelector('[data-confirm-dialog]')).not.toBeNull();
+    expect(apiMock.cancelRun).not.toHaveBeenCalled();
+    document.body.querySelector('[data-confirm-ok]').click();
+    await flushPromises();
     expect(apiMock.cancelRun).toHaveBeenCalledWith('run-1');
+    wrapper.unmount();
+  });
+
+  it('declining the question leaves the version alone', async () => {
+    const { wrapper } = await mountPage('/workbench/run-1');
+    await buttonByText(wrapper, '放弃本版本').trigger('click');
+    await flushPromises();
+    document.body.querySelector('[data-confirm-cancel]').click();
+    await flushPromises();
+    expect(apiMock.cancelRun).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

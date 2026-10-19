@@ -6,12 +6,17 @@
         <p>{{ unresolved }} 条待处理 · 共 {{ total }} 条</p>
       </div>
       <div class="qy-review-panel-tools">
-        <button
-          type="button"
-          class="qy-secondary-button"
-          :disabled="enriching || !items.length"
-          @click="$emit('enrich')"
-        >{{ enriching ? 'DeepSeek 推断中…' : 'DeepSeek 推断推荐译法' }}</button>
+        <div class="qy-suggest-control">
+          <button
+            type="button"
+            class="qy-secondary-button"
+            data-term-suggest
+            :disabled="enriching || !items.length"
+            :aria-describedby="suggestNoteId"
+            @click="$emit('enrich')"
+          >{{ enriching ? '正在获取推荐译法…' : '获取推荐译法' }}</button>
+          <small :id="suggestNoteId" class="qy-suggest-note" :class="{ 'is-external': external }" data-term-suggest-scope>{{ suggestNote }}</small>
+        </div>
         <details v-if="rules?.method?.length">
           <summary>查看提取规则 {{ rules.version || '' }}</summary>
           <ul><li v-for="line in rules.method" :key="line">{{ line }}</li></ul>
@@ -101,8 +106,19 @@ const props = defineProps({
   canManageTerms: { type: Boolean, default: false },
   error: { type: String, default: '' },
   enriching: { type: Boolean, default: false },
+  // Who gets the term snippets when suggestions are requested: { label, egress_scope } from the server.
+  suggester: { type: Object, default: null },
 });
 const emit = defineEmits(['decide', 'batch', 'page', 'enrich', 'error']);
+const suggestNoteId = `qy-suggest-note-${Math.random().toString(36).slice(2, 8)}`;
+const external = computed(() => Boolean(props.suggester) && props.suggester.egress_scope !== 'none');
+const suggestNote = computed(() => {
+  if (!props.suggester) return '点击后才会请求推荐译法。';
+  const label = props.suggester.label || '术语模型';
+  return external.value
+    ? `点击后会把脱敏的术语片段发送给外部服务（${label}）；不点击就不会外发。`
+    : `使用 ${label}，数据不离开内网；点击后才会运行。`;
+});
 const drafts = reactive({});
 const selected = ref([]);
 const batchEligible = computed(() => props.items.filter(isBatchEligible));
@@ -183,7 +199,7 @@ function batch(action) {
 function decide(item, action) {
   const target = resolveTarget(item, action);
   if (action === 'approve' && !target) {
-    emit('error', `「${item.source_term}」缺少确认译法：请先点击 DeepSeek 推断，或手动填写确认译法。`);
+    emit('error', `「${item.source_term}」缺少确认译法：请先点击“获取推荐译法”，或手动填写确认译法。`);
     return;
   }
   emit('decide', item, {

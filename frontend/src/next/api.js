@@ -1,3 +1,5 @@
+import { markOffline, markOnline } from './stores/connection.js';
+
 const API_PREFIX = '/api/v1';
 
 function formatApiDetail(payload) {
@@ -41,7 +43,20 @@ export async function apiRequest(path, options = {}) {
     if (token) headers.set('X-CSRF-Token', token);
   }
 
-  const response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
+  let response;
+  try {
+    response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
+  } catch (cause) {
+    // fetch only rejects when the request never got an answer (offline, DNS, reset): say so, and let the
+    // shell show "connection lost"; an aborted request is the caller's own doing.
+    if (cause?.name === 'AbortError') throw cause;
+    markOffline();
+    const error = new Error('连接中断，请检查网络；页面会自动重试。');
+    error.status = 0;
+    error.network = true;
+    throw error;
+  }
+  markOnline();
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json')
     ? await response.json()
@@ -197,11 +212,13 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);
   },
-  uploadPreflightResumable: async (file, fields = {}, onProgress = null, storageKey = null) => {
+  // `expectedSha256` lets the server answer with the pre-check it already has for the same file (f7).
+  uploadPreflightResumable: async (file, fields = {}, onProgress = null, storageKey = null, { expectedSha256 = null } = {}) => {
     const chunkSize = 1024 * 1024;
     const create = await api.createUploadSession({
       filename: file.name,
       total_size: file.size,
+      ...(expectedSha256 ? { expected_sha256: expectedSha256 } : {}),
     });
     if (create.reused_preflight) {
       return create.reused_preflight;
@@ -260,7 +277,13 @@ export const api = {
         error.payload = payload;
         reject(error);
       };
-      request.onerror = () => reject(new Error('网络连接失败，请重试'));
+      request.onerror = () => {
+        markOffline();
+        const error = new Error('网络连接失败，请重试');
+        error.status = 0;
+        error.network = true;
+        reject(error);
+      };
       request.onabort = () => reject(new Error('上传已取消'));
       request.send(body);
     });

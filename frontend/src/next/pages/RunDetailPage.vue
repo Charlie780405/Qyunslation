@@ -21,6 +21,7 @@
           <label v-if="run?.quality_state === 'review_ready'" class="qy-review-comment">
             <span>审核意见</span>
             <textarea v-model="reviewComment" rows="3" placeholder="记录复核意见，刷新后会自动恢复" @input="scheduleDraftSave" />
+            <small v-if="draftError" class="qy-field-error" role="status" data-draft-error>{{ draftError }}</small>
           </label>
           <button
             v-if="run?.quality_state === 'review_ready'"
@@ -94,6 +95,7 @@
         <button type="button" class="qy-secondary-button" aria-label="重新加载任务详情" @click="refresh">重试</button>
       </p>
       <p v-if="reviewError" class="qy-panel qy-run-detail-error" role="alert">{{ reviewError }}</p>
+      <p v-if="softIssueText" class="qy-panel qy-run-detail-notice" role="status" data-soft-issue>{{ softIssueText }}</p>
 
       <QaTodoPanel
         v-if="showQaPanel"
@@ -134,6 +136,7 @@
         :can-manage-terms="canReviewHighRisk"
         :error="termPanelError"
         :enriching="termEnriching"
+        :suggester="termSuggester"
         @decide="decideTerm"
         @batch="batchDecideTerms"
         @page="loadTerms"
@@ -206,8 +209,13 @@ import ObjectInspector from '../components/ObjectInspector.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import TermReviewPanel from '../components/TermReviewPanel.vue';
 import { useRunDetailView } from '../stores/runDetail.js';
+import { useAsyncAction } from '../lib/asyncAction.js';
+import { confirmDialog } from '../lib/confirm.js';
+import { createEventTail } from '../lib/eventTail.js';
+import { createPoller } from '../lib/poller.js';
 import {
   can,
+  isExecuting,
   lifecycleLabel,
   lifecycleOf,
   qualityLabel,
@@ -237,17 +245,27 @@ const reviewError = ref('');
 const termPanelError = ref('');
 const termEnriching = ref(false);
 const reviewComment = ref('');
-const busyAction = ref('');
+const asyncAction = useAsyncAction();
+const busyAction = asyncAction.pending;
 const drawer = ref(null); // { mode: 'revision' | 'resume', extra? }
 const actionNotice = ref('');
+const termSuggester = ref(null); // who would receive term snippets if suggestions are requested
+const draftError = ref('');
+// Parts of the page that failed to load without making the whole page unusable.
+const softIssues = ref({});
+const softIssueText = computed(() => Object.values(softIssues.value).filter(Boolean).join('；'));
+const eventTail = createEventTail((id, params) => api.getRunEvents(id, params));
 let autoSelectDone = false;
 const canManageTerms = computed(() => sessionStore.hasCapability('can_manage_terms'));
 const isRunOwner = computed(() => Boolean(
   run.value?.actor_sub && sessionStore.user?.sub && run.value.actor_sub === sessionStore.user.sub,
 ));
 const canReviewHighRisk = computed(() => canManageTerms.value || isRunOwner.value);
-let timer;
 let draftTimer;
+
+function softIssue(key, error, what) {
+  softIssues.value = { ...softIssues.value, [key]: error ? `${what}没能加载（${error.network ? '连接中断' : (error.message || '未知错误')}），稍后会再试` : '' };
+}
 
 const runId = computed(() => props.runId || route.params.runId);
 const sourcePreviewUrl = computed(() => (
@@ -308,6 +326,7 @@ function visibleTermItems(items) {
 async function loadTerms(page = termPage.value) {
   const terms = await api.listRunTermCandidates(runId.value, { page, page_size: 40 });
   termCandidates.value = visibleTermItems(terms.items);
+  termSuggester.value = terms.suggester || null;
   termRules.value = terms.rules || {};
   termUnresolved.value = terms.unresolved || 0;
   termTotal.value = termCandidates.value.length;
@@ -318,25 +337,28 @@ async function refresh({ includeTerms = true } = {}) {
   if (!runId.value) return;
   try {
     run.value = await api.getRun(runId.value);
-    const ev = await api.getRunEvents(runId.value, { after_sequence: 0 });
-    events.value = ev.items || [];
+    events.value = await eventTail.pull(runId.value);
     const qa = await api.getQaItems(runId.value);
     qaItems.value = qa.items || [];
     selectFirstBlockerOnce();
     if (includeTerms) {
       try {
         await loadTerms();
-      } catch {
+        softIssue('terms', null);
+      } catch (error) {
         termCandidates.value = [];
+        softIssue('terms', error, '术语候选');
       }
     }
     try {
       const affiliations = await api.listRunAffiliationSegments(runId.value);
       affiliationSegments.value = affiliations.items || [];
       affiliationUnconfirmed.value = affiliations.unconfirmed || 0;
-    } catch {
+      softIssue('affiliations', null);
+    } catch (error) {
       affiliationSegments.value = [];
       affiliationUnconfirmed.value = 0;
+      softIssue('affiliations', error, '单位译名');
     }
     if (run.value?.quality_state === 'review_ready') {
       const draft = await api.getReviewDraft(runId.value);
@@ -348,7 +370,35 @@ async function refresh({ includeTerms = true } = {}) {
       ? '未找到该任务，请返回任务列表确认。'
       : `任务详情加载失败：${error?.message || '未知错误'}`;
   }
+  poller.reschedule();
 }
+
+// What the person can see change while a task runs; the poll only refetches the rest when this moves.
+function runSignature(current) {
+  if (!current) return '';
+  return [current.status, current.stage, current.quality_state, current.lifecycle, current.generation, current.progress, JSON.stringify(current.pending_counts || {})].join('|');
+}
+
+// Detail polls only while the task is executing or being checked, only while the tab is in front, and then
+// fetches just the run and any new events; the heavier lists are reloaded when the run itself changed.
+const poller = createPoller({
+  run: async () => {
+    if (!runId.value) return undefined;
+    const before = runSignature(run.value);
+    try {
+      run.value = await api.getRun(runId.value);
+      events.value = await eventTail.pull(runId.value);
+      loadError.value = '';
+    } catch (error) {
+      loadError.value = error?.network ? error.message : `任务详情刷新失败：${error?.message || '未知错误'}`;
+      throw error;
+    }
+    const after = runSignature(run.value);
+    if (after !== before) await refresh({ includeTerms: false });
+    return `${after}#${events.value.length}`;
+  },
+  shouldPoll: () => isExecuting(run.value),
+});
 
 function scheduleDraftSave() {
   window.clearTimeout(draftTimer);
@@ -359,8 +409,10 @@ function scheduleDraftSave() {
         comment: reviewComment.value,
         resolved_qa_ids: qaItems.value.filter((item) => item.resolved).map((item) => item.id),
       });
-    } catch {
-      /* ignore transient draft errors */
+      draftError.value = '';
+    } catch (error) {
+      // The text stays in the box; say that it is not saved yet instead of pretending it is.
+      draftError.value = error?.network ? '连接中断，审核意见暂未保存；恢复后继续输入会再次保存。' : '审核意见暂未保存，请稍后再试。';
     }
   }, 600);
 }
@@ -377,21 +429,13 @@ async function approve() {
 
 // pending -> success/failure feedback for every action, and no double submission.
 async function runAction(name, task, { success = '', failure = '操作失败' } = {}) {
-  if (busyAction.value) return false;
-  busyAction.value = name;
+  if (asyncAction.pending.value) return false;
   reviewError.value = '';
   actionNotice.value = '';
-  try {
-    await task();
-    actionNotice.value = success;
-    return true;
-  } catch (error) {
-    reviewError.value = error?.message || failure;
-    return false;
-  } finally {
-    busyAction.value = '';
-    await refresh();
-  }
+  const ok = await asyncAction.run(name, task, { success, failure, after: refresh });
+  if (ok) actionNotice.value = success;
+  else reviewError.value = asyncAction.error.value;
+  return ok;
 }
 
 function selectFirstBlockerOnce() {
@@ -473,8 +517,14 @@ async function submitDrawer(submission) {
   if (created?.id) await router.push({ path: `/workbench/${created.id}`, query: { tab: 'qa' } });
 }
 
-function discardRun() {
-  if (!window.confirm('放弃本版本后将无法继续处理其中的质量问题（审计记录会保留）。确定放弃吗？')) return false;
+async function discardRun() {
+  const confirmed = await confirmDialog({
+    title: '放弃本版本？',
+    body: '放弃后将无法继续处理其中的质量问题；审计记录会保留。',
+    confirmLabel: '放弃本版本',
+    danger: true,
+  });
+  if (!confirmed) return false;
   return runAction('discard', () => api.cancelRun(runId.value), { success: '已放弃本版本。', failure: '放弃失败' });
 }
 
@@ -497,21 +547,34 @@ async function decideTerm(item, payload) {
   }
 }
 
+// Only ever called from the button. When the snippets would leave the network, the person is told
+// where they go and has to agree first; opening the page sends nothing anywhere.
 async function enrichTermSuggestions() {
+  if (termEnriching.value) return;
+  const suggester = termSuggester.value;
+  if (suggester && suggester.egress_scope !== 'none') {
+    const confirmed = await confirmDialog({
+      title: '把术语片段发送给外部服务？',
+      body: `获取推荐译法会把脱敏后的术语片段发送给 ${suggester.label || '外部模型'}。不需要的话可以取消，手动填写确认译法。`,
+      confirmLabel: '发送并获取',
+    });
+    if (!confirmed) return;
+  }
   termEnriching.value = true;
   termPanelError.value = '';
   try {
     const payload = await api.enrichRunTermSuggestions(runId.value);
     termCandidates.value = visibleTermItems(payload.items);
+    termSuggester.value = payload.suggester || termSuggester.value;
     termRules.value = payload.rules || {};
     termUnresolved.value = payload.unresolved || 0;
     termTotal.value = payload.total || 0;
     termPage.value = payload.page || termPage.value;
     if ((payload.suggestions_enriched || 0) === 0) {
-      termPanelError.value = '没有新的推荐译法；请手动填写确认译法，或检查 DeepSeek 配置。';
+      termPanelError.value = '没有新的推荐译法；请手动填写确认译法，或联系管理员检查术语模型配置。';
     }
   } catch (error) {
-    termPanelError.value = error?.message || 'DeepSeek 推断失败';
+    termPanelError.value = error?.message || '获取推荐译法失败';
   } finally {
     termEnriching.value = false;
   }
@@ -560,19 +623,18 @@ watch(runId, async (next, previous) => {
   run.value = null;
   qaItems.value = [];
   events.value = [];
+  softIssues.value = {};
+  draftError.value = '';
   await refresh();
 });
 
 onMounted(async () => {
   await sessionStore.load();
+  poller.start();
   await refresh();
-  if (termCandidates.value.some((item) => !item.suggested_target)) {
-    await enrichTermSuggestions();
-  }
-  timer = setInterval(() => refresh({ includeTerms: false }), 3000);
 });
 onUnmounted(() => {
-  clearInterval(timer);
+  poller.stop();
   window.clearTimeout(draftTimer);
 });
 </script>

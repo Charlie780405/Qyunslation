@@ -35,10 +35,10 @@
             @dragleave="onDragLeave"
             @drop.prevent="onDrop"
           >
-            <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" :accept="ACCEPT_ATTRIBUTE" @change="selectFile" />
+            <input id="workbench-file" ref="fileInput" type="file" class="qy-visually-hidden" :accept="acceptAttribute" @change="selectFile" />
             <DocumentArrowUpIcon aria-hidden="true" />
             <strong>{{ selectedFile ? selectedFile.name : '拖放文件到这里，或点击选择' }}</strong>
-            <span>{{ selectedFile ? formatSize(selectedFile.size) : '支持 PDF、DOCX、PPTX、TXT、Markdown、PNG、JPG' }}</span>
+            <span>{{ selectedFile ? formatSize(selectedFile.size) : `支持 ${formatList.join('、')}${maxBytes ? `，单个文件不超过 ${formatSize(maxBytes)}` : ''}` }}</span>
           </label>
           <div v-if="uploadMessage" class="qy-callout" :class="uploadError ? 'qy-callout-warning' : 'qy-callout-info'" role="status">
             <InformationCircleIcon aria-hidden="true" /><span>{{ uploadMessage }}</span>
@@ -71,6 +71,7 @@
             </button>
             <button v-if="runForPreflight && preflight.state === 'ready'" class="qy-secondary-button" type="button" @click="copyAndConfirm">用新参数再翻译一次</button>
           </div>
+          <PreflightIssues :preflight="preflight" />
           <div class="qy-panel-actions">
             <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight">
               <ArrowPathIcon v-if="uploading" class="qy-spin" aria-hidden="true" />
@@ -206,6 +207,7 @@
           <h2>真实阶段事件</h2>
           <p class="qy-muted">进度只反映服务端事件，不伪造已完成。</p>
           <p v-if="focusRun" class="qy-muted qy-timeline-owner">当前任务：{{ focusRun.display_name || focusRun.filename || '未命名文档' }}（{{ lifecycleLabel(focusRun) }}）</p>
+          <p v-if="eventsError" class="qy-muted qy-events-error" role="status" data-events-error>阶段事件暂时没能更新（{{ eventsError }}），稍后会自动重试。</p>
           <StageTimeline
             :events="activeEvents"
             :current-stage="focusRun?.stage || ''"
@@ -265,6 +267,11 @@ import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import RunListToolbar from '../components/RunListToolbar.vue';
 import BatchActionBar from '../components/BatchActionBar.vue';
 import StageTimeline from '../components/StageTimeline.vue';
+import PreflightIssues from '../components/PreflightIssues.vue';
+import { confirmDialog } from '../lib/confirm.js';
+import { createEventTail } from '../lib/eventTail.js';
+import { sha256Hex } from '../lib/fileHash.js';
+import { createPoller } from '../lib/poller.js';
 import {
   can,
   isExecuting,
@@ -301,18 +308,24 @@ const batchResult = ref(null);
 const batchError = ref('');
 const renaming = ref(null); // { id, value, original, version, saving, error }
 const renameInput = ref(null);
-const activeEvents = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
 const drawer = ref(null); // { mode: 'new' | 'revision' | 'resume', run?, extra? }
 const defaultsSnapshot = ref({});
 const copiedFrom = ref(null); // { label, config } carried into the next confirmation
-let pollTimer;
 let pollRequest = 0;
+const activeEvents = ref([]);
+const eventsError = ref('');
+const eventTail = createEventTail((id, params) => api.getRunEvents(id, params));
 
-// Keep in step with PREFLIGHT_ALLOWED_EXTENSIONS in qyunslation/api/v1.py.
-const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg'];
-const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',');
+// The server publishes the formats and size limit (/settings/schema); until it answers, or if it cannot,
+// the list below (the same one the server ships today) keeps the upload box working.
+const FALLBACK_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg'];
+const FORMAT_NAMES = { '.pdf': 'PDF', '.docx': 'DOCX', '.pptx': 'PPTX', '.txt': 'TXT', '.md': 'Markdown', '.png': 'PNG', '.jpg': 'JPG', '.jpeg': 'JPG' };
+const acceptedExtensions = ref([...FALLBACK_EXTENSIONS]);
+const maxBytes = ref(0);
+const acceptAttribute = computed(() => acceptedExtensions.value.join(','));
+const formatList = computed(() => [...new Set(acceptedExtensions.value.map((ext) => FORMAT_NAMES[ext] || ext.replace('.', '').toUpperCase()))]);
 const dragging = ref(false);
 const activeRun = computed(() => runs.value.find(isActive) || null);
 // The side timeline always describes one explicit task: the running one, else the newest.
@@ -585,8 +598,46 @@ function applyFile(file, notice = '') {
   uploadError.value = false;
 }
 
+function extensionOf(name) {
+  return name.includes('.') ? `.${name.split('.').pop().toLowerCase()}` : '';
+}
+
+// One check for a picked and a dropped file, with the reason on screen when it is turned away.
+function acceptFile(file, notice = '') {
+  const extension = extensionOf(file.name);
+  if (!acceptedExtensions.value.includes(extension)) {
+    uploadError.value = true;
+    uploadMessage.value = `不支持的文件格式“${extension || file.name}”。请使用 ${formatList.value.join('、')}。`;
+    return false;
+  }
+  if (maxBytes.value && file.size > maxBytes.value) {
+    uploadError.value = true;
+    uploadMessage.value = `文件太大（${formatSize(file.size)}），单个文件不能超过 ${formatSize(maxBytes.value)}。`;
+    return false;
+  }
+  applyFile(file, notice);
+  return true;
+}
+
 function selectFile(event) {
-  applyFile(event.target.files?.[0] || null);
+  const file = event.target.files?.[0] || null;
+  if (!file) {
+    applyFile(null);
+    return;
+  }
+  if (!acceptFile(file)) event.target.value = '';
+}
+
+async function loadUploadLimits() {
+  try {
+    const upload = (await api.getSettingsSchema())?.upload;
+    if (Array.isArray(upload?.allowed_extensions) && upload.allowed_extensions.length) {
+      acceptedExtensions.value = upload.allowed_extensions.map((ext) => String(ext).toLowerCase());
+    }
+    if (upload?.max_bytes) maxBytes.value = Number(upload.max_bytes);
+  } catch {
+    // Not fatal and not worth a message: the built-in format list stays and the server checks again on upload.
+  }
 }
 
 function hasFiles(event) {
@@ -608,19 +659,19 @@ function onDrop(event) {
   dragging.value = false;
   const files = Array.from(event.dataTransfer?.files || []);
   if (!files.length) return;
-  const file = files[0];
-  const extension = file.name.includes('.') ? `.${file.name.split('.').pop().toLowerCase()}` : '';
-  if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-    uploadError.value = true;
-    uploadMessage.value = `不支持的文件格式“${extension || file.name}”。请使用 PDF、DOCX、PPTX、TXT、Markdown、PNG 或 JPG。`;
-    return;
-  }
-  applyFile(file, files.length > 1 ? '一次只能处理一个文件，已使用第一个。' : '');
+  acceptFile(files[0], files.length > 1 ? '一次只能处理一个文件，已使用第一个。' : '');
 }
 
 // A file dropped outside the zone must not navigate the tab away to the file.
 function ignoreStrayFileDrop(event) {
   if (hasFiles(event)) event.preventDefault();
+}
+
+function formatWhen(iso) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return '之前';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function formatSize(bytes) {
@@ -638,6 +689,8 @@ async function startPreflight() {
   uploadMessage.value = '';
   try {
     const storageKey = uploadStorageKey(sessionStore.user?.tenant_slug, sessionStore.user?.sub);
+    // Hash first (skipped for very large files): the server can then answer with the pre-check it already has.
+    const expectedSha256 = await sha256Hex(selectedFile.value);
     preflight.value = await api.uploadPreflightResumable(
       selectedFile.value,
       {
@@ -647,10 +700,13 @@ async function startPreflight() {
       },
       (progress) => { uploadProgress.value = progress; },
       storageKey,
+      { expectedSha256 },
     );
     uploadMessage.value = preflight.value.state === 'ready'
-      ? (preflight.value.reused ? '已复用相同文件的预检结果，请确认参数后开始翻译。' : '预检已完成。请确认参数后再开始翻译。')
-      : '预检发现风险，请先处理阻断项。';
+      ? (preflight.value.reused
+        ? `已复用 ${formatWhen(preflight.value.created_at)} 做过的预检，文件无需重新上传。请确认参数后开始翻译。`
+        : '预检已完成。请确认参数后再开始翻译。')
+      : '预检发现问题，请先看下面的说明；阻断项处理之前不能开始翻译。';
   } catch (error) {
     uploadError.value = true;
     uploadMessage.value = error.status === 404 ? '预检服务正在接入，当前仅完成工作台界面预览。' : error.message;
@@ -660,33 +716,42 @@ async function startPreflight() {
   }
 }
 
+// Events only grow, so after the first read just the new ones are fetched. A failed read keeps what is on
+// screen and says so next to the timeline; the next poll tries again.
 async function refreshActiveEvents(run) {
   if (!run?.id) {
+    eventTail.reset();
     activeEvents.value = [];
+    eventsError.value = '';
     return;
   }
   try {
-    const response = await api.getRunEvents(run.id, { after_sequence: 0 });
-    activeEvents.value = response.items || [];
-  } catch {
-    activeEvents.value = [];
+    activeEvents.value = await eventTail.pull(run.id);
+    eventsError.value = '';
+  } catch (error) {
+    eventsError.value = error.network ? '连接中断' : (error.message || '加载失败');
   }
 }
 
+// What the person can see about the list; the poller backs off while this stops changing.
+function listSignature() {
+  return `${list.total.value}#${runs.value.map((item) => `${item.id}:${lifecycleOf(item)}:${item.stage || ''}:${item.progress ?? ''}`).join('|')}`;
+}
+
+// The list is polled only while a task is executing (or being checked) and the tab is in front;
+// 2s -> 5s -> 10s while nothing changes. Every other path refreshes on demand.
+const poller = createPoller({
+  run: () => refreshRuns(),
+  shouldPoll: () => runs.value.some(isActive),
+});
+
 async function refreshRuns() {
   const requestId = ++pollRequest;
-  try {
-    await list.refresh();
-    if (requestId !== pollRequest) return;
-    const focus = runs.value.find(isActive) || runs.value[0];
-    await refreshActiveEvents(focus);
-  } finally {
-    if (requestId === pollRequest) {
-      window.clearTimeout(pollTimer);
-      const active = runs.value.some(isActive);
-      pollTimer = window.setTimeout(refreshRuns, active ? 2000 : 10000);
-    }
-  }
+  await list.refresh();
+  if (requestId !== pollRequest) return undefined;
+  await refreshActiveEvents(runs.value.find(isActive) || runs.value[0]);
+  poller.reschedule();
+  return listSignature();
 }
 
 // Filters live in the URL: reload, share and back all land on the same list.
@@ -702,11 +767,10 @@ async function changeFilters(next) {
 // A full reload (first visit, or the filters changed) instead of a poll that keeps the loaded pages.
 async function reloadList() {
   const requestId = ++pollRequest;
-  window.clearTimeout(pollTimer);
   await list.load();
   if (requestId !== pollRequest) return;
   await refreshActiveEvents(runs.value.find(isActive) || runs.value[0]);
-  pollTimer = window.setTimeout(refreshRuns, runs.value.some(isActive) ? 2000 : 10000);
+  poller.reschedule();
 }
 
 function clearedFilterQuery() {
@@ -803,7 +867,13 @@ async function commitRename(reset = false) {
 }
 
 async function deleteRun(run) {
-  if (!window.confirm(`把任务“${rowName(run)}”移入回收站吗？30 天内可以在“回收站”里恢复。`)) return;
+  const confirmed = await confirmDialog({
+    title: `把“${rowName(run)}”移入回收站？`,
+    body: '30 天内可以在“回收站”里恢复；到期前不会删除任何文件。',
+    confirmLabel: '移入回收站',
+    danger: true,
+  });
+  if (!confirmed) return;
   try {
     await api.deleteRun(run.id);
     const deletedSelectedPreflight = preflight.value?.id === run.preflight_id;
@@ -825,6 +895,8 @@ async function deleteRun(run) {
 onMounted(async () => {
   window.addEventListener('dragover', ignoreStrayFileDrop);
   window.addEventListener('drop', ignoreStrayFileDrop);
+  poller.start();
+  loadUploadLimits(); // in the background: the box works with the built-in list until the server answers
   await sessionStore.load();
   await restoreWorkbenchSession(sessionStore.user);
   defaultsSnapshot.value = { ...workbenchState };
@@ -848,7 +920,7 @@ onMounted(async () => {
   }
 });
 onUnmounted(() => {
-  window.clearTimeout(pollTimer);
+  poller.stop();
   window.removeEventListener('dragover', ignoreStrayFileDrop);
   window.removeEventListener('drop', ignoreStrayFileDrop);
 });

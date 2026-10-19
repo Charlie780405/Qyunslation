@@ -2,6 +2,7 @@
 """PLAN-034c/d/e/f/g：/api/v1（projects / jobs / concepts / tm / qa / review / health）。"""
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import json
@@ -35,6 +36,7 @@ from qyunslation.persist.db import (
     reset_engine,
 )
 from qyunslation.persist.identity import IdentityContext, require_csrf, resolve_identity
+from qyunslation.pipeline.preflight_probe import probe_document
 from qyunslation.persist.models import (
     DocumentTermCandidate,
     Job,
@@ -689,6 +691,8 @@ async def create_preflight(
     issues: list[dict[str, str]] = []
     if suffix in {".png", ".jpg", ".jpeg"}:
         issues.append({"severity": "warning", "code": "IMAGE_DOCUMENT", "message": "图片文档将在翻译前执行 OCR。"})
+    probe = await asyncio.to_thread(probe_document, target, suffix, source_language)
+    issues.extend(probe.issues)
     record = PreflightRecord(
         id=record_id,
         tenant_id=tenant.id,
@@ -697,10 +701,15 @@ async def create_preflight(
         source_format=suffix.removeprefix(".").lower(),
         source_sha256=digest,
         size_bytes=size_bytes,
-        status="ready",
+        status="blocked" if probe.blocked else "ready",
         metadata_json={
             "mime": mime,
-            "manifest_summary": {"pages": None, "objects": None, "scan_detected": suffix in {".png", ".jpg", ".jpeg"}},
+            "manifest_summary": {
+                "pages": None,
+                "objects": None,
+                "scan_detected": suffix in {".png", ".jpg", ".jpeg"},
+                **probe.manifest_summary,
+            },
             "capabilities": {"source_read_only": True, "bilingual_output": True, "formal_export": False},
             "issues": issues,
             "recommended": {
@@ -1043,6 +1052,14 @@ async def complete_upload_session(
         storage_key=relative_key,
         expires_at=now + timedelta(hours=PREFLIGHT_TTL_HOURS),
     )
+    probe = await asyncio.to_thread(probe_document, final_path, suffix, source_language)
+    if probe.blocked:
+        preflight.status = "blocked"
+    preflight.metadata_json = {
+        **preflight.metadata_json,
+        "manifest_summary": {**preflight.metadata_json["manifest_summary"], **probe.manifest_summary},
+        "issues": [*preflight.metadata_json.get("issues", []), *probe.issues],
+    }
     session.add(preflight)
     session.flush()
     payload = _preflight_dict(preflight)
@@ -4694,6 +4711,11 @@ def settings_schema(identity: IdentityContext = Depends(require_identity)) -> di
             {"key": "policy", "title": "系统策略", "requires": "can_manage_policy"},
         ],
         "keys": sorted(PREF_ALLOWED_KEYS),
+        # One list of accepted formats and the size limit, so the upload box never disagrees with the server.
+        "upload": {
+            "allowed_extensions": sorted(PREFLIGHT_ALLOWED_EXTENSIONS),
+            "max_bytes": DEFAULT_MAX_UPLOAD_BYTES,
+        },
     }
 
 
@@ -5962,6 +5984,7 @@ def list_run_term_candidates(
         .order_by(DocumentTermCandidate.created_at.desc())
     ).unique().all())
     from qyunslation.persist.candidate_repo import candidate_to_dict
+    from qyunslation.workbench.term_extract import term_suggester_info
 
     start = (page - 1) * page_size
     selected = rows[start : start + page_size]
@@ -5971,6 +5994,7 @@ def list_run_term_candidates(
         "page_size": page_size,
         "total": len(rows),
         "unresolved": sum(row.status not in _FINAL_TERM_STATUSES for row in rows),
+        "suggester": term_suggester_info(run),
         "rules": {
             "version": (run.term_summary or {}).get("rule_version"),
             "included_regions": ["标题", "摘要", "正文", "章节标题", "图表", "脚注"],
