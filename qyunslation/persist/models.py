@@ -171,6 +171,7 @@ class TranslationRunRecord(Base):
         UniqueConstraint("preflight_id", "generation", name="uq_translation_run_generation"),
         Index("ix_translation_run_tenant_created", "tenant_id", "created_at"),
         Index("ix_translation_run_tenant_status", "tenant_id", "status"),
+        Index("ix_translation_run_tenant_deleted", "tenant_id", "deleted_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -190,6 +191,13 @@ class TranslationRunRecord(Base):
     name_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # PLAN-078e: recycle bin. A task in the bin is invisible everywhere except the bin; files stay
+    # until it is purged. ``purge_status`` is set only while a purge is under way or has failed.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    purge_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    purge_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     settings_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     stage: Mapped[str] = mapped_column(String(32), nullable=False, default="validation")
@@ -988,3 +996,47 @@ class TermDecision(Base):
     )
 
     candidate: Mapped[DocumentTermCandidate] = relationship(back_populates="decisions")
+
+
+class RunSelection(Base):
+    """PLAN-078e: a server-side snapshot of "all tasks matching these filters".
+
+    "Select all 248 results" must act on those 248 tasks, not on whatever the filters match
+    a minute later, so the ids are frozen here and the token expires after fifteen minutes.
+    """
+
+    __tablename__ = "run_selection"
+    __table_args__ = (Index("ix_run_selection_expires", "expires_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    run_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RunBatchOperation(Base):
+    """PLAN-078e: the recorded outcome of a batch request, so a replayed key gets the first answer."""
+
+    __tablename__ = "run_batch_operation"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "actor_sub", "key_hash", name="uq_run_batch_operation_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )

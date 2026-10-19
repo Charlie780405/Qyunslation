@@ -7,6 +7,7 @@ import re
 import json
 import base64
 import hashlib
+import secrets
 import logging
 import mimetypes
 import shutil
@@ -14,12 +15,13 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Generator, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, event, func, literal, or_, select, tuple_
+from sqlalchemy import and_, case, delete, event, func, literal, or_, select, tuple_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.persist import repo
@@ -42,6 +44,8 @@ from qyunslation.persist.models import (
     ReviewDecision,
     ReviewDraft,
     ReviewSegment,
+    RunBatchOperation,
+    RunSelection,
     TranslationArtifact,
     TranslationRunRecord,
     UploadSession,
@@ -2521,6 +2525,11 @@ def _run_allowed_actions(
         if condition and name not in actions:
             actions.append(name)
 
+    if run.deleted_at is not None:  # in the recycle bin: only the bin's own actions
+        add("restore_from_trash", writer and not run.purge_status)
+        add("purge", role in {"admin", "owner"})
+        return actions
+
     add("open", True)
     add("rename", writer)
     add("restore", writer and archived)
@@ -2605,6 +2614,10 @@ def _translation_run_dict(
         "settings": settings,
         "display_name": run.display_name,
         "name_version": run.name_version or 0,
+        "deleted_at": run.deleted_at.isoformat() if run.deleted_at else None,
+        "purge_after": run.purge_after.isoformat() if run.purge_after else None,
+        "trash_days_left": _trash_days_left(run),
+        "purge_status": run.purge_status,
         "archived": run.archived_at is not None,
         "archived_at": run.archived_at.isoformat() if run.archived_at else None,
         "status": run.status,
@@ -2630,7 +2643,10 @@ def _translation_run_dict(
     }
 
 
-def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> TranslationRunRecord:
+def _run_owned(
+    session: Session, *, run_id: str, identity: IdentityContext, include_trashed: bool = False
+) -> TranslationRunRecord:
+    """Visibility only. A task in the recycle bin does not exist for anything but the bin itself."""
     tenant = _tenant_bundle(session, identity)
     run = session.scalar(
         select(TranslationRunRecord).where(
@@ -2638,6 +2654,8 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
             TranslationRunRecord.tenant_id == tenant.id,
         )
     )
+    if run is not None and run.deleted_at is not None and not include_trashed:
+        raise HTTPException(status_code=404, detail="translation run not found")
     if run is None or (
         run.actor_sub != identity.user_sub
         and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}
@@ -2646,11 +2664,16 @@ def _run_owned(session: Session, *, run_id: str, identity: IdentityContext) -> T
     return run
 
 
-_WRITER_ACTIONS = frozenset({"rename", "archive", "restore", "delete", "cancel", "discard"})
+_WRITER_ACTIONS = frozenset({"rename", "archive", "restore", "delete", "cancel", "discard", "restore_from_trash"})
+_EXECUTING_LIFECYCLES = frozenset({"executing", "qa_checking"})
+
+
+def _is_run_admin(session: Session, identity: IdentityContext) -> bool:
+    return _cached_role(session, identity) in {"admin", "owner"}
 
 
 def _is_run_writer(session: Session, identity: IdentityContext, run: TranslationRunRecord) -> bool:
-    return run.actor_sub == identity.user_sub or _cached_role(session, identity) in {"admin", "owner"}
+    return run.actor_sub == identity.user_sub or _is_run_admin(session, identity)
 
 
 def _require_run_writer(session: Session, identity: IdentityContext, run: TranslationRunRecord) -> None:
@@ -2663,17 +2686,36 @@ def _require_run_writer(session: Session, identity: IdentityContext, run: Transl
 def _authorize_run_action(
     session: Session, identity: IdentityContext, run: TranslationRunRecord, action: str
 ) -> None:
-    """The server-side twin of ``allowed_actions``: who may do what, in which state (PLAN-078d).
+    """The server-side twin of ``allowed_actions``: who may do what, in which state (PLAN-078d/e).
 
     Seeing a task is not authority over it. Writer actions need the submitter or an admin; and
     every action must make sense for the task's current phase, so a running task is never
-    archived or deleted underneath its executor.
+    archived or deleted underneath its executor. Permanent purge is for administrators only.
     """
+    if run.deleted_at is not None:
+        if action == "purge":
+            if not _is_run_admin(session, identity):
+                raise _disposition_error(403, "ADMIN_REQUIRED", "仅管理员可以永久清除任务")
+            return
+        if action == "restore_from_trash":
+            _require_run_writer(session, identity, run)
+            if run.purge_status == "pending":
+                raise _disposition_error(409, "PURGE_IN_PROGRESS", "该任务正在被清除，不能恢复")
+            if run.purge_status == "failed":
+                raise _disposition_error(
+                    409, "PURGE_FAILED", "该任务清除失败，文件可能已被部分删除，不能恢复；请管理员重试清除"
+                )
+            return
+        raise _disposition_error(409, "RUN_IN_TRASH", "任务在回收站中，请先恢复")
+    if action in {"restore_from_trash", "purge"}:
+        raise _disposition_error(409, "NOT_IN_TRASH", "任务不在回收站中")
     lifecycle = _run_lifecycle(run)
     if action in _run_allowed_actions(session, identity, run, lifecycle, {"passed": False}, []):
         return
     if action in _WRITER_ACTIONS:
         _require_run_writer(session, identity, run)
+    if action == "delete" and lifecycle in _EXECUTING_LIFECYCLES:
+        raise _disposition_error(409, "RUN_STILL_EXECUTING", "任务仍在运行，请先取消后再删除")
     raise _disposition_error(
         409,
         "ACTION_NOT_ALLOWED_IN_STATE",
@@ -2702,18 +2744,6 @@ def _parse_if_match(raw: str) -> int:
         return int(text.strip('"'))
     except ValueError as exc:
         raise _disposition_error(400, "INVALID_IF_MATCH", "If-Match 必须是任务名称的版本号") from exc
-
-
-def _run_writable(session: Session, *, run_id: str, identity: IdentityContext) -> TranslationRunRecord:
-    """Visibility is not authority: only the submitter or an administrator may rename,
-    archive, restore, cancel or delete a task. Reviewers keep read/review access."""
-    run = _run_owned(session, run_id=run_id, identity=identity)
-    if run.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"admin", "owner"}:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "RUN_OWNER_REQUIRED", "message": "仅任务提交人或管理员可以修改、归档、取消或删除该任务"},
-        )
-    return run
 
 
 async def _start_legacy_translation(
@@ -3549,10 +3579,14 @@ def _run_query_filters(
     domain: str | None,
     created_from: date | None,
     created_to: date | None,
+    trash: bool = False,
 ) -> list[Any]:
     """Conditions that describe *which runs match*, applied before versions are grouped."""
     tenant = _tenant_bundle(session, identity)
-    conditions: list[Any] = [TranslationRunRecord.tenant_id == tenant.id]
+    conditions: list[Any] = [
+        TranslationRunRecord.tenant_id == tenant.id,
+        TranslationRunRecord.deleted_at.is_not(None) if trash else TranslationRunRecord.deleted_at.is_(None),
+    ]
     if _cached_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         conditions.append(TranslationRunRecord.actor_sub == identity.user_sub)
     if q and q.strip():
@@ -3581,40 +3615,34 @@ def _run_query_filters(
     return conditions
 
 
-@router.get("/translation-runs")
-def list_translation_runs(
-    q: str | None = Query(default=None, max_length=200),
-    lifecycle: list[str] | None = Query(default=None),
-    format: list[str] | None = Query(default=None),
-    direction: str | None = Query(default=None, max_length=64),
-    domain: str | None = Query(default=None, max_length=32),
-    created_from: date | None = Query(default=None),
-    created_to: date | None = Query(default=None),
-    archived: str | None = Query(default=None, pattern="^(active|archived|all)$"),
-    sort: str = Query(default="created", pattern="^(created|updated|name)$"),
-    order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    cursor: str | None = Query(default=None, max_length=512),
-    group_versions: bool = Query(default=True),
-    status: str | None = Query(default=None),
-    include_archived: bool = Query(default=False),
-    page_size: int = Query(default=100, ge=1, le=100),
-    identity: IdentityContext = Depends(require_identity),
-    session: Session = Depends(get_db),
-) -> dict[str, Any]:
-    """Search, filter, sort and page the tenant's tasks on the server (PLAN-078d).
+def _task_query(
+    session: Session,
+    identity: IdentityContext,
+    *,
+    q: str | None,
+    lifecycle: Any,
+    format: Any,
+    direction: str | None,
+    domain: str | None,
+    created_from: date | None,
+    created_to: date | None,
+    archived_mode: str,
+    status: str | None,
+    sort: str,
+    group_versions: bool,
+    trash: bool,
+) -> tuple[Any, list[Any], list[Any], Any] | None:
+    """The one place that says which tasks a set of list filters selects.
 
-    Matching (``q``, format, direction, domain, dates) is applied to every version of a task;
-    the versions are then grouped so each task shows its newest matching version, and the
-    task's *state* (lifecycle, archived) is that version's. Pagination is keyset-based, so it
-    stays stable while tasks are being created or changed.
+    The list, its counts and the "select every match" snapshot all go through here, so they
+    cannot disagree. Returns None when a lifecycle name is unknown (nothing can match).
     """
     TR, PF = TranslationRunRecord, PreflightRecord
     wanted_lifecycles = _split_values(lifecycle)
-    unknown = [name for name in wanted_lifecycles if name not in _LIFECYCLE_NAMES]
-    if unknown:
-        return {"items": [], "next_cursor": None, "total": 0, "facets": {"lifecycle": {}, "total": 0}, "page_size": page_size}
-    archived_mode = archived or ("all" if include_archived else "active")
-
+    if any(name not in _LIFECYCLE_NAMES for name in wanted_lifecycles):
+        return None
+    if trash:
+        archived_mode = "all"  # the bin is not split by archive state
     sort_expression = {
         "created": TR.created_at,
         "updated": TR.updated_at,
@@ -3639,7 +3667,7 @@ def list_translation_runs(
         .where(
             *_run_query_filters(
                 session=session, identity=identity, q=q, formats=_split_values(format), direction=direction,
-                domain=domain, created_from=created_from, created_to=created_to,
+                domain=domain, created_from=created_from, created_to=created_to, trash=trash,
             )
         )
         .subquery()
@@ -3655,6 +3683,48 @@ def list_translation_runs(
     conditions = list(task_state)
     if wanted_lifecycles:
         conditions.append(phase.in_(wanted_lifecycles))
+
+    return ranked, conditions, task_state, phase
+
+
+@router.get("/translation-runs")
+def list_translation_runs(
+    q: str | None = Query(default=None, max_length=200),
+    lifecycle: list[str] | None = Query(default=None),
+    format: list[str] | None = Query(default=None),
+    direction: str | None = Query(default=None, max_length=64),
+    domain: str | None = Query(default=None, max_length=32),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
+    archived: str | None = Query(default=None, pattern="^(active|archived|all)$"),
+    sort: str = Query(default="created", pattern="^(created|updated|name)$"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    cursor: str | None = Query(default=None, max_length=512),
+    group_versions: bool = Query(default=True),
+    trash: bool = Query(default=False),
+    status: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    page_size: int = Query(default=100, ge=1, le=100),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Search, filter, sort and page the tenant's tasks on the server (PLAN-078d).
+
+    Matching (``q``, format, direction, domain, dates) is applied to every version of a task;
+    the versions are then grouped so each task shows its newest matching version, and the
+    task's *state* (lifecycle, archived) is that version's. Pagination is keyset-based, so it
+    stays stable while tasks are being created or changed.
+    """
+    TR, PF = TranslationRunRecord, PreflightRecord
+    query = _task_query(
+        session, identity, q=q, lifecycle=lifecycle, format=format, direction=direction, domain=domain,
+        created_from=created_from, created_to=created_to,
+        archived_mode=archived or ("all" if include_archived else "active"),
+        status=status, sort=sort, group_versions=group_versions, trash=trash,
+    )
+    if query is None:
+        return {"items": [], "next_cursor": None, "total": 0, "facets": {"lifecycle": {}, "total": 0}, "page_size": page_size}
+    ranked, conditions, task_state, phase = query
 
     total = session.scalar(select(func.count()).select_from(ranked).where(*conditions)) or 0
     facet_rows = session.execute(
@@ -3831,67 +3901,234 @@ def restore_translation_run(
     return _translation_run_dict(session, run, identity=identity)
 
 
+# ---------------------------------------------------------------------------------------------------
+# PLAN-078e: recycle bin, permanent purge, and batch actions.
+#
+# A "task" is the chain of versions that share one pre-check (what the list shows as one row). Moving
+# to the bin, restoring and purging act on the whole chain, so deleting a task never makes an older
+# version of it reappear in the list.
+# ---------------------------------------------------------------------------------------------------
+
+TRASH_BATCH_MAX_IDS = 200
+SELECTION_MAX = 1000
+SELECTION_TTL = timedelta(minutes=15)
+
+
+def _trash_retention() -> timedelta:
+    try:
+        days = int(os.environ.get("QYUNSLATION_TRASH_RETENTION_DAYS") or 30)
+    except ValueError:
+        days = 30
+    return timedelta(days=max(days, 1))
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _trash_days_left(run: TranslationRunRecord) -> int | None:
+    due = _aware(run.purge_after)
+    if run.deleted_at is None or due is None:
+        return None
+    return max(0, -(-int((due - datetime.now(timezone.utc)).total_seconds()) // 86400))
+
+
+def _task_chain(session: Session, run: TranslationRunRecord) -> list[TranslationRunRecord]:
+    return list(
+        session.scalars(
+            select(TranslationRunRecord)
+            .where(
+                TranslationRunRecord.tenant_id == run.tenant_id,
+                TranslationRunRecord.preflight_id == run.preflight_id,
+            )
+            .order_by(TranslationRunRecord.generation)
+        )
+    )
+
+
+def _move_task_to_trash(
+    session: Session, identity: IdentityContext, chain: list[TranslationRunRecord], now: datetime
+) -> None:
+    head = chain[-1]
+    for member in chain:
+        if member is head or _needs_refresh(member):
+            _refresh_translation_run(session, member)
+    if any(_run_lifecycle(member) in _EXECUTING_LIFECYCLES for member in chain):
+        raise _disposition_error(409, "RUN_STILL_EXECUTING", "任务仍在运行，请先取消后再删除")
+    due = now + _trash_retention()
+    for member in chain:
+        if member.deleted_at is None:
+            member.deleted_at = now
+            member.deleted_by = identity.user_sub
+            member.purge_after = due
+            member.purge_status = None
+            member.purge_error = None
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.trash",
+        extra={"run_id": head.id, "run_ids": [member.id for member in chain], "purge_after": due.isoformat()},
+    )
+
+
+def _restore_task_from_trash(
+    session: Session, identity: IdentityContext, chain: list[TranslationRunRecord]
+) -> None:
+    for member in chain:
+        member.deleted_at = None
+        member.deleted_by = None
+        member.purge_after = None
+        member.purge_status = None
+        member.purge_error = None
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.restore_from_trash",
+        extra={"run_id": chain[-1].id, "run_ids": [member.id for member in chain]},
+    )
+
+
 @router.delete("/translation-runs/{run_id}", status_code=204)
 def delete_translation_run(
     run_id: str,
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> Response:
+    """Move a task to the recycle bin. Nothing is removed: files stay until the bin is purged."""
     run = _run_owned(session, run_id=run_id, identity=identity)
-    _refresh_translation_run(session, run)
-    _authorize_run_action(session, identity, run, "delete")
+    chain = _task_chain(session, run)
+    _refresh_translation_run(session, chain[-1])
+    _authorize_run_action(session, identity, chain[-1], "delete")
+    _move_task_to_trash(session, identity, chain, datetime.now(timezone.utc))
+    session.commit()
+    return Response(status_code=204)
 
-    # Files are removed only after the database transaction commits: a failed commit
-    # must never leave rows that point at files that are already gone.
-    doomed_files: list[Path] = []
-    artifacts = list(
-        session.scalars(
+
+@router.post("/translation-runs/{run_id}/restore-from-trash")
+def restore_translation_run_from_trash(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    run = _run_owned(session, run_id=run_id, identity=identity, include_trashed=True)
+    chain = _task_chain(session, run)
+    head = chain[-1]
+    if head.deleted_at is None:  # nothing to restore: the same answer as a successful restore
+        _require_run_writer(session, identity, head)
+    else:
+        _authorize_run_action(session, identity, head, "restore_from_trash")
+        _restore_task_from_trash(session, identity, chain)
+    session.commit()
+    return _translation_run_dict(session, head, identity=identity)
+
+
+# ----- purge: commit the decision first, remove files second, delete rows last -----------------------
+
+
+def _run_work_dirs(chain: list[TranslationRunRecord]) -> list[Path]:
+    from qyunslation.workbench.runner import _root_from_env
+
+    root = _root_from_env()
+    out: list[Path] = []
+    for member in chain:
+        directory = (root / member.tenant_id / member.id).resolve()
+        if root in directory.parents:  # never a path that escapes the runner root
+            out.append(directory)
+    return out
+
+
+def _purge_files(
+    session: Session, chain: list[TranslationRunRecord], preflight: PreflightRecord | None
+) -> tuple[list[Path], list[Path]]:
+    files: list[Path] = []
+    for member in chain:
+        for artifact in session.scalars(
             select(TranslationArtifact).where(
-                TranslationArtifact.run_id == run.id,
-                TranslationArtifact.tenant_id == run.tenant_id,
+                TranslationArtifact.run_id == member.id, TranslationArtifact.tenant_id == member.tenant_id
             )
+        ):
+            try:
+                files.append(_artifact_path(artifact))
+            except HTTPException:
+                logger.warning("skipping artifact with an invalid storage key: %s", artifact.id)
+    if preflight is not None:
+        # A source file is removed only when no other pre-check points at the same stored file.
+        shared = session.scalar(
+            select(func.count())
+            .select_from(PreflightRecord)
+            .where(PreflightRecord.storage_key == preflight.storage_key, PreflightRecord.id != preflight.id)
         )
-    )
-    for artifact in artifacts:
-        doomed_files.append(_artifact_path(artifact))
-        session.delete(artifact)
+        if not shared:
+            try:
+                files.append(_preflight_path(preflight))
+            except HTTPException:
+                logger.warning("skipping preflight with an invalid storage key: %s", preflight.id)
+    return files, _run_work_dirs(chain)
 
-    preflight = session.get(PreflightRecord, run.preflight_id)
-    sibling = session.scalar(
-        select(TranslationRunRecord.id)
-        .where(
-            TranslationRunRecord.preflight_id == run.preflight_id,
-            TranslationRunRecord.id != run.id,
-        )
-        .limit(1)
-    )
-    preflight_removed = preflight is not None and sibling is None
-    if preflight_removed:
-        doomed_files.append(_preflight_path(preflight))
-        session.delete(preflight)
 
-    # ReviewDecision rows cascade with the run; keep their substance in the audit log.
+def _remove_purged_files(files: list[Path], directories: list[Path]) -> list[str]:
+    """Delete what a purge owns. A file that is already gone is fine; anything else is reported."""
+    errors: list[str] = []
+    for path in files:
+        try:
+            if path.is_file():
+                path.unlink()
+        except Exception as exc:
+            logger.warning("purge: could not remove %s", path, exc_info=True)
+            errors.append(f"{path.name}: {exc}")
+    for directory in directories:
+        try:
+            if directory.is_dir():
+                shutil.rmtree(directory)
+        except Exception as exc:
+            logger.warning("purge: could not remove %s", directory, exc_info=True)
+            errors.append(f"{directory.name}: {exc}")
+    return errors
+
+
+def _begin_purge(session: Session, actor_sub: str, chain: list[TranslationRunRecord]) -> None:
+    """Phase one: mark the task as being purged and write the tombstone. The caller commits."""
+    head = chain[-1]
+    if any(member.deleted_at is None for member in chain):
+        raise _disposition_error(409, "NOT_IN_TRASH", "任务不在回收站中")
+    preflight = session.get(PreflightRecord, head.preflight_id)
     decisions = list(
         session.scalars(
             select(ReviewDecision)
-            .where(ReviewDecision.run_id == run.id)
+            .where(ReviewDecision.run_id.in_([member.id for member in chain]))
             .order_by(ReviewDecision.created_at)
         )
     )
-    run_id_value = run.id
-    session.delete(run)
+    filename = preflight.source_filename if preflight is not None else ""
+    for member in chain:
+        member.purge_status = "pending"
+        member.purge_error = None
+    # The tombstone keeps what an audit still needs after the task is gone: who decided what.
     record_audit(
         session,
-        actor_sub=identity.user_sub,
-        action="translation_run.delete",
+        actor_sub=actor_sub,
+        action="translation_run.purge",
+        source_sha256=preflight.source_sha256 if preflight is not None else None,
         extra={
-            "run_id": run_id_value,
-            "generation": run.generation,
-            "status": run.status,
-            "quality_state": run.quality_state,
-            "preflight_removed": preflight_removed,
+            "run_id": head.id,
+            "preflight_id": head.preflight_id,
+            "source_filename_digest": hashlib.sha256(filename.encode("utf-8")).hexdigest()[:16],
+            "runs": [
+                {
+                    "run_id": member.id,
+                    "generation": member.generation,
+                    "status": member.status,
+                    "quality_state": member.quality_state,
+                    "deleted_at": member.deleted_at.isoformat() if member.deleted_at else None,
+                    "deleted_by": member.deleted_by,
+                }
+                for member in chain
+            ],
             "review_decisions": [
                 {
+                    "run_id": row.run_id,
                     "generation": row.generation,
                     "decision": row.decision,
                     "user_id": row.user_id,
@@ -3902,9 +4139,443 @@ def delete_translation_run(
             ],
         },
     )
+
+
+def _complete_purge(
+    session: Session, *, tenant_id: str, preflight_id: str, actor_sub: str
+) -> tuple[bool, str | None]:
+    """Phase two and three, after the mark has been committed: remove files, then the rows.
+
+    Safe to repeat. If the files cannot all be removed the rows stay, marked ``failed``, and the
+    next attempt picks up where this one stopped. Rows are never deleted while files remain.
+    """
+    chain = list(
+        session.scalars(
+            select(TranslationRunRecord)
+            .where(TranslationRunRecord.tenant_id == tenant_id, TranslationRunRecord.preflight_id == preflight_id)
+            .order_by(TranslationRunRecord.generation)
+        )
+    )
+    if not chain:
+        return True, None
+    if any(member.deleted_at is None or not member.purge_status for member in chain):
+        return False, "任务没有被标记为清除"
+    preflight = session.get(PreflightRecord, preflight_id)
+    files, directories = _purge_files(session, chain, preflight)
+    errors = _remove_purged_files(files, directories)
+    if errors:
+        message = "；".join(errors)[:1000]
+        for member in chain:
+            member.purge_status = "failed"
+            member.purge_error = message
+        record_audit(
+            session,
+            actor_sub=actor_sub,
+            action="translation_run.purge_failed",
+            extra={"run_id": chain[-1].id, "error": message},
+        )
+        session.commit()
+        return False, message
+    run_ids = [member.id for member in chain]
+    for artifact in session.scalars(select(TranslationArtifact).where(TranslationArtifact.run_id.in_(run_ids))):
+        session.delete(artifact)
+    for member in chain:
+        session.delete(member)
+    session.flush()  # children first: the database cascades from the pre-check to its runs
+    if preflight is not None:
+        session.delete(preflight)
+    record_audit(
+        session,
+        actor_sub=actor_sub,
+        action="translation_run.purged",
+        extra={"run_ids": run_ids, "preflight_id": preflight_id},
+    )
     session.commit()
-    _unlink_quietly(doomed_files)
-    return Response(status_code=204)
+    return True, None
+
+
+def _purge_chain(session: Session, actor_sub: str, chain: list[TranslationRunRecord]) -> tuple[bool, str | None]:
+    head = chain[-1]
+    tenant_id, preflight_id = head.tenant_id, head.preflight_id
+    _begin_purge(session, actor_sub, chain)
+    session.commit()  # the decision is durable before the first file is touched
+    try:
+        return _complete_purge(session, tenant_id=tenant_id, preflight_id=preflight_id, actor_sub=actor_sub)
+    except Exception as exc:
+        session.rollback()
+        logger.exception("purge of %s stopped; it stays marked pending and can be retried", preflight_id)
+        return False, str(exc)[:500]
+
+
+@router.post("/translation-runs/{run_id}/purge")
+def purge_translation_run(
+    run_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Permanently remove a task that is in the recycle bin. Administrators only; safe to retry."""
+    run = _run_owned(session, run_id=run_id, identity=identity, include_trashed=True)
+    chain = _task_chain(session, run)
+    _authorize_run_action(session, identity, chain[-1], "purge")
+    done, error = _purge_chain(session, identity.user_sub, chain)
+    return {"id": run_id, "purged": done, "purge_status": "done" if done else "failed", "error": error}
+
+
+def purge_expired_runs(
+    session: Session, *, now: datetime | None = None, execute: bool = False, actor_sub: str = "system:purge"
+) -> dict[str, Any]:
+    """Tasks whose bin retention has run out (and earlier purges that did not finish).
+
+    With ``execute=False`` this only reports. Automatic purging is not scheduled in the first
+    release; an administrator runs scripts/plan078e-purge-expired.py.
+    """
+    now = now or datetime.now(timezone.utc)
+    rows = list(
+        session.scalars(
+            select(TranslationRunRecord)
+            .where(
+                TranslationRunRecord.deleted_at.is_not(None),
+                or_(TranslationRunRecord.purge_after <= now, TranslationRunRecord.purge_status.is_not(None)),
+            )
+            .order_by(TranslationRunRecord.tenant_id, TranslationRunRecord.preflight_id, TranslationRunRecord.generation)
+        )
+    )
+    chains: dict[tuple[str, str], list[TranslationRunRecord]] = {}
+    for row in rows:
+        chains.setdefault((row.tenant_id, row.preflight_id), []).append(row)
+    report: dict[str, Any] = {"due": len(chains), "purged": 0, "failed": 0, "executed": execute, "items": []}
+    for (tenant_id, preflight_id), members in chains.items():
+        chain = _task_chain(session, members[0])
+        entry = {"run_id": chain[-1].id, "tenant_id": tenant_id, "purge_status": chain[-1].purge_status}
+        if execute:
+            if chain[-1].purge_status:
+                tenant_id_, preflight_id_ = chain[-1].tenant_id, chain[-1].preflight_id
+                try:
+                    done, error = _complete_purge(
+                        session, tenant_id=tenant_id_, preflight_id=preflight_id_, actor_sub=actor_sub
+                    )
+                except Exception as exc:
+                    session.rollback()
+                    done, error = False, str(exc)[:500]
+            else:
+                done, error = _purge_chain(session, actor_sub, chain)
+            entry["result"] = "purged" if done else "failed"
+            entry["error"] = error
+            report["purged" if done else "failed"] += 1
+        report["items"].append(entry)
+    return report
+
+
+# ----- batch actions ----------------------------------------------------------------------------------
+
+
+class RunSelectionBody(BaseModel):
+    q: str | None = Field(default=None, max_length=200)
+    lifecycle: list[str] = Field(default_factory=list)
+    format: list[str] = Field(default_factory=list)
+    direction: str | None = Field(default=None, max_length=64)
+    domain: str | None = Field(default=None, max_length=32)
+    created_from: date | None = None
+    created_to: date | None = None
+    archived: Literal["active", "archived", "all"] = "active"
+    trash: bool = False
+    group_versions: bool = True
+
+
+@router.post("/translation-runs/selection")
+def create_run_selection(
+    body: RunSelectionBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Freeze "everything the current filters match" so a later batch acts on exactly those tasks."""
+    query = _task_query(
+        session, identity, q=body.q, lifecycle=body.lifecycle, format=body.format, direction=body.direction,
+        domain=body.domain, created_from=body.created_from, created_to=body.created_to,
+        archived_mode=body.archived, status=None, sort="created", group_versions=body.group_versions,
+        trash=body.trash,
+    )
+    ids: list[str] = []
+    if query is not None:
+        ranked, conditions, _task_state, _phase = query
+        ids = list(
+            session.scalars(
+                select(ranked.c.id).where(*conditions).order_by(ranked.c.sk.desc(), ranked.c.id.desc()).limit(SELECTION_MAX + 1)
+            )
+        )
+    if len(ids) > SELECTION_MAX:
+        raise _disposition_error(
+            422, "SELECTION_TOO_LARGE", f"筛选结果超过 {SELECTION_MAX} 条，请缩小范围后再批量操作"
+        )
+    tenant = _tenant_bundle(session, identity)
+    now = datetime.now(timezone.utc)
+    session.execute(delete(RunSelection).where(RunSelection.expires_at < now))
+    selection = RunSelection(
+        id=secrets.token_urlsafe(24),
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        scope="trash" if body.trash else "active",
+        run_ids=ids,
+        created_at=now,
+        expires_at=now + SELECTION_TTL,
+    )
+    session.add(selection)
+    session.commit()
+    return {
+        "selection_token": selection.id,
+        "count": len(ids),
+        "scope": selection.scope,
+        "expires_at": selection.expires_at.isoformat(),
+    }
+
+
+class RunBatchBody(BaseModel):
+    action: Literal["archive", "unarchive", "trash", "restore_from_trash", "purge"]
+    ids: list[str] | None = None
+    selection_token: str | None = Field(default=None, max_length=128)
+    exclude_ids: list[str] = Field(default_factory=list, max_length=SELECTION_MAX)
+
+
+_BATCH_AUTHORIZE_AS = {
+    "archive": "archive",
+    "unarchive": "restore",
+    "trash": "delete",
+    "restore_from_trash": "restore_from_trash",
+    "purge": "purge",
+}
+
+
+def _http_reason(exc: HTTPException) -> tuple[str, str]:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        return str(detail.get("code") or "ERROR"), str(detail.get("message") or detail.get("code") or "")
+    return "ERROR", str(detail)
+
+
+def _apply_batch_action(
+    session: Session,
+    identity: IdentityContext,
+    action: str,
+    chain: list[TranslationRunRecord],
+    now: datetime,
+) -> tuple[str, str, str]:
+    """One task, one action: (outcome, reason_code, message). Raises HTTPException when refused."""
+    head = chain[-1]
+    trashed = head.deleted_at is not None
+    if action == "trash":
+        if trashed:
+            return "skipped", "ALREADY_IN_TRASH", "任务已在回收站中"
+        _refresh_translation_run(session, head)
+        _authorize_run_action(session, identity, head, "delete")
+        _move_task_to_trash(session, identity, chain, now)
+        return "succeeded", "", ""
+    if action in {"archive", "unarchive"}:
+        if trashed:
+            raise _disposition_error(409, "RUN_IN_TRASH", "任务在回收站中，请先恢复")
+        _require_run_writer(session, identity, head)
+        archiving = action == "archive"
+        if (head.archived_at is not None) == archiving:
+            return "skipped", "ALREADY_ARCHIVED" if archiving else "NOT_ARCHIVED", (
+                "任务已归档" if archiving else "任务没有归档"
+            )
+        _refresh_translation_run(session, head)
+        _authorize_run_action(session, identity, head, "archive" if archiving else "restore")
+        head.archived_at = now if archiving else None
+        head.archived_by = identity.user_sub if archiving else None
+        record_audit(
+            session,
+            actor_sub=identity.user_sub,
+            action="translation_run.archive" if archiving else "translation_run.restore",
+            extra={"run_id": head.id, "batch": True},
+        )
+        return "succeeded", "", ""
+    if action == "restore_from_trash":
+        if not trashed:
+            return "skipped", "NOT_IN_TRASH", "任务不在回收站中"
+        _authorize_run_action(session, identity, head, "restore_from_trash")
+        _restore_task_from_trash(session, identity, chain)
+        return "succeeded", "", ""
+    # purge: only the decision is made here; files go after the batch has been committed.
+    _authorize_run_action(session, identity, head, "purge")
+    _begin_purge(session, identity.user_sub, chain)
+    return "succeeded", "", ""
+
+
+@router.post("/translation-runs/batch")
+def batch_translation_runs(
+    body: RunBatchBody,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=200),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Apply one action to many tasks, each checked on its own against its latest state.
+
+    The answer lists every task's outcome (succeeded, skipped or failed with a reason); one task
+    failing never undoes another. The same Idempotency-Key replays the first answer.
+    """
+    if not idempotency_key or not idempotency_key.strip():
+        raise _disposition_error(400, "IDEMPOTENCY_KEY_REQUIRED", "批量操作需要 Idempotency-Key")
+    if (body.ids is None) == (body.selection_token is None):
+        raise _disposition_error(422, "SELECTION_REQUIRED", "请提供任务 ID 列表，或提供选择令牌（二选一）")
+    if body.action == "purge" and not _is_run_admin(session, identity):
+        raise _disposition_error(403, "ADMIN_REQUIRED", "仅管理员可以永久清除任务")
+    tenant = _tenant_bundle(session, identity)
+    now = datetime.now(timezone.utc)
+
+    requested: list[str]
+    if body.selection_token is not None:
+        selection = session.get(RunSelection, body.selection_token)
+        if selection is None or selection.tenant_id != tenant.id or selection.actor_sub != identity.user_sub:
+            raise _disposition_error(404, "SELECTION_NOT_FOUND", "找不到这次选择，请重新选择")
+        if _aware(selection.expires_at) < now:
+            raise _disposition_error(410, "SELECTION_EXPIRED", "这次选择已过期，请重新选择")
+        in_trash = body.action in {"restore_from_trash", "purge"}
+        if (selection.scope == "trash") != in_trash:
+            raise _disposition_error(422, "SELECTION_SCOPE_MISMATCH", "选择的任务范围与操作不匹配，请重新选择")
+        excluded = set(body.exclude_ids)
+        requested = [run_id for run_id in selection.run_ids if run_id not in excluded]
+    else:
+        if len(body.ids or []) > TRASH_BATCH_MAX_IDS:
+            raise _disposition_error(422, "TOO_MANY_IDS", f"一次最多操作 {TRASH_BATCH_MAX_IDS} 个任务")
+        requested = list(dict.fromkeys(body.ids or []))
+
+    key_hash = hashlib.sha256(idempotency_key.strip().encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        json.dumps(
+            {"action": body.action, "ids": sorted(requested), "token": body.selection_token}, sort_keys=True
+        ).encode("utf-8")
+    ).hexdigest()
+    existing = session.scalar(
+        select(RunBatchOperation).where(
+            RunBatchOperation.tenant_id == tenant.id,
+            RunBatchOperation.actor_sub == identity.user_sub,
+            RunBatchOperation.key_hash == key_hash,
+        )
+    )
+    if existing is not None:
+        if existing.request_digest != digest:
+            raise _disposition_error(422, "IDEMPOTENCY_KEY_REUSED", "该 Idempotency-Key 已用于另一个不同的批量请求")
+        return {**existing.result, "replayed": True}
+
+    # Lock every affected task up front, in a fixed order, so two batches cannot deadlock.
+    by_id: dict[str, TranslationRunRecord] = {}
+    chains: dict[str, list[TranslationRunRecord]] = {}
+    for start in range(0, len(requested), 400):
+        part = requested[start : start + 400]
+        preflight_ids = set(
+            session.scalars(
+                select(TranslationRunRecord.preflight_id).where(
+                    TranslationRunRecord.tenant_id == tenant.id, TranslationRunRecord.id.in_(part)
+                )
+            )
+        )
+        if not preflight_ids:
+            continue
+        for row in session.scalars(
+            select(TranslationRunRecord)
+            .where(TranslationRunRecord.tenant_id == tenant.id, TranslationRunRecord.preflight_id.in_(preflight_ids))
+            .order_by(TranslationRunRecord.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ):
+            by_id[row.id] = row
+            chains.setdefault(row.preflight_id, []).append(row)
+    for members in chains.values():
+        members.sort(key=lambda member: member.generation)
+    names = {
+        preflight.id: preflight.source_filename
+        for preflight in session.scalars(select(PreflightRecord).where(PreflightRecord.id.in_(list(chains))))
+    } if chains else {}
+    reviewer_roles = {"reviewer", "term_admin", "admin", "owner"}
+    role = _cached_role(session, identity)
+
+    items: list[dict[str, Any]] = []
+    purge_chains: list[tuple[int, str, str]] = []
+    for run_id in requested:
+        run = by_id.get(run_id)
+        item: dict[str, Any] = {"id": run_id, "name": "", "outcome": "failed", "reason_code": "", "message": ""}
+        items.append(item)
+        if run is None or (run.actor_sub != identity.user_sub and role not in reviewer_roles):
+            item.update(reason_code="NOT_FOUND", message="任务不存在或你无权访问")
+            continue
+        chain = chains[run.preflight_id]
+        item["name"] = chain[-1].display_name or names.get(run.preflight_id) or ""
+        try:
+            with session.begin_nested():
+                outcome, code, message = _apply_batch_action(session, identity, body.action, chain, now)
+        except HTTPException as exc:
+            code, message = _http_reason(exc)
+            item.update(outcome="failed", reason_code=code, message=message)
+            continue
+        except Exception:
+            logger.exception("batch %s failed for %s", body.action, run_id)
+            item.update(reason_code="INTERNAL_ERROR", message="处理这个任务时出错，其他任务不受影响")
+            continue
+        item.update(outcome=outcome, reason_code=code, message=message)
+        if body.action == "purge" and outcome == "succeeded":
+            purge_chains.append((len(items) - 1, chain[-1].tenant_id, chain[-1].preflight_id))
+
+    def tally() -> dict[str, Any]:
+        return {
+            "action": body.action,
+            "requested": len(items),
+            "succeeded": sum(1 for item in items if item["outcome"] == "succeeded"),
+            "failed": sum(1 for item in items if item["outcome"] == "failed"),
+            "skipped": sum(1 for item in items if item["outcome"] == "skipped"),
+            "items": items,
+        }
+
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="translation_run.batch",
+        extra={key: value for key, value in tally().items() if key != "items"},
+    )
+    operation = RunBatchOperation(
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        key_hash=key_hash,
+        request_digest=digest,
+        result=tally(),
+    )
+    session.add(operation)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Another request with the same key finished first: its answer is the answer.
+        session.rollback()
+        winner = session.scalar(
+            select(RunBatchOperation).where(
+                RunBatchOperation.tenant_id == tenant.id,
+                RunBatchOperation.actor_sub == identity.user_sub,
+                RunBatchOperation.key_hash == key_hash,
+            )
+        )
+        if winner is None:
+            raise
+        return {**winner.result, "replayed": True}
+
+    if purge_chains:
+        # The purge decisions are committed; now the files, one task at a time.
+        for index, purge_tenant, purge_preflight in purge_chains:
+            try:
+                done, error = _complete_purge(
+                    session, tenant_id=purge_tenant, preflight_id=purge_preflight, actor_sub=identity.user_sub
+                )
+            except Exception as exc:
+                session.rollback()
+                done, error = False, str(exc)[:500]
+            if not done:
+                items[index].update(
+                    outcome="failed",
+                    reason_code="PURGE_FILES_FAILED",
+                    message="文件没有全部删除，任务保留在回收站并标记为清除失败，可由管理员重试",
+                )
+        refreshed = session.get(RunBatchOperation, operation.id)
+        if refreshed is not None:
+            refreshed.result = tally()
+            session.commit()
+    return {**tally(), "replayed": False}
 
 
 def _unlink_quietly(paths: list[Path]) -> None:
