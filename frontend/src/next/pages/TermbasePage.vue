@@ -35,6 +35,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
 import {
@@ -50,7 +51,8 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline';
 
-const query = ref('');
+const route = useRoute();
+const query = ref(typeof route.query.q === 'string' ? route.query.q : '');
 const risk = ref('all');
 const activeView = ref('company');
 const showImport = ref(false);

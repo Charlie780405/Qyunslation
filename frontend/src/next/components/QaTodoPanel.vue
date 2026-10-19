@@ -157,6 +157,25 @@
         </ol>
       </section>
 
+      <section class="qy-qa-remedies" data-qa-remedies aria-label="解决方案">
+        <h4>怎么解决</h4>
+        <ul v-if="remedies.length">
+          <li v-for="remedy in remedies" :key="remedy.id" :data-recommended="remedy.recommended ? 'true' : 'false'">
+            <button
+              type="button"
+              :class="remedy.recommended ? 'qy-primary-button' : 'qy-secondary-button'"
+              :disabled="Boolean(busy) || submitting"
+              :data-remedy="remedy.id"
+              @click="runRemedy(remedy)"
+            >{{ remedy.label }}<small v-if="remedy.recommended">（推荐）</small></button>
+            <span class="qy-muted">{{ remedy.why }}</span>
+          </li>
+        </ul>
+        <p v-else class="qy-muted" data-qa-no-remedy>
+          当前账号对这一项没有可执行的操作。请联系有复核权限的同事（复核人、术语管理员、管理员或所有者）处理。
+        </p>
+      </section>
+
       <div v-if="selected.allowed_dispositions?.length" class="qy-qa-actions" data-qa-actions>
         <button
           v-for="action in selected.allowed_dispositions"
@@ -208,7 +227,7 @@ const props = defineProps({
   onDispose: { type: Function, default: null },
   onBatch: { type: Function, default: null },
 });
-defineEmits(['select', 'locate', 'revise']);
+const emit = defineEmits(['select', 'locate', 'revise', 'recheck', 'termbase']);
 
 const filter = ref('open');
 const activeAction = ref('');
@@ -307,6 +326,39 @@ const checkLine = computed(() => {
   if (check.rule_set_version) parts.push(`规则集 ${check.rule_set_version}`);
   return parts.join(' · ');
 });
+
+// ---- remedies: concrete ways out of the selected problem ------------------------------------
+// The server proposes them per problem and per person; here only the ones that can run in this task state stay.
+const remedies = computed(() => (selected.value?.remedies || []).filter((remedy) => {
+  if (remedy.kind === 'revise') return canRevise.value;
+  if (remedy.kind === 'recheck') return Boolean(props.run) && can(props.run, 'requalify');
+  if (remedy.kind === 'locate') return anchorsOf(selected.value).some((anchor) => anchor.page);
+  return true;
+}));
+
+function runRemedy(remedy) {
+  switch (remedy.kind) {
+    case 'revise':
+      emit('revise');
+      break;
+    case 'recheck':
+      emit('recheck');
+      break;
+    case 'termbase':
+      emit('termbase', remedy.search || '');
+      break;
+    case 'locate':
+      emit('locate', anchorsOf(selected.value).find((anchor) => anchor.page));
+      break;
+    case 'disposition':
+      // Open the normal form with the reason already filled in: one check, one click, and it stays editable.
+      openForm(remedy.action);
+      reason.value = remedy.reason || '';
+      break;
+    default:
+      break;
+  }
+}
 
 // ---- single disposition ---------------------------------------------------------------------
 const canSubmit = computed(() => reason.value.trim().length >= 10);
@@ -436,6 +488,11 @@ li[data-severity='unavailable'] .qy-qa-item strong { color: #7a5200; }
 .qy-qa-detail-fields { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .9rem; margin: 0; }
 .qy-qa-detail-fields dt { color: #3b4452; font-weight: 600; }
 .qy-qa-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+.qy-qa-remedies { margin: .75rem 0; padding: .6rem .75rem; border: 1px solid #c9d7e6; background: #f4f8fc; }
+.qy-qa-remedies h4 { margin: 0 0 .4rem; }
+.qy-qa-remedies ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+.qy-qa-remedies li { display: grid; gap: .2rem; }
+.qy-qa-remedies small { margin-left: .3rem; }
 .qy-anchor-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
 .qy-anchor-list blockquote { margin: .2rem 0; padding: .25rem .6rem; border-left: 3px solid #9fb3c8; background: #f6f8fa; font-size: .9rem; }
 .qy-qa-critical-note { margin: 0; padding: .5rem .7rem; background: #fef2f2; border-left: 4px solid #8b1e1e; }

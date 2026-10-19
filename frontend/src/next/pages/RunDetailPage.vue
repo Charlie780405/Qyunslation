@@ -108,6 +108,8 @@
         @select="view.selectObject"
         @locate="locateAnchor"
         @revise="reviseRun"
+        @recheck="requalify"
+        @termbase="openTermbase"
       />
 
       <section class="qy-panel qy-run-stages" aria-labelledby="qy-stage-heading">
@@ -475,6 +477,11 @@ async function locateAnchor(anchor) {
   if (!anchor?.page) return;
   const result = await viewer.value?.focusAnchor?.(anchor);
   if (!result || result.reason === 'pending') view.setPage(anchor.page);
+}
+
+// From a term problem straight to the vocabulary workbench, with the term already in the search box.
+function openTermbase(search) {
+  router.push({ path: '/termbase', query: search ? { q: search } : {} });
 }
 
 function reviseRun() {

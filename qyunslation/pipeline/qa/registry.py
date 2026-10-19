@@ -194,6 +194,96 @@ def is_registered(code: str) -> bool:
     return code in _RULES
 
 
+# ------------------------------------------------------------------------------------------------
+# remedies: what a person can actually DO about a finding, as clickable options (PLAN-079)
+# ------------------------------------------------------------------------------------------------
+
+# Prefilled, editable reasons for the "go ahead anyway" choices. They say what to check, so the
+# reviewer confirms a fact instead of inventing a sentence (a reason must be at least 10 characters).
+_WAIVER_REASONS: dict[str, str] = {
+    "TEXT_ENCODING_ARTIFACT": "已查看对应页面，页面上读不出乱码，内容可以接受（命中的多半是文本层里不可见的控制字符）。",
+    "LOGO_MISSING": "已核对首页，标识或印章在译文中以其他形式保留，或本文不需要保留，不影响使用。",
+    "PAGE_COUNT_MISMATCH": "已核对，译文页数与原文不同来自排版（行宽、字体或表格），内容完整。",
+    "AUTHOR_METADATA_CHANGED": "已核对作者与单位信息，差异只是标点或格式，姓名与单位没有被改动。",
+    "ORDINAL_ARTIFACT": "已核对，序数上标在译文中显示正常，不影响阅读。",
+    "MANIFEST_EMPTY_OBJECTS": "已核对文档确实没有可处理的对象，译文内容完整，可以带着交付。",
+    "GENERATION_MISMATCH": "已核对结构清单对应的就是当前版本，译文内容一致，可以带着交付。",
+    "AD_DOMAIN_EVIDENCE_MISSING": "已核对原文的专业领域，译文按该领域处理是合适的，可以带着交付。",
+}
+_DEFAULT_WAIVER_REASON = "已逐项核对原文和译文，确认这一项不影响内容的正确性和使用，可以带着交付。"
+_TERM_WAIVER_REASON = "本文上下文确需使用当前译法，已对照原文核对，不影响理解，保持现状。"
+_FALSE_POSITIVE_REASON = "已对照原文核对，译文已正确保留该内容，检查规则误判。"
+_ACKNOWLEDGE_REASON = "已查看该提示，属于正常保留或可接受的内容，不影响交付。"
+
+
+def _remedy(rid: str, kind: str, label: str, why: str, **kw: Any) -> dict[str, Any]:
+    return {"id": rid, "kind": kind, "label": label, "why": why, "action": "", "reason": "", "recommended": False, **kw}
+
+
+def remedies_for(code: str, rule_class: str) -> list[dict[str, Any]]:
+    """Ordered options for one finding. The API drops the ones this person or this task state cannot run.
+
+    kinds: ``locate`` (show the page), ``disposition`` (``action`` + prefilled ``reason``), ``revise``
+    (new version from the same configuration), ``recheck`` (run the checks again), ``termbase`` (open the
+    vocabulary workbench). Exactly one option is marked ``recommended``.
+    """
+    locate = _remedy("locate", "locate", "先看问题所在的页面", "对照原文和译文，确认问题是否真实存在，再选下面的处理方式。")
+    revise = _remedy(
+        "revise", "revise", "重新生成修订版",
+        "原版会保留。新版用同一套配置重新翻译并自动复检；数字、编号、否定这类问题多半是单次漏译或改写，重译后常会消失。",
+    )
+    if rule_class == C3:
+        return [_remedy(
+            "recheck", "recheck", "重新检查",
+            "这是检查没有跑成，不代表译文有问题。服务恢复后重新检查即可得出结论。", recommended=True,
+        )]
+    if rule_class == C1:
+        revise["recommended"] = True
+        return [
+            locate,
+            revise,
+            _remedy(
+                "false_positive", "disposition", "我核对过，这是检查误报",
+                "确认译文其实是正确的时使用。关键事实类需要另一位管理员、术语管理员或所有者再确认一次才会放行。",
+                action="report_false_positive", reason=_FALSE_POSITIVE_REASON,
+            ),
+        ]
+    if rule_class == C2:
+        return [
+            locate,
+            _remedy(
+                "waive", "disposition", "确认没问题，带着交付",
+                "你看过并认为可以接受时使用。一个复核人即可，理由会记入审计，之后可以撤销。",
+                action="grant_waiver", reason=_WAIVER_REASONS.get(code, _DEFAULT_WAIVER_REASON), recommended=True,
+            ),
+            revise,
+        ]
+    if rule_class == C4:
+        return [
+            _remedy(
+                "termbase", "termbase", "去术语工作台核对译名",
+                "先确认词库里的批准译名是否正确，需要的话在那里改好；改好后再重新生成修订版。", recommended=True,
+            ),
+            {**revise, "label": "按批准译名重新生成修订版",
+             "why": "原版会保留。新版会按当前批准的译名重新翻译并自动复检。"},
+            _remedy(
+                "waive", "disposition", "本文确需这样翻，带着交付",
+                "上下文确实需要不同译法时使用。复核人写明理由即可，只作用于本文，不会写入共享词库。",
+                action="grant_waiver", reason=_TERM_WAIVER_REASON,
+            ),
+        ]
+    if rule_class == WARN:
+        return [
+            locate,
+            _remedy(
+                "acknowledge", "disposition", "已阅，不影响交付",
+                "警告本身不阻断交付；确认已阅后会记入审计。",
+                action="acknowledge", reason=_ACKNOWLEDGE_REASON, recommended=True,
+            ),
+        ]
+    return []
+
+
 # Findings store the class they were produced with. When a rule is deliberately reclassified, findings that
 # were already stored (and sit at the gate right now) must follow it, or the change would only reach a task
 # after somebody re-ran its checks.

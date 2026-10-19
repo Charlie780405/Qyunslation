@@ -5044,7 +5044,27 @@ def _qa_item_payload(
         "disposition": _disposition_dict(last) if last is not None else None,
         "history": [_disposition_dict(h) for h in history],
         "allowed_dispositions": allowed,
+        "remedies": _remedies_for_item(row, rule_class, allowed, state),
     }
+
+
+def _remedies_for_item(row: QaItem, rule_class: str, allowed: list[str], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Clickable ways out of this finding, limited to what this person can run on this item right now."""
+    from qyunslation.pipeline.qa import registry
+
+    if state["closed"]:
+        return []
+    out = []
+    for remedy in registry.remedies_for(row.code, rule_class):
+        if remedy["kind"] == "disposition" and remedy["action"] not in allowed:
+            continue
+        if remedy["kind"] == "termbase":
+            evidence = row.evidence_json or {}
+            remedy = {**remedy, "search": str(
+                evidence.get("source_term") or evidence.get("source_norm") or evidence.get("expected") or ""
+            )[:80]}
+        out.append(remedy)
+    return out
 
 
 def _prior_version_dispositions(session: Session, run: TranslationRunRecord) -> dict[str, QaDisposition]:

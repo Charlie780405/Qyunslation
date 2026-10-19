@@ -72,6 +72,14 @@ const ITEMS = [
     history: [{ id: 'd1', action: 'grant_waiver', actor_sub: 'rev', actor_role: 'reviewer', reason: '印章位置不同', self_review: false, created_at: '2026-10-19T08:00:00Z' }] }),
 ];
 
+const REMEDY = {
+  locate: { id: 'locate', kind: 'locate', label: '先看问题所在的页面', why: '对照原文和译文，确认问题是否真实存在。', action: '', reason: '', recommended: false },
+  revise: { id: 'revise', kind: 'revise', label: '重新生成修订版', why: '原版会保留，新版重新翻译并自动复检。', action: '', reason: '', recommended: false },
+  waive: { id: 'waive', kind: 'disposition', label: '确认没问题，带着交付', why: '你看过并认为可以接受时使用。', action: 'grant_waiver', reason: '已核对首页，标识在译文中以其他形式保留，不影响使用。', recommended: true },
+  recheck: { id: 'recheck', kind: 'recheck', label: '重新检查', why: '这是检查没有跑成，不代表译文有问题。', action: '', reason: '', recommended: true },
+  termbase: { id: 'termbase', kind: 'termbase', label: '去术语工作台核对译名', why: '先确认批准译名是否正确。', action: '', reason: '', recommended: true, search: 'dupilumab' },
+};
+
 const RUN = {
   id: 'run-1', filename: 'a.pdf', status: 'gated', stage: 'qa', quality_state: 'qa_blocked',
   lifecycle: 'qa_action', next_action: 'fix_quality_issues', superseded_by: null,
@@ -210,6 +218,68 @@ describe('QA todo panel', () => {
     const body = wrapper.find('[data-term-body]');
     expect(body.element.tagName).toBe('DETAILS');
     expect(body.attributes('open')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('offers concrete ways out of a problem, the recommended one first and prominent', async () => {
+    apiMock.getQaItems.mockResolvedValue({ items: [
+      ITEMS[1] && { ...ITEMS[1], remedies: [REMEDY.waive, REMEDY.revise] },
+    ] });
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    const box = wrapper.find('[data-qa-remedies]');
+    expect(box.exists()).toBe(true);
+    const buttons = box.findAll('button');
+    expect(buttons.map((b) => b.attributes('data-remedy'))).toEqual(['waive', 'revise']);
+    expect(buttons[0].classes()).toContain('qy-primary-button');
+    expect(buttons[0].text()).toContain('推荐');
+    expect(box.text()).toContain('你看过并认为可以接受时使用');
+    wrapper.unmount();
+  });
+
+  it('a "go ahead" remedy opens the form with the reason already filled in, and it can be submitted as is', async () => {
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[1], remedies: [REMEDY.waive] }] });
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    await wrapper.find('[data-remedy="waive"]').trigger('click');
+    await flushPromises();
+    const form = wrapper.find('[data-qa-form]');
+    expect(form.find('textarea').element.value).toContain('已核对首页');
+    await form.find('button[type="submit"]').trigger('submit');
+    await flushPromises();
+    expect(apiMock.postQaDisposition).toHaveBeenCalledWith('run-1', 'i2', expect.objectContaining({
+      action: 'grant_waiver', reason: expect.stringContaining('已核对首页'),
+    }));
+    wrapper.unmount();
+  });
+
+  it('a recheck remedy runs the check again', async () => {
+    apiMock.requalifyRun.mockResolvedValue({});
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[1], remedies: [REMEDY.recheck] }] });
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    await wrapper.find('[data-remedy="recheck"]').trigger('click');
+    await flushPromises();
+    expect(apiMock.requalifyRun).toHaveBeenCalledWith('run-1');
+    wrapper.unmount();
+  });
+
+  it('a term remedy opens the vocabulary workbench with the term already in the search', async () => {
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[1], remedies: [REMEDY.termbase] }] });
+    const { wrapper, router } = await mountPage();
+    await pick(wrapper, 0);
+    await wrapper.find('[data-remedy="termbase"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/termbase');
+    expect(router.currentRoute.value.query.q).toBe('dupilumab');
+    wrapper.unmount();
+  });
+
+  it('says who to ask when this account has nothing it can run on the problem', async () => {
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[1], remedies: [] }] });
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    expect(wrapper.find('[data-qa-no-remedy]').text()).toContain('联系');
     wrapper.unmount();
   });
 

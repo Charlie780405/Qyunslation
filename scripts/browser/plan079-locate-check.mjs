@@ -31,9 +31,11 @@ function item(overrides) {
     location: { anchors: [{ side: 'source', page: 3, label: '45.2%', excerpt: '…45.2% improved…' }] }, ...overrides,
   };
 }
+const WAIVE = { id: 'waive', kind: 'disposition', label: '确认没问题，带着交付', why: '你看过并认为可以接受时使用。', action: 'acknowledge', reason: '已查看该提示，属于正常保留或可接受的内容，不影响交付。', recommended: true };
+const REVISE = { id: 'revise', kind: 'revise', label: '重新生成修订版', why: '原版会保留，新版重新翻译并自动复检。', action: '', reason: '', recommended: false };
 const ITEMS = [
   item({}),
-  item({ id: 'i2', code: 'LATIN_RESIDUE', title: '译文中英文残留较多', severity: 'warning', rule_class: 'W', allowed_dispositions: ['acknowledge'],
+  item({ id: 'i2', code: 'LATIN_RESIDUE', title: '译文中英文残留较多', severity: 'warning', rule_class: 'W', allowed_dispositions: ['acknowledge'], remedies: [WAIVE, REVISE],
     location: { anchors: [{ side: 'translated', page: 2, label: '英文残留', excerpt: 'Subjects receiving…' }] } }),
   item({ id: 'i3', code: 'AD_NEGATION_DRIFT', title: '否定含义在译文中丢失', location: { anchors: [{ side: 'translated', page: 4, label: '否定', excerpt: 'no' }] } }),
   item({ id: 'i4', code: 'AD_MODALITY_DRIFT', title: '义务、许可或禁止的语气发生变化', location: { anchors: [{ side: 'source', page: 99, label: 'must', excerpt: 'must' }] } }),
@@ -142,6 +144,15 @@ async function scenario(browserType, browserName, sizeName, translatedPdf) {
       const sourceVisible = await page.evaluate(() => { const s = document.querySelector('[data-side="source"] .qy-pane-scroll'); return !!s && s.offsetParent !== null; });
       check(`${tag}: other side hidden on ${sizeName}`, !sourceVisible);
     }
+
+    // 3b) the way out is on screen and one click fills in the reason
+    const remedies = page.locator('[data-qa-remedies] [data-remedy]');
+    check(`${tag}: remedy buttons are shown`, await remedies.count() === 2, String(await remedies.count()));
+    check(`${tag}: the recommended remedy is marked`, (await page.locator('[data-remedy="waive"]').textContent()).includes('推荐'));
+    await page.locator('[data-remedy="waive"]').click();
+    const prefilled = await page.locator('[data-qa-form] textarea').inputValue();
+    check(`${tag}: the reason is prefilled and long enough to submit`, prefilled.trim().length >= 10, prefilled);
+    check(`${tag}: submit is enabled without typing`, await page.locator('[data-qa-form] button[type="submit"]').isEnabled());
 
     // 4) out of range
     await locate(page, '义务、许可或禁止的语气发生变化');

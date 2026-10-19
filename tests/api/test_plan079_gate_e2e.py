@@ -91,3 +91,25 @@ def test_a_garbled_text_item_stored_as_c1_before_the_change_is_waivable_without_
         assert shown["rule_class"] == "C2" and "grant_waiver" in shown["allowed_dispositions"]
         assert _post(client, run_id, item_id, REVIEWER, "grant_waiver", "页面上读不出乱码，内容可以接受").status_code == 200
     reset_engine()
+
+
+def test_a_blocker_comes_with_ways_out_limited_to_what_this_person_can_run(monkeypatch, tmp_path):
+    from _plan078_flow import OWNER, REVIEWER, make_client, run_to_gate
+    from test_plan078b_dispositions import _inject, _item
+
+    with make_client(monkeypatch, tmp_path, translate=True) as client:
+        run_id, _ = run_to_gate(client, OWNER, tmp_path, "remedies")
+        garbled, term = _inject(run_id, [
+            ("blocker", "TEXT_ENCODING_ARTIFACT", {"pages": [2]}),
+            ("blocker", "TERM_HIGH_RISK_CONFLICT", {"concept_id": "c1", "expected": "度普利尤单抗", "source_term": "dupilumab"}),
+        ])
+        reviewer = {r["id"]: r for r in _item(client, run_id, garbled, REVIEWER)["remedies"]}
+        assert reviewer["waive"]["action"] == "grant_waiver" and len(reviewer["waive"]["reason"]) >= 10
+        assert reviewer["waive"]["recommended"] is True and "revise" in reviewer
+        # the submitter alone may not waive: that option is simply not offered, the rest still is
+        submitter = {r["id"] for r in _item(client, run_id, garbled, OWNER)["remedies"]}
+        assert "waive" not in submitter and "revise" in submitter
+        # a term conflict leads to the vocabulary workbench with the term already named
+        term_remedies = {r["id"]: r for r in _item(client, run_id, term, REVIEWER)["remedies"]}
+        assert term_remedies["termbase"]["search"] == "dupilumab" and term_remedies["termbase"]["recommended"] is True
+    reset_engine()
