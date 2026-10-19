@@ -214,15 +214,19 @@ def test_delete_commits_before_unlinking_and_audits_review_decisions(client, mon
         order.append("unlink")
         return real_unlink(self, *a, **k)
 
+    # PLAN-078e: deleting moves the task to the recycle bin and touches no file; the permanent
+    # purge is what removes files, and it commits its decision first.
+    assert client.delete(f"/api/v1/translation-runs/{run_id}", headers=OWNER).status_code == 204
     monkeypatch.setattr(Session, "commit", spy_commit)
     monkeypatch.setattr(Path, "unlink", spy_unlink)
-    assert client.delete(f"/api/v1/translation-runs/{run_id}", headers=OWNER).status_code == 204
+    purged = client.post(f"/api/v1/translation-runs/{run_id}/purge", headers=ADMIN)
+    assert purged.status_code == 200 and purged.json()["purged"] is True
     assert "unlink" in order
     assert order.index("commit") < order.index("unlink")
 
     with SessionLocal() as session:
         audit = session.scalars(
-            select(AuditEvent).where(AuditEvent.action == "translation_run.delete")
+            select(AuditEvent).where(AuditEvent.action == "translation_run.purge")
         ).all()
         assert len(audit) == 1
         decisions = (audit[0].extra or {}).get("review_decisions")
@@ -230,14 +234,14 @@ def test_delete_commits_before_unlinking_and_audits_review_decisions(client, mon
         assert decisions[0]["comment"] == "数字不一致"
 
 
-def test_failed_unlink_does_not_fail_or_resurrect_delete(client, monkeypatch):
+def test_delete_never_touches_files_and_never_resurrects(client, monkeypatch):
     pdf = _preflight(client)
     run_id = _create_run(client, pdf["id"], "del2").json()["id"]
 
     def boom(self, *a, **k):
         raise PermissionError("locked")
 
-    monkeypatch.setattr(Path, "unlink", boom)
+    monkeypatch.setattr(Path, "unlink", boom)  # would fail if delete tried to remove anything
     assert client.delete(f"/api/v1/translation-runs/{run_id}", headers=OWNER).status_code == 204
     assert client.get(f"/api/v1/translation-runs/{run_id}", headers=OWNER).status_code == 404
 
