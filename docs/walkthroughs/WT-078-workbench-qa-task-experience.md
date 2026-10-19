@@ -52,3 +52,10 @@
 1. 用一份加密 PDF、一份扫描 PDF、一份宽表格 docx 走预检卡；对比空闲标签页 10 分钟的请求数。
 2. 在 Chrome、Firefox、Safari 各做一次拖放走查。
 3. 确认 `pdf2zh.service` 单元文件改动（systemd 提示需要 `daemon-reload`，非本次引入）。
+
+## 7. 追加：术语证据展示全部出处与完整句子（分支 `feat/term-evidence-sentences`，未部署）
+
+- 现象：术语审核里“上下文与提取证据（4 处）”只展示一段文字，而且是 PDF 的一行（约 80 字符，常在句子中间断开）。
+- 改动：抽取时把每处出现所在的完整句子（前后两个句末标点之间，跨 PDF 换行拼接，不拼入作者/单位/参考文献行）存为该出现位置的上下文；候选接口为每处出现附带 `sentence`、`match_start/match_end`、`truncated`；前端逐条列出全部出处（第几处、页码、高亮术语），默认展开。重新检查时同一位置的上下文会被更新，不再重复添加出现位置。
+- 已有候选：新增 `scripts/backfill-term-evidence-sentences.py RUN_ID [--apply]`（默认只演练，不调用模型）。对任务 `eb7e4876…` 演练结果：163 个候选、418 处出现，396 处会更新，0 处对不上；“subgroup analyses”的 4 处都变成完整句子。**尚未 `--apply`，也尚未部署。**
+- 验证：新增后端测试 8 项、前端测试 5 项；后端全量（不含 `tests/structure`）只有已记录的 9 个基线失败；前端 205/205；`npm run build` 通过。未做浏览器走查。

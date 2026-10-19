@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from qyunslation.glossary.candidate_rules import (
     classify_risk_by_rules,
@@ -57,6 +57,8 @@ _EXTRACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 EXTRACTION_RULE_VERSION = f"PLAN-074-v1+{rules_version()}"
+# Occurrence contexts keep enough of the paragraph for the complete sentence around a term (row-level context stays at 1000).
+OCCURRENCE_CONTEXT_CAP = 4000
 STRUCTURED_PROMPT_VERSION = "PLAN-074-medical-v1"
 
 
@@ -101,6 +103,82 @@ def _eligible_paragraphs(text: str) -> list[tuple[int, str, int]]:
     return rows
 
 
+def sentence_context(
+    eligible: list[tuple[int, str, int]], index: int, start: int, end: int
+) -> str:
+    """The complete sentence holding ``eligible[index][1][start:end]``.
+
+    PDF text arrives one physical line at a time, so a sentence usually continues on the next
+    line.  Lines that were not eligible (authors, references, ...) are never stitched in.
+    """
+    from qyunslation.workbench.sentences import sentence_bounds
+
+    first = last = index
+    while first > 0 and eligible[first - 1][0] == eligible[first][0] - 1:
+        first -= 1
+    while last + 1 < len(eligible) and eligible[last + 1][0] == eligible[last][0] + 1:
+        last += 1
+    pieces: list[str] = []
+    line_offset = 0
+    hit_start = hit_end = 0
+    for position in range(first, last + 1):
+        line = eligible[position][1]
+        if position == index:
+            hit_start, hit_end = line_offset + start, line_offset + end
+        pieces.append(line)
+        line_offset += len(line) + 1
+    joined = " ".join(pieces)
+    begin, finish = sentence_bounds(joined, hit_start, hit_end)
+    sentence = re.sub(r"\s+", " ", joined[begin:finish]).strip()
+    if len(sentence) > OCCURRENCE_CONTEXT_CAP:
+        centre = max(0, min(hit_start - begin, len(sentence)))
+        low = max(0, centre - OCCURRENCE_CONTEXT_CAP // 2)
+        sentence = sentence[low : low + OCCURRENCE_CONTEXT_CAP]
+    return sentence or eligible[index][1][:OCCURRENCE_CONTEXT_CAP]
+
+
+def refresh_occurrence_contexts(
+    session: Session, *, run: TranslationRunRecord, source_text: str
+) -> dict[str, int]:
+    """Re-derive the sentence for candidates stored with line-sized contexts (no model calls).
+
+    Only existing occurrences are updated, matched by their stored position; nothing is added or removed.
+    """
+    eligible = _eligible_paragraphs(source_text)
+    rows = list(
+        session.scalars(
+            select(DocumentTermCandidate)
+            .where(DocumentTermCandidate.translation_run_id == run.id)
+            .options(selectinload(DocumentTermCandidate.occurrences))
+        ).unique()
+    )
+    stats = {"candidates": len(rows), "occurrences": 0, "updated": 0, "unchanged": 0, "unmatched": 0}
+    for candidate in rows:
+        pattern = re.compile(re.escape(candidate.source_term), re.IGNORECASE)
+        by_place = {
+            (occurrence.block_id, occurrence.char_start, occurrence.char_end): occurrence
+            for occurrence in candidate.occurrences
+        }
+        stats["occurrences"] += len(candidate.occurrences)
+        touched: set[tuple[Any, Any, Any]] = set()
+        for row_index, (paragraph_no, paragraph, base_offset) in enumerate(eligible):
+            for match in pattern.finditer(paragraph):
+                place = (f"paragraph:{paragraph_no}", base_offset + match.start(), base_offset + match.end())
+                occurrence = by_place.get(place)
+                if occurrence is None:
+                    continue
+                touched.add(place)
+                context = sentence_context(eligible, row_index, match.start(), match.end())
+                if context and context != occurrence.source_context:
+                    occurrence.source_context = context
+                    stats["updated"] += 1
+                else:
+                    stats["unchanged"] += 1
+        stats["unmatched"] += len(by_place) - len(touched)
+    session.flush()
+    return stats
+
+
 def discover_term_occurrences(source_text: str, translated_text: str) -> list[dict[str, Any]]:
     """Deterministically discover balanced medical candidates with complete locations.
 
@@ -108,7 +186,8 @@ def discover_term_occurrences(source_text: str, translated_text: str) -> list[di
     evidence-only and cannot invent a source term or target fragment.
     """
     found: dict[str, dict[str, Any]] = {}
-    for paragraph_no, paragraph, base_offset in _eligible_paragraphs(source_text):
+    eligible_rows = _eligible_paragraphs(source_text)
+    for row_index, (paragraph_no, paragraph, base_offset) in enumerate(eligible_rows):
         for label, pattern in _EXTRACT_PATTERNS:
             for match in pattern.finditer(paragraph):
                 token = match.group(0).strip()
@@ -128,7 +207,7 @@ def discover_term_occurrences(source_text: str, translated_text: str) -> list[di
                     "char_start": start,
                     "char_end": end,
                     "bbox": None,
-                    "source_context": paragraph[:1000],
+                    "source_context": sentence_context(eligible_rows, row_index, match.start(), match.end()),
                     "target_context": (translated_text or "")[:1000],
                 }
                 row = found.setdefault(
@@ -217,7 +296,7 @@ def discover_structured_medical_terms(
         reason = str(item.get("reason") or "medical phrase").strip()[:240]
         occurrences: list[dict[str, Any]] = []
         surface = ""
-        for paragraph_no, paragraph, base_offset in eligible:
+        for row_index, (paragraph_no, paragraph, base_offset) in enumerate(eligible):
             for match in re.finditer(re.escape(requested), paragraph, re.I):
                 surface = surface or match.group(0)
                 occurrences.append(
@@ -228,7 +307,7 @@ def discover_structured_medical_terms(
                         "char_start": base_offset + match.start(),
                         "char_end": base_offset + match.end(),
                         "bbox": None,
-                        "source_context": paragraph[:1000],
+                        "source_context": sentence_context(eligible, row_index, match.start(), match.end()),
                         "target_context": (translated_text or "")[:1000],
                     }
                 )
@@ -247,7 +326,7 @@ def discover_structured_medical_terms(
                 "suggested_target": str(item.get("recommended_target") or "").strip() or None,
                 "term_type": term_type,
                 "risk": classify_risk_by_rules(surface, term_type),
-                "source_context": occurrences[0]["source_context"],
+                "source_context": occurrences[0]["source_context"][:1000],
                 "target_context": (translated_text or "")[:1000],
                 "occurrences": occurrences,
                 "extraction_metadata": {
