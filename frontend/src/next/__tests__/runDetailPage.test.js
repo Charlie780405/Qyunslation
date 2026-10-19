@@ -91,7 +91,6 @@ beforeEach(() => {
   });
   apiMock.listRunAffiliationSegments.mockResolvedValue({ items: [], unconfirmed: 0 });
   apiMock.decideRunTermCandidate.mockResolvedValue({});
-  apiMock.decideRunAffiliationSegment.mockResolvedValue({});
 });
 
 afterEach(() => {

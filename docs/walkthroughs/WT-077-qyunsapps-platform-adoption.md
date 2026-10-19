@@ -21,7 +21,7 @@
 | T2 | 少量接线 | `frontend/src/main.js`（+1 import、+1 条件分支）、`frontend/src/next/components/AppShell.vue`（退出后跳 end-session）、`frontend/tailwind.config.js`（加 preset） |
 | T2 | 测试 | `frontend/src/next/__tests__/qyuns.test.js`（21 项） |
 | T2 | 构建产物（单独的 `build:` 提交） | `qyunslation/static/app/*` |
-| T3 | 备好未执行 | `docs/runbooks/pg-loopback-binding.md` |
+| T3 | 已收口（`6ecd306`；2026-10-19 核对本机只监听 127.0.0.1:5433；口令是否覆盖默认值仍待用户核对，见 PLAN-079 F0） | `docs/runbooks/pg-loopback-binding.md` |
 | T4 | 决策包 | `docs/assessments/object-storage-ownership.md` |
 | T5 | 归属说明 | `deploy/authentik/blueprints/README.md`（旧蓝图标为迁移基线，未删除、未改内容） |
 

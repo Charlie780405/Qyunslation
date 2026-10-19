@@ -192,6 +192,33 @@ describe('QA todo panel', () => {
     await byText(panel(wrapper), '在对照视图定位').trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.query.page).toBe('3');
+    expect(wrapper.find('[data-locate-note]').text()).toContain('已定位到源文第 3 页');
+    wrapper.unmount();
+  });
+
+  it('shows undecided vocabulary as non-blocking glossary work when the gate ignores it', async () => {
+    apiMock.getRun.mockResolvedValue({
+      ...RUN,
+      formal_gate: { ...RUN.formal_gate, reasons: ['qa_blockers'], term_gate_mode: 'enforce' },
+    });
+    const { wrapper } = await mountPage();
+    const text = panel(wrapper).text();
+    expect(text).toContain('词库待整理（不影响交付）');
+    expect(text).not.toContain('待审核术语');
+    expect(wrapper.find('[data-term-nonblocking]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('answers a second click on the same page instead of staying silent', async () => {
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    await byText(panel(wrapper), '在对照视图定位').trigger('click');
+    await flushPromises();
+    const scroll = vi.fn();
+    wrapper.find('.qy-viewer').element.scrollIntoView = scroll;
+    await byText(panel(wrapper), '在对照视图定位').trigger('click');
+    await flushPromises();
+    expect(scroll).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 

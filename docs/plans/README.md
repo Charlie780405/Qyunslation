@@ -56,9 +56,10 @@
 | **PLAN-074** | [PLAN-074-author-terms-qa](./PLAN-074-author-terms-qa/) | **作者与英文单位原文保护、术语 QA 闭环与乱码门禁（074a–074d）** |
 | **PLAN-075** | [PLAN-075-073-074-closeout](./PLAN-075-073-074-closeout/) | **073/074 收口、部署门禁、真件回归与评测真实化（075a–075e）** |
 | **PLAN-076** | [PLAN-076-ad-bilingual-prompt-quality-system](./PLAN-076-ad-bilingual-prompt-quality-system/) | **AD 中英双向专业提示词、术语与质量门禁（076a–076h）** |
-| **PLAN-077** | [PLAN-077-qyunsapps-platform-adoption](./PLAN-077-qyunsapps-platform-adoption/) | **接入 QyunsApps 平台控制面：身份/边缘归属、统一 UI、数据面加固与 Authentik 迁出**（T1–T5 仓库侧已实施，见 WT-077） |
-| **PLAN-078** | [PLAN-078-workbench-qa-task-experience](./PLAN-078-workbench-qa-task-experience/) | **工作台 QA 处理闭环、状态一致、参数确认、任务检索与批量/回收站（078a–078f）**（规划完成，未实施） |
+| **PLAN-077** | [PLAN-077-qyunsapps-platform-adoption](./PLAN-077-qyunsapps-platform-adoption/) | **接入 QyunsApps 平台控制面：身份/边缘归属、统一 UI、数据面加固与 Authentik 迁出**（T1、T2 已合并；T3 的 PG 端口收口已合并（`6ecd306`）；T4、T5 为准备件；T6、T7 待用户，见 WT-077） |
+| **PLAN-078** | [PLAN-078-workbench-qa-task-experience](./PLAN-078-workbench-qa-task-experience/) | **工作台 QA 处理闭环、状态一致、参数确认、任务检索与批量/回收站（078a–078f）**（078a–e、f1–f7 已合并并部署，f8 仅出方案；见各子计划上线记录与 WT-078） |
+| **PLAN-079** | [PLAN-079-qa-gate-and-term-triage](./PLAN-079-qa-gate-and-term-triage/) | **QA 阻断分级、术语审核准入、对照视图定位与上线收口（A–E + F0–F17）**（v3；A–D 等已在工作区实现，未部署，见 WT-079） |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
 
-下一个可用父计划编号：**PLAN-079**。创建前须同时检查所有 worktree，避免未合并计划占号。
+下一个可用父计划编号：**PLAN-080**。创建前须同时检查所有 worktree，避免未合并计划占号。

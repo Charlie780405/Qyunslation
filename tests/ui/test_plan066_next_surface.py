@@ -33,15 +33,15 @@ def test_next_app_exposes_clinical_routes_and_design_tokens():
     assert '/app-assets/qyunslation-mark.png' in shell
     assert '/app-assets/qyunslation-mark.png' in login
     assert '/static/qyunslation-logo.png' in settings
-    assert 'settings.sourceLanguage' in workbench
-    assert 'settings.targetLanguage' in workbench
-    assert 'function buildIdempotencyKey()' in workbench
-    assert 'encodeURIComponent' in workbench
-    assert 'showArchived' in workbench
+    # Language choices live in the confirmation form since PLAN-078c; idempotency headers are built in api.js.
+    assert 'form.sourceLanguage' in workbench
+    assert 'form.targetLanguage' in workbench
+    assert "'Idempotency-Key'" in api
+    assert 'encodeURIComponent' in api
+    assert 'archived' in workbench
     assert 'progress_message' in workbench
     assert 'activeRun' in workbench
     assert 'is-indeterminate' in workbench
-    assert 'preflight not found' in workbench
     assert 'patchRun' in api
     assert 'deleteRun' in api
     assert (ROOT / 'qyunslation/static/qyunslation-logo.png').exists()

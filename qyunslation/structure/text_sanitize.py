@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from typing import Iterable
 
 IL_MARKUP_LEAK = "IL_MARKUP_LEAK"
 SOURCE_OVERLAY = "SOURCE_OVERLAY"
@@ -22,7 +23,12 @@ _LEAK_RE = re.compile(
     re.IGNORECASE,
 )
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
-_MOJIBAKE_RE = re.compile(r"(?:Ã.|Â.|â(?:€™|€œ|€|€“|€”|€¦))")
+# UTF-8 text decoded as Latin-1/cp1252: the lead byte (Ã/Â) is followed by a continuation byte, which shows up as
+# U+0080-U+00BF or one of the cp1252 specials. An ASCII letter after Ã/Â (SÃO PAULO, JOÃO) is a real capital letter.
+_CP1252_SPECIALS = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
+_MOJIBAKE_RE = re.compile(rf"(?:[ÃÂ][\x80-\xbf{_CP1252_SPECIALS}]|\u00e2(?:€™|€œ|€|€“|€”|€¦))")
+_C0_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_C1_RE = re.compile(r"[\x80-\x9f]")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_WORD_RE = re.compile(r"[A-Za-z]{3,}")
 _LATIN_RE = re.compile(r"[A-Za-z]")
@@ -145,6 +151,26 @@ def strip_il_markup(text: str | None) -> str:
 
 def has_il_markup_leak(text: str | None) -> bool:
     return bool(_LEAK_RE.search(text or ""))
+
+
+def artifact_evidence(text: str | None) -> dict[str, list[str]]:
+    """Which detector families fire on ``text`` and on which code points (PLAN-079 D1).
+
+    ``{"fffd": ["U+FFFD"], "c0": ["U+0007"], "c1": [...], "mojibake": ["U+00C3"]}``; empty when clean.
+    """
+    raw = text or ""
+    found: dict[str, list[str]] = {}
+
+    def add(family: str, chars: Iterable[str]) -> None:
+        marks = sorted({f"U+{ord(ch):04X}" for ch in chars})
+        if marks:
+            found[family] = marks[:6]
+
+    add("fffd", [ch for ch in raw if ch == "\ufffd"][:1])
+    add("c0", _C0_RE.findall(raw))
+    add("c1", _C1_RE.findall(raw))
+    add("mojibake", [m.group(0)[0] for m in _MOJIBAKE_RE.finditer(raw)])
+    return found
 
 
 def detect_text_artifacts(text: str | None) -> list[str]:

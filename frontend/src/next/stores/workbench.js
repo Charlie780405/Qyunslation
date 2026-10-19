@@ -67,8 +67,9 @@ export async function restoreWorkbenchSession(sessionUser) {
         } else {
           window.localStorage.removeItem(uploadKey);
         }
-      } catch {
-        window.localStorage.removeItem(uploadKey);
+      } catch (error) {
+        // A dropped connection says nothing about the upload; only a server answer (gone / forbidden) makes the pointer stale.
+        if (!error?.network) window.localStorage.removeItem(uploadKey);
       }
     }
   } finally {

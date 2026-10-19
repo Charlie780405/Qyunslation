@@ -1,0 +1,154 @@
+# WT-079：QA 阻断分级、术语审核准入、对照视图定位与上线收口（实施走查）
+
+> 日期：2026-10-19 · 计划：[PLAN-079](../plans/PLAN-079-qa-gate-and-term-triage/PLAN-079-qa-gate-and-term-triage.md) v3 · 分支：`docs/plan-079-qa-gate-triage`（本记录对应的改动**未提交、未合并、未部署**）
+
+## 1. 本轮做了什么
+
+按 PLAN-079 §11 的顺序，先做了无需用户确认的项，再做依赖它们的 C、D。门禁开关默认 `legacy`，门禁口径本身不因部署而改变。但 legacy 并不等于“完全无行为变化”，以下几项在默认配置下就会生效（见 §10）：预检复用的语言提示、乱码判定的正则收紧、docx/pptx 工作流的修复、工作台的加载失败提示。上线前需要用户确认的事项见 §6。
+
+| 编号 | 状态 | 说明 |
+| --- | --- | --- |
+| A 对照视图定位 | 已实现，**Chromium + WebKit 三种宽度实测通过**（用拦截接口的本地构建，未登录真实环境） | `DualCanvasViewer.focusAnchor`：目标侧切换、同页重复点击也执行、滚入视口并短暂高亮、`aria-live` 播报、越界/未加载给出原因、加载中暂存锚点。`RunDetailPage.locateAnchor` 改为调用它；浏览器实测另发现并修复 `PdfPane` 的页偏移缺陷（见 §5） |
+| B 只读基线 | 已实现并在本机库跑过一次 | `scripts/qa/plan079_baseline.py`，结果见 §3 |
+| C 术语与门禁解耦 | 已实现，**默认 `legacy`** | `QYUNSLATION_TERM_GATE_MODE=legacy/shadow/enforce`、`TERM_REVIEW_REQUIRED`、`violation`→阻断型 `TERM_TARGET_MISSING`、`phrase_denylist`（规则版本 `079-v1`）、前端文案 |
+| D 乱码证据与分级 | 已实现；**源文继承降级默认关闭** | 检测器与码点写入证据。源文同页也有的字符降为警告 `TEXT_ENCODING_INHERITED`，但**只有设置 `QYUNSLATION_ENCODING_INHERITANCE=1` 才启用**（B2 标注未做，不能在默认路径上验证它）。收紧 `Ã`/`Â` 判定，葡/西语大写名不再命中（这一条默认生效） |
+| E 回归、影子灰度、切换 | **未做**（E1 已做，E2/E3 需要部署与一周观察） | 见 §6 |
+| F2 预检误阻断 | 已评估 | §4 |
+| F5 测试基线 | 已清零 | §5 |
+| F8 浏览器实测 | Chromium + WebKit 已做，Firefox 未做 | §6：拖放四种情形与轮询请求数，18/18 |
+| F7 排序规则告警 | 只读检查已做，**未写库** | §8：影响清单；REINDEX 与刷新版本待批准（D6） |
+| F10 文档状态 | 已修正 | 索引、PLAN-077 README/正文、WT-077 T3、WT-078 §7 标题 |
+| F12 复用预检的语言提示 | 已做；`capabilities` 字段**没改** | 复用预检时按新选的源语言只重算 `LANGUAGE_MISMATCH`（其余问题保持）；`capabilities` 在仓库内无人读取，但删除或改值是接口契约变更，等你确认外部调用方后再动 |
+| F14 静默 `catch {}` | 已处理 | §5 |
+
+## 2. 设计要点与取舍
+
+- **门禁只读 QA 条目。** `enforce` 下 `unresolved_terms` 不再进入 `reasons`，但 `unresolved_term_count` 仍在响应里（供展示）。`legacy` 和 `shadow` 的判定与以前完全一致。
+- **`shadow` 不改变任何结论。** 它只在 QA 轮次里把“旧口径的术语原因（`unresolved_terms`）/ 新口径的术语原因（`TERM_REVIEW_REQUIRED` 与 `violation` 补发造成的阻断）/ 各自条数”写进 `run.term_summary.gate_shadow`，并打日志 `plan079.gate_shadow`（不含术语原文）。shadow 评估自身出错只记日志，不会让健康的 QA 轮次失败；`enforce` 则保守：出错让轮次进入“检查未完成”，绝不悄悄放行。
+  - **端到端测试暴露的设计修正：** 最初记录的是“完整门禁原因”，但轮次进行到一半时任务还是 `draft`（会混进瞬时的 `qa_checking`），`qa_summary` 也还是上一轮的，记录会失真。现在只记“由术语策略引起”的部分，门禁的其余部分在两种口径下相同，由 `plan079_baseline.py` 按实时状态另行统计。
+- **`TERM_REVIEW_REQUIRED` 只用能确定性计算的信号。**
+  - a `multi_target`：同一 `source_norm` 在本文有 ≥2 种真正不同的译法（“自闭症”与“自闭症（ASD）”算一种）；
+  - c `alias_conflict`：术语库对同一原文给出两个不同的批准译名（且在本文出现过）；
+  - b（源文出现但译文既无译名也无原文）**没有上线**：现有对齐是模型段落对齐（`workbench/term_align.py`），不能作为门禁输入，这就是 PLAN-079 假设 H4 的结论。
+  - 必要条件：术语类型属于药名/生物制品/靶点/疾病/安全性事件/终点/量表/方案；已被术语库解决的和已裁决的不算；每文档最多 5 条，其余只计数。
+- **发现并补上一个会被悄悄放行的缺口（H3 的反面）。** `term_snapshot` 对**非高风险**硬约束术语缺失只发**警告**级 `TERM_TARGET_MISSING`（高风险才是阻断），而 `violation` 候选是**段落级**信号（该段源文有术语、对齐译文没有批准译名）。以前它们靠“未决候选”阻断交付；`enforce` 后如果不处理就会放行。所以 `violation` 现在会补发一条阻断型 `TERM_TARGET_MISSING`（同一概念已有阻断条目时不重复）。
+- **门禁租户白名单没做。** D4 已定“全租户影子”，`QYUNSLATION_TERM_GATE_TENANTS` 是计划里的可选项，需要时再加。
+- **A4（“返回问题”按钮）没做**，它在计划里是可选项。
+
+## 3. 阶段 B 基线（本机库，只读，聚合）
+
+运行：`scripts/qa/plan079_baseline.py`（只做 SELECT；输出写入 `var/plan079/`，不入库）。
+
+| 项 | 结果 |
+| --- | --- |
+| 已到达门禁的任务 | **1 个**（样本极少，不能据此校准） |
+| 门禁原因 | `qa_blockers` 1、`unresolved_terms` 1；**只因术语被阻断的任务：0** |
+| 未决候选 | 123 条：高风险 8 条；模型抽取 52、确定性 71；其中 `量表/终点/方法` 类 14 条 |
+| `TEXT_ENCODING_ARTIFACT` | 2 个条目、10 个锚点，摘录里的码点族**全部是 C0 控制字符**（没有 U+FFFD、C1、mojibake） |
+| `violation` 候选 | 0 条，无法对账 |
+
+对假设的结论（按计划，样本不足记为“未知”，**不据此改任何生产阈值**）：
+
+- H1（多数乱码命中来自控制字符）：本机样本**支持**，但只有 1 个任务；是否来自源文，需要源文页文本比对，现已由 D 在运行时完成（同页同族→降级）。
+- H2（只因术语被阻断的任务占多数）：**未知**，样本里是 0/1。需要生产多任务的 `shadow` 数据。
+- H3（每个 `violation` 都有对应 C4 条目）：**无数据**；但代码层面已确认 `violation` 与文档级检查口径不同，所以 C 补发了阻断条目（见 §2）。
+- H4：见 §2，b 不可用，a、c 可用。
+- H5（渲染前译文字符串可取回）：**未验证**。因此 D 没有做“渲染前不存在→抽取伪影降级”这一条，只做了“源文同页继承”和“大写人名不计”。
+- B2（人工标注 ≥30 条乱码、≥100 条候选）：**未做**，需要人工。
+
+## 4. F2：预检探测误阻断评估
+
+脚本：`scripts/qa/plan079_probe_eval.py`（只读）。对本机已有的 129 份**能正常使用的文件**运行探测：
+
+| 来源 | 文件数 | 阻断 | 警告 | 探测失败 | 最长耗时 |
+| --- | --- | --- | --- | --- | --- |
+| `var/preflights`（已上传过） | 35（docx 32、pdf 2、txt 1） | 0 | 0 | 0 | 0.82 s |
+| `var/translation-runs` | 38（txt 27、pdf 11） | 0 | 0 | 0 | 2.54 s |
+| `deliverables` | 53（png 29、pdf 24） | 0 | 0 | 0 | 0.56 s |
+| `docs/gold` | 3（md） | 0 | 0 | 0 | 0 s |
+
+结论：**没有发现误阻断**，耗时都在 4 秒上限内。局限：本机没有真实的加密、损坏、扫描、宽表格、pptx 样本，所以**真阳性一侧没有验证**，仍只靠合成夹具；`PROBE` 逃生开关 `QYUNSLATION_PREFLIGHT_PROBE=0` 保留。
+
+## 5. 测试基线与顺带修复
+
+全量后端测试（不含 `tests/structure`）之前有 9 个已知失败，现已全部处理：
+
+- 7 个 SQLite 迁移往返：`073a0001`、`074a0001` 在 SQLite 上执行了不支持的约束 ALTER。改为 SQLite 走 `batch_alter_table`，**PostgreSQL 路径原样不变**（已部署的迁移没有改动其 PG 行为）。
+- `test_plan060_evidence`：这是**真实缺陷**，不只是测试问题。`BaseWorkflowParams` 的 `domain_profile`、`document_profile` 被 `model_dump` 后传给翻译器配置，而所有翻译器 dataclass 都不接受它们，docx/pptx 经 `create_workflow_from_payload` 时抛 `TypeError`。已在 `qyunslation/core/factory.py` 中排除这两个字段（提示词编译发生在更早的位置）。线上 docx 任务是否走这条路径未核实。
+- **`PdfPane` 页偏移缺陷（真实浏览器才暴露，jsdom 看不到）：** `pageTop` 用 `offsetTop`，而滚动容器不是定位祖先，`offsetTop` 相对页面主体而不是滚动容器，查看器在页面越靠下偏差越大（实测目标页被滚过头约 1500 像素）。这意味着此前“跳页”在文档较长时本来就落不到正确的位置。已改为用几何位置相对滚动容器计算，`detectPage` 同步受益；jsdom 没有布局时回退 `offsetTop`。
+- **隐藏页签的画布在激活后才测宽：** 平板/手机上切到目标侧后页高会变，之前算好的滚动位置作废。`PdfPane` 现在记住最近一次定位请求，激活并重新测量后再对准一次。
+- `test_plan066_next_surface`：断言仍指向旧版 `WorkbenchPage`，改为指向 078c 之后的实际位置。
+- 前端 `runDetailPage.test.js`：mock 引用已删除的接口，9 个用例在干净工作树上就已失败（此前记录的 205/205 与现状不符）。
+
+F14：`TermbasePage` 的加载失败现在显示可重试的提示；`stores/workbench.js` 在网络中断时不再丢弃“未完成上传”的指针（只有服务端明确答复才清除）；`SettingsPage` 的管理员提示改为说明性注释；`logout.js` 本来就有说明，保持不变。
+
+## 6. 验证与尚未做的事
+
+验证：
+
+- 前端 vitest **216 项全绿**（新增 `dualCanvasViewer.locate.test.js` 6 项、`silentCatch.test.js` 3 项，并扩展 `qaTodoPanel.test.js`）；`vite build` 在临时目录通过（**没有**覆盖已跟踪的 `qyunslation/static/app`）。
+- **真实浏览器：** `scripts/browser/plan079-locate-check.mjs`（Playwright，Chromium + WebKit × 桌面 1440、平板 800、手机 390 × 译文 5 页/3 页）**70/70 通过**：查看器滚入视口；目标侧目标页位于其画布顶部；目标页被高亮；播报“已定位到源文第 N 页”；同页再次点击（先把页面滚走）仍有响应；锚点在译文侧时平板/手机自动切到译文页签、另一侧隐藏；页码越界给出“超出源文页数（99 > 5）”“超出译文页数（4 > 3）”；无页面级报错。接口、会话和 PDF 都是拦截并伪造的，**没有访问任何真实服务**。WebKit 用的是缓存里与 Playwright 版本不完全匹配的构建（`QY_WEBKIT_EXEC`）。
+- **F8（`scripts/browser/plan079-workbench-check.mjs`，Chromium + WebKit，18/18）：** 拖放进入时高亮；支持的文件被选中；不支持的格式和超过上限的文件被拒绝并说明原因；落在拖放区之外的文件不会让标签页跳走；空闲列表用假时钟快进 10 分钟，API 请求 **0** 次；有任务执行且无变化时快进 1 分钟，列表请求 **8** 次（固定 2 秒定时器会是 30 次；脚本带“确实在轮询”的下限对照，避免假通过）。
+- 后端新增 `tests/api/test_plan079_baseline.py`（5）、`tests/api/test_plan079_term_gate.py`（17）、`tests/api/test_plan079_gate_e2e.py`（3，真实 QA 轮次下三种开关）、`tests/api/test_plan079_language_reuse.py`（4）、`tests/pipeline/test_plan079_encoding.py`（16）；全量结果见本文末尾的“最终回归”。
+
+**没有做，也不能由我单方面做：**
+
+1. **登录后的真实页面走查（F1）与键盘/读屏**：A 的浏览器检查用的是伪造接口；真实账号下的页面、焦点移动的读屏体验、触屏实机都没有验证。
+2. **部署与上线**：需要重新 `vite build` 并提交 `static/app`、合并、运行 `scripts/deploy-translate-stack.sh`。这些是对外动作，等你确认。
+3. **E2/E3 影子灰度**：部署时设 `QYUNSLATION_TERM_GATE_MODE=shadow`，观察一个工作周，逐个抽查“新口径放行、旧口径阻断”的任务，再决定是否 `enforce`。差异报告用 `scripts/qa/plan079_shadow_report.py`（只读；数据源是 `run.term_summary.gate_shadow` 和 `plan079.gate_shadow` 日志）。总门禁脚本是 `scripts/verify-plan-079.sh`。
+4. **B2 人工标注**与 H2、H3、H5 的最终结论。
+5. F0、F1、F3、F4、F6、F7、F8、F9、F11、F12、F13、F15–F17：需要用户确认、账号、窗口或权限，见 PLAN-079 §11。
+6. `pdf2zh.service` 单元状态仍无法在本会话核实。
+7. F8 的 Firefox 与触屏实机未做（本机 Playwright 缓存里没有 Firefox）。
+
+回滚：把 `QYUNSLATION_TERM_GATE_MODE` 改回 `legacy` 并重启即可；乱码证据字段和 `TEXT_ENCODING_INHERITED` 只增不改，旧客户端忽略即可。
+
+## 7. 最终回归
+
+- 后端全量（不含 `tests/structure`）：**987 passed，0 失败**；此前 9 个基线失败已清零。
+- `tests/structure`：641 passed、6 skipped、**3 failed**。这 3 个在干净工作树上同样失败，与本计划无关，**未处理**：`test_manifest_contract.py::test_committed_json_schema_matches_model`、`test_manifest_store.py::test_schema_major_mismatch_is_treated_as_miss`、`test_plan059_fidelity.py::test_ljae_semantic_counts_are_not_physical_image_counts`（manifest 的 schema 契约与版本，属于更早的计划）。改 `text_sanitize` 相关的 `test_plan045_sanitize.py` 在其中，通过。
+- 前端 vitest：**216 passed**（20 个文件）。
+- 真实浏览器：A 的定位 70/70，F8 的拖放与轮询 18/18（Chromium + WebKit）。
+- `scripts/verify-plan-079.sh`：`SUMMARY: BLOCKED fail=0 blocked=2`；BLOCKED 的两项是登录后真实页面走查（需要测试账号）和影子灰度（需要部署与一周观察）。
+
+## 8. F7：PostgreSQL 排序规则版本告警（只读检查结果）
+
+在只读事务里查系统目录（没有写任何东西，也没有读取口令以外的配置内容）：
+
+| 项 | 结果 |
+| --- | --- |
+| 服务器 | PostgreSQL 16.15（Debian 12 容器镜像） |
+| 库的排序规则 | `en_US.utf8`；**记录版本 2.41，当前实际 2.36**（即库建在较新的 glibc 上，现在运行在较旧的 glibc 上） |
+| 依赖“命名排序规则”且版本不符的对象 | 0 个（873 个命名排序规则版本不符，但没有对象依赖它们） |
+| 使用库默认排序规则的 btree 索引（`public`） | 92 个，其中唯一索引 57 个（主键、`uq_project_tenant_slug`、`tenant_slug_key`、`uq_translation_run_idempotency` 等） |
+
+判断：glibc 版本变化只可能影响**字符串排序次序**，进而影响 btree 索引的有序性。主键基本是 UUID 字符串（ASCII 十六进制和连字符），在两个 glibc 版本里次序一致的概率很高，但**不能因此断言所有 57 个唯一索引都安全**（`slug`、`idempotency_key_hash`、各种 `*_key` 列可能含更多字符）。当前没有观察到查询异常或唯一约束异常，但这只是没有症状，不是证明。
+
+下一步需要你批准（计划决策 D6，推荐 a）：在维护窗口里对这 92 个索引（至少 57 个唯一索引）逐个 `REINDEX INDEX CONCURRENTLY`，再执行 `ALTER DATABASE qyunslation REFRESH COLLATION VERSION`，告警随之消失。`REINDEX CONCURRENTLY` 不阻塞写入，但仍属于对生产库的写操作，我没有执行。更稳妥的选择是先装 `amcheck` 用 `bt_index_check` 验证现有索引是否真的失序，这需要扩展权限，也等你决定。
+
+## 9. 需要用户动作的收口项：我能做的只读准备（均未执行任何写操作）
+
+| 项 | 准备结果 | 仍需用户 |
+| --- | --- | --- |
+| F3 构建新鲜度 | 已提交的 `qyunslation/static/app` 与 `frontend/src` 的最后一次提交同为 `a672262`（2026-10-19），即**已提交的产物与已提交的源码一致**。工作区里 PLAN-079 的前端改动**尚未重新构建进 `static/app`**，上线前必须重新 `vite build` 并提交 | 确认发布窗口并执行；运行 QyunsApps 002g smoke |
+| F9 配置核对 | `deploy/authentik/blueprints/README.md` 已写明：活动 SSOT 在 QyunsApps 仓，本仓蓝图只是恢复副本，且带 `client_secret` 占位默认值（在 Authentik 容器没有该环境变量时 apply 会把 secret 改成占位值）。这是 apply 前必须在 QyunsApps 侧确认的风险。没有接触任何密钥 | 在 QyunsApps 侧 apply 蓝图并做授权码往返 |
+| F15 对象存储 | 决策包文档 `docs/assessments/object-storage-ownership.md` 已存在；T4 要求的 MinIO 实际配置、容量、备份证据在 qyunsgen 侧，本仓读不到，也不允许读取 access key | 补齐 5 项证据并决定是否迁移（D8） |
+| F17 清理清单 | 已合并到 `main` 的本地分支 31 个（含 `feat/PLAN-077-qyunsapps-platform-adoption`、`fix/pg-loopback-binding`）；另有 9 个 worktree（其中 8 个挂在 `.codex`/`.cursor` 下，部分分支已合并）。**没有删除任何分支或 worktree**；有 worktree 占用的分支不能直接删 | 逐项确认（D10） |
+| F0、F1、F4、F6、F7 的写入部分、F11、F13、F16 | 无可做的只读准备，或已在前文说明 | 见 PLAN-079 §11 |
+
+## 10. 上线前的 legacy 行为核对（修正）
+
+本文 §1 原来写“不部署也不会改变现有行为”，逐项核对后这句话不成立。默认配置下的实际变化如下：
+
+| 项 | 默认配置下是否生效 | 影响 |
+| --- | --- | --- |
+| 术语门禁 `legacy/shadow/enforce` | 默认 `legacy`，门禁口径不变 | 无 |
+| 乱码源文继承降级 | **默认关闭**（`QYUNSLATION_ENCODING_INHERITANCE`） | 无；默认下每个乱码页都是阻断，与之前一致 |
+| 乱码正则收紧 | **生效** | 大写葡/西语名（`JOÃO`、`SÃO PAULO`）不再被判为乱码。这是对误报的修正，但它确实减少了一类阻断，需要知道 |
+| 预检复用时的语言提示 | **生效** | 复用预检时按新选的源语言重算语言提示（修正） |
+| docx/pptx 工作流 | **生效** | `factory.py` 此前把 `domain_profile`/`document_profile` 传给翻译器配置，所有翻译器 dataclass 都不接受，docx/pptx 经该路径会 `TypeError`。在 `main` 上已复现（`test_plan060_evidence` 在干净工作树上失败）。修复后这条路径可用 |
+| 工作台加载失败提示、网络中断保留上传指针 | **生效** | 只影响提示文案和本地指针，不影响任务 |
+| 前端 A（对照视图定位） | **生效** | 定位行为修正，已浏览器实测 |
+
+**结论：** 部署后的默认行为与之前相比，门禁不变；乱码阻断在“大写葡/西语名”上放宽，docx/pptx 从报错变为可用，其余为 UI 修正。源文继承降级和 E2/E3 影子灰度都没有在默认路径上启用。
+

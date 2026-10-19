@@ -226,7 +226,7 @@ async function loadAdminHints() {
     deepseekConfigured.value = Boolean(policies.deepseek_configured);
     pipelineDefault.value = policies.pipeline_default || 'legacy';
   } catch {
-    /* optional for non-admin preview */
+    // Admin hints are optional: without them the page shows the defaults, which is the non-admin view.
   }
 }
 

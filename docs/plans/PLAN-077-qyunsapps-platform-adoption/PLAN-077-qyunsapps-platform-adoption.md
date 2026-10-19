@@ -1,6 +1,6 @@
 # PLAN-077 — Qyunslation 接入 QyunsApps 平台控制面
 
-> 状态：**T1、T2 已实现；T3/T4/T5 准备件已备好；T6/T7 与生产写操作待用户确认（2026-10-18，见 WT-077）** · 创建 2026-10-18 · 上游：`/home/dev/QyunsApps/docs/plans/PLAN-002-platform-ownership/PLAN-002-platform-ownership.md`、PLAN-001g · WT：`docs/walkthroughs/WT-077-qyunsapps-platform-adoption.md`
+> 状态：**T1、T2 已实现并合并；T3 的 PG 端口收口已合并（`6ecd306`），口令核对待用户；T4/T5 准备件已备好；T6/T7 与生产写操作待用户确认（2026-10-18，见 WT-077；后续事项归入 PLAN-079 §6.F）** · 创建 2026-10-18 · 上游：`/home/dev/QyunsApps/docs/plans/PLAN-002-platform-ownership/PLAN-002-platform-ownership.md`、PLAN-001g · WT：`docs/walkthroughs/WT-077-qyunsapps-platform-adoption.md`
 
 ## 1. 目标
 

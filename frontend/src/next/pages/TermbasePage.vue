@@ -5,6 +5,8 @@
       <div class="qy-page-head-actions"><button class="qy-secondary-button" type="button" @click="showImport = !showImport"><ArrowUpTrayIcon aria-hidden="true" /> 导入 CSV</button><button class="qy-primary-button" type="button"><PlusIcon aria-hidden="true" /> 新建术语</button></div>
     </section>
 
+    <p v-if="loadError" class="qy-panel qy-inline-error" role="alert" data-term-load-error>{{ loadError }} <button type="button" class="qy-link-button" @click="loadTerms">重试</button></p>
+
     <div class="qy-term-layout">
       <section class="qy-panel qy-term-panel">
         <div class="qy-saved-views" role="tablist" aria-label="词库视图">
@@ -54,6 +56,7 @@ const activeView = ref('company');
 const showImport = ref(false);
 const selectedTerm = ref(null);
 const terms = ref([]);
+const loadError = ref('');
 const views = [
   { key: 'company', label: '公司术语', count: 0 },
   { key: 'pending', label: '待处理', count: 0 },
@@ -68,6 +71,7 @@ const filteredTerms = computed(() => terms.value.filter((term) => {
 }));
 
 async function loadTerms() {
+  loadError.value = '';
   try {
     const response = await api.listTerms();
     const rows = Array.isArray(response) ? response : response.items || [];
@@ -83,8 +87,9 @@ async function loadTerms() {
         statusLabel: row.status === 'curated' ? '已批准' : row.status === 'rejected' ? '已驳回' : '待审核',
       };
     });
-  } catch {
+  } catch (error) {
     terms.value = [];
+    loadError.value = error?.network ? '连接中断，词库没能加载。请检查网络后重试。' : '词库加载失败，请稍后重试。';
   }
 }
 
