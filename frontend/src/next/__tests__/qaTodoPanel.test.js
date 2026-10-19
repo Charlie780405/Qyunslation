@@ -143,6 +143,7 @@ describe('QA todo panel', () => {
     expect(checklist).toContain('阻断问题');
     expect(checklist).toMatch(/2/);
     expect(checklist).toContain('待审核术语');
+    expect(checklist).not.toContain('单位译名');
     expect(checklist).toContain('正式稿');
     expect(checklist).toContain('未解锁');
     expect(panel(wrapper).text()).toContain('第 2 轮检查');

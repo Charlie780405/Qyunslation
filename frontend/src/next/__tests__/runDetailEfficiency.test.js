@@ -162,11 +162,10 @@ describe('detail polling (f3)', () => {
     apiMock.getRun.mockResolvedValue(EXECUTING);
     const wrapper = await mountPage();
     const qaBefore = apiMock.getQaItems.mock.calls.length;
-    const affiliationsBefore = apiMock.listRunAffiliationSegments.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60000);
     expect(apiMock.getRun.mock.calls.length).toBeGreaterThan(2);
     expect(apiMock.getQaItems.mock.calls.length).toBe(qaBefore); // the heavy lists wait for a change
-    expect(apiMock.listRunAffiliationSegments.mock.calls.length).toBe(affiliationsBefore);
+    expect(apiMock.listRunAffiliationSegments).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -205,10 +204,9 @@ describe('failures are visible, not swallowed (f4)', () => {
     wrapper.unmount();
   });
 
-  it('an affiliation list that cannot load is reported', async () => {
-    apiMock.listRunAffiliationSegments.mockRejectedValue(new Error('down'));
+  it('does not request affiliation review data', async () => {
     const wrapper = await mountPage();
-    expect(wrapper.find('[data-soft-issue]').text()).toContain('单位译名没能加载');
+    expect(apiMock.listRunAffiliationSegments).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

@@ -2,7 +2,7 @@
 """PLAN-033h：BabelDOC 送 LLM 前消费参考文献 PRESERVE 策略。"""
 from __future__ import annotations
 
-from .frontmatter import paragraph_is_author
+from .frontmatter import AFFILIATION, AUTHOR, classify_frontmatter_text
 from .references import is_reference_entry, is_reference_heading, is_section_break
 
 
@@ -59,7 +59,8 @@ def current_llm_spy() -> LlmRequestSpy | None:
 
 def paragraph_is_preserved(text: str | None) -> bool:
     blob = text or ""
-    if paragraph_is_author(blob):
+    role = classify_frontmatter_text(blob).role
+    if role in {AUTHOR, AFFILIATION}:
         return True
     if is_reference_heading(blob) or is_reference_entry(blob):
         return True
@@ -71,7 +72,7 @@ def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = N
     recorder = spy or _SPY
     kept: list[str] = []
     for text in texts:
-        if paragraph_is_author(text) or gate.should_preserve(text):
+        if classify_frontmatter_text(text).role in {AUTHOR, AFFILIATION} or gate.should_preserve(text):
             continue
         kept.append(text)
         if recorder is not None:
@@ -82,7 +83,7 @@ def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = N
 def title_is_usable_context(text: str | None) -> bool:
     blob = text or ""
     return (
-        not paragraph_is_author(blob)
+        classify_frontmatter_text(blob).role not in {AUTHOR, AFFILIATION}
         and not is_reference_heading(blob)
         and not is_reference_entry(blob)
     )

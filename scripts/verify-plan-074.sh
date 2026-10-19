@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# PLAN-074：作者保护、单位审核、术语闭环与乱码门禁验收。
+# PLAN-074：作者/单位原文保护、术语闭环与乱码门禁验收。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +18,8 @@ REQUIRED=(
   "qyunslation/structure/text_sanitize.py"
   "qyunslation/structure/translation_trace.py"
   "qyunslation/workbench/term_extract.py"
-  "frontend/src/next/components/AffiliationReviewPanel.vue"
   "frontend/src/next/components/TermReviewPanel.vue"
+  "frontend/src/next/components/QaTodoPanel.vue"
 )
 for path in "${REQUIRED[@]}"; do
   [[ -f "$ROOT/$path" ]] && pass "file $path" || fail "missing $path"

@@ -1,5 +1,7 @@
 # PLAN-074b：研究单位审校与精确 TM
 
+> 状态：**历史实现，2026-10-19 起按产品要求停用；英文单位改为保留原文，不再人工审核。**
+
 ## 交付
 
 - `ReviewSegment` 绑定 `translation_run_id` / `generation` / 页码。

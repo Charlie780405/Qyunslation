@@ -1,18 +1,18 @@
-# WT-074：作者保护、单位审校、术语闭环与乱码门禁
+# WT-074：作者/单位原文保护、术语闭环与乱码门禁
 
 > 状态：**工程闭环；legacy 真件 QA 待重跑**
 
 ## 执行摘要
 
-PLAN-074 在 `/next` PDF 文献/Poster 路径上保护作者元数据、将研究单位纳入 QA 审校、结构化抽取专业术语并在正式批准前强制闭环，同时阻断乱码与 IL 标签残留。
+PLAN-074 在 `/next` PDF 文献/Poster 路径上保护作者元数据、结构化抽取专业术语并在正式批准前强制闭环，同时阻断乱码与 IL 标签残留。单位人工审校为历史行为，当前英文单位保留原文。
 
 ## 变更明细
 
 | 区域 | 交付 |
 | --- | --- |
-| 074a | `frontmatter.py` 作者/单位分类；BabelDOC 作者块跳过 LLM |
-| 074b | affiliation 审校 API；`apply-corrections` 新一代；`translation_trace` 精确写回 |
-| 074c | `term_extract` 结构化补充；Term/Affiliation 审校面板；`formal_gate` |
+| 074a | `frontmatter.py` 作者/单位分类；BabelDOC 作者与英文单位块跳过 LLM |
+| 074b | 历史实现：affiliation 审校 API；`apply-corrections` 新一代；`translation_trace` 精确写回（当前已停用） |
+| 074c | `term_extract` 结构化补充；术语审校面板；历史 `formal_gate` 曾包含单位确认 |
 | 074d | `text_sanitize` 扩展；单/双语 PDF 阻断；`_QY_074_POSTPROCESS` 钩子 |
 
 ## 验证
@@ -39,3 +39,10 @@ bash scripts/plan074-live-regression.py
 ## 后续
 
 用 PLAN-074 流水线重跑 Dupilumab Poster，使 live regression QA 段从 BLOCKED 转为 PASS。
+
+## 当前行为变更（2026-10-19）
+
+- 英文研究单位段与已识别的英文作者姓名在翻译阶段按原文保留；这些原文不会被英文残留 QA 误报。
+- QA 不再创建新的单位审核段；旧单位记录不再出现在 `/next`，也不再阻挡正式稿批准。
+- 中译英时，文档中已存在的英文单位/姓名原文会原样保留；没有英文原文的中文名称仍按原翻译流程处理。
+- 生产部署与验证结果将在本节补记。

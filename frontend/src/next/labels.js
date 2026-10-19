@@ -124,7 +124,7 @@ export function todoCount(run) {
   const pending = run?.pending_counts;
   if (pending) {
     return (pending.qa_blockers || 0) + (pending.qa_unavailable || 0)
-      + (pending.unresolved_terms || 0) + (pending.unconfirmed_affiliations || 0);
+      + (pending.unresolved_terms || 0);
   }
   return run?.qa_summary?.blocker || 0;
 }
@@ -190,7 +190,6 @@ export const GATE_REASON_LABELS = {
   qa_checking: '质量检查进行中',
   qa_degraded: '语义检查未完成',
   unresolved_terms: '有待审核的术语',
-  unconfirmed_affiliations: '有未确认的单位译名',
   superseded_artifact: '已有更新的版本',
   term_extraction_degraded: '术语抽取未完成',
 };

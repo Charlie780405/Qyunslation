@@ -1909,18 +1909,7 @@ def _run_qa_pass(
     preflight = session.get(PreflightRecord, run.preflight_id)
     if facts and preflight is not None:
         try:
-            from qyunslation.structure.translation_trace import TRACE_FILE
-            from qyunslation.workbench.term_extract import (
-                extract_candidates_from_text,
-                sync_affiliation_segments_from_text,
-            )
-
-            trace_path: Path | None = None
-            runner_state_path = str((runner_state or {}).get("runner_state_path") or "").strip()
-            if runner_state_path:
-                candidate = Path(runner_state_path).resolve().parent / TRACE_FILE
-                if candidate.is_file():
-                    trace_path = candidate
+            from qyunslation.workbench.term_extract import extract_candidates_from_text
 
             extract_candidates_from_text(
                 session,
@@ -1929,14 +1918,6 @@ def _run_qa_pass(
                 source_text=facts["source"].text,
                 translated_text=facts["translated"].text,
                 require_structured_model=True,
-            )
-            sync_affiliation_segments_from_text(
-                session,
-                run=run,
-                preflight=preflight,
-                source_text=facts["source"].text,
-                translated_text=facts["translated"].text,
-                trace_path=trace_path,
             )
         except Exception as exc:
             run.term_summary = {
@@ -1950,7 +1931,7 @@ def _run_qa_pass(
                     category="terminology",
                     severity="unavailable",
                     code="TERM_EXTRACTION_DEGRADED",
-                    message="术语与单位审校服务未能完成检查（不代表译文有问题），服务恢复后请重新检查",
+                    message="术语抽取服务未能完成检查（不代表译文有问题），服务恢复后请重新检查",
                     evidence={"reason": type(exc).__name__},
                 )
             )
@@ -2284,7 +2265,6 @@ class _ListContext:
     preflights: dict[str, PreflightRecord]
     artifacts: dict[str, list[TranslationArtifact]]
     terms: dict[str, list[str]]
-    affiliations: dict[tuple[str, int], list[str]]
     chains: dict[str, list[tuple[int, str]]]  # preflight id -> [(generation, run id)] ascending
     qa_checks: dict[str, Any]  # run id -> latest QaCheckRound of its current generation
 
@@ -2295,7 +2275,7 @@ def _build_list_context(session: Session, runs: list[TranslationRunRecord]) -> _
     run_ids = [run.id for run in runs]
     preflight_ids = list({run.preflight_id for run in runs})
     if not run_ids:
-        return _ListContext({}, {}, {}, {}, {}, {})
+        return _ListContext({}, {}, {}, {}, {})
     preflights = {
         row.id: row for row in session.scalars(select(PreflightRecord).where(PreflightRecord.id.in_(preflight_ids)))
     }
@@ -2314,15 +2294,6 @@ def _build_list_context(session: Session, runs: list[TranslationRunRecord]) -> _
         )
     ):
         terms.setdefault(run_id, []).append(term_id)
-    affiliations: dict[tuple[str, int], list[str]] = {}
-    for run_id, generation, segment_id in session.execute(
-        select(ReviewSegment.translation_run_id, ReviewSegment.generation, ReviewSegment.id).where(
-            ReviewSegment.translation_run_id.in_(run_ids),
-            ReviewSegment.role == "affiliation",
-            ReviewSegment.status != "approved",
-        )
-    ):
-        affiliations.setdefault((run_id, generation), []).append(segment_id)
     chains: dict[str, list[tuple[int, str]]] = {}
     for preflight_id, generation, run_id in session.execute(
         select(TranslationRunRecord.preflight_id, TranslationRunRecord.generation, TranslationRunRecord.id)
@@ -2339,7 +2310,7 @@ def _build_list_context(session: Session, runs: list[TranslationRunRecord]) -> _
     ):
         if row.generation == generation_of.get(row.run_id):
             qa_checks[row.run_id] = row
-    return _ListContext(preflights, artifacts, terms, affiliations, chains, qa_checks)
+    return _ListContext(preflights, artifacts, terms, chains, qa_checks)
 
 
 def _needs_refresh(run: TranslationRunRecord) -> bool:
@@ -2352,28 +2323,17 @@ def _needs_refresh(run: TranslationRunRecord) -> bool:
 def _formal_gate(
     session: Session, run: TranslationRunRecord, ctx: _ListContext | None = None
 ) -> dict[str, Any]:
-    """Unified publication gate for QA, affiliation review, terms, and generations."""
+    """Unified publication gate for QA, terms, and generations."""
     if ctx is not None:
         unresolved_terms = list(ctx.terms.get(run.id, []))
-        unresolved_affiliations = list(ctx.affiliations.get((run.id, run.generation), []))
         newer = [item for item in ctx.chains.get(run.preflight_id, []) if item[0] > run.generation]
         superseding_run_id = newer[-1][1] if newer else None
-        return _gate_from(run, unresolved_terms, unresolved_affiliations, superseding_run_id)
+        return _gate_from(run, unresolved_terms, superseding_run_id)
     unresolved_terms = list(
         session.scalars(
             select(DocumentTermCandidate.id).where(
                 DocumentTermCandidate.translation_run_id == run.id,
                 DocumentTermCandidate.status.not_in(_FINAL_TERM_STATUSES),
-            )
-        )
-    )
-    unresolved_affiliations = list(
-        session.scalars(
-            select(ReviewSegment.id).where(
-                ReviewSegment.translation_run_id == run.id,
-                ReviewSegment.generation == run.generation,
-                ReviewSegment.role == "affiliation",
-                ReviewSegment.status != "approved",
             )
         )
     )
@@ -2386,13 +2346,12 @@ def _formal_gate(
         .order_by(TranslationRunRecord.generation.desc())
         .limit(1)
     )
-    return _gate_from(run, unresolved_terms, unresolved_affiliations, superseding_run_id)
+    return _gate_from(run, unresolved_terms, superseding_run_id)
 
 
 def _gate_from(
     run: TranslationRunRecord,
     unresolved_terms: list[str],
-    unresolved_affiliations: list[str],
     superseding_run_id: str | None,
 ) -> dict[str, Any]:
     summary = run.qa_summary or {}
@@ -2406,8 +2365,6 @@ def _gate_from(
         reasons.append("qa_blockers")
     if unresolved_terms:
         reasons.append("unresolved_terms")
-    if unresolved_affiliations:
-        reasons.append("unconfirmed_affiliations")
     if superseding_run_id:
         reasons.append("superseded_artifact")
     if extraction_degraded:
@@ -2425,8 +2382,9 @@ def _gate_from(
         "qa_unavailable": int((run.qa_summary or {}).get("unavailable") or 0),
         "unresolved_term_count": len(unresolved_terms),
         "unresolved_term_ids": unresolved_terms,
-        "unconfirmed_affiliation_count": len(unresolved_affiliations),
-        "unconfirmed_affiliation_ids": unresolved_affiliations,
+        # Keep the response keys at zero for older clients while removing affiliation review.
+        "unconfirmed_affiliation_count": 0,
+        "unconfirmed_affiliation_ids": [],
         "superseding_run_id": superseding_run_id,
         "term_extraction_degraded": extraction_degraded,
     }

@@ -369,10 +369,10 @@ def sync_affiliation_segments_from_text(
     translated_text: str,
     trace_path: Path | None = None,
 ) -> list[ReviewSegment]:
-    """Create required affiliation review rows using page-order evidence.
+    """Legacy helper for existing affiliation-review clients; the current QA path does not call it.
 
     BabelDOC's paragraph trace is preferred when present; flattened PDF text is
-    retained as a conservative fallback and never auto-confirms a segment.
+    retained as a conservative fallback. Kept temporarily for historical tooling.
     """
     job = _ensure_job(session, run=run, preflight=preflight)
     from qyunslation.structure.translation_trace import load_affiliation_trace

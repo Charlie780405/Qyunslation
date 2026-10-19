@@ -183,17 +183,6 @@ export const api = {
     `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/term-candidates/enrich-suggestions`,
     { method: 'POST' },
   ),
-  listRunAffiliationSegments: (runId) => apiRequest(
-    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/affiliation-segments`,
-  ),
-  decideRunAffiliationSegment: (runId, segmentId, payload) => apiRequest(
-    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/affiliation-segments/${encodeURIComponent(segmentId)}`,
-    { method: 'PATCH', body: JSON.stringify(payload) },
-  ),
-  applyRunCorrections: (runId) => apiRequest(
-    `${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/apply-corrections`,
-    { method: 'POST' },
-  ),
   getReviewDraft: (runId) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`),
   saveReviewDraft: (runId, payload) => apiRequest(`${API_PREFIX}/translation-runs/${encodeURIComponent(runId)}/review-draft`, {
     method: 'PUT',

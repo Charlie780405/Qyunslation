@@ -119,13 +119,6 @@
         />
       </section>
 
-      <AffiliationReviewPanel
-        :items="affiliationSegments"
-        :unconfirmed="affiliationUnconfirmed"
-        @decide="decideAffiliation"
-        @apply-corrections="applyCorrections"
-      />
-
       <TermReviewPanel
         :items="termCandidates"
         :rules="termRules"
@@ -193,7 +186,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
-import AffiliationReviewPanel from '../components/AffiliationReviewPanel.vue';
 import QaTodoPanel from '../components/QaTodoPanel.vue';
 import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import DualCanvasViewer from '../components/DualCanvasViewer.vue';
@@ -230,8 +222,6 @@ const termRules = ref({});
 const termUnresolved = ref(0);
 const termTotal = ref(0);
 const termPage = ref(1);
-const affiliationSegments = ref([]);
-const affiliationUnconfirmed = ref(0);
 const reviewError = ref('');
 const termPanelError = ref('');
 const termEnriching = ref(false);
@@ -279,7 +269,12 @@ const previewRefreshKey = computed(() => [
 const formalGateMessage = computed(() => {
   const gate = run.value?.formal_gate;
   if (!gate || gate.passed) return '';
-  return `尚有 ${gate.unresolved_term_count || 0} 条术语、${gate.unconfirmed_affiliation_count || 0} 条单位译名或 ${gate.qa_blockers || 0} 个 QA 阻断项未处理`;
+  const pending = [];
+  if (gate.unresolved_term_count) pending.push(`${gate.unresolved_term_count} 条术语`);
+  if (gate.qa_blockers) pending.push(`${gate.qa_blockers} 个 QA 阻断项`);
+  return pending.length
+    ? `正式稿尚未解锁：${pending.join('、')}待处理`
+    : '正式稿尚未解锁，请检查当前 QA 与版本状态';
 });
 
 const showQaPanel = computed(() => Boolean(run.value) && (
@@ -340,16 +335,6 @@ async function refresh({ includeTerms = true } = {}) {
         termCandidates.value = [];
         softIssue('terms', error, '术语候选');
       }
-    }
-    try {
-      const affiliations = await api.listRunAffiliationSegments(runId.value);
-      affiliationSegments.value = affiliations.items || [];
-      affiliationUnconfirmed.value = affiliations.unconfirmed || 0;
-      softIssue('affiliations', null);
-    } catch (error) {
-      affiliationSegments.value = [];
-      affiliationUnconfirmed.value = 0;
-      softIssue('affiliations', error, '单位译名');
     }
     if (run.value?.quality_state === 'review_ready') {
       const draft = await api.getReviewDraft(runId.value);
@@ -580,31 +565,6 @@ async function batchDecideTerms(decisions) {
     reviewError.value = error?.status === 409
       ? '部分术语已被其他审核人更新，请刷新后重试。'
       : (error?.message || '批量术语裁决失败');
-  }
-}
-
-async function decideAffiliation(item, revisedText) {
-  try {
-    await api.decideRunAffiliationSegment(runId.value, item.id, {
-      expected_version: item.version,
-      revised_text: revisedText,
-    });
-    reviewError.value = '';
-    await refresh();
-  } catch (error) {
-    reviewError.value = error?.status === 409
-      ? '该单位译名已被其他审核人更新，请刷新后重试。'
-      : (error?.message || '单位译名确认失败');
-  }
-}
-
-async function applyCorrections() {
-  try {
-    const nextRun = await api.applyRunCorrections(runId.value);
-    reviewError.value = '';
-    if (nextRun?.id) await router.push(`/workbench/${nextRun.id}`);
-  } catch (error) {
-    reviewError.value = error?.message || '重新生成失败';
   }
 }
 

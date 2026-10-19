@@ -68,11 +68,19 @@ def test_untranslated_body_detected():
     assert latin_residue_ratio("这是中文译文\n另一行中文") == 0.0
 
 
-def test_residue_not_flagged_for_non_chinese_target():
+def test_residue_check_respects_target_language_and_preserved_frontmatter():
     english = "The study evaluates the efficacy and safety of the drug in adults"
     assert "UNTRANSLATED_BODY" not in codes(
         check_translation_text(source_text=english, translated_text=english, target_is_chinese=False)
     )
+    affiliation = "Division of Pharmacology and Toxicology, Example Medical Center"
+    findings = check_translation_text(
+        source_text=f"{affiliation}\nBackground paragraph",
+        translated_text=f"{affiliation}\n背景段落",
+        target_is_chinese=True,
+    )
+    assert "LATIN_RESIDUE" not in codes(findings)
+    assert "UNTRANSLATED_BODY" not in codes(findings)
 
 
 pymupdf = pytest.importorskip("pymupdf")

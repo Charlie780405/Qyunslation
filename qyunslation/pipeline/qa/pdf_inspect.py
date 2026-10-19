@@ -14,7 +14,7 @@ from typing import Any
 
 from qyunslation.pipeline.qa import locate
 from qyunslation.pipeline.qa.engine import QaFinding
-from qyunslation.structure.frontmatter import AUTHOR, classify_frontmatter_text
+from qyunslation.structure.frontmatter import AFFILIATION, AUTHOR, classify_frontmatter_text
 from qyunslation.structure.text_sanitize import (
     _CONTROL_RE,
     _MOJIBAKE_RE,
@@ -189,6 +189,20 @@ def _author_metadata_lines(text: str) -> list[str]:
     ]
 
 
+def _preserved_frontmatter_terms(text: str) -> set[str]:
+    """Exclude preserved English names and organizations from untranslated-text checks."""
+    terms: set[str] = set()
+    for line in (text or "").splitlines():
+        if classify_frontmatter_text(line).role not in {AUTHOR, AFFILIATION}:
+            continue
+        value = line.strip()
+        if value:
+            terms.add(value)
+            words = re.findall(r"[A-Za-z][A-Za-z'-]*", value)
+            terms.update(" ".join(words[index : index + 3]) for index in range(len(words) - 2))
+    return terms
+
+
 def check_author_metadata(
     source_text: str, translated_text: str, *, source_pages: list[str] | None = None
 ) -> list[QaFinding]:
@@ -353,6 +367,7 @@ def check_translation_text(
         protected = set().union(
             *(extract_protected_literals(source_text).values())
         )
+        protected.update(_preserved_frontmatter_terms(source_text))
         ratio = latin_residue_ratio(translated_text, protected=protected)
         if ratio >= residue_block:
             findings.append(

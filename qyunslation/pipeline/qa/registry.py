@@ -100,7 +100,7 @@ _RULES: dict[str, RuleInfo] = dict(
            "对照原文和译文检查是否有缺页或内容溢出；确属排版差异时由复核人说明理由后授权例外。",
            unlocatable_reason="页数差异不属于某一页", identity_keys=("output_kind",)),
         _r("AUTHOR_METADATA_CHANGED", C2, "作者信息与原文不完全一致",
-           "作者与单位信息要求与原文逐行一致。",
+           "作者信息要求与原文逐行一致。",
            "对照原文位置，把作者行改回与原文一致；若只是换行或标点造成的差异，由复核人说明理由后授权例外。",
            locatable="page", identity_keys=("missing",)),
         _r("ORDINAL_ARTIFACT", C2, "出现序数上标伪影（如 ^{th}）",
@@ -113,7 +113,7 @@ _RULES: dict[str, RuleInfo] = dict(
            "无法证明该文档属于所选专业领域，专业规则可能不适用。",
            "确认文档领域选择是否正确；确属该领域但缺少锚点时由复核人说明理由后授权例外。"),
         # ---- C3: the checker could not run -----------------------------------------------------
-        _r("TERM_EXTRACTION_DEGRADED", C3, "术语与单位审校服务未能完成检查",
+        _r("TERM_EXTRACTION_DEGRADED", C3, "术语抽取服务未能完成检查",
            "检查服务当时无法运行，这不代表译文有问题，但也不能当作检查通过。",
            "等术语模型服务恢复后点击“重新检查”。"),
         _r("AD_QA_SOURCE_UNAVAILABLE", C3, "缺少可供检查的译文文件",

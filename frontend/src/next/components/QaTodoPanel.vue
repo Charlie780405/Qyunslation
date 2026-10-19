@@ -281,7 +281,6 @@ const checklist = computed(() => {
   }
   rows.push(
     { key: 'terms', label: '待审核术语', value: `${pending.unresolved_terms || 0} 条`, ok: !pending.unresolved_terms },
-    { key: 'affiliations', label: '单位译名', value: `${pending.unconfirmed_affiliations || 0} 条未确认`, ok: !pending.unconfirmed_affiliations },
     { key: 'version', label: '版本', value: run.superseded_by ? '已被更新版本取代' : '当前最新', ok: !run.superseded_by },
   );
   const reasons = (gate.reasons || []).map((r) => GATE_REASON_LABELS[r] || r);
