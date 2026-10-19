@@ -5428,6 +5428,16 @@ def _preview_target(path: Path, media: str, filename: str) -> tuple[Path, str, s
     return path, media, filename
 
 
+def _translation_preview_rank(filename: str, file_type: str = "") -> int:
+    """Prefer the mono translation when a run produced both PDF variants."""
+    identity = f"{filename} {file_type}".casefold()
+    if re.search(r"(?:^|[._-])mono(?:[._-]|$)", identity):
+        return 0
+    if re.search(r"(?:^|[._-])dual(?:[._-]|$)", identity):
+        return 2
+    return 1
+
+
 @router.get("/translation-runs/{run_id}/preview/{side}")
 def preview_translation_run(
     run_id: str,
@@ -5453,14 +5463,24 @@ def preview_translation_run(
         allowed_kinds = ["translated_preview", "review_draft", "legacy"]
         if approved:
             allowed_kinds.append("formal")
-        artifact = session.scalar(
-            select(TranslationArtifact)
-            .where(
-                TranslationArtifact.run_id == run.id,
-                TranslationArtifact.tenant_id == run.tenant_id,
-                TranslationArtifact.kind.in_(allowed_kinds),
+        artifacts = list(
+            session.scalars(
+                select(TranslationArtifact)
+                .where(
+                    TranslationArtifact.run_id == run.id,
+                    TranslationArtifact.tenant_id == run.tenant_id,
+                    TranslationArtifact.kind.in_(allowed_kinds),
+                )
+                .order_by(TranslationArtifact.created_at.desc())
             )
-            .order_by(TranslationArtifact.created_at.desc())
+        )
+        # CLI runs may publish both `*.mono.pdf` and `*.dual.pdf`. The viewer
+        # already places the source PDF in its own pane, so its translated pane
+        # should show the standalone translation when that artifact exists.
+        artifact = min(
+            artifacts,
+            key=lambda item: _translation_preview_rank(item.filename, item.file_type),
+            default=None,
         )
         if artifact is None:
             # Fall back to runner outputs for v2 layout_complete without formal gate.
@@ -5471,7 +5491,19 @@ def preview_translation_run(
             except Exception:
                 state = None
             files = (state or {}).get("downloadable_files") or {}
-            first = next(iter(files.values()), None)
+            candidates = [
+                (key, meta)
+                for key, meta in files.items()
+                if isinstance(meta, dict)
+            ]
+            _, first = min(
+                candidates,
+                key=lambda item: _translation_preview_rank(
+                    str(item[1].get("filename") or Path(str(item[1].get("path") or "")).name),
+                    str(item[0]),
+                ),
+                default=(None, None),
+            )
             if not first:
                 raise HTTPException(status_code=404, detail="translated preview unavailable")
             path = Path(str(first["path"]))
