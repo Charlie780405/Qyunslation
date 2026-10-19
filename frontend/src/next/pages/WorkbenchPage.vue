@@ -6,11 +6,6 @@
         <h1>翻译工作台</h1>
         <p>从文件预检开始，逐步完成翻译、质量检查和受控交付。</p>
       </div>
-      <div class="qy-page-head-actions">
-        <button class="qy-secondary-button" type="button" @click="showAdvanced = !showAdvanced">
-          <AdjustmentsHorizontalIcon aria-hidden="true" /> {{ showAdvanced ? '收起参数' : '本次任务参数' }}
-        </button>
-      </div>
     </section>
 
     <section v-if="todoSummary" class="qy-panel qy-todo-bar" data-todo-bar role="status" aria-live="polite">
@@ -31,15 +26,6 @@
             <div><span class="qy-step-index">01</span><div><h2>上传文档</h2><p>先做结构预检，再决定是否开始翻译。</p></div></div>
             <span class="qy-panel-status">{{ uploadStatusLabel }}</span>
           </div>
-          <div class="qy-language-fields" aria-label="翻译语言">
-            <label class="qy-field"><span>源语言</span><select v-model="workbenchState.sourceLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
-            <label class="qy-field"><span>目标语言</span><select v-model="workbenchState.targetLanguage"><option v-for="language in languages" :key="language" :value="language">{{ language }}</option></select></label>
-          </div>
-          <div class="qy-ad-mode" aria-label="专业领域模式">
-            <label class="qy-field"><span>专业领域</span><select v-model="workbenchState.domainProfile"><option value="general">通用医药翻译</option><option v-if="adEnabled" value="ad">AD 特应性皮炎</option></select></label>
-            <span class="qy-inline-hint"><span v-if="workbenchState.domainProfile === 'ad'" class="qy-status-badge is-pending" role="status">AD 内部测试版</span>AD 模式仅支持中英互译，并在任务中启用专业提示词、术语和双向 QA。</span>
-          </div>
-          <div v-if="languageError" class="qy-callout qy-callout-warning" role="alert"><InformationCircleIcon aria-hidden="true" /><span>{{ languageError }}</span></div>
           <label
             class="qy-dropzone"
             :class="{ 'is-selected': selectedFile, 'is-dragging': dragging }"
@@ -79,11 +65,11 @@
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
             <span class="qy-status-badge" :class="preflight.state === 'ready' ? 'is-ready' : 'is-pending'">{{ preflight.state === 'ready' ? '预检通过' : '需要处理' }}</span>
-            <button class="qy-primary-button" type="button" :disabled="startingRun || preflight.state !== 'ready' || Boolean(runForPreflight)" @click="startTranslation">
-              <ArrowPathIcon v-if="startingRun" class="qy-spin" aria-hidden="true" />
-              <PlayIcon v-else aria-hidden="true" />
-              {{ startingRun ? '正在创建任务…' : runForPreflight ? '该文件已创建任务' : '确认并开始翻译' }}
+            <button class="qy-primary-button" type="button" :disabled="preflight.state !== 'ready' || Boolean(runForPreflight)" @click="openConfirm">
+              <PlayIcon aria-hidden="true" />
+              {{ runForPreflight ? '该文件已创建任务' : '确认参数并开始翻译' }}
             </button>
+            <button v-if="runForPreflight && preflight.state === 'ready'" class="qy-secondary-button" type="button" @click="copyAndConfirm">用新参数再翻译一次</button>
           </div>
           <div class="qy-panel-actions">
             <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight">
@@ -118,9 +104,10 @@
               <div class="qy-task-actions" @click.stop>
                 <button v-if="can(run, 'cancel')" class="qy-link-button" type="button" @click="cancelRun(run)">取消</button>
                 <button v-if="entryLabel(run)" class="qy-link-button qy-task-entry" type="button" @click="openRun(run, entryTab(run))">{{ entryLabel(run) }}</button>
-                <button v-if="can(run, 'resume') && lifecycleOf(run) === 'interrupted'" class="qy-link-button" type="button" @click="resumeRunAction(run)">续跑</button>
-                <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="retryRun(run, { pipeline: 'v2' })">新版重试</button>
-                <button v-else-if="can(run, 'retry') && ['failed', 'cancelled'].includes(lifecycleOf(run))" class="qy-link-button" type="button" @click="retryRun(run)">重试</button>
+                <button v-if="can(run, 'resume') && lifecycleOf(run) === 'interrupted'" class="qy-link-button" type="button" @click="openResume(run)">续跑</button>
+                <button v-else-if="canRetryV2(run)" class="qy-link-button" type="button" @click="openRevision(run, { pipeline: 'v2' })">新版重试</button>
+                <button v-else-if="can(run, 'retry') && ['failed', 'cancelled'].includes(lifecycleOf(run))" class="qy-link-button" type="button" @click="openRevision(run)">重试</button>
+                <button class="qy-link-button" type="button" @click="copyConfig(run)">复制配置</button>
                 <button v-if="can(run, 'restore')" class="qy-link-button" type="button" @click="restoreRun(run)">恢复</button>
                 <button v-else-if="can(run, 'archive')" class="qy-link-button" type="button" @click="archiveRun(run)">归档</button>
                 <button v-if="can(run, 'delete')" class="qy-link-button qy-danger-link" type="button" @click="deleteRun(run)">删除</button>
@@ -149,18 +136,23 @@
             :quality-state="focusRun?.quality_state || 'draft'"
           />
         </div>
-        <div v-if="showAdvanced" class="qy-panel qy-settings-card">
-          <div class="qy-panel-heading"><div><h2>本次任务参数</h2><p>开始翻译后将固定为任务快照。</p></div><LockClosedIcon aria-hidden="true" /></div>
-          <label class="qy-field"><span>文档类型</span><select v-model="workbenchState.profile"><option v-for="option in documentProfileOptions" :key="option">{{ option }}</option></select></label>
-          <p v-if="workbenchState.domainProfile === 'ad'" class="qy-muted">AD 模式只支持医学研究文献与临床研究文档。</p>
-          <label class="qy-field"><span>资料等级</span><select v-model="workbenchState.classification" @change="refreshModelProfiles"><option value="internal">内部</option><option value="confidential">机密</option><option value="public">公开</option></select></label>
-          <label class="qy-field"><span>翻译模型</span><select v-model="workbenchState.modelProfileId"><option v-for="profile in translatorProfiles" :key="profile.profile_id" :value="profile.profile_id" :disabled="!profile.configured">{{ profile.label }}{{ profile.experimental ? '（试验）' : '' }}</option></select></label>
-          <p v-if="selectedModelProfile" class="qy-muted">外发范围：{{ egressLabel(selectedModelProfile) }}</p>
-          <label class="qy-check-field"><input v-model="workbenchState.bilingual" data-field="bilingual" type="checkbox" :disabled="!bilingualSupported" /><span>生成源译对照稿</span></label>
-          <p v-if="!bilingualSupported" class="qy-muted">仅 PDF 支持源译对照；当前格式只输出译文。</p>
-        </div>
       </aside>
     </div>
+
+    <RunConfirmDrawer
+      v-if="drawer"
+      :mode="drawer.mode"
+      :preflight="drawer.mode === 'new' ? preflight : null"
+      :run="drawer.run || null"
+      :initial="drawerInitial"
+      :initial-source="drawerInitialSource"
+      :defaults="defaultsSnapshot"
+      :last="lastConfig"
+      :ad-enabled="adEnabled"
+      :on-submit="submitDrawer"
+      @close="drawer = null"
+      @copy-preflight="copyPreflightForDrawer"
+    />
   </AppShell>
 </template>
 
@@ -173,10 +165,11 @@ import { useSessionStore } from '../stores/session.js';
 import {
   restoredPreflight,
   restoreWorkbenchSession,
-  scheduleWorkbenchPreferenceSave,
+  saveWorkbenchDefaults,
   uploadStorageKey,
   workbenchState,
 } from '../stores/workbench.js';
+import RunConfirmDrawer from '../components/RunConfirmDrawer.vue';
 import StageTimeline from '../components/StageTimeline.vue';
 import {
   can,
@@ -187,14 +180,12 @@ import {
   todoCount,
 } from '../labels.js';
 import {
-  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   ChevronRightIcon,
   ClockIcon,
   DocumentArrowUpIcon,
   DocumentTextIcon,
   InformationCircleIcon,
-  LockClosedIcon,
   MagnifyingGlassIcon,
   PlayIcon,
 } from '@heroicons/vue/24/outline';
@@ -207,11 +198,13 @@ const uploadMessage = ref('');
 const uploadError = ref(false);
 const uploading = ref(false);
 const uploadProgress = ref(0);
-const showAdvanced = ref(false);
 const runs = ref([]);
 const activeEvents = ref([]);
 const preflight = ref(null);
 const startingRun = ref(false);
+const drawer = ref(null); // { mode: 'new' | 'revision' | 'resume', run?, extra? }
+const defaultsSnapshot = ref({});
+const copiedFrom = ref(null); // { label, config } carried into the next confirmation
 const showArchived = ref(false);
 let pollTimer;
 let pollRequest = 0;
@@ -220,7 +213,6 @@ let pollRequest = 0;
 const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.txt', '.md', '.png', '.jpg', '.jpeg'];
 const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',');
 const dragging = ref(false);
-const languages = ['English', '简体中文'];
 const activeRun = computed(() => runs.value.find(isActive) || null);
 // The side timeline always describes one explicit task: the running one, else the newest.
 const focusRun = computed(() => activeRun.value || runs.value[0] || null);
@@ -245,43 +237,6 @@ const uploadStatusLabel = computed(() => {
   return '等待选择文件';
 });
 const adEnabled = computed(() => Boolean(sessionStore.user?.capabilities?.ad_enabled));
-// Mirrors SUPPORTED_AD_DOCUMENTS on the server; AD rejects any other profile with 422.
-const AD_DOCUMENT_PROFILES = ['医学研究文献', '临床研究文档'];
-const GENERAL_DOCUMENT_PROFILES = ['临床研究文档', '监管申报材料', '通用医药文档'];
-const documentProfileOptions = computed(() =>
-  workbenchState.domainProfile === 'ad' ? AD_DOCUMENT_PROFILES : GENERAL_DOCUMENT_PROFILES,
-);
-const languageError = computed(() => workbenchState.sourceLanguage === workbenchState.targetLanguage ? '源语言和目标语言不能相同。' : '');
-// Only the PDF executor can emit a source/translation pair (see bilingual_effective on the server).
-const currentFormat = computed(() => {
-  if (preflight.value?.format) return String(preflight.value.format).toLowerCase();
-  const name = selectedFile.value?.name || '';
-  return name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-});
-const bilingualSupported = computed(() => !currentFormat.value || currentFormat.value === 'pdf');
-const modelProfiles = ref([]);
-const translatorProfiles = computed(() => modelProfiles.value.filter((item) => !item.role || item.role === 'translator'));
-const selectedModelProfile = computed(
-  () => modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId) || null,
-);
-
-// HTTP field values are restricted to ISO-8859-1 by the browser Headers API.
-// Encode each segment so localized settings remain safe and deterministic as
-// an Idempotency-Key while still distinguishing every task configuration.
-function buildIdempotencyKey() {
-  return [
-    'preflight',
-    preflight.value?.id,
-    workbenchState.sourceLanguage,
-    workbenchState.targetLanguage,
-    workbenchState.profile,
-    workbenchState.domainProfile,
-    workbenchState.classification,
-    workbenchState.modelProfileId,
-    workbenchState.bilingual && bilingualSupported.value ? '1' : '0',
-  ].map((value) => encodeURIComponent(String(value ?? ''))).join(':');
-}
-
 function liveSummary(run) {
   if (!run) return '';
   if (lifecycleOf(run) === 'qa_checking') return '翻译完成，正在做质量检查';
@@ -289,25 +244,128 @@ function liveSummary(run) {
   return stageMessage(run);
 }
 
-function egressLabel(profile) {
-  if (!profile) return '仅内网';
-  if (profile.role === 'term_suggester') return '脱敏术语片段';
-  if (profile.provider === 'deepseek') return '公开资料全文外发';
-  return '无外发';
+// ---- the confirmation drawer: settings live there and only there --------------------------------
+function configFromRun(run) {
+  const settings = run.settings || {};
+  return {
+    sourceLanguage: settings.source_language || run.source_language || 'English',
+    targetLanguage: settings.target_language || run.target_language || '简体中文',
+    profile: settings.profile || run.profile || '临床研究文档',
+    domainProfile: settings.domain_profile || 'general',
+    classification: run.document_classification || settings.document_classification || 'internal',
+    modelProfileId: run.model_profile_id || settings.model_profile_id || '',
+    bilingual: settings.bilingual ?? true,
+  };
 }
 
-async function refreshModelProfiles() {
+const drawerInitial = computed(() => {
+  const base = copiedFrom.value ? copiedFrom.value.config : { ...workbenchState };
+  return {
+    displayName: '',
+    sourceLanguage: base.sourceLanguage,
+    targetLanguage: base.targetLanguage,
+    profile: base.profile,
+    domainProfile: adEnabled.value ? base.domainProfile : 'general',
+    classification: base.classification,
+    modelProfileId: base.modelProfileId,
+    bilingual: base.bilingual,
+  };
+});
+const drawerInitialSource = computed(() => (copiedFrom.value ? copiedFrom.value.label : '上次使用'));
+const lastConfig = computed(() => {
+  const latest = runs.value[0];
+  return latest ? { label: '上次任务', ...configFromRun(latest) } : null;
+});
+
+function openConfirm() {
+  if (!preflight.value || preflight.value.state !== 'ready' || runForPreflight.value) return;
+  drawer.value = { mode: 'new' };
+}
+
+async function swapInPreflightCopy() {
+  const copy = await api.copyPreflight(preflight.value.id);
+  preflight.value = copy;
+}
+
+async function copyAndConfirm() {
   try {
-    const payload = await api.listModelProfiles(workbenchState.classification);
-    modelProfiles.value = payload.items || payload.profiles || [];
-    const current = modelProfiles.value.find((item) => item.profile_id === workbenchState.modelProfileId);
-    if (!current || !current.configured) {
-      const fallback = modelProfiles.value.find((item) => item.configured && item.role === 'translator');
-      if (fallback) workbenchState.modelProfileId = fallback.profile_id;
-    }
-  } catch {
-    modelProfiles.value = [];
+    await swapInPreflightCopy();
+    drawer.value = { mode: 'new' };
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '复制预检失败';
   }
+}
+
+async function copyPreflightForDrawer() {
+  try {
+    await swapInPreflightCopy();
+  } catch (error) {
+    uploadError.value = true;
+    uploadMessage.value = error.message || '复制预检失败';
+  }
+}
+
+function openRevision(run, extra = {}) {
+  drawer.value = { mode: 'revision', run, extra };
+}
+
+function openResume(run) {
+  drawer.value = { mode: 'resume', run };
+}
+
+function copyConfig(run) {
+  const name = run.display_name || run.filename || '未命名文档';
+  copiedFrom.value = { label: `复制自「${name}」`, config: configFromRun(run) };
+  uploadError.value = false;
+  uploadMessage.value = `已载入「${name}」的配置。选择文件并预检后，会在确认抽屉里使用这份配置。`;
+  document.getElementById('workbench-file')?.focus?.();
+}
+
+// The drawer shows failures itself, so submissions rethrow instead of swallowing them.
+async function submitDrawer(submission) {
+  const current = drawer.value;
+  if (!current) return;
+  if (current.mode === 'new') {
+    await api.createTranslationRun(submission.payload, submission.key);
+    uploadError.value = false;
+    uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
+    copiedFrom.value = null;
+    drawer.value = null;
+    if (submission.saveAsDefault) {
+      const form = submission.form;
+      try {
+        await saveWorkbenchDefaults({
+          sourceLanguage: form.sourceLanguage,
+          targetLanguage: form.targetLanguage,
+          profile: form.profile,
+          domainProfile: form.domainProfile,
+          bilingual: form.bilingual,
+          classification: form.classification,
+          modelProfileId: form.modelProfileId,
+        });
+        defaultsSnapshot.value = { ...workbenchState };
+      } catch (error) {
+        uploadError.value = true;
+        uploadMessage.value = `任务已创建，但默认参数保存失败：${error.message || '未知错误'}`;
+      }
+    }
+  } else if (current.mode === 'revision') {
+    const overrides = submission.overrides || {};
+    await api.createRevision(current.run.id, {
+      ...current.extra,
+      ...(Object.keys(overrides).length ? { overrides } : {}),
+    });
+    uploadError.value = false;
+    uploadMessage.value = '已生成新版本，原版本保持冻结。';
+    drawer.value = null;
+  } else {
+    await api.resumeRun(current.run.id);
+    uploadError.value = false;
+    uploadMessage.value = '任务已从断点续跑。';
+    drawer.value = null;
+  }
+  await refreshRuns();
 }
 
 function isActive(run) {
@@ -400,11 +458,6 @@ function formatSize(bytes) {
 
 async function startPreflight() {
   if (!selectedFile.value) return;
-  if (languageError.value) {
-    uploadError.value = true;
-    uploadMessage.value = languageError.value;
-    return;
-  }
   uploading.value = true;
   uploadProgress.value = 0;
   uploadError.value = false;
@@ -430,37 +483,6 @@ async function startPreflight() {
   } finally {
     uploading.value = false;
     uploadProgress.value = 100;
-  }
-}
-
-async function startTranslation() {
-  if (!preflight.value || preflight.value.state !== 'ready' || activeRun.value?.preflight_id === preflight.value.id) return;
-  startingRun.value = true;
-  uploadError.value = false;
-  try {
-    const key = buildIdempotencyKey();
-    await api.createTranslationRun({
-      preflight_id: preflight.value.id,
-      source_language: workbenchState.sourceLanguage,
-      target_language: workbenchState.targetLanguage,
-      profile: workbenchState.profile,
-      domain_profile: workbenchState.domainProfile,
-      bilingual: workbenchState.bilingual && bilingualSupported.value,
-      document_classification: workbenchState.classification,
-      model_profile_id: workbenchState.modelProfileId,
-    }, key);
-    uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
-    await refreshRuns();
-  } catch (error) {
-    uploadError.value = true;
-    if (error.status === 404 && String(error.message || '').toLowerCase().includes('preflight not found')) {
-      preflight.value = null;
-      uploadMessage.value = '预检记录已失效，请重新点击“开始预检”后再翻译。';
-    } else {
-      uploadMessage.value = error.message || '翻译任务创建失败';
-    }
-  } finally {
-    startingRun.value = false;
   }
 }
 
@@ -502,27 +524,6 @@ async function cancelRun(run) {
   } catch (error) {
     uploadError.value = true;
     uploadMessage.value = error.message || '取消任务失败';
-  }
-}
-
-async function resumeRunAction(run) {
-  try {
-    await api.resumeRun(run.id);
-    uploadMessage.value = '任务已从断点续跑。';
-    await refreshRuns();
-  } catch (error) {
-    uploadError.value = true;
-    uploadMessage.value = error.message || '续跑失败';
-  }
-}
-
-async function retryRun(run, payload = {}) {
-  try {
-    await api.retryRun(run.id, payload);
-    await refreshRuns();
-  } catch (error) {
-    uploadError.value = true;
-    uploadMessage.value = error.message || '重试任务失败';
   }
 }
 
@@ -580,31 +581,15 @@ onMounted(async () => {
   window.addEventListener('drop', ignoreStrayFileDrop);
   await sessionStore.load();
   await restoreWorkbenchSession(sessionStore.user);
-  await refreshModelProfiles();
-  if (preflight.value === null && restoredPreflight.value?.state === 'ready') {
+  defaultsSnapshot.value = { ...workbenchState };
+  // A pre-check that already has a task cannot start another one, so it is not restored as "ready".
+  if (preflight.value === null && restoredPreflight.value?.state === 'ready' && !restoredPreflight.value.used_by_run_id) {
     preflight.value = restoredPreflight.value;
     uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
   }
   await refreshRuns();
 });
-watch(adEnabled, (enabled) => {
-  if (!enabled && workbenchState.domainProfile === 'ad') {
-    workbenchState.domainProfile = 'general';
-  }
-});
-watch(
-  () => workbenchState.domainProfile,
-  (domain) => {
-    if (domain === 'ad' && !AD_DOCUMENT_PROFILES.includes(workbenchState.profile)) {
-      workbenchState.profile = '临床研究文档';
-    } else if (domain !== 'ad' && !GENERAL_DOCUMENT_PROFILES.includes(workbenchState.profile)) {
-      workbenchState.profile = '临床研究文档';
-    }
-  },
-);
 watch(showArchived, refreshRuns);
-watch(() => workbenchState.classification, refreshModelProfiles);
-watch(workbenchState, () => scheduleWorkbenchPreferenceSave(), { deep: true });
 onUnmounted(() => {
   window.clearTimeout(pollTimer);
   window.removeEventListener('dragover', ignoreStrayFileDrop);

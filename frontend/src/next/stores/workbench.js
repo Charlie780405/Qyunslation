@@ -28,21 +28,16 @@ function applyWorkbenchPreferences(preferences = {}) {
   });
 }
 
-let saveTimer;
-export function scheduleWorkbenchPreferenceSave() {
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(async () => {
-    try {
-      const current = await api.getPreferences();
-      const merged = {
-        ...(current.preferences || {}),
-        workbench: { ...workbenchState },
-      };
-      await api.savePreferences(merged);
-    } catch {
-      /* ignore transient preference errors */
-    }
-  }, 600);
+// Defaults change only when the person says so (the confirmation drawer's "save as default");
+// editing a field for one task never writes them. Failures are returned to the caller to show.
+export async function saveWorkbenchDefaults(config) {
+  const current = await api.getPreferences();
+  const merged = {
+    ...(current.preferences || {}),
+    workbench: { ...config },
+  };
+  await api.savePreferences(merged);
+  Object.assign(workbenchState, config);
 }
 
 export function uploadStorageKey(tenantSlug, sub) {
