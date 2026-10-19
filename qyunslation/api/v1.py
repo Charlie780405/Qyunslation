@@ -10,6 +10,7 @@ import logging
 import mimetypes
 import shutil
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
@@ -658,6 +659,8 @@ async def create_preflight(
         )
     )
     for existing in existing_rows:
+        if _preflight_used_by(session, existing.id):
+            continue  # a pre-check that already has a task cannot start another; make a fresh one
         expires_at = existing.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -732,8 +735,15 @@ def list_preflights(
     if _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         stmt = stmt.where(PreflightRecord.actor_sub == identity.user_sub)
     rows = list(session.scalars(stmt))
-    items = [_preflight_dict(row) for row in rows if _preflight_dict(row)["state"] == "ready"]
-    latest = items[0] if items else None
+    items = []
+    for row in rows:
+        payload = _preflight_dict(row)
+        if payload["state"] != "ready":
+            continue
+        payload["used_by_run_id"] = _preflight_used_by(session, row.id)
+        items.append(payload)
+    # Only a pre-check that no task uses can be restored as "ready to start".
+    latest = next((item for item in items if item["used_by_run_id"] is None), None)
     return {"items": items, "latest": latest}
 
 
@@ -750,6 +760,64 @@ def get_preflight(
     if record.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
         raise HTTPException(status_code=404, detail="preflight not found")
     return _preflight_dict(record)
+
+
+@router.post("/preflights/{preflight_id}/copy", status_code=201)
+def copy_preflight(
+    preflight_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """New pre-check from the same source file, so a task can be run again with other settings."""
+    tenant = _tenant_bundle(session, identity)
+    record = session.get(PreflightRecord, preflight_id)
+    if (
+        record is None
+        or record.tenant_id != tenant.id
+        or (
+            record.actor_sub != identity.user_sub
+            and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}
+        )
+    ):
+        raise HTTPException(status_code=404, detail="preflight not found")
+    _ensure_preflight_usable(session, record, actor_sub=identity.user_sub)
+    new_id = str(uuid.uuid4())
+    suffix = Path(record.storage_key).suffix
+    relative_key = f"{tenant.id}/{new_id}{suffix}"
+    root = _preflight_root().resolve()
+    target = (root / relative_key).resolve()
+    if root not in target.parents:
+        raise HTTPException(status_code=500, detail="invalid copy destination")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_preflight_path(record), target)
+    metadata = json.loads(json.dumps(record.metadata_json or {}))
+    metadata["copied_from"] = record.id
+    copy = PreflightRecord(
+        id=new_id,
+        tenant_id=tenant.id,
+        actor_sub=identity.user_sub,
+        source_filename=record.source_filename,
+        source_format=record.source_format,
+        source_sha256=record.source_sha256,
+        size_bytes=record.size_bytes,
+        status="ready",
+        metadata_json=metadata,
+        storage_key=relative_key,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=PREFLIGHT_TTL_HOURS),
+        document_classification=record.document_classification,
+        model_profile_id=record.model_profile_id,
+    )
+    session.add(copy)
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="preflight.copy",
+        extra={"preflight_id": new_id, "copied_from": record.id},
+    )
+    session.flush()
+    payload = _preflight_dict(copy)
+    payload["used_by_run_id"] = None
+    return payload
 
 
 @router.post("/upload-sessions", status_code=201)
@@ -777,6 +845,8 @@ def create_upload_session(
             )
         )
         for existing in existing_rows:
+            if _preflight_used_by(session, existing.id):
+                continue
             reused = _preflight_dict(existing)
             reused["reused"] = True
             return {
@@ -1019,6 +1089,8 @@ class TranslationRunCreateBody(BaseModel):
     document_classification: str | None = Field(default=None, max_length=32)
     model_profile_id: str | None = Field(default=None, max_length=128)
     term_model_profile_id: str | None = Field(default=None, max_length=128)
+    # PLAN-078c: the digest the person confirmed (from /translation-runs/validate).
+    config_digest: str | None = Field(default=None, max_length=64)
 
 
 class PreflightPatchBody(BaseModel):
@@ -2728,9 +2800,14 @@ def _run_config_digest(
     model_profile_id: str | None,
     term_model_profile_id: str | None,
 ) -> str:
-    """Stable digest of every request field that shapes a run (see create_translation_run)."""
+    """Stable digest of every setting that shapes a run (see create_translation_run).
+
+    v2 (PLAN-078c) takes the *resolved* term model, so a change in which model will really be
+    used between confirmation and submission is noticed.
+    """
     canonical = json.dumps(
         {
+            "v": 2,
             "preflight_id": preflight_id,
             "direction": direction,
             "profile": profile,
@@ -2746,6 +2823,304 @@ def _run_config_digest(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+@dataclass
+class ResolvedRunConfig:
+    source_language: str
+    target_language: str
+    direction: str
+    profile: str
+    domain_profile: str
+    classification: str
+    model_profile_id: str | None
+    term_profile_id: str | None
+    bilingual: bool
+    bilingual_effective: bool
+    display_name: str | None
+    digest: str
+
+
+@dataclass
+class ConfigCheck:
+    tenant: Any
+    preflight: PreflightRecord | None
+    cfg: ResolvedRunConfig | None = None
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _config_issue(code: str, message: str, *, field_name: str | None = None, **extra: Any) -> dict[str, Any]:
+    return {"code": code, "message": message, "field": field_name, **extra}
+
+
+_SELECTION_CODES = (
+    ("invalid document_classification", "CLASSIFICATION_INVALID", "document_classification", "资料等级无效"),
+    ("deepseek not configured", "MODEL_NOT_CONFIGURED", "model_profile_id", "该外部模型当前没有配置，无法使用"),
+    ("term model not allowed", "TERM_MODEL_NOT_ALLOWED", "term_model_profile_id", "该资料等级不允许使用所选术语模型"),
+    ("confidential forbids external term model", "TERM_MODEL_NOT_ALLOWED", "term_model_profile_id", "机密资料不允许使用外部术语模型"),
+    ("model_profile_id not allowed", "MODEL_NOT_ALLOWED", "model_profile_id", "该资料等级不允许使用所选翻译模型"),
+    ("forbids external", "MODEL_EGRESS_CONFLICT", "model_profile_id", "所选模型会把全文发送到外部，与资料等级冲突"),
+)
+
+
+def _collect_run_config(
+    session: Session, identity: IdentityContext, body: TranslationRunCreateBody, *, check_occupied: bool
+) -> ConfigCheck:
+    """Resolve and check everything that decides what a run will do, collecting every problem.
+
+    Creating a run and validating a confirmation use this one function, so what a person is
+    shown is what the server will execute (PLAN-078c). ``errors[*]["status"/"detail"]`` carry
+    the HTTP error the create endpoint raises for the first problem.
+    """
+    from qyunslation.pipeline.model_profiles import PROFILES, default_term_profile_id, validate_selection
+    from qyunslation.pipeline.run_snapshot import egress_scope
+
+    tenant = _tenant_bundle(session, identity)
+    check = ConfigCheck(tenant=tenant, preflight=None)
+
+    def fail(code: str, message: str, *, status: int, detail: Any, field_name: str | None = None, **extra: Any) -> None:
+        issue = _config_issue(code, message, field_name=field_name, **extra)
+        issue["status"], issue["detail"] = status, detail
+        check.errors.append(issue)
+
+    languages: tuple[str, str, str] | None = None
+    try:
+        languages = _normalize_language_pair(body.source_language, body.target_language, body.direction)
+    except HTTPException as exc:
+        same = "must differ" in str(exc.detail)
+        fail(
+            "LANGUAGE_SAME" if same else "LANGUAGE_UNSUPPORTED",
+            "源语言和目标语言不能相同" if same else "不支持所选语言或方向",
+            status=exc.status_code, detail=exc.detail, field_name="language",
+        )
+
+    preflight = session.get(PreflightRecord, body.preflight_id)
+    visible = (
+        preflight is not None
+        and preflight.tenant_id == tenant.id
+        and (
+            preflight.actor_sub == identity.user_sub
+            or _effective_role(session, identity) in {"reviewer", "term_admin", "admin", "owner"}
+        )
+    )
+    usable_preflight = False
+    if not visible:
+        preflight = None
+        fail("PREFLIGHT_NOT_FOUND", "找不到该预检", status=404, detail="preflight not found", field_name="preflight_id")
+    else:
+        state = _preflight_dict(preflight)["state"]
+        if state != "ready":
+            expired = state == "expired"
+            fail(
+                "PREFLIGHT_EXPIRED" if expired else "PREFLIGHT_NOT_READY",
+                "预检已过期，请重新预检" if expired else "预检未通过，不能开始翻译",
+                status=409, detail="preflight is not ready", field_name="preflight_id",
+            )
+        else:
+            usable_preflight = True
+    check.preflight = preflight
+
+    domain_profile = (body.domain_profile or "general").strip().casefold()
+    if usable_preflight and languages is not None:
+        try:
+            _validate_domain_profile(
+                preflight=preflight,
+                domain_profile=domain_profile,
+                direction=languages[2],
+                document_profile=body.profile,
+                tenant_slug=tenant.slug,
+            )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            code = str(detail.get("code") or "DOMAIN_INVALID")
+            fail(
+                "DOMAIN_UNSUPPORTED" if code == "AD_PROFILE_UNSUPPORTED" and domain_profile != "ad" else code,
+                str(detail.get("message") or "专业领域设置无效"),
+                status=exc.status_code, detail=exc.detail, field_name="domain_profile",
+            )
+
+    classification = body.document_classification or (preflight.document_classification if preflight else None) or "internal"
+    model_profile_id = body.model_profile_id or (preflight.model_profile_id if preflight else None)
+    term_profile_id = body.term_model_profile_id
+    if term_profile_id is None:
+        term_profile_id = default_term_profile_id(classification)
+    selection_ok = True
+    try:
+        classification, model_profile_id, term_profile_id = validate_selection(
+            classification=classification, model_profile_id=model_profile_id, term_profile_id=term_profile_id
+        )
+    except ValueError as exc:
+        selection_ok = False
+        text = str(exc)
+        code, field_name, message = next(
+            ((c, f, m) for needle, c, f, m in _SELECTION_CODES if needle in text),
+            ("MODEL_INVALID", "model_profile_id", "模型选择无效"),
+        )
+        fail(code, message, status=400, detail=text, field_name=field_name)
+
+    if check_occupied and usable_preflight:
+        occupied = session.scalar(
+            select(TranslationRunRecord.id).where(
+                TranslationRunRecord.preflight_id == preflight.id, TranslationRunRecord.generation == 1
+            )
+        )
+        if occupied is not None:
+            fail(
+                "PREFLIGHT_ALREADY_RUN",
+                "该文件已用这份预检创建过任务；可复制预检后用新参数翻译，原任务不受影响",
+                status=409,
+                detail={"code": "PREFLIGHT_ALREADY_RUN", "run_id": occupied},
+                field_name="preflight_id",
+                run_id=occupied,
+                can_copy=True,
+            )
+
+    if languages is None or preflight is None or not selection_ok:
+        return check
+
+    source_language, target_language, direction = languages
+    pdf = preflight.source_format.casefold() == "pdf"
+    check.cfg = ResolvedRunConfig(
+        source_language=source_language,
+        target_language=target_language,
+        direction=direction,
+        profile=body.profile,
+        domain_profile=domain_profile,
+        classification=classification,
+        model_profile_id=model_profile_id,
+        term_profile_id=term_profile_id,
+        bilingual=bool(body.bilingual),
+        bilingual_effective=bool(body.bilingual) and pdf,
+        display_name=(body.display_name or "").strip() or None,
+        digest=_run_config_digest(
+            preflight_id=preflight.id,
+            direction=direction,
+            profile=body.profile,
+            domain_profile=domain_profile,
+            bilingual=body.bilingual,
+            classification=classification,
+            model_profile_id=model_profile_id,
+            term_model_profile_id=term_profile_id,
+        ),
+    )
+
+    if body.bilingual and not pdf:
+        check.warnings.append(
+            _config_issue("BILINGUAL_NOT_SUPPORTED", "该格式只输出译文，不会生成源译对照稿", field_name="bilingual")
+        )
+    egress = egress_scope(classification=classification, translator_id=model_profile_id, term_id=term_profile_id)
+    if egress == "full_document":
+        check.warnings.append(_config_issue("EGRESS_FULL_DOCUMENT", "全文将发送到外部模型，请确认资料等级允许", field_name="model_profile_id"))
+    elif egress == "redacted_term_snippets":
+        check.warnings.append(_config_issue("EGRESS_REDACTED_TERMS", "脱敏后的术语片段将发送到外部术语模型", field_name="term_model_profile_id"))
+    term_profile = PROFILES.get(term_profile_id or "")
+    if term_profile is not None and term_profile.provider == "ollama":
+        try:
+            from qyunslation.gateway.config import resolve_profile
+
+            endpoint = resolve_profile(None).get("endpoint")
+        except Exception:
+            endpoint = None
+        if not endpoint:
+            check.warnings.append(
+                _config_issue("TERM_MODEL_NOT_CONFIGURED", "内网模型地址未配置，术语检查可能无法完成", field_name="term_model_profile_id")
+            )
+    if domain_profile == "ad":
+        check.warnings.append(_config_issue("AD_PREVIEW", "AD 专业模式为内部测试版", field_name="domain_profile"))
+    return check
+
+
+def _model_info(profile_id: str | None) -> dict[str, Any] | None:
+    from qyunslation.pipeline.model_profiles import PROFILES
+
+    profile = PROFILES.get(profile_id or "")
+    if profile is None:
+        return None
+    return {
+        "profile_id": profile.profile_id,
+        "label": profile.label,
+        "provider": profile.provider,
+        "model_id": profile.model_id,
+        "experimental": profile.experimental,
+    }
+
+
+def _preflight_used_by(session: Session, preflight_id: str) -> str | None:
+    return session.scalar(
+        select(TranslationRunRecord.id)
+        .where(TranslationRunRecord.preflight_id == preflight_id, TranslationRunRecord.generation == 1)
+        .limit(1)
+    )
+
+
+@router.post("/translation-runs/validate")
+def validate_translation_run(
+    body: TranslationRunCreateBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Dry run of run creation: what would execute, what is wrong, and the digest to confirm."""
+    from qyunslation.pipeline.run_snapshot import egress_scope
+
+    check = _collect_run_config(session, identity, body, check_occupied=True)
+    if any(error["code"] == "PREFLIGHT_NOT_FOUND" for error in check.errors):
+        raise HTTPException(status_code=404, detail="preflight not found")
+    cfg, preflight = check.cfg, check.preflight
+    config: dict[str, Any] | None = None
+    if cfg is not None:
+        config = {
+            "preflight_id": preflight.id,
+            "filename": preflight.source_filename,
+            "format": preflight.source_format,
+            "display_name": cfg.display_name,
+            "source_language": cfg.source_language,
+            "target_language": cfg.target_language,
+            "direction": cfg.direction,
+            "profile": cfg.profile,
+            "domain_profile": cfg.domain_profile,
+            "document_classification": cfg.classification,
+            "model_profile_id": cfg.model_profile_id,
+            "term_model_profile_id": cfg.term_profile_id,
+            "model": _model_info(cfg.model_profile_id),
+            "term_model": _model_info(cfg.term_profile_id),
+            "egress_scope": egress_scope(
+                classification=cfg.classification, translator_id=cfg.model_profile_id, term_id=cfg.term_profile_id
+            ),
+            "bilingual": cfg.bilingual,
+            "bilingual_effective": cfg.bilingual_effective,
+            "qa_policy": {
+                "deterministic": True,
+                "term_extraction": True,
+                "term_model_profile_id": cfg.term_profile_id,
+                "semantic_qa_mode": (os.environ.get("QYUNSLATION_AD_SEMANTIC_QA_MODE") or "shadow").strip().casefold()
+                if cfg.domain_profile == "ad"
+                else None,
+            },
+        }
+    public_errors = [
+        {key: value for key, value in error.items() if key not in {"status", "detail"}} for error in check.errors
+    ]
+    return {
+        "ok": not check.errors,
+        "errors": public_errors,
+        "warnings": check.warnings,
+        "config": config,
+        "config_digest": cfg.digest if cfg is not None else None,
+        "preflight": (
+            {
+                "id": preflight.id,
+                "state": _preflight_dict(preflight)["state"],
+                "filename": preflight.source_filename,
+                "format": preflight.source_format,
+                "size_bytes": preflight.size_bytes,
+                "expires_at": _preflight_dict(preflight)["expires_at"],
+                "used_by_run_id": _preflight_used_by(session, preflight.id),
+            }
+            if preflight is not None
+            else None
+        ),
+    }
+
+
 @router.post("/translation-runs", status_code=201)
 async def create_translation_run(
     body: TranslationRunCreateBody,
@@ -2753,65 +3128,21 @@ async def create_translation_run(
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    source_language, target_language, direction = _normalize_language_pair(
-        body.source_language, body.target_language, body.direction
-    )
-    tenant = _tenant_bundle(session, identity)
-    preflight = session.get(PreflightRecord, body.preflight_id)
-    if preflight is None or preflight.tenant_id != tenant.id:
-        raise HTTPException(status_code=404, detail="preflight not found")
-    if preflight.actor_sub != identity.user_sub and _effective_role(session, identity) not in {"reviewer", "term_admin", "admin", "owner"}:
-        raise HTTPException(status_code=404, detail="preflight not found")
-    state = _preflight_dict(preflight)
-    if state["state"] != "ready":
-        raise HTTPException(status_code=409, detail="preflight is not ready")
-    domain_profile = (body.domain_profile or "general").strip().casefold()
-    _validate_domain_profile(
-        preflight=preflight,
-        domain_profile=domain_profile,
-        direction=direction,
-        document_profile=body.profile,
-        tenant_slug=tenant.slug,
-    )
+    check = _collect_run_config(session, identity, body, check_occupied=False)
+    if check.errors:
+        first = check.errors[0]
+        raise HTTPException(status_code=first["status"], detail=first["detail"])
+    cfg = check.cfg
+    tenant, preflight = check.tenant, check.preflight
+    source_language, target_language, direction = cfg.source_language, cfg.target_language, cfg.direction
+    domain_profile, classification = cfg.domain_profile, cfg.classification
+    model_profile_id, term_profile_id = cfg.model_profile_id, cfg.term_profile_id
+    config_digest = cfg.digest
     key = (idempotency_key or f"preflight:{preflight.id}").strip()
     if not key or len(key) > 256:
         raise HTTPException(status_code=400, detail="invalid Idempotency-Key")
     key_material = f"{key}|domain_profile={domain_profile}"
     key_hash = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
-    from qyunslation.pipeline.model_profiles import validate_selection
-
-    classification = (
-        body.document_classification
-        or preflight.document_classification
-        or "internal"
-    )
-    model_profile_id = body.model_profile_id or preflight.model_profile_id
-    term_profile_id = body.term_model_profile_id
-    if term_profile_id is None:
-        from qyunslation.pipeline.model_profiles import default_term_profile_id
-
-        term_profile_id = default_term_profile_id(classification)
-    try:
-        classification, model_profile_id, term_profile_id = validate_selection(
-            classification=classification,
-            model_profile_id=model_profile_id,
-            term_profile_id=term_profile_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # The Idempotency-Key only names a request; this digest binds it to every setting
-    # that shapes the run, so a changed model, classification, language or output mode
-    # can never be answered with an earlier run that used different settings.
-    config_digest = _run_config_digest(
-        preflight_id=preflight.id,
-        direction=direction,
-        profile=body.profile,
-        domain_profile=domain_profile,
-        bilingual=body.bilingual,
-        classification=classification,
-        model_profile_id=model_profile_id,
-        term_model_profile_id=body.term_model_profile_id,
-    )
     existing = session.scalar(
         select(TranslationRunRecord).where(
             TranslationRunRecord.tenant_id == tenant.id,
@@ -2821,8 +3152,9 @@ async def create_translation_run(
     if existing is not None:
         existing_snapshot = existing.settings_snapshot or {}
         recorded = existing_snapshot.get("config_digest")
+        versioned = existing_snapshot.get("config_digest_v") == 2
         existing_domain = str(existing_snapshot.get("domain_profile") or "general").casefold()
-        if (recorded and recorded != config_digest) or (not recorded and existing_domain != domain_profile):
+        if (versioned and recorded != config_digest) or (not versioned and existing_domain != domain_profile):
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -2832,6 +3164,17 @@ async def create_translation_run(
                 },
             )
         return _translation_run_dict(session, existing, identity=identity)
+    if body.config_digest and body.config_digest != config_digest:
+        # The person confirmed one configuration; what would run now is another one (a model
+        # became unavailable, the default term model changed, ...). Ask again instead of guessing.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CONFIG_STALE",
+                "message": "确认之后配置已发生变化，请重新确认参数",
+                "current_digest": config_digest,
+            },
+        )
     # (preflight_id, generation) is unique; a second run for the same preflight
     # must surface as a conflict rather than an IntegrityError 500.
     occupied = session.scalar(
@@ -2912,8 +3255,9 @@ async def create_translation_run(
             "bilingual": body.bilingual,
             # Only the PDF executor can emit a source/translation pair; other formats
             # always produce the translation alone, and the snapshot must say so.
-            "bilingual_effective": bool(body.bilingual) and preflight.source_format.casefold() == "pdf",
+            "bilingual_effective": cfg.bilingual_effective,
             "config_digest": config_digest,
+            "config_digest_v": 2,
             "auto_ocr_workaround": True,
             "document_classification": classification,
             "model_profile_id": model_profile_id,
@@ -4147,6 +4491,8 @@ async def _spawn_next_generation(
     *,
     key_prefix: str,
     snap: dict[str, Any],
+    columns: dict[str, Any] | None = None,
+    expect_digest: str | None = None,
 ) -> TranslationRunRecord:
     """Create (once) the next version of a run from its frozen configuration and start it."""
     preflight = session.get(PreflightRecord, run.preflight_id)
@@ -4159,7 +4505,17 @@ async def _spawn_next_generation(
         )
     )
     if existing is not None:
+        if expect_digest and (existing.settings_snapshot or {}).get("config_digest") != expect_digest:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "REVISION_EXISTS",
+                    "message": "该任务已经有一个用不同参数生成的新版本",
+                    "run_id": existing.id,
+                },
+            )
         return existing
+    columns = columns or {}
     key = hashlib.sha256(f"{key_prefix}:{run.id}:{next_generation}".encode("utf-8")).hexdigest()
     snap = dict(snap)
     snap["revision_of"] = {"run_id": run.id, "generation": run.generation}
@@ -4171,13 +4527,13 @@ async def _spawn_next_generation(
         generation=next_generation,
         direction=run.direction,
         profile=run.profile,
-        display_name=run.display_name,
+        display_name=columns.get("display_name", run.display_name),
         settings_snapshot=snap,
         status="queued",
         stage="validation",
         quality_state="draft",
-        document_classification=run.document_classification,
-        model_profile_id=run.model_profile_id,
+        document_classification=columns.get("document_classification", run.document_classification),
+        model_profile_id=columns.get("model_profile_id", run.model_profile_id),
         term_summary={"status": "snapshot_pending"},
         qa_summary={"blocker": 0, "warning": 0, "info": 0},
     )
@@ -4191,6 +4547,84 @@ async def _spawn_next_generation(
         session=session,
     )
     return new
+
+
+_REVISION_OVERRIDABLE = frozenset(
+    {"model_profile_id", "term_model_profile_id", "document_classification", "bilingual", "display_name"}
+)
+_REVISION_AD_LOCKED = frozenset({"model_profile_id", "term_model_profile_id", "document_classification"})
+
+
+def _apply_revision_overrides(
+    session: Session, run: TranslationRunRecord, snap: dict[str, Any], overrides: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Parameters changed at confirmation become a new, validated configuration for the new version.
+
+    Only settings that do not change the source-derived inputs can be overridden here; anything
+    else (languages, document type, domain, which feed the frozen AD prompt) needs a new task
+    from the original file, and the answer says so.
+    """
+    from qyunslation.pipeline import resolve_pipeline_mode
+    from qyunslation.pipeline.model_profiles import default_term_profile_id, validate_selection
+    from qyunslation.pipeline.run_snapshot import build_run_model_snapshot
+
+    unknown = sorted(set(overrides) - _REVISION_OVERRIDABLE)
+    if unknown:
+        raise _disposition_error(422, "OVERRIDE_NOT_SUPPORTED", f"这些参数需要从原文件新建任务，不能在修订版里修改：{', '.join(unknown)}")
+    domain = str(snap.get("domain_profile") or "general").casefold()
+    if domain == "ad" and _REVISION_AD_LOCKED & set(overrides):
+        raise _disposition_error(422, "OVERRIDE_NOT_SUPPORTED_FOR_AD", "AD 任务的模型和资料等级与已冻结的提示词绑定，请从原文件新建任务")
+    snap = dict(snap)
+    classification = overrides.get("document_classification") or run.document_classification or "internal"
+    model = overrides.get("model_profile_id") or run.model_profile_id
+    if overrides.get("term_model_profile_id"):
+        term = overrides["term_model_profile_id"]
+    elif {"document_classification", "model_profile_id"} & set(overrides):
+        term = default_term_profile_id(classification)  # the old term model may not be allowed any more
+    else:
+        term = snap.get("term_model_profile_id") or default_term_profile_id(classification)
+    try:
+        classification, model, term = validate_selection(
+            classification=classification, model_profile_id=model, term_profile_id=term
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    preflight = session.get(PreflightRecord, run.preflight_id)
+    pdf = bool(preflight and preflight.source_format.casefold() == "pdf")
+    bilingual = bool(overrides["bilingual"]) if "bilingual" in overrides else bool(snap.get("bilingual", True))
+    mode = build_run_model_snapshot(
+        classification=classification,
+        translator_id=model,
+        term_id=term,
+        termbase_version=(snap.get("model_snapshot") or {}).get("termbase_version"),
+        pipeline=snap.get("pipeline") or resolve_pipeline_mode(None),
+    )
+    snap.update(mode)
+    snap.update(
+        {
+            "document_classification": classification,
+            "model_profile_id": model,
+            "term_model_profile_id": term,
+            "bilingual": bilingual,
+            "bilingual_effective": bilingual and pdf,
+            "revision_overrides": sorted(overrides),
+        }
+    )
+    snap["config_digest"] = _run_config_digest(
+        preflight_id=run.preflight_id,
+        direction=run.direction,
+        profile=run.profile,
+        domain_profile=domain,
+        bilingual=bilingual,
+        classification=classification,
+        model_profile_id=model,
+        term_model_profile_id=term,
+    )
+    snap["config_digest_v"] = 2
+    columns: dict[str, Any] = {"document_classification": classification, "model_profile_id": model}
+    if "display_name" in overrides:
+        columns["display_name"] = (str(overrides["display_name"] or "").strip() or None)
+    return snap, columns
 
 
 def _approved_affiliation_overrides(session: Session, run: TranslationRunRecord) -> dict[str, str]:
@@ -4287,6 +4721,8 @@ async def retry_translation_run(
 class RevisionBody(BaseModel):
     pipeline: str | None = Field(default=None, max_length=32)
     apply_review_corrections: bool = False
+    # PLAN-078c: parameters changed at confirmation (model, class, output mode, name).
+    overrides: dict[str, Any] | None = None
 
 
 @router.post("/translation-runs/{run_id}/revisions", status_code=201)
@@ -4318,7 +4754,14 @@ async def create_translation_revision(
             raise HTTPException(status_code=409, detail="no edited affiliation translations to apply")
         snap["review_overrides"] = overrides
         snap["correction_of"] = {"run_id": run.id, "generation": run.generation}
-    revision = await _spawn_next_generation(session, run, identity, key_prefix="retry", snap=snap)
+    columns: dict[str, Any] = {}
+    expect_digest = None
+    if body is not None and body.overrides:
+        snap, columns = _apply_revision_overrides(session, run, snap, body.overrides)
+        expect_digest = snap["config_digest"]
+    revision = await _spawn_next_generation(
+        session, run, identity, key_prefix="retry", snap=snap, columns=columns, expect_digest=expect_digest
+    )
     return _translation_run_dict(session, revision, identity=identity)
 
 
