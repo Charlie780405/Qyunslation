@@ -209,13 +209,19 @@ else echo "已自定义"; fi
 
 如需轮换，要先停机，并核对 `docs/runbooks/pg-loopback-binding.md`。注意：改 `.env` 里的变量不会改已初始化数据库的密码，必须在数据库内执行 `ALTER USER ... PASSWORD ...`。
 
-**F4：术语证据回填（写生产库，需批准）。** 任务 ID 已确认为 `eb7e4876-d6af-4ca8-9a4b-249a778cd35c`。
+**数据库命令的前提：** 本机没有 `psql`、`pg_dump`，数据库在容器 `qyunslation-plan034c-pg` 里，用容器自带的客户端执行。`<db-user>` 请从 `.env` 中的 `QYUNSLATION_DATABASE_URL` 取用户名（只打印用户名，不要打印密码）：
+
+```bash
+grep -o '^QYUNSLATION_DATABASE_URL=postgresql+psycopg://[^:]*' .env | sed 's/.*:\/\///'
+```
+
+**F4：术语证据回填（写生产库，需批准）。** 任务 ID 为 `eb7e4876-d6af-4ca8-9a4b-249a778cd35c`。
 
 ```bash
 set -a; . ./.env >/dev/null 2>&1; set +a
-# 先备份（D5 推荐）
-pg_dump --data-only -t document_term_candidate -t document_term_occurrence \
-  "${QYUNSLATION_DATABASE_URL/postgresql+psycopg/postgresql}" > "backup-term-$(date +%F).sql"
+# 先备份候选表（D5 推荐）
+docker exec qyunslation-plan034c-pg pg_dump -U <db-user> --data-only \
+  -t document_term_candidate -t document_term_occurrence qyunslation > "backup-term-$(date +%F).sql"
 .venv/bin/python scripts/backfill-term-evidence-sentences.py eb7e4876-d6af-4ca8-9a4b-249a778cd35c          # 只演练
 .venv/bin/python scripts/backfill-term-evidence-sentences.py eb7e4876-d6af-4ca8-9a4b-249a778cd35c --apply  # 确认演练结果后
 ```
@@ -223,15 +229,13 @@ pg_dump --data-only -t document_term_candidate -t document_term_occurrence \
 **F7：排序规则版本告警（写生产库，需维护窗口和批准）**
 
 ```bash
-set -a; . ./.env >/dev/null 2>&1; set +a
-PGURL="${QYUNSLATION_DATABASE_URL/postgresql+psycopg/postgresql}"
 # 1. 生成逐个索引的 REINDEX 清单（只读），先审阅
-psql "$PGURL" -At -c "select 'REINDEX INDEX CONCURRENTLY '||quote_ident(n.nspname)||'.'||quote_ident(ic.relname)||';' from pg_index i join pg_class ic on ic.oid=i.indexrelid join pg_class tc on tc.oid=i.indrelid join pg_namespace n on n.oid=tc.relnamespace join pg_am am on am.oid=ic.relam and am.amname='btree' where n.nspname='public' and exists (select 1 from unnest(string_to_array(i.indcollation::text,' ')::oid[]) o where o=100)" > reindex.sql
+docker exec qyunslation-plan034c-pg psql -U <db-user> -d qyunslation -At -c "select 'REINDEX INDEX CONCURRENTLY '||quote_ident(n.nspname)||'.'||quote_ident(ic.relname)||';' from pg_index i join pg_class ic on ic.oid=i.indexrelid join pg_class tc on tc.oid=i.indrelid join pg_namespace n on n.oid=tc.relnamespace join pg_am am on am.oid=ic.relam and am.amname='btree' where n.nspname='public' and exists (select 1 from unnest(string_to_array(i.indcollation::text,' ')::oid[]) o where o=100)" > reindex.sql
 wc -l reindex.sql
-# 2. 批准后执行，再刷新版本
-psql "$PGURL" -f reindex.sql
-psql "$PGURL" -c "ALTER DATABASE qyunslation REFRESH COLLATION VERSION;"
-psql "$PGURL" -c "select datcollversion, pg_database_collation_actual_version(oid) from pg_database where datname=current_database();"
+# 2. 批准后执行 REINDEX（逐条，CONCURRENTLY 不能放在事务里），再刷新版本
+docker exec -i qyunslation-plan034c-pg psql -U <db-user> -d qyunslation < reindex.sql
+docker exec qyunslation-plan034c-pg psql -U <db-user> -d qyunslation -c "ALTER DATABASE qyunslation REFRESH COLLATION VERSION;"
+docker exec qyunslation-plan034c-pg psql -U <db-user> -d qyunslation -c "select datcollversion, pg_database_collation_actual_version(oid) from pg_database where datname=current_database();"
 ```
 
 两个版本相等即完成。需要数据库属主权限。
