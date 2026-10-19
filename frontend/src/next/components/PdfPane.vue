@@ -38,6 +38,7 @@
           :key="n"
           :ref="(el) => setPageEl(n, el)"
           class="qy-page"
+          :class="{ 'qy-page-flash': flashing === n }"
           :data-page="n"
           :style="pageStyle(n)"
         >
@@ -177,16 +178,41 @@ function renderWanted() {
   for (const n of targetPages()) renderPage(n);
 }
 
+// Position of page ``n`` inside the scroll container's content. ``offsetTop`` is measured from the nearest
+// positioned ancestor, which is not the scroller, so it drifts by wherever the viewer sits in the page.
 function pageTop(n) {
   const el = pageEls.get(n);
-  return el ? el.offsetTop : 0;
+  const scroller_ = scroller.value;
+  if (!el) return 0;
+  if (!scroller_ || typeof el.getBoundingClientRect !== 'function') return el.offsetTop;
+  const box = el.getBoundingClientRect();
+  const frame = scroller_.getBoundingClientRect();
+  // jsdom has no layout (all zeros); fall back to offsetTop there.
+  if (!box.height && !frame.height) return el.offsetTop;
+  return box.top - frame.top + scroller_.scrollTop;
 }
 
+// A pane hidden behind a tab is measured only when it becomes active, which changes the page heights.
+// Remember the latest request so the activation can re-align to it.
+let requestedPage = 0;
+let requestedAt = 0;
+
 function scrollToPage(n) {
+  requestedPage = n;
+  requestedAt = Date.now();
   const el = scroller.value;
   if (!el || !pageEls.get(n)) return;
   suppressScrollUntil = Date.now() + 120;
   el.scrollTop = Math.max(0, pageTop(n) - 8);
+}
+
+const flashing = ref(0);
+let flashTimer = null;
+
+function flashPage(n) {
+  flashing.value = n;
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashing.value = 0; flashTimer = null; }, 1500);
 }
 
 function detectPage() {
@@ -247,6 +273,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   destroyed = true;
+  if (flashTimer) clearTimeout(flashTimer);
   if (observer) observer.disconnect();
   if (resizeObserver) resizeObserver.disconnect();
   cancelAll();
@@ -285,10 +312,12 @@ watch(() => props.active, async (value) => {
   if (!value) return;
   await nextTick();
   updateWidth();
+  await nextTick();
+  if (requestedPage && Date.now() - requestedAt < 2000) scrollToPage(requestedPage);
   renderWanted();
 });
 
-defineExpose({ scrollToPage, setScrollRatio, detectPage, currentScale: scale });
+defineExpose({ scrollToPage, flashPage, setScrollRatio, detectPage, currentScale: scale });
 </script>
 
 <style scoped>
@@ -299,6 +328,7 @@ defineExpose({ scrollToPage, setScrollRatio, detectPage, currentScale: scale });
 .qy-pages { display: grid; gap: .75rem; justify-content: center; }
 .qy-page { background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); margin: 0 auto; }
 .qy-page canvas { display: block; }
+.qy-page-flash { outline: 3px solid #d97706; outline-offset: 2px; }
 .qy-pane-state { display: grid; gap: .5rem; justify-items: center; padding: 2rem 1rem; color: #3b4452; text-align: center; }
 .qy-pane-image img { display: block; margin: 0 auto; }
 </style>

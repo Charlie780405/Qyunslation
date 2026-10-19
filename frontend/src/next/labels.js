@@ -119,12 +119,17 @@ export function severityLabel(severity) {
   return SEVERITY_LABELS[severity] || severity || '';
 }
 
+// PLAN-079: with term_gate_mode "enforce" undecided vocabulary candidates are glossary work, not a delivery blocker.
+export function termsBlockDelivery(run) {
+  return run?.formal_gate?.term_gate_mode !== 'enforce';
+}
+
 // Count shown on the "处理质量问题（N）" entry: what still stands between the run and delivery.
 export function todoCount(run) {
   const pending = run?.pending_counts;
   if (pending) {
     return (pending.qa_blockers || 0) + (pending.qa_unavailable || 0)
-      + (pending.unresolved_terms || 0);
+      + (termsBlockDelivery(run) ? (pending.unresolved_terms || 0) : 0);
   }
   return run?.qa_summary?.blocker || 0;
 }

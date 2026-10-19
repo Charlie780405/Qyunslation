@@ -123,6 +123,7 @@
         :items="termCandidates"
         :rules="termRules"
         :unresolved="termUnresolved"
+        :blocking="termsBlockDelivery(run)"
         :total="termTotal"
         :page="termPage"
         :page-size="40"
@@ -140,6 +141,7 @@
       <div class="qy-run-detail-grid">
         <section class="qy-panel qy-run-viewer" aria-label="源译对照">
           <DualCanvasViewer
+            ref="viewer"
             :run-id="runId"
             :page="view.page.value"
             :zoom="view.zoom.value"
@@ -203,6 +205,7 @@ import {
   lifecycleOf,
   qualityLabel,
   stageLabel,
+  termsBlockDelivery,
 } from '../labels.js';
 import { useSessionStore } from '../stores/session.js';
 
@@ -212,6 +215,7 @@ const router = useRouter();
 const view = useRunDetailView();
 const sessionStore = useSessionStore();
 const loadError = ref('');
+const viewer = ref(null);
 const logOpen = ref(false);
 const logVisible = ref(false);
 const run = ref(null);
@@ -270,7 +274,7 @@ const formalGateMessage = computed(() => {
   const gate = run.value?.formal_gate;
   if (!gate || gate.passed) return '';
   const pending = [];
-  if (gate.unresolved_term_count) pending.push(`${gate.unresolved_term_count} 条术语`);
+  if (gate.unresolved_term_count && termsBlockDelivery(run.value)) pending.push(`${gate.unresolved_term_count} 条术语`);
   if (gate.qa_blockers) pending.push(`${gate.qa_blockers} 个 QA 阻断项`);
   return pending.length
     ? `正式稿尚未解锁：${pending.join('、')}待处理`
@@ -465,8 +469,12 @@ async function disposeBatch(payload) {
   return response;
 }
 
-function locateAnchor(anchor) {
-  if (anchor?.page) view.setPage(anchor.page);
+// Drives the viewer itself so the page scrolls into view, repeated clicks on the same page still respond,
+// and the anchor's side is honoured. Out-of-range and unavailable anchors keep the URL page untouched.
+async function locateAnchor(anchor) {
+  if (!anchor?.page) return;
+  const result = await viewer.value?.focusAnchor?.(anchor);
+  if (!result || result.reason === 'pending') view.setPage(anchor.page);
 }
 
 function reviseRun() {

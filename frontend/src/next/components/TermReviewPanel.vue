@@ -3,7 +3,8 @@
     <header class="qy-review-panel-head">
       <div>
         <h2 id="qy-term-review-heading">术语审核</h2>
-        <p>{{ unresolved }} 条待处理 · 共 {{ total }} 条</p>
+        <p v-if="blocking">{{ unresolved }} 条待处理 · 共 {{ total }} 条</p>
+        <p v-else data-term-nonblocking>词库待整理 {{ unresolved }} 条（不影响交付）· 共 {{ total }} 条</p>
       </div>
       <div class="qy-review-panel-tools">
         <div class="qy-suggest-control">
@@ -109,6 +110,7 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   rules: { type: Object, default: () => ({}) },
   unresolved: { type: Number, default: 0 },
+  blocking: { type: Boolean, default: true },
   total: { type: Number, default: 0 },
   page: { type: Number, default: 1 },
   pageSize: { type: Number, default: 40 },

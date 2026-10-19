@@ -1,5 +1,5 @@
 <template>
-  <section class="qy-viewer" role="region" aria-label="源译对照预览" :data-layout="layout">
+  <section ref="rootEl" class="qy-viewer" role="region" aria-label="源译对照预览" :data-layout="layout" tabindex="-1">
     <div class="qy-viewer-controls" role="toolbar" aria-label="预览控制">
       <div class="qy-viewer-group" role="group" aria-label="页码">
         <button type="button" class="qy-icon-button" aria-label="上一页" :disabled="page <= 1" @click="goTo(page - 1)">‹</button>
@@ -59,6 +59,8 @@
       >{{ tab.label }}</button>
     </div>
 
+    <p v-if="locateNote" class="qy-viewer-note" :data-kind="locateNote.kind" role="status" aria-live="polite" data-locate-note>{{ locateNote.text }}</p>
+
     <div class="qy-viewer-canvases">
       <div
         v-for="tab in SIDES"
@@ -87,7 +89,7 @@
 </template>
 
 <script setup>
-import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { loadPdfjs } from '../lib/pdfjs.js';
 import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, clampZoom } from '../stores/runDetail.js';
@@ -120,6 +122,10 @@ const panes = {};
 const layout = ref('desktop');
 const activeSide = ref('source');
 const generation = { source: 0, translated: 0 };
+const rootEl = ref(null);
+const locateNote = ref(null);
+let pendingAnchor = null;
+let syncPaused = false;
 let internalPage = props.page;
 let scrollDriver = null;
 let mediaCleanup = [];
@@ -223,10 +229,73 @@ function onPaneRaisedPage(side, n) {
 
 function onPaneScroll(side, ratio) {
   scrollDriver = side;
+  // A locate on documents with different page counts scrolled one side only; the next manual scroll resumes syncing.
+  if (syncPaused) syncPaused = false;
   if (!props.syncScroll || layout.value !== 'desktop') return;
   for (const other of SIDES) {
     if (other.side !== side) panes[other.side]?.setScrollRatio?.(ratio);
   }
+}
+
+function pagesOf(side) {
+  const content = contents[side];
+  if (content.status === 'ready') return content.doc.numPages;
+  if (content.status === 'image') return 1;
+  return 0;
+}
+
+function note(kind, text) {
+  locateNote.value = { kind, text };
+}
+
+// Scroll the viewer into view and bring `page` of `side` into the canvas. Returns
+// { ok, reason } where reason is 'pending' | 'unavailable' | 'out-of-range' | 'invalid'.
+async function focusAnchor(anchor) {
+  const page = Math.floor(Number(anchor?.page));
+  if (!Number.isFinite(page) || page < 1) {
+    note('error', '这个问题没有可定位的页码');
+    return { ok: false, reason: 'invalid' };
+  }
+  const side = SIDES.some((s) => s.side === anchor?.side) ? anchor.side : 'translated';
+  const label = SIDES.find((s) => s.side === side).label;
+  const status = contents[side].status;
+  if (status === 'loading') {
+    pendingAnchor = { page, side };
+    note('info', `${label}预览正在加载，加载完成后会自动定位到第 ${page} 页`);
+    return { ok: false, reason: 'pending' };
+  }
+  const total = pagesOf(side);
+  if (!total) {
+    pendingAnchor = null;
+    note('error', `${label}预览尚未加载，无法定位`);
+    return { ok: false, reason: 'unavailable' };
+  }
+  if (page > total) {
+    pendingAnchor = null;
+    note('error', `该问题页码超出${label}页数（${page} > ${total}）`);
+    return { ok: false, reason: 'out-of-range' };
+  }
+  pendingAnchor = null;
+  if (layout.value !== 'desktop') activeSide.value = side;
+  internalPage = page;
+  emit('update:page', page);
+  await nextTick();
+  await nextTick();
+  const counts = SIDES.map((s) => pagesOf(s.side));
+  if (counts[0] === counts[1]) {
+    scrollAll(page);
+  } else {
+    panes[side]?.scrollToPage?.(page);
+    syncPaused = true;
+  }
+  panes[side]?.flashPage?.(page);
+  const el = rootEl.value;
+  if (el) {
+    el.scrollIntoView?.({ block: 'start' });
+    el.focus?.({ preventScroll: true });
+  }
+  note('info', `已定位到${label}第 ${page} 页`);
+  return { ok: true };
 }
 
 function setupMedia() {
@@ -253,6 +322,10 @@ watch(() => props.page, (value) => {
     internalPage = value;
     scrollAll(value);
   }
+});
+
+watch(() => `${contents.source.status}|${contents.translated.status}`, () => {
+  if (pendingAnchor) focusAnchor(pendingAnchor);
 });
 
 watch(totalPages, (total) => {
@@ -284,11 +357,14 @@ onBeforeUnmount(() => {
   SIDES.forEach(({ side }) => releaseContent(contents[side]));
 });
 
-defineExpose({ goTo, layout, scrollDriver: () => scrollDriver });
+defineExpose({ goTo, focusAnchor, layout, scrollDriver: () => scrollDriver });
 </script>
 
 <style scoped>
-.qy-viewer { display: grid; grid-template-rows: auto auto 1fr; gap: .5rem; min-width: 0; }
+.qy-viewer { display: grid; grid-auto-rows: auto; gap: .5rem; min-width: 0; scroll-margin-top: 4rem; }
+.qy-viewer:focus { outline: none; }
+.qy-viewer-note { margin: 0; padding: .3rem .6rem; background: #eef5ff; border-left: 3px solid #1f3a5f; }
+.qy-viewer-note[data-kind='error'] { background: #fff4e5; border-left-color: #d97706; }
 .qy-viewer-controls { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; position: sticky; top: 0; z-index: 2; background: #fff; padding: .4rem .5rem; border: 1px solid var(--qy-border, #d6dce3); }
 .qy-viewer-group { display: inline-flex; align-items: center; gap: .35rem; }
 .qy-viewer-page { display: inline-flex; align-items: center; gap: .3rem; }

@@ -197,6 +197,7 @@ import {
   ruleClassLabel,
   severityLabel,
   sortItems,
+  termsBlockDelivery,
 } from '../labels.js';
 
 const props = defineProps({
@@ -280,7 +281,9 @@ const checklist = computed(() => {
     rows.push({ key: 'unavailable', label: '检查未完成', value: `${pending.qa_unavailable} 项`, ok: false });
   }
   rows.push(
-    { key: 'terms', label: '待审核术语', value: `${pending.unresolved_terms || 0} 条`, ok: !pending.unresolved_terms },
+    termsBlockDelivery(run)
+      ? { key: 'terms', label: '待审核术语', value: `${pending.unresolved_terms || 0} 条`, ok: !pending.unresolved_terms }
+      : { key: 'terms', label: '词库待整理（不影响交付）', value: `${pending.unresolved_terms || 0} 条`, ok: true },
     { key: 'version', label: '版本', value: run.superseded_by ? '已被更新版本取代' : '当前最新', ok: !run.superseded_by },
   );
   const reasons = (gate.reasons || []).map((r) => GATE_REASON_LABELS[r] || r);
