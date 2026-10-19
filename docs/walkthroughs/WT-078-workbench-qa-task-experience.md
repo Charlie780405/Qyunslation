@@ -59,3 +59,11 @@
 - 改动：抽取时把每处出现所在的完整句子（前后两个句末标点之间，跨 PDF 换行拼接，不拼入作者/单位/参考文献行）存为该出现位置的上下文；候选接口为每处出现附带 `sentence`、`match_start/match_end`、`truncated`；前端逐条列出全部出处（第几处、页码、高亮术语），默认展开。重新检查时同一位置的上下文会被更新，不再重复添加出现位置。
 - 已有候选：新增 `scripts/backfill-term-evidence-sentences.py RUN_ID [--apply]`（默认只演练，不调用模型）。对任务 `eb7e4876…` 演练结果：163 个候选、418 处出现，396 处会更新，0 处对不上；“subgroup analyses”的 4 处都变成完整句子。**尚未 `--apply`，也尚未部署。**
 - 验证：新增后端测试 8 项、前端测试 5 项；后端全量（不含 `tests/structure`）只有已记录的 9 个基线失败；前端 205/205；`npm run build` 通过。未做浏览器走查。
+
+### 7.1 上线记录（术语证据）
+
+- 合并提交 `4bb3cbd`（`--no-ff` 合并功能 `7f5be0a` 与前端构建产物 `ae29d95`），已推送 origin/main。上文标题与正文里的“未部署”以本记录为准。
+- 部署时间：2026-10-19 12:43（UTC+8），在 `/home/dev/qyunslation` 运行 `bash scripts/deploy-translate-stack.sh`。本次无数据库迁移。
+- 重启前只读检查：`translation_run_record` 没有 translating/rendering/scanning/queued 任务，`qa_check_round` 没有 pending/running 轮次，没有 `pdf2zh_next` 翻译子进程（只有 7860 端口的 GUI 服务进程）；没有任务被打断。
+- 已核对：合并后在 main 上跑前端 `termEvidence.test.js`（5 项）和后端三个测试文件（17 项），全部通过；部署脚本的前置检查（迁移对齐、前端构建新鲜）、sidecar 指纹（本地与远端一致）、API 路由检查均通过；`pdf2zh.service` 与 `qyunslation-office.service` 均为 active，`NeedDaemonReload=no`；7860 端口返回 200；`/next/` 引用的前端资源与 `qyunslation/static/app/index.html` 一致；`/api/v1/settings/schema` 未登录返回 401；`qyunslation-office.service` 近 3 分钟日志没有 Traceback。
+- 未做：登录后的页面走查（术语审核里逐条出处与完整句子的实际显示）；已有候选的回填。`scripts/backfill-term-evidence-sentences.py RUN_ID --apply` 会写生产库，需用户另行确认后再执行；回填前，旧任务的候选仍显示原来的短上下文。
