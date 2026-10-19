@@ -8,7 +8,7 @@ findings "the same problem" across re-checks (fingerprint).
 
 Classes (see PLAN-078 §5.2):
 
-* ``C1`` critical fact (numbers, units, negation, missing text, garbled output): can only be
+* ``C1`` critical fact (numbers, units, negation, missing text): can only be
   fixed, or confirmed as a rule false positive by a second person. Never waivable.
 * ``C2`` layout / metadata: fix, or a reviewer waives it with a reason.
 * ``C3`` the checker could not run (or its integrity failed): says nothing about the
@@ -82,9 +82,13 @@ _RULES: dict[str, RuleInfo] = dict(
            "试验或申报编号错误会让监管文件无法对应。",
            "对照原文位置，把编号原样保留在译文中，然后重新检查。",
            locatable="excerpt", identity_keys=("kind", "missing")),
-        _r("TEXT_ENCODING_ARTIFACT", C1, "译文含乱码或不可打印字符",
-           "乱码意味着文字在转换中损坏。",
-           "查看下方页面中的乱码位置；展开“技术细节”可看到是哪一类字符（替换符、控制字符或编码错乱）及其码点。重新翻译（必要时换用文本型 PDF 或原始 Word 文档）。",
+        # PLAN-079: a garbled-text hit is often an invisible control character in the PDF text layer, which a
+        # reviewer settles by looking at the page. So it is C2 (a reviewer waives it with a written reason,
+        # one person, audited) rather than C1 (second-person confirmation), unlike numbers or negation.
+        _r("TEXT_ENCODING_ARTIFACT", C2, "译文含乱码或不可打印字符",
+           "乱码意味着文字在转换中损坏；但命中也可能只是 PDF 文本层里看不见的控制字符。",
+           "查看下方页面中的乱码位置；展开“技术细节”可看到是哪一类字符（替换符、控制字符或编码错乱）及其码点。"
+           "如果页面上确实读不出乱码，复核人写明理由后可授权例外；确有乱码则重新翻译（必要时换用文本型 PDF 或原始 Word 文档）。",
            locatable="page", identity_keys=("output_kind",)),
         _r("TEXT_ENCODING_INHERITED", WARN, "译文中的异常字符在源文同一页也存在",
            "同一页的源文已经带有这些字符，多半来自源文 PDF 的字体或编码，不是翻译造成的。",
@@ -188,6 +192,17 @@ def rule_for(code: str) -> RuleInfo:
 
 def is_registered(code: str) -> bool:
     return code in _RULES
+
+
+# Findings store the class they were produced with. When a rule is deliberately reclassified, findings that
+# were already stored (and sit at the gate right now) must follow it, or the change would only reach a task
+# after somebody re-ran its checks.
+RECLASSIFIED: dict[str, str] = {"TEXT_ENCODING_ARTIFACT": C2}
+
+
+def effective_class(code: str, stored: str | None) -> str:
+    """The class a finding is handled under: a deliberate reclassification wins over the stored value."""
+    return RECLASSIFIED.get(code) or stored or rule_for(code).rule_class
 
 
 def all_rules() -> list[RuleInfo]:

@@ -234,7 +234,29 @@ def discover_term_occurrences(source_text: str, translated_text: str) -> list[di
                     for item in row["occurrences"]
                 ):
                     row["occurrences"].append(occurrence)
-    return sorted(found.values(), key=lambda item: item["source_norm"])
+    kept = [row for row in found.values() if _worth_listing(row)]
+    return sorted(kept, key=lambda item: item["source_norm"])
+
+
+def _defined_in_context(token: str, contexts: list[str]) -> bool:
+    """"Full name (ABBR)" or "ABBR (full name)": the document itself defines the abbreviation."""
+    escaped = re.escape(token)
+    pattern = re.compile(rf"\(\s*{escaped}\s*\)|\b{escaped}\s*\([^)]{{3,}}\)")
+    return any(pattern.search(text or "") for text in contexts)
+
+
+def _worth_listing(row: dict[str, Any]) -> bool:
+    """PLAN-079: a bare all-caps token seen once and never defined is noise for a glossary reviewer.
+
+    Only the catch-all ``abbreviation`` pattern is thinned; drugs, targets, codes, study ids, diseases
+    and mechanisms always stay. Approved glossary terms are matched elsewhere and are not affected.
+    """
+    if row["extraction_metadata"].get("reason") != "deterministic:abbreviation":
+        return True
+    occurrences = row["occurrences"]
+    if len(occurrences) >= 2:
+        return True
+    return _defined_in_context(row["source_term"], [item.get("source_context") or "" for item in occurrences])
 
 
 def _structured_chunks(rows: list[tuple[int, str, int]], *, max_chars: int = 12000) -> list[str]:

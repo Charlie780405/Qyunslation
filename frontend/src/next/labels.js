@@ -174,7 +174,7 @@ export const ITEM_STATUS_LABELS = {
 export const ACTION_LABELS = {
   report_false_positive: '反馈误报',
   confirm_false_positive: '确认误报',
-  reject_false_positive: '驳回误报反馈',
+  reject_false_positive: '驳回（问题确实存在）',
   grant_waiver: '授权例外',
   revoke_waiver: '撤销例外',
   acknowledge: '确认已阅',
@@ -183,8 +183,8 @@ export const ACTION_LABELS = {
 export const ACTION_HELP = {
   report_false_positive: '认为这是检查规则的误判时使用。反馈本身不会放行，需由另一位术语管理员或管理员确认。',
   confirm_false_positive: '核对原文后确认这是规则误判。需由反馈人以外的人完成，会记入审计。',
-  reject_false_positive: '核对后认为问题真实存在，驳回误报反馈；问题仍需修复。',
-  grant_waiver: '仅用于版式、元数据和术语类问题：说明为何可以带着它交付。理由会记入审计。',
+  reject_false_positive: '核对后认为问题真实存在，驳回别人的误报反馈；阻断保留，问题仍需修复。想说“这是误报、可以放行”不要点这个。',
+  grant_waiver: '用于版式、元数据、乱码和术语类问题：说明为何可以带着它交付（例如页面上读不出乱码）。一个复核人即可，理由会记入审计。',
   revoke_waiver: '撤销之前授权的例外，问题重新计入阻断。',
   acknowledge: '确认已阅读这条警告；警告本身不阻断交付。',
 };

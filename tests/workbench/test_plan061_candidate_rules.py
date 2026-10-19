@@ -96,3 +96,19 @@ def test_plan079_statistical_methods_do_not_become_candidates():
     # drugs, targets and diseases are untouched
     for term in ("dupilumab", "atopic dermatitis", "IL-13", "analysis"):
         assert should_exclude_from_termbase(term)[0] is False, term
+
+
+def test_plan079_bare_abbreviations_are_not_listed_unless_repeated_or_defined():
+    from qyunslation.workbench.term_extract import discover_term_occurrences
+
+    source = (
+        "Patients with atopic dermatitis (ADX) were enrolled.\n"
+        "The FOO value was recorded once.\n"
+        "BAR and BAR were both measured.\n"
+        "Dupilumab reduced IL-13 levels.\n"
+    )
+    found = {row["source_term"] for row in discover_term_occurrences(source, "")}
+    assert "FOO" not in found          # once, never defined
+    assert "BAR" in found              # repeated
+    assert "ADX" in found              # defined once in parentheses by the document itself
+    assert {"Dupilumab", "IL-13"} <= found  # drugs and targets are never thinned

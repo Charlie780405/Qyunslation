@@ -24,6 +24,8 @@
         </details>
       </div>
     </header>
+    <component :is="blocking ? 'div' : 'details'" class="qy-term-body" data-term-body>
+    <summary v-if="!blocking" data-term-body-toggle>展开查看这 {{ unresolved }} 条词库候选（需要时再整理，完全不影响交付）</summary>
     <p v-if="error" class="qy-callout qy-callout-warning" role="alert">{{ error }}</p>
     <div v-if="batchEligible.length" class="qy-review-actions" aria-label="低风险术语批量操作">
       <span>已选 {{ selected.length }} 条低风险术语</span>
@@ -100,6 +102,7 @@
       <span>第 {{ page }} 页</span>
       <button type="button" :disabled="page * pageSize >= total" @click="$emit('page', page + 1)">下一页</button>
     </nav>
+    </component>
   </section>
 </template>
 

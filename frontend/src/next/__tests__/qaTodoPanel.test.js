@@ -206,6 +206,10 @@ describe('QA todo panel', () => {
     expect(text).toContain('词库待整理（不影响交付）');
     expect(text).not.toContain('待审核术语');
     expect(wrapper.find('[data-term-nonblocking]').exists()).toBe(true);
+    // the candidate list is folded away by default, so a hundred of them do not push the page around
+    const body = wrapper.find('[data-term-body]');
+    expect(body.element.tagName).toBe('DETAILS');
+    expect(body.attributes('open')).toBeUndefined();
     wrapper.unmount();
   });
 

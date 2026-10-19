@@ -5001,7 +5001,7 @@ def _qa_item_payload(
     from qyunslation.pipeline.qa import registry
 
     info = registry.rule_for(row.code)
-    rule_class = row.rule_class or info.rule_class
+    rule_class = registry.effective_class(row.code, row.rule_class)
     location = dict(row.location_json or {})
     location.setdefault("anchors", [])
     if not location["anchors"]:
@@ -5175,7 +5175,7 @@ def _apply_disposition(
     if expected_round_id is not None and expected_round_id != (item.round_id or ""):
         raise _disposition_error(409, "STALE_ROUND", "检查结果已更新，请刷新后再处置")
     info = registry.rule_for(item.code)
-    rule_class = item.rule_class or info.rule_class
+    rule_class = registry.effective_class(item.code, item.rule_class)
     classes = registry.ACTION_CLASSES.get(action)
     if classes is None:
         raise _disposition_error(422, "UNKNOWN_ACTION", "不支持的处置动作")

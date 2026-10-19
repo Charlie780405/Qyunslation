@@ -92,3 +92,14 @@ def test_by_default_source_overlap_does_not_downgrade_anything(monkeypatch):
     assert found["TEXT_ENCODING_ARTIFACT"].severity == "blocker"
     assert "TEXT_ENCODING_INHERITED" not in found
 
+
+
+def test_garbled_text_can_be_waived_by_one_reviewer_but_other_critical_facts_cannot():
+    from qyunslation.pipeline.qa import registry
+
+    rules = {rule.code: rule for rule in registry.all_rules()}
+    assert rules["TEXT_ENCODING_ARTIFACT"].rule_class == "C2"
+    assert "grant_waiver" in registry.allowed_actions("C2", "reviewer", is_writer=False)
+    # numbers, negation and the like stay C1: no waiver, a second person must confirm a false positive
+    assert rules["AD_NUMBER_DRIFT"].rule_class == "C1"
+    assert "grant_waiver" not in registry.allowed_actions("C1", "reviewer", is_writer=False)
