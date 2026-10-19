@@ -137,7 +137,7 @@
         <dd>{{ selected.how || '请联系管理员查看该检查项。' }}</dd>
       </dl>
       <p v-if="selected.rule_class === 'C1'" class="qy-qa-critical-note">
-        关键事实类问题不能直接放行：请修复后生成修订版；如果确认是检查规则误判，请反馈误报，由另一位术语管理员或管理员确认。
+        关键事实类问题不能直接放行：请修复后生成修订版；如果确认是检查规则误判，请反馈误报，由有确认权限的人（术语管理员、管理员、所有者）确认。
       </p>
       <p v-if="selected.prior_version_disposition" class="qy-qa-prior-note">
         上一版本曾授权例外（{{ selected.prior_version_disposition.actor_sub }}：{{ selected.prior_version_disposition.reason }}）。
@@ -159,36 +159,37 @@
 
       <section class="qy-qa-remedies" data-qa-remedies aria-label="解决方案">
         <h4>怎么解决</h4>
-        <ul v-if="remedies.length">
-          <li v-for="remedy in remedies" :key="remedy.id" :data-recommended="remedy.recommended ? 'true' : 'false'">
+        <template v-if="remedies.length || infoRemedies.length">
+          <p v-for="info in infoRemedies" :key="info.id" class="qy-remedy-info" data-remedy-info>
+            <strong>{{ info.label }}</strong>
+            <span>{{ info.why }}</span>
+          </p>
+          <div v-if="remedies.length" class="qy-remedy-row" role="group" aria-label="可选的解决方式">
             <button
+              v-for="remedy in remedies"
+              :key="remedy.id"
               type="button"
-              :class="remedy.recommended ? 'qy-primary-button' : 'qy-secondary-button'"
+              class="qy-remedy-btn"
+              :class="{ 'is-primary': remedy.recommended }"
               :disabled="Boolean(busy) || submitting"
               :data-remedy="remedy.id"
+              :aria-describedby="hintId"
               @click="runRemedy(remedy)"
-            >{{ remedy.label }}<small v-if="remedy.recommended">（推荐）</small></button>
-            <span class="qy-muted">{{ remedy.why }}</span>
-          </li>
-        </ul>
+              @mouseenter="hinted = remedy.id"
+              @mouseleave="hinted = ''"
+              @focus="hinted = remedy.id"
+              @blur="hinted = ''"
+            >{{ remedy.label }}<span v-if="remedy.recommended" class="qy-remedy-tag">推荐</span></button>
+          </div>
+          <p v-if="hintRemedy" :id="hintId" class="qy-remedy-hint" data-remedy-hint>{{ hintRemedy.why }}</p>
+        </template>
         <p v-else class="qy-muted" data-qa-no-remedy>
           当前账号对这一项没有可执行的操作。请联系有复核权限的同事（复核人、术语管理员、管理员或所有者）处理。
         </p>
       </section>
 
-      <div v-if="selected.allowed_dispositions?.length" class="qy-qa-actions" data-qa-actions>
-        <button
-          v-for="action in selected.allowed_dispositions"
-          :key="action"
-          type="button"
-          class="qy-secondary-button"
-          :disabled="Boolean(busy) || submitting"
-          :aria-pressed="activeAction === action"
-          @click="openForm(action)"
-        >{{ actionLabel(action) }}</button>
-      </div>
       <form v-if="activeAction" class="qy-qa-form" data-qa-form @submit.prevent="submitForm">
-        <p class="qy-muted">{{ ACTION_HELP[activeAction] }}</p>
+        <p class="qy-muted">{{ activeThen ? '提交后会依次记录“反馈误报”和“确认误报”，两条记录都会进入审计。' : ACTION_HELP[activeAction] }}</p>
         <label class="qy-field">
           <span>理由（至少 10 个字，将记入审计）</span>
           <textarea v-model="reason" rows="3" />
@@ -198,6 +199,21 @@
           <button type="button" class="qy-secondary-button" @click="closeForm">取消</button>
         </div>
       </form>
+
+      <details v-if="selected.allowed_dispositions?.length" class="qy-qa-more" data-qa-more>
+        <summary>更多处置方式</summary>
+        <div class="qy-qa-actions" data-qa-actions>
+          <button
+            v-for="action in selected.allowed_dispositions"
+            :key="action"
+            type="button"
+            class="qy-secondary-button"
+            :disabled="Boolean(busy) || submitting"
+            :aria-pressed="activeAction === action"
+            @click="openForm(action)"
+          >{{ actionLabel(action) }}</button>
+        </div>
+      </details>
     </section>
   </section>
 </template>
@@ -231,6 +247,9 @@ const emit = defineEmits(['select', 'locate', 'revise', 'recheck', 'termbase']);
 
 const filter = ref('open');
 const activeAction = ref('');
+const activeThen = ref('');
+const hinted = ref('');
+const hintId = `qy-remedy-hint-${Math.random().toString(36).slice(2, 8)}`;
 const reason = ref('');
 const submitting = ref(false);
 const error = ref('');
@@ -329,12 +348,19 @@ const checkLine = computed(() => {
 
 // ---- remedies: concrete ways out of the selected problem ------------------------------------
 // The server proposes them per problem and per person; here only the ones that can run in this task state stay.
-const remedies = computed(() => (selected.value?.remedies || []).filter((remedy) => {
+const allRemedies = computed(() => (selected.value?.remedies || []).filter((remedy) => {
   if (remedy.kind === 'revise') return canRevise.value;
   if (remedy.kind === 'recheck') return Boolean(props.run) && can(props.run, 'requalify');
   if (remedy.kind === 'locate') return anchorsOf(selected.value).some((anchor) => anchor.page);
   return true;
 }));
+const remedies = computed(() => allRemedies.value.filter((remedy) => remedy.kind !== 'info'));
+const infoRemedies = computed(() => allRemedies.value.filter((remedy) => remedy.kind === 'info'));
+// One line of explanation under the row: the option under the pointer or focus, else the recommended one.
+const hintRemedy = computed(() => remedies.value.find((remedy) => remedy.id === hinted.value)
+  || remedies.value.find((remedy) => remedy.recommended)
+  || remedies.value[0]
+  || null);
 
 function runRemedy(remedy) {
   switch (remedy.kind) {
@@ -354,6 +380,7 @@ function runRemedy(remedy) {
       // Open the normal form with the reason already filled in: one check, one click, and it stays editable.
       openForm(remedy.action);
       reason.value = remedy.reason || '';
+      activeThen.value = remedy.then || '';
       break;
     default:
       break;
@@ -365,6 +392,7 @@ const canSubmit = computed(() => reason.value.trim().length >= 10);
 
 function openForm(action) {
   activeAction.value = action;
+  activeThen.value = '';
   reason.value = '';
   error.value = '';
   notice.value = '';
@@ -372,6 +400,7 @@ function openForm(action) {
 
 function closeForm() {
   activeAction.value = '';
+  activeThen.value = '';
   reason.value = '';
 }
 
@@ -380,8 +409,12 @@ async function submitForm() {
   submitting.value = true;
   error.value = '';
   try {
-    await props.onDispose(selected.value, activeAction.value, reason.value.trim());
-    notice.value = `已记录：${actionLabel(activeAction.value)}`;
+    const text = reason.value.trim();
+    const steps = activeThen.value ? [activeAction.value, activeThen.value] : [activeAction.value];
+    // "report, then confirm" for someone who may confirm: each step is its own audited record, and a failure
+    // in the second leaves the first in place, now shown as a pending report with its next step.
+    for (const step of steps) await props.onDispose(selected.value, step, text);
+    notice.value = `已记录：${steps.map(actionLabel).join('、')}`;
     closeForm();
   } catch (failure) {
     error.value = failure?.message || '处置失败，请稍后重试';
@@ -488,11 +521,22 @@ li[data-severity='unavailable'] .qy-qa-item strong { color: #7a5200; }
 .qy-qa-detail-fields { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .9rem; margin: 0; }
 .qy-qa-detail-fields dt { color: #3b4452; font-weight: 600; }
 .qy-qa-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
-.qy-qa-remedies { margin: .75rem 0; padding: .6rem .75rem; border: 1px solid #c9d7e6; background: #f4f8fc; }
-.qy-qa-remedies h4 { margin: 0 0 .4rem; }
-.qy-qa-remedies ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
-.qy-qa-remedies li { display: grid; gap: .2rem; }
-.qy-qa-remedies small { margin-left: .3rem; }
+.qy-qa-remedies { margin: .75rem 0; padding: .55rem .75rem .6rem; border: 1px solid #c9d7e6; border-radius: 6px; background: #f4f8fc; }
+.qy-qa-remedies h4 { margin: 0 0 .45rem; font-size: .85rem; letter-spacing: .02em; color: #3b4452; }
+.qy-remedy-row { display: flex; flex-wrap: wrap; gap: .45rem .5rem; align-items: center; }
+.qy-remedy-btn { display: inline-flex; align-items: center; gap: .4rem; width: auto; min-height: 2.25rem; padding: .3rem .85rem; font: inherit; font-size: .9rem; line-height: 1.2; color: #005076; background: #fff; border: 1px solid #9fb3c8; border-radius: 999px; cursor: pointer; }
+.qy-remedy-btn:hover:not(:disabled) { border-color: #005076; background: #eef5fa; }
+.qy-remedy-btn:focus-visible { outline: 3px solid #f2a900; outline-offset: 2px; }
+.qy-remedy-btn:disabled { opacity: .55; cursor: not-allowed; }
+.qy-remedy-btn.is-primary { color: #fff; background: #005076; border-color: #005076; font-weight: 600; }
+.qy-remedy-btn.is-primary:hover:not(:disabled) { background: #003f5c; }
+.qy-remedy-tag { padding: 0 .4rem; font-size: .7rem; font-weight: 600; color: #005076; background: #fff; border-radius: 999px; }
+.qy-remedy-hint { margin: .5rem 0 0; font-size: .85rem; color: #3b4452; min-height: 1.3em; }
+.qy-remedy-info { display: grid; gap: .1rem; margin: 0 0 .5rem; padding: .35rem .6rem; font-size: .85rem; background: #fff8e6; border-left: 3px solid #d97706; }
+.qy-qa-more { margin-top: .6rem; }
+.qy-qa-more > summary { cursor: pointer; font-size: .85rem; color: #4a5565; }
+.qy-qa-more .qy-qa-actions { margin-top: .4rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+@media (max-width: 640px) { .qy-remedy-btn { min-height: 2.75rem; } }
 .qy-anchor-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
 .qy-anchor-list blockquote { margin: .2rem 0; padding: .25rem .6rem; border-left: 3px solid #9fb3c8; background: #f6f8fa; font-size: .9rem; }
 .qy-qa-critical-note { margin: 0; padding: .5rem .7rem; background: #fef2f2; border-left: 4px solid #8b1e1e; }

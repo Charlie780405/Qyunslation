@@ -181,8 +181,8 @@ export const ACTION_LABELS = {
 };
 
 export const ACTION_HELP = {
-  report_false_positive: '认为这是检查规则的误判时使用。反馈本身不会放行，需由另一位术语管理员或管理员确认。',
-  confirm_false_positive: '核对原文后确认这是规则误判。需由反馈人以外的人完成，会记入审计。',
+  report_false_positive: '认为这是检查规则的误判时使用。反馈本身不会放行，需由有确认权限的人（术语管理员、管理员、所有者）确认；你有确认权限时可以自己确认。',
+  confirm_false_positive: '核对原文后确认这是规则误判，阻断解除。你自己的反馈也可以自己确认，审计里会标注为自我确认。',
   reject_false_positive: '核对后认为问题真实存在，驳回别人的误报反馈；阻断保留，问题仍需修复。想说“这是误报、可以放行”不要点这个。',
   grant_waiver: '用于版式、元数据、乱码和术语类问题：说明为何可以带着它交付（例如页面上读不出乱码）。一个复核人即可，理由会记入审计。',
   revoke_waiver: '撤销之前授权的例外，问题重新计入阻断。',

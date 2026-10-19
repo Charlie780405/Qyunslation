@@ -113,3 +113,44 @@ def test_a_blocker_comes_with_ways_out_limited_to_what_this_person_can_run(monke
         term_remedies = {r["id"]: r for r in _item(client, run_id, term, REVIEWER)["remedies"]}
         assert term_remedies["termbase"]["search"] == "dupilumab" and term_remedies["termbase"]["recommended"] is True
     reset_engine()
+
+
+def test_a_confirmer_clears_a_false_positive_on_a_critical_fact_without_a_second_person(monkeypatch, tmp_path):
+    """Reported: 'I checked it, it is a false positive' left the blocker in place. Now a confirmer finishes it alone, marked."""
+    from sqlalchemy import select
+
+    from _plan078_flow import OWNER, make_client, run_to_gate
+    from qyunslation.persist import db as persist_db
+    from qyunslation.persist.models import QaDisposition
+    from test_plan078b_dispositions import ADMIN, REVIEWER, _inject, _item, _post, _run
+
+    with make_client(monkeypatch, tmp_path, translate=True) as client:
+        run_id, _ = run_to_gate(client, OWNER, tmp_path, "self-confirm")
+        (item_id,) = _inject(run_id, [("blocker", "LITERAL_MISSING_IND", {"kind": "ind", "missing": ["IND 123456"]})])
+
+        # a confirmer is offered the one-step path; a plain reviewer is not
+        by_id = {r["id"]: r for r in _item(client, run_id, item_id, ADMIN)["remedies"]}
+        assert by_id["false_positive"]["then"] == "confirm_false_positive"
+        reviewer_fp = next(r for r in _item(client, run_id, item_id, REVIEWER)["remedies"] if r["id"] == "false_positive")
+        assert "then" not in reviewer_fp
+
+        assert _post(client, run_id, item_id, ADMIN, "report_false_positive", "核对原文第3页后确认编号完整保留").status_code == 200
+        # while it waits, the confirmer is shown what to do next; the reviewer is told who can confirm
+        pending = {r["id"]: r for r in _item(client, run_id, item_id, ADMIN)["remedies"]}
+        assert pending["confirm"]["recommended"] is True and pending["reject"]["action"] == "reject_false_positive"
+        waiting = {r["id"]: r for r in _item(client, run_id, item_id, REVIEWER)["remedies"]}
+        assert waiting["waiting"]["kind"] == "info" and "confirm" not in waiting
+
+        confirmed = _post(client, run_id, item_id, ADMIN, "confirm_false_positive", "已复核原文和译文，同意这是检查误报，放行。")
+        assert confirmed.status_code == 200, confirmed.text
+        assert _item(client, run_id, item_id)["status"] == "false_positive_confirmed"
+        body = _run(client, run_id)
+        assert body["quality_state"] == "review_ready" and body["formal_gate"]["passed"] is True
+        with persist_db.SessionLocal() as session:
+            row = session.scalar(select(QaDisposition).where(QaDisposition.action == "confirm_false_positive"))
+            assert row.self_review is True  # nobody else looked at it, and the record says so
+        # a plain reviewer still cannot confirm anything
+        (other,) = _inject(run_id, [("blocker", "LITERAL_MISSING_IND", {"kind": "ind", "missing": ["IND 654321"]})])
+        assert _post(client, run_id, other, REVIEWER, "report_false_positive", "核对原文后确认编号完整").status_code == 200
+        assert _post(client, run_id, other, REVIEWER, "confirm_false_positive", "我自己确认自己的反馈").status_code == 403
+    reset_engine()

@@ -77,7 +77,7 @@ def test_critical_fact_cannot_be_waived_or_acknowledged(gated):
     assert body["quality_state"] == "qa_blocked" and body["formal_gate"]["passed"] is False
 
 
-def test_false_positive_needs_a_second_person_to_confirm(gated):
+def test_false_positive_is_confirmed_by_someone_with_the_confirmer_role(gated):
     client, run_id, _ = gated
     (item_id,) = _inject(run_id, [("blocker", "AD_NUMBER_DRIFT", {"missing_in_target": ["45.2%"]})])
 
@@ -90,11 +90,6 @@ def test_false_positive_needs_a_second_person_to_confirm(gated):
 
     assert _post(client, run_id, item_id, OWNER, "confirm_false_positive").status_code == 403  # not a confirmer
     assert _post(client, run_id, item_id, REVIEWER, "confirm_false_positive").status_code == 403  # reviewers cannot
-
-    # even a confirmer cannot confirm their own report
-    own_report = _post(client, run_id, item_id, TERM_ADMIN, "report_false_positive", "我自己反馈的误报说明")
-    assert own_report.status_code == 200
-    assert _post(client, run_id, item_id, TERM_ADMIN, "confirm_false_positive").status_code == 409
 
     confirmed = _post(client, run_id, item_id, ADMIN, "confirm_false_positive", "核对原文表格后确认译文数值一致")
     assert confirmed.status_code == 200, confirmed.text

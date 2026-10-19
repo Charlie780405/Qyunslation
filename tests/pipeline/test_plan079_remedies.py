@@ -44,3 +44,15 @@ def test_the_way_out_depends_on_what_kind_of_problem_it_is():
 def test_garbled_text_default_reason_says_what_was_checked():
     waive = next(r for r in registry.remedies_for("TEXT_ENCODING_ARTIFACT", "C2") if r["kind"] == "disposition")
     assert "页面" in waive["reason"] and waive["action"] == "grant_waiver"
+
+
+def test_a_pending_false_positive_report_always_has_a_next_step():
+    confirmer = registry.pending_report_remedies(True)
+    assert [r["id"] for r in confirmer] == ["locate", "confirm", "reject", "revise"]
+    assert next(r for r in confirmer if r["recommended"])["id"] == "confirm"
+    waiting = registry.pending_report_remedies(False)
+    assert waiting[0]["kind"] == "info" and "术语管理员" in waiting[0]["why"]
+    assert next(r for r in waiting if r["recommended"])["kind"] == "revise"  # something clickable is recommended
+    for remedy in confirmer:
+        if remedy["kind"] == "disposition":
+            assert len(remedy["reason"]) >= 10

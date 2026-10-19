@@ -231,9 +231,16 @@ describe('QA todo panel', () => {
     expect(box.exists()).toBe(true);
     const buttons = box.findAll('button');
     expect(buttons.map((b) => b.attributes('data-remedy'))).toEqual(['waive', 'revise']);
-    expect(buttons[0].classes()).toContain('qy-primary-button');
+    expect(buttons[0].classes()).toContain('is-primary');
+    expect(buttons[1].classes()).not.toContain('is-primary');
     expect(buttons[0].text()).toContain('推荐');
-    expect(box.text()).toContain('你看过并认为可以接受时使用');
+    // one explanation line, not one per option: the recommended option's by default, the focused one's when focused
+    expect(box.findAll('[data-remedy-hint]').length).toBe(1);
+    expect(box.find('[data-remedy-hint]').text()).toContain('你看过并认为可以接受时使用');
+    await box.find('[data-remedy="revise"]').trigger('focus');
+    expect(box.find('[data-remedy-hint]').text()).toContain('原版会保留');
+    await box.find('[data-remedy="revise"]').trigger('blur');
+    expect(box.find('[data-remedy-hint]').text()).toContain('你看过并认为可以接受时使用');
     wrapper.unmount();
   });
 
@@ -250,6 +257,33 @@ describe('QA todo panel', () => {
     expect(apiMock.postQaDisposition).toHaveBeenCalledWith('run-1', 'i2', expect.objectContaining({
       action: 'grant_waiver', reason: expect.stringContaining('已核对首页'),
     }));
+    wrapper.unmount();
+  });
+
+  it('"false positive" for someone who may confirm records the report and the confirmation in one go', async () => {
+    const oneStep = { id: 'false_positive', kind: 'disposition', label: '核对过了，这是检查误报，放行', why: '你有确认权限，所以一步完成。', action: 'report_false_positive', then: 'confirm_false_positive', reason: '已对照原文核对，译文已正确保留该内容，检查规则误判。', recommended: false };
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[0], remedies: [REMEDY.revise, oneStep] }] });
+    const { wrapper } = await mountPage();
+    await pick(wrapper, 0);
+    await wrapper.find('[data-remedy="false_positive"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-qa-form]').text()).toContain('依次记录');
+    await wrapper.find('[data-qa-form] button[type="submit"]').trigger('submit');
+    await flushPromises();
+    const actions = apiMock.postQaDisposition.mock.calls.map((call) => call[2].action);
+    expect(actions).toEqual(['report_false_positive', 'confirm_false_positive']);
+    wrapper.unmount();
+  });
+
+  it('a waiting false-positive report says what is pending and still offers something to click', async () => {
+    const waiting = { id: 'waiting', kind: 'info', label: '已反馈误报，等待有确认权限的人确认', why: '确认之前阻断保留。', action: '', reason: '', recommended: false };
+    apiMock.getQaItems.mockResolvedValue({ items: [{ ...ITEMS[0], status: 'false_positive_reported', remedies: [waiting, { ...REMEDY.revise, recommended: true }] }] });
+    const { wrapper } = await mountPage();
+    await wrapper.find('[data-qa-panel] .qy-qa-filters button:nth-child(3)').trigger('click');
+    await pick(wrapper, 0);
+    const box = wrapper.find('[data-qa-remedies]');
+    expect(box.find('[data-remedy-info]').text()).toContain('等待有确认权限的人确认');
+    expect(box.findAll('[data-remedy]').map((b) => b.attributes('data-remedy'))).toEqual(['revise']);
     wrapper.unmount();
   });
 

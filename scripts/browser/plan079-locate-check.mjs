@@ -149,6 +149,17 @@ async function scenario(browserType, browserName, sizeName, translatedPdf) {
     const remedies = page.locator('[data-qa-remedies] [data-remedy]');
     check(`${tag}: remedy buttons are shown`, await remedies.count() === 2, String(await remedies.count()));
     check(`${tag}: the recommended remedy is marked`, (await page.locator('[data-remedy="waive"]').textContent()).includes('推荐'));
+    // layout: compact options in a row, not full-width bars; one hint line
+    const boxes = await page.locator('[data-qa-remedies] [data-remedy]').evaluateAll((els) => els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+    }));
+    const panelWidth = await page.locator('[data-qa-remedies]').evaluate((el) => Math.round(el.getBoundingClientRect().width));
+    check(`${tag}: remedy buttons are compact, not full-width bars`, boxes.every((b) => b.width < Math.max(320, panelWidth * 0.6)), JSON.stringify(boxes));
+    if (sizeName === 'desktop') check(`${tag}: remedy buttons share one row`, new Set(boxes.map((b) => b.top)).size === 1, JSON.stringify(boxes));
+    if (sizeName === 'phone') check(`${tag}: touch targets are at least 44px tall`, boxes.every((b) => b.height >= 44), JSON.stringify(boxes));
+    check(`${tag}: exactly one explanation line`, await page.locator('[data-qa-remedies] [data-remedy-hint]').count() === 1);
+    if (browserName === 'chromium') await page.locator('[data-qa-remedies]').screenshot({ path: `${OUT}/remedies-${sizeName}.png` });
     await page.locator('[data-remedy="waive"]').click();
     const prefilled = await page.locator('[data-qa-form] textarea').inputValue();
     check(`${tag}: the reason is prefilled and long enough to submit`, prefilled.trim().length >= 10, prefilled);

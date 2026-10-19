@@ -9,7 +9,8 @@ findings "the same problem" across re-checks (fingerprint).
 Classes (see PLAN-078 §5.2):
 
 * ``C1`` critical fact (numbers, units, negation, missing text): can only be
-  fixed, or confirmed as a rule false positive by a second person. Never waivable.
+  fixed, or confirmed as a rule false positive by someone with a confirmer role (term_admin, admin, owner; the
+  reporter may confirm their own report, which the audit trail marks). Never waivable.
 * ``C2`` layout / metadata: fix, or a reviewer waives it with a reason.
 * ``C3`` the checker could not run (or its integrity failed): says nothing about the
   translation; re-run the check. No dispositions.
@@ -220,6 +221,48 @@ def _remedy(rid: str, kind: str, label: str, why: str, **kw: Any) -> dict[str, A
     return {"id": rid, "kind": kind, "label": label, "why": why, "action": "", "reason": "", "recommended": False, **kw}
 
 
+def one_step_false_positive() -> dict[str, Any]:
+    """Override for the C1 "false positive" remedy when the viewer may also confirm: report + confirm in one go."""
+    return {
+        "label": "核对过了，这是检查误报，放行",
+        "why": "你有确认权限，所以反馈和确认一步完成；两条记录都会进入审计，并标注为自我确认（没有第二个人复核）。",
+        "then": "confirm_false_positive",
+    }
+
+
+def pending_report_remedies(can_confirm: bool) -> list[dict[str, Any]]:
+    """What to do while a false-positive report on a critical fact is waiting for confirmation."""
+    locate = _remedy("locate", "locate", "先看问题所在的页面", "对照原文和译文，再决定确认还是驳回。")
+    revise = _remedy(
+        "revise", "revise", "重新生成修订版",
+        "原版会保留。新版用同一套配置重新翻译并自动复检，这条问题可能随之消失。",
+    )
+    if can_confirm:
+        return [
+            locate,
+            _remedy(
+                "confirm", "disposition", "确认这是误报，放行",
+                "已有人反馈这是误报。确认后阻断解除，记入审计。",
+                action="confirm_false_positive", reason="已复核原文和译文，同意这是检查误报，放行。", recommended=True,
+            ),
+            _remedy(
+                "reject", "disposition", "驳回：问题确实存在",
+                "复核后认为问题是真的：阻断保留，需要修复或重新生成。",
+                action="reject_false_positive", reason="复核后问题确实存在，驳回误报反馈，需要修复。",
+            ),
+            revise,
+        ]
+    revised = {**revise, "recommended": True}
+    return [
+        _remedy(
+            "waiting", "info", "已反馈误报，等待有确认权限的人确认",
+            "确认之前阻断保留。有确认权限的角色是：术语管理员、管理员、所有者。你也可以先重新生成修订版。",
+        ),
+        locate,
+        revised,
+    ]
+
+
 def remedies_for(code: str, rule_class: str) -> list[dict[str, Any]]:
     """Ordered options for one finding. The API drops the ones this person or this task state cannot run.
 
@@ -244,7 +287,7 @@ def remedies_for(code: str, rule_class: str) -> list[dict[str, Any]]:
             revise,
             _remedy(
                 "false_positive", "disposition", "我核对过，这是检查误报",
-                "确认译文其实是正确的时使用。关键事实类需要另一位管理员、术语管理员或所有者再确认一次才会放行。",
+                "确认译文其实是正确的时使用。提交后需要有确认权限的人（术语管理员、管理员、所有者）确认才会放行。",
                 action="report_false_positive", reason=_FALSE_POSITIVE_REASON,
             ),
         ]

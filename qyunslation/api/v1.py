@@ -5054,10 +5054,19 @@ def _remedies_for_item(row: QaItem, rule_class: str, allowed: list[str], state: 
 
     if state["closed"]:
         return []
+    can_confirm = "confirm_false_positive" in allowed
+    if rule_class == "C1" and state["pending_report"] is not None:
+        # A false-positive report is waiting: say what happens next instead of leaving the person at a dead end.
+        remedies = registry.pending_report_remedies(can_confirm)
+    else:
+        remedies = registry.remedies_for(row.code, rule_class)
     out = []
-    for remedy in registry.remedies_for(row.code, rule_class):
+    for remedy in remedies:
         if remedy["kind"] == "disposition" and remedy["action"] not in allowed:
             continue
+        if remedy["id"] == "false_positive" and can_confirm:
+            # This person may confirm too, so report and confirm go in one step (two audit records, marked).
+            remedy = {**remedy, **registry.one_step_false_positive()}
         if remedy["kind"] == "termbase":
             evidence = row.evidence_json or {}
             remedy = {**remedy, "search": str(
@@ -5218,12 +5227,14 @@ def _apply_disposition(
     last = state["last"]
     if last is not None and last.action == action and last.actor_sub == identity.user_sub:
         return last  # repeating the same decision is a no-op, not a second record
+    self_confirm = False
     if action == "confirm_false_positive":
         pending = state["pending_report"]
         if pending is None:
             raise _disposition_error(409, "NO_REPORT_TO_CONFIRM", "没有待确认的误报反馈")
-        if pending.actor_sub == identity.user_sub:
-            raise _disposition_error(409, "NEEDS_SECOND_PERSON", "误报需要由反馈人以外的人确认")
+        # Only confirmer roles reach this point (checked above). A confirmer may confirm their own report; the
+        # record is marked so the audit trail shows that no second person looked at it.
+        self_confirm = pending.actor_sub == identity.user_sub
     elif action == "reject_false_positive":
         if state["pending_report"] is None:
             raise _disposition_error(409, "NO_REPORT_TO_REJECT", "没有待处理的误报反馈")
@@ -5246,7 +5257,7 @@ def _apply_disposition(
         evidence_json={"severity": item.severity, "title": info.title},
         actor_sub=identity.user_sub,
         actor_role=role,
-        self_review=bool(is_writer and action != "report_false_positive"),
+        self_review=bool((is_writer and action != "report_false_positive") or self_confirm),
     )
     session.add(row)
     if not item.fingerprint:  # old finding: store the identity we just relied on
