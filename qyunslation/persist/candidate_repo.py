@@ -83,6 +83,19 @@ def candidate_to_dict(
         "updated_at": candidate.updated_at.isoformat() if candidate.updated_at else None,
     }
     if include_occurrences:
+        from qyunslation.workbench.sentences import term_sentence
+
+        # Several occurrences can sit in one stored paragraph; the n-th of them is the n-th match there.
+        ordered = sorted(
+            candidate.occurrences,
+            key=lambda occ: (occ.block_id or "", occ.char_start if occ.char_start is not None else -1),
+        )
+        seen_in_block: dict[str, int] = {}
+        ordinals: dict[str, int] = {}
+        for occurrence in ordered:
+            key = occurrence.block_id or ""
+            ordinals[occurrence.id] = seen_in_block.get(key, 0)
+            seen_in_block[key] = ordinals[occurrence.id] + 1
         result["occurrences"] = [
             {
                 "id": occurrence.id,
@@ -94,8 +107,16 @@ def candidate_to_dict(
                 "bbox": occurrence.bbox,
                 "source_context": occurrence.source_context,
                 "target_context": occurrence.target_context,
+                **term_sentence(
+                    occurrence.source_context or "",
+                    candidate.source_term,
+                    ordinals.get(occurrence.id, 0),
+                ),
             }
-            for occurrence in candidate.occurrences
+            for occurrence in sorted(
+                candidate.occurrences,
+                key=lambda occ: (occ.char_start is None, occ.char_start if occ.char_start is not None else 0),
+            )
         ]
         result["occurrence_count"] = len(candidate.occurrences)
     return result
@@ -285,6 +306,28 @@ def enqueue_candidate(
         )
         if occurrence_key in existing_occurrence_keys:
             continue
+        # The same place found again (a re-check) with a better context refreshes the stored
+        # context instead of adding a second occurrence of the same match.
+        located = (
+            occurrence_data.get("block_id"),
+            occurrence_data.get("char_start"),
+            occurrence_data.get("char_end"),
+        )
+        if located[1] is not None and located[2] is not None:
+            same_place = next(
+                (
+                    occurrence
+                    for occurrence in candidate.occurrences
+                    if (occurrence.block_id, occurrence.char_start, occurrence.char_end) == located
+                ),
+                None,
+            )
+            if same_place is not None:
+                if occurrence_data.get("source_context"):
+                    same_place.source_context = occurrence_data.get("source_context")
+                if occurrence_data.get("target_context") and not same_place.target_context:
+                    same_place.target_context = occurrence_data.get("target_context")
+                continue
         # Keep the already-loaded relationship in sync with the database.  The
         # public extract endpoint serializes this object immediately after the
         # flush; adding only ``candidate_id`` leaves a stale empty collection

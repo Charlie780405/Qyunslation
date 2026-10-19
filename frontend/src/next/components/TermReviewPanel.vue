@@ -56,9 +56,18 @@
           >
         </label>
       </div>
-      <details v-if="item.source_context">
+      <details v-if="evidenceList(item).length" class="qy-term-evidence" data-term-evidence open>
         <summary>上下文与提取证据（{{ evidenceCount(item) }} 处）</summary>
-        <p>{{ item.source_context }}</p>
+        <ol class="qy-term-evidence-list">
+          <li v-for="(entry, index) in evidenceList(item)" :key="entry.key" data-term-evidence-item>
+            <span class="qy-term-evidence-no">第 {{ index + 1 }} 处<template v-if="entry.page"> · 第 {{ entry.page }} 页</template></span>
+            <p class="qy-term-sentence" data-term-sentence>
+              <template v-if="entry.hit">{{ entry.before }}<mark>{{ entry.hit }}</mark>{{ entry.after }}</template>
+              <template v-else>{{ entry.text }}</template>
+              <small v-if="entry.truncated" class="qy-muted">（原文上下文过长，句子可能不完整）</small>
+            </p>
+          </li>
+        </ol>
         <small>{{ item.extraction_reason || '规则提取' }} · {{ item.rule_version || rules?.version }}</small>
       </details>
       <p v-if="actionHint(item)" class="qy-muted">{{ actionHint(item) }}</p>
@@ -139,8 +148,34 @@ function isFinal(item) {
   return ['approved', 'rejected', 'applied'].includes(item.status);
 }
 
+// Every occurrence of the term, each with the complete sentence around it (the server derives it).
+function evidenceList(item) {
+  const occurrences = Array.isArray(item.occurrences) ? item.occurrences : [];
+  const entries = occurrences
+    .map((occurrence, index) => {
+      const text = String(occurrence.sentence || occurrence.source_context || '').trim();
+      if (!text) return null;
+      const start = occurrence.match_start;
+      const end = occurrence.match_end;
+      const located = Number.isInteger(start) && Number.isInteger(end) && end > start && end <= text.length;
+      return {
+        key: occurrence.id || `${item.id}:${index}`,
+        page: occurrence.page_no || null,
+        text,
+        before: located ? text.slice(0, start) : '',
+        hit: located ? text.slice(start, end) : '',
+        after: located ? text.slice(end) : '',
+        truncated: Boolean(occurrence.truncated),
+      };
+    })
+    .filter(Boolean);
+  if (entries.length) return entries;
+  const fallback = String(item.source_context || '').trim();
+  return fallback ? [{ key: `${item.id}:context`, page: null, text: fallback, before: '', hit: '', after: '', truncated: false }] : [];
+}
+
 function evidenceCount(item) {
-  return item.occurrence_count || (item.source_context ? 1 : 0);
+  return Math.max(evidenceList(item).length, Number(item.occurrence_count) || 0);
 }
 
 function isBatchEligible(item) {
@@ -222,5 +257,9 @@ function decide(item, action) {
 .qy-term-fields input { width: 100%; }
 .qy-review-actions, .qy-pagination { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .qy-muted { color: #667085; }
+.qy-term-evidence-list { margin: .35rem 0; padding-left: 1.2rem; display: grid; gap: .45rem; }
+.qy-term-evidence-no { font-size: .8rem; color: #667085; }
+.qy-term-sentence { margin: .1rem 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.qy-term-sentence mark { background: #fff3bf; padding: 0 .1rem; border-radius: .15rem; }
 @media (max-width: 800px) { .qy-term-fields { grid-template-columns: 1fr; } }
 </style>
