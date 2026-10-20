@@ -550,6 +550,11 @@ def inspect_pdf_pair(
                 if item.get("side") == "translated":
                     item.setdefault("output_kind", output_kind)
         findings.extend(current)
+        if output_kind == "mono" and target_is_chinese and mono_path is not None:
+            # PLAN-080f：段落级漏译、字体种类、装饰线（默认关闭，只出警告）
+            from qyunslation.pipeline.qa.pdf_layout import check_output_layout
+
+            findings.extend(check_output_layout(source_path, mono_path, output_kind=output_kind))
         if source.page_count != translated.page_count:
             findings.append(
                 QaFinding(
