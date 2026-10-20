@@ -93,6 +93,35 @@ def test_by_default_source_overlap_does_not_downgrade_anything(monkeypatch):
     assert "TEXT_ENCODING_INHERITED" not in found
 
 
+def test_babeldoc_space_glyph_control_is_warning_not_blocker():
+    """PLAN-082 S4: U+0003 between name parts is a ToUnicode space-map artifact, not real mojibake."""
+    pages = [
+        "Yue\x03Cheng\x03 1†，Qingfeng\x03Liu 2†",
+        "MAD\x03阶段共纳入\x0324\x03名参与者",
+        "3.00\x03ng/mL。",
+    ]
+    found = _by_code(check_translation_text(
+        source_text="clean source", translated_text="\n".join(pages), translated_pages=pages,
+    ))
+    assert "TEXT_ENCODING_ARTIFACT" not in found
+    item = found["TEXT_LAYER_SPACE_MAP"]
+    assert item.severity == "warning"
+    assert item.evidence["pages"] == [1, 2, 3]
+    assert "U+0003" in item.evidence["detectors"]["c0"]
+    snippet = item.location["anchors"][0]["excerpt"]
+    assert "⟦U+0003⟧" in snippet
+    assert "\x03" not in snippet
+
+
+def test_real_replacement_char_still_blocks_even_beside_space_map():
+    pages = ["Yue\x03Cheng 正常", "坏\ufffd字"]
+    found = _by_code(check_translation_text(
+        source_text="x", translated_text="\n".join(pages), translated_pages=pages,
+    ))
+    assert found["TEXT_ENCODING_ARTIFACT"].severity == "blocker"
+    assert found["TEXT_ENCODING_ARTIFACT"].evidence["pages"] == [2]
+    assert found["TEXT_LAYER_SPACE_MAP"].evidence["pages"] == [1]
+
 
 def test_garbled_text_can_be_waived_by_one_reviewer_but_other_critical_facts_cannot():
     from qyunslation.pipeline.qa import registry

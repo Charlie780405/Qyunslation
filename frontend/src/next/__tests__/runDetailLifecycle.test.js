@@ -35,6 +35,7 @@ vi.mock('../lib/pdfjs.js', () => ({
 }));
 
 import RunDetailPage from '../pages/RunDetailPage.vue';
+import { listView } from '../stores/runs.js';
 
 const QA_ITEMS = [
   { id: 'w1', category: 'integrity', severity: 'warning', code: 'LATIN_RESIDUE', message: '英文残留较多', object_id: null, resolved: false, evidence: {} },
@@ -149,8 +150,10 @@ describe('run detail follows the server lifecycle', () => {
     wrapper.unmount();
   });
 
-  it('abandoning a gated version asks first, then calls cancel', async () => {
-    const { wrapper } = await mountPage('/workbench/run-1');
+  it('abandoning a gated version asks first, then calls cancel and returns to the workbench', async () => {
+    listView.notice = '';
+    listView.openedId = 'run-1';
+    const { wrapper, router } = await mountPage('/workbench/run-1');
     await buttonByText(wrapper, '放弃本版本').trigger('click');
     await flushPromises();
     expect(document.body.querySelector('[data-confirm-dialog]')).not.toBeNull();
@@ -158,16 +161,34 @@ describe('run detail follows the server lifecycle', () => {
     document.body.querySelector('[data-confirm-ok]').click();
     await flushPromises();
     expect(apiMock.cancelRun).toHaveBeenCalledWith('run-1');
+    expect(router.currentRoute.value.path).toBe('/workbench');
+    expect(listView.notice).toBe('已放弃本版本。');
+    expect(listView.openedId).toBe('');
     wrapper.unmount();
   });
 
   it('declining the question leaves the version alone', async () => {
-    const { wrapper } = await mountPage('/workbench/run-1');
+    const { wrapper, router } = await mountPage('/workbench/run-1');
     await buttonByText(wrapper, '放弃本版本').trigger('click');
     await flushPromises();
     document.body.querySelector('[data-confirm-cancel]').click();
     await flushPromises();
     expect(apiMock.cancelRun).not.toHaveBeenCalled();
+    expect(router.currentRoute.value.path).toBe('/workbench/run-1');
+    wrapper.unmount();
+  });
+
+  it('discard failure stays on the detail page', async () => {
+    apiMock.cancelRun.mockRejectedValueOnce(new Error('网络中断'));
+    listView.notice = '';
+    const { wrapper, router } = await mountPage('/workbench/run-1');
+    await buttonByText(wrapper, '放弃本版本').trigger('click');
+    await flushPromises();
+    document.body.querySelector('[data-confirm-ok]').click();
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe('/workbench/run-1');
+    expect(listView.notice).toBe('');
+    expect(wrapper.find('[role="alert"]').text()).toContain('网络中断');
     wrapper.unmount();
   });
 

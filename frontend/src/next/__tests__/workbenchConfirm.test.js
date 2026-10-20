@@ -119,6 +119,35 @@ describe('every start goes through the confirmation drawer', () => {
     expect(payload).toMatchObject({ preflight_id: 'pf-1', config_digest: 'd'.repeat(64), document_classification: 'internal' });
     expect(key).toBeTruthy();
     expect(drawer()).toBeNull();
+    // PLAN-082 S2: after create, clear the upload zone so "开始预检" is not still offered.
+    expect(wrapper.find('.qy-preflight-card').exists()).toBe(false);
+    expect(wrapper.find('[data-preflight-action]').attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('任务已开始，进度见下方任务卡');
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it('after creating a run, the upload zone no longer looks like a re-preflight prompt', async () => {
+    const { wrapper } = await mountPage();
+    await readyPreflight(wrapper);
+    await wrapper.find('.qy-preflight-card button.qy-primary-button').trigger('click');
+    await flushPromises();
+    // After create, list refresh should show the new executing task.
+    apiMock.listRuns.mockResolvedValue({
+      items: [{
+        id: 'run-new', filename: 'protocol.pdf', status: 'translating', stage: 'text', quality_state: 'draft',
+        progress: null, progress_message: '正在翻译段落', lifecycle: 'executing', artifacts: [],
+        allowed_actions: ['open', 'cancel'], pending_counts: {}, preflight_id: 'pf-1',
+      }],
+    });
+    byText(drawer(), '确认并开始翻译').click();
+    await flushPromises();
+    expect(wrapper.find('.qy-preflight-card').exists()).toBe(false);
+    expect(wrapper.find('[data-preflight-action]').text()).toContain('开始预检');
+    expect(wrapper.find('[data-preflight-action]').attributes('disabled')).toBeDefined();
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1);
+    expect(wrapper.find('.qy-task-row [role="progressbar"]').exists()).toBe(true);
+    expect(wrapper.find('[data-active-run-hint]').exists()).toBe(true);
     wrapper.unmount();
   });
 

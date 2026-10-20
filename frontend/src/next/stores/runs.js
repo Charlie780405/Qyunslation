@@ -334,4 +334,5 @@ export function createRunListStore() {
 // One list for the whole app session: leaving for a task and coming back shows the same rows at the
 // same place, then refreshes them in the background.
 export const runList = createRunListStore();
-export const listView = { scrollY: 0, openedId: '' };
+// notice: one-shot message shown on the workbench after leaving a run detail action (e.g. discard).
+export const listView = { scrollY: 0, openedId: '', notice: '' };

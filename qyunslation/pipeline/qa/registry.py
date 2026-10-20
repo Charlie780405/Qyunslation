@@ -91,6 +91,10 @@ _RULES: dict[str, RuleInfo] = dict(
            "查看下方页面中的乱码位置；展开“技术细节”可看到是哪一类字符（替换符、控制字符或编码错乱）及其码点。"
            "如果页面上确实读不出乱码，复核人写明理由后可授权例外；确有乱码则重新翻译（必要时换用文本型 PDF 或原始 Word 文档）。",
            locatable="page", identity_keys=("output_kind",)),
+        _r("TEXT_LAYER_SPACE_MAP", WARN, "译文文本层空格被映射为控制字符",
+           "页面通常仍可读；复制或搜索时会出现异常符号。常见于部分 PDF 字体把空格字形的 ToUnicode 写成了控制字符。",
+           "对照页面确认正文可读即可确认已阅；若复制结果也要干净，可重新导出或开启空格 CMap 修复后再交付。",
+           locatable="page", identity_keys=("detectors",)),
         _r("TEXT_ENCODING_INHERITED", WARN, "译文中的异常字符在源文同一页也存在",
            "同一页的源文已经带有这些字符，多半来自源文 PDF 的字体或编码，不是翻译造成的。",
            "对照源文同一页确认；确属源文原样的可确认已阅。",
@@ -108,6 +112,10 @@ _RULES: dict[str, RuleInfo] = dict(
            "页数变化通常意味着内容溢出、缺页或版式损坏。",
            "对照原文和译文检查是否有缺页或内容溢出；确属排版差异时由复核人说明理由后授权例外。",
            unlocatable_reason="页数差异不属于某一页", identity_keys=("output_kind",)),
+        _r("TABLE_TEXT_OVERLAP", C2, "译文表格区域文字框严重重叠",
+           "表头或数值叠在一起通常表示列对齐失败，读者无法核对数据。",
+           "在对照视图查看对应页；确认表格不可读后重新翻译或开启表格后处理；若仅为脚注叠字可由复核人说明理由后授权例外。",
+           locatable="page", identity_keys=("output_kind",)),
         _r("AUTHOR_METADATA_CHANGED", C2, "作者信息与原文不完全一致",
            "作者信息要求与原文逐行一致。",
            "对照原文位置，把作者行改回与原文一致；若只是换行或标点造成的差异，由复核人说明理由后授权例外。",
@@ -221,6 +229,8 @@ def is_registered(code: str) -> bool:
 # reviewer confirms a fact instead of inventing a sentence (a reason must be at least 10 characters).
 _WAIVER_REASONS: dict[str, str] = {
     "TEXT_ENCODING_ARTIFACT": "已查看对应页面，页面上读不出乱码，内容可以接受（命中的多半是文本层里不可见的控制字符）。",
+    "TEXT_LAYER_SPACE_MAP": "已查看对应页面，正文可读；命中的是文本层空格字形映射，不影响阅读。",
+    "TABLE_TEXT_OVERLAP": "已对照原文表格，重叠不影响关键数据核对，或仅为脚注/装饰叠字。",
     "LOGO_MISSING": "已核对首页，标识或印章在译文中以其他形式保留，或本文不需要保留，不影响使用。",
     "PAGE_COUNT_MISMATCH": "已核对，译文页数与原文不同来自排版（行宽、字体或表格），内容完整。",
     "AUTHOR_METADATA_CHANGED": "已核对作者与单位信息，差异只是标点或格式，姓名与单位没有被改动。",

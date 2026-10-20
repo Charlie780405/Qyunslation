@@ -43,24 +43,10 @@
           <div v-if="uploadMessage" class="qy-callout" :class="uploadError ? 'qy-callout-warning' : 'qy-callout-info'" role="status">
             <InformationCircleIcon aria-hidden="true" /><span>{{ uploadMessage }}</span>
           </div>
-          <div v-if="activeRun" class="qy-live-progress" role="status" aria-live="polite">
-            <div class="qy-live-progress-heading">
-              <div class="qy-live-progress-title"><span class="qy-live-indicator" aria-hidden="true"></span><strong>翻译实时进度</strong></div>
-              <span>{{ lifecycleLabel(activeRun) }}</span>
-            </div>
-            <div class="qy-live-progress-meta">
-              <strong>{{ liveSummary(activeRun) }}</strong>
-              <span>{{ progressText(activeRun) }}</span>
-            </div>
-            <div
-              class="qy-task-progress qy-live-progress-bar"
-              :class="{ 'is-indeterminate': activeRun.progress === null || activeRun.progress === undefined }"
-              role="progressbar"
-              :aria-valuemin="0"
-              :aria-valuemax="100"
-              :aria-valuenow="activeRun.progress === null || activeRun.progress === undefined ? undefined : activeRun.progress"
-              :aria-valuetext="progressText(activeRun)"
-            ><span :style="activeRun.progress === null || activeRun.progress === undefined ? {} : { width: `${Math.max(0, Math.min(100, activeRun.progress))}%` }"></span></div>
+          <div v-if="activeRun" class="qy-active-run-hint" role="status" aria-live="polite" data-active-run-hint>
+            <span class="qy-live-indicator" aria-hidden="true"></span>
+            <span>1 个任务进行中：{{ liveSummary(activeRun) }}</span>
+            <button class="qy-link-button" type="button" @click="focusActiveRun">查看进度</button>
           </div>
           <div v-if="preflight" class="qy-preflight-card" aria-live="polite">
             <div><strong>{{ preflight.filename }}</strong><span>{{ preflight.format?.toUpperCase() }} · {{ formatSize(preflight.size_bytes) }} · SHA-256 已记录</span></div>
@@ -73,12 +59,12 @@
           </div>
           <PreflightIssues :preflight="preflight" />
           <div class="qy-panel-actions">
-            <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight">
+            <button class="qy-primary-button" type="button" :disabled="!selectedFile || uploading" @click="startPreflight" data-preflight-action>
               <ArrowPathIcon v-if="uploading" class="qy-spin" aria-hidden="true" />
               <MagnifyingGlassIcon v-else aria-hidden="true" />
-              {{ uploading ? (uploadProgress < 100 ? `上传中 ${uploadProgress}%` : '正在检查文件…') : '开始预检' }}
+              {{ preflightActionLabel }}
             </button>
-            <span class="qy-inline-hint">不会自动开始翻译</span>
+            <span class="qy-inline-hint">{{ preflightHint }}</span>
           </div>
         </div>
 
@@ -353,12 +339,38 @@ const uploadStatusLabel = computed(() => {
   if (selectedFile.value) return '待预检';
   return '等待选择文件';
 });
+const preflightActionLabel = computed(() => {
+  if (uploading.value) return uploadProgress.value < 100 ? `上传中 ${uploadProgress.value}%` : '正在检查文件…';
+  if (preflight.value && runForPreflight.value) return '重新预检';
+  return '开始预检';
+});
+const preflightHint = computed(() => {
+  if (preflight.value && runForPreflight.value) return '该文件已有任务；重新预检会覆盖当前预检结果';
+  if (preflight.value) return '不会自动开始翻译';
+  return '不会自动开始翻译';
+});
 const adEnabled = computed(() => Boolean(sessionStore.user?.capabilities?.ad_enabled));
 function liveSummary(run) {
   if (!run) return '';
   if (lifecycleOf(run) === 'qa_checking') return '翻译完成，正在做质量检查';
   if (run.status === 'translating' && run.progress_message) return run.progress_message;
   return stageMessage(run);
+}
+async function focusActiveRun() {
+  const run = activeRun.value;
+  if (!run) return;
+  await nextTick();
+  const row = document.querySelector(`[data-run-id="${run.id}"]`);
+  row?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  row?.focus?.({ preventScroll: true });
+}
+function resetUploadAfterTaskCreated(message) {
+  selectedFile.value = null;
+  preflight.value = null;
+  uploadProgress.value = 0;
+  if (fileInput.value) fileInput.value.value = '';
+  uploadError.value = false;
+  uploadMessage.value = message;
 }
 
 // ---- the confirmation drawer: settings live there and only there --------------------------------
@@ -445,10 +457,9 @@ async function submitDrawer(submission) {
   if (!current) return;
   if (current.mode === 'new') {
     await api.createTranslationRun(submission.payload, submission.key);
-    uploadError.value = false;
-    uploadMessage.value = '翻译任务已创建，服务端会继续处理。';
     copiedFrom.value = null;
     drawer.value = null;
+    resetUploadAfterTaskCreated('任务已开始，进度见下方任务卡。');
     if (submission.saveAsDefault) {
       const form = submission.form;
       try {
@@ -473,14 +484,13 @@ async function submitDrawer(submission) {
       ...current.extra,
       ...(Object.keys(overrides).length ? { overrides } : {}),
     });
-    uploadError.value = false;
-    uploadMessage.value = '已生成新版本，原版本保持冻结。';
     drawer.value = null;
+    resetUploadAfterTaskCreated('已生成新版本，原版本保持冻结。进度见下方任务卡。');
   } else {
     await api.resumeRun(current.run.id);
+    drawer.value = null;
     uploadError.value = false;
     uploadMessage.value = '任务已从断点续跑。';
-    drawer.value = null;
   }
   await refreshRuns();
 }
@@ -592,8 +602,20 @@ function stageMessage(run) {
   return ({ validation: '正在准备任务', structure: '正在分析文档结构', text: '正在翻译正文', table_figure: '正在处理表格与图注', layout: '正在渲染版式', rendering: '正在渲染版式', qa: '正在执行 QA 检查', review: '等待人工复核', export: '正在导出结果' })[run?.stage] || '正在处理任务';
 }
 
+function formatElapsed(run) {
+  const started = run?.started_at || run?.created_at;
+  if (!started) return '';
+  const ms = Date.now() - new Date(started).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `已运行 ${min}分${String(sec).padStart(2, '0')}秒` : `已运行 ${sec}秒`;
+}
 function progressText(run) {
-  return run?.progress === null || run?.progress === undefined ? '处理中，进度计算中' : `${run.progress}%`;
+  if (run?.progress !== null && run?.progress !== undefined) return `${run.progress}%`;
+  const elapsed = formatElapsed(run);
+  return elapsed || '处理中';
 }
 
 function applyFile(file, notice = '') {
@@ -741,7 +763,8 @@ async function refreshActiveEvents(run) {
 
 // What the person can see about the list; the poller backs off while this stops changing.
 function listSignature() {
-  return `${list.total.value}#${runs.value.map((item) => `${item.id}:${lifecycleOf(item)}:${item.stage || ''}:${item.progress ?? ''}`).join('|')}`;
+  // Include progress_message and updated_at so stage-text-only updates reset the poll backoff.
+  return `${list.total.value}#${runs.value.map((item) => `${item.id}:${lifecycleOf(item)}:${item.stage || ''}:${item.progress ?? ''}:${item.progress_message || ''}:${item.updated_at || ''}`).join('|')}`;
 }
 
 // The list is polled only while a task is executing (or being checked) and the tab is in front;
@@ -906,10 +929,16 @@ onMounted(async () => {
   await sessionStore.load();
   await restoreWorkbenchSession(sessionStore.user);
   defaultsSnapshot.value = { ...workbenchState };
+  // One-shot notice from a detail-page action (e.g. discard) — show once then clear.
+  if (listView.notice) {
+    uploadError.value = false;
+    uploadMessage.value = listView.notice;
+    listView.notice = '';
+  }
   // A pre-check that already has a task cannot start another one, so it is not restored as "ready".
   if (preflight.value === null && restoredPreflight.value?.state === 'ready' && !restoredPreflight.value.used_by_run_id) {
     preflight.value = restoredPreflight.value;
-    uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
+    if (!uploadMessage.value) uploadMessage.value = '已恢复上次预检结果，可直接开始翻译。';
   }
   const before = JSON.stringify(filtersToQuery(list.filters));
   list.applyFilters(filtersFromQuery(route.query));

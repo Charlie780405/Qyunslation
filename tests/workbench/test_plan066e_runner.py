@@ -10,6 +10,9 @@ import pytest
 
 from qyunslation.workbench.runner import (
     Pdf2zhRunner,
+    _monotonic_progress,
+    _parse_progress,
+    _parse_rich_progress,
     _progress_message_from_line,
     build_pdf2zh_command,
 )
@@ -105,6 +108,25 @@ def test_runner_extracts_human_readable_live_progress_from_cli_output():
         "Typesetting (1/1) ━━━━━ 18/18 0:00:… 0:00:…"
     ) == "正在处理版式"
     assert _progress_message_from_line("INFO: unrelated diagnostic") is None
+    assert _progress_message_from_line("translate                                              ━━━━━ 45/100 0:04:12 0:00:30") is None
+
+
+def test_runner_parses_rich_overall_and_stage_progress():
+    overall, stage = _parse_rich_progress("translate                                              ━━━━━ 45/100 0:04:12 0:00:30")
+    assert overall == 45
+    assert stage == "translating"
+    # Truncated total still treated as overall/100
+    truncated, _ = _parse_rich_progress("translate                                              ━━━━━ 100/… 0:04:… 0:00:…")
+    assert truncated == 99
+    stage_pct, stage_name = _parse_rich_progress(
+        "Translate Paragraphs (1/1)                             ━━━━━ 150/300 0:03:12 0:01:00"
+    )
+    assert stage_name == "translating"
+    assert stage_pct == 45  # 15 + round(60 * 0.5)
+    assert _parse_progress("Progress: 0.25, parse document") == (25, "structure")
+    assert _monotonic_progress(10, 5) == 10
+    assert _monotonic_progress(10, 40) == 40
+    assert _monotonic_progress(None, 7) == 7
 
 
 @pytest.mark.asyncio

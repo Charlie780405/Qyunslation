@@ -9,6 +9,10 @@ from typing import Iterable
 IL_MARKUP_LEAK = "IL_MARKUP_LEAK"
 SOURCE_OVERLAY = "SOURCE_OVERLAY"
 TEXT_ENCODING_ARTIFACT = "TEXT_ENCODING_ARTIFACT"
+TEXT_LAYER_SPACE_MAP = "TEXT_LAYER_SPACE_MAP"
+# BabelDOC often maps a blank/space glyph's ToUnicode to U+0003; copy/search shows a box, the page looks fine.
+_SPACE_MAP_CONTROLS = frozenset("\x00\x01\x02\x03\x04\x05\x06\x0b\x0c\x0e\x0f")
+_WORDISH_RE = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
 
 _SPAN_TAG_RE = re.compile(
     r"</?\s*(?:span|style|stytle|font)\b[^>]*>",
@@ -173,6 +177,47 @@ def artifact_evidence(text: str | None) -> dict[str, list[str]]:
     return found
 
 
+def _is_wordish(ch: str) -> bool:
+    return bool(ch and _WORDISH_RE.match(ch))
+
+
+def is_space_map_control_context(text: str, index: int) -> bool:
+    """True when ``text[index]`` is a blank-glyph control sandwiched by letters/digits/CJK."""
+    if index < 0 or index >= len(text):
+        return False
+    ch = text[index]
+    if ch not in _SPACE_MAP_CONTROLS:
+        return False
+    left = text[index - 1] if index > 0 else ""
+    right = text[index + 1] if index + 1 < len(text) else ""
+    return _is_wordish(left) and _is_wordish(right)
+
+
+def space_map_evidence(text: str | None) -> dict[str, list[str]]:
+    """Evidence for PLAN-082 space-glyph ToUnicode false positives; empty when not applicable.
+
+    BabelDOC often maps a blank glyph to U+0003. Hits may sit between letters (``Yue\\x03Cheng``)
+    or before ordinary spaces (``Cheng\\x03 1``). Real corruption still uses U+FFFD / C1 / mojibake
+    or non-space C0 controls such as BEL (U+0007), which keep the blocker path.
+    """
+    raw = text or ""
+    evidence = artifact_evidence(raw)
+    if not evidence:
+        return {}
+    # Real corruption always blocks: replacement char, C1, or mojibake.
+    if evidence.keys() - {"c0"}:
+        return {}
+    controls = _C0_RE.findall(raw)
+    if not controls:
+        return {}
+    if any(ch not in _SPACE_MAP_CONTROLS for ch in controls):
+        return {}
+    # Require at least one clear letter/digit/CJK sandwich so we do not downgrade stray NULs.
+    if not any(is_space_map_control_context(raw, m.start()) for m in _C0_RE.finditer(raw)):
+        return {}
+    return evidence
+
+
 def detect_text_artifacts(text: str | None) -> list[str]:
     """Return blocker codes for non-printable/encoding and IL artifacts."""
     raw = text or ""
@@ -180,8 +225,24 @@ def detect_text_artifacts(text: str | None) -> list[str]:
     if has_il_markup_leak(raw):
         codes.append(IL_MARKUP_LEAK)
     if "\ufffd" in raw or _CONTROL_RE.search(raw) or _MOJIBAKE_RE.search(raw):
+        # Space-map-only pages are still flagged so QA can grade them; callers may downgrade.
         codes.append(TEXT_ENCODING_ARTIFACT)
     return codes
+
+
+def visible_codepoint_excerpt(text: str, start: int, end: int, *, radius: int = 30) -> str:
+    """Build a human-readable excerpt where controls show as ⟦U+XXXX⟧ instead of □."""
+    raw = text or ""
+    lo = max(0, start - radius)
+    hi = min(len(raw), end + radius)
+    parts: list[str] = []
+    for ch in raw[lo:hi]:
+        code = ord(ch)
+        if ch == "\ufffd" or code < 32 or 0x7F <= code <= 0x9F:
+            parts.append(f"⟦U+{code:04X}⟧")
+        else:
+            parts.append(ch)
+    return "".join(parts)
 
 
 DRUG_NAME_DRIFT = "DRUG_NAME_DRIFT"

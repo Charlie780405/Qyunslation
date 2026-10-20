@@ -224,6 +224,7 @@ import {
   termsBlockDelivery,
 } from '../labels.js';
 import { useSessionStore } from '../stores/session.js';
+import { listView } from '../stores/runs.js';
 
 const props = defineProps({ runId: { type: String, default: '' } });
 const route = useRoute();
@@ -532,7 +533,17 @@ async function discardRun() {
     danger: true,
   });
   if (!confirmed) return false;
-  return runAction('discard', () => api.cancelRun(runId.value), { success: '已放弃本版本。', failure: '放弃失败' });
+  const ok = await runAction('discard', () => api.cancelRun(runId.value), {
+    success: '已放弃本版本。',
+    failure: '放弃失败',
+  });
+  if (!ok) return false;
+  // Return to the task list so the person is not stuck on a cancelled version.
+  listView.openedId = '';
+  listView.scrollY = 0;
+  listView.notice = '已放弃本版本。';
+  await router.push('/workbench');
+  return true;
 }
 
 async function decideTerm(item, payload) {

@@ -21,6 +21,8 @@ from qyunslation.structure.text_sanitize import (
     _MOJIBAKE_RE,
     artifact_evidence,
     detect_text_artifacts,
+    space_map_evidence,
+    visible_codepoint_excerpt,
 )
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -271,8 +273,7 @@ def _merge_families(parts: list[dict[str, list[str]]]) -> dict[str, list[str]]:
 def _encoding_findings(
     translated_text: str, translated_pages: list[str] | None, source_pages: list[str] | None
 ) -> list[QaFinding]:
-    """PLAN-079 D: a garbled-text blocker that says which detector fired on which code points, and
-    that does not blame the translation for characters the source PDF already carries on the same page."""
+    """PLAN-079 D / PLAN-082 S4: garbled-text findings with space-glyph false-positive downgrade."""
     hits = [
         (number, artifact_evidence(page))
         for number, page in enumerate(translated_pages or [], start=1)
@@ -280,10 +281,20 @@ def _encoding_findings(
     ]
     message = "译文包含不可打印字符或编码乱码，必须重新生成"
     if not hits:
+        whole = artifact_evidence(translated_text)
+        if space_map_evidence(translated_text):
+            return [
+                QaFinding(
+                    category="integrity", severity="warning", code="TEXT_LAYER_SPACE_MAP",
+                    message="译文文本层把空格字形映射成了控制字符；页面通常可读，复制时可能出现异常符号",
+                    evidence={"detectors": whole, "pages": []},
+                    location=locate.location([]),
+                )
+            ]
         return [
             QaFinding(
                 category="integrity", severity="blocker", code="TEXT_ENCODING_ARTIFACT", message=message,
-                evidence={"detectors": artifact_evidence(translated_text), "pages": []},
+                evidence={"detectors": whole, "pages": []},
                 location=locate.location([]),
             )
         ]
@@ -293,11 +304,16 @@ def _encoding_findings(
     inheritance = os.environ.get("QYUNSLATION_ENCODING_INHERITANCE", "0").strip().casefold() in {"1", "true", "on"}
     blocking: list[tuple[int, dict[str, list[str]]]] = []
     inherited: list[tuple[int, dict[str, list[str]]]] = []
+    space_mapped: list[tuple[int, dict[str, list[str]]]] = []
+    pages = translated_pages or []
     for number, evidence in hits:
+        page = pages[number - 1]
+        if space_map_evidence(page):
+            space_mapped.append((number, evidence))
+            continue
         in_source = artifact_evidence(source_pages[number - 1]) if (comparable and inheritance) else {}
         (inherited if set(in_source) & set(evidence) else blocking).append((number, evidence))
     out: list[QaFinding] = []
-    pages = translated_pages or []
     if blocking:
         out.append(
             QaFinding(
@@ -309,6 +325,20 @@ def _encoding_findings(
                 },
                 location=locate.location(
                     [locate.page_anchor("translated", n, "乱码或不可打印字符", _artifact_excerpt(pages[n - 1])) for n, _ in blocking]
+                ),
+            )
+        )
+    if space_mapped:
+        out.append(
+            QaFinding(
+                category="integrity", severity="warning", code="TEXT_LAYER_SPACE_MAP",
+                message="译文文本层把空格字形映射成了控制字符；页面通常可读，复制时可能出现异常符号",
+                evidence={
+                    "detectors": _merge_families([e for _, e in space_mapped]),
+                    "pages": [n for n, _ in space_mapped],
+                },
+                location=locate.location(
+                    [locate.page_anchor("translated", n, "空格字形映射伪影", _artifact_excerpt(pages[n - 1])) for n, _ in space_mapped]
                 ),
             )
         )
@@ -326,15 +356,123 @@ def _encoding_findings(
     return out
 
 
+def _span_overlap_pairs(page) -> int:
+    """Count span pairs whose intersection covers >35% of the smaller box."""
+    try:
+        blocks = page.get_text("dict").get("blocks") or []
+    except Exception:
+        return 0
+    rects = []
+    for block in blocks:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            for span in line.get("spans") or []:
+                text = str(span.get("text") or "").strip()
+                if not text:
+                    continue
+                bbox = span.get("bbox")
+                if not bbox or len(bbox) < 4:
+                    continue
+                x0, y0, x1, y1 = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+                area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+                if area <= 1.0:
+                    continue
+                rects.append((x0, y0, x1, y1, area))
+    overlaps = 0
+    for index, (ax0, ay0, ax1, ay1, aa) in enumerate(rects):
+        for bx0, by0, bx1, by1, ba in rects[index + 1 :]:
+            ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+            ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+            inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+            if inter <= 0:
+                continue
+            if inter / min(aa, ba) > 0.35:
+                overlaps += 1
+    return overlaps
+
+
+def check_table_text_overlap(
+    translated_path: Path,
+    *,
+    source_path: Path | None = None,
+    min_pairs: int = 20,
+) -> list[QaFinding]:
+    """PLAN-082 S5: block when table pages show heavy overlapping text boxes."""
+    try:
+        import pymupdf as fitz  # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            import fitz  # type: ignore[import-not-found,no-redef]
+        except ImportError:
+            return []
+    table_pages: set[int] = set()
+    if source_path is not None and source_path.is_file():
+        try:
+            from qyunslation.structure.models import ObjectType
+            from qyunslation.structure.scan_pdf import PdfStructureScanner
+
+            manifest = PdfStructureScanner().scan(source_path)
+            for obj in manifest.objects:
+                if obj.type is not ObjectType.TABLE:
+                    continue
+                try:
+                    page_no = int(str(obj.canvas_id).split(":")[-1])
+                except Exception:
+                    continue
+                table_pages.add(page_no)
+        except Exception:
+            table_pages = set()
+    try:
+        doc = fitz.open(str(translated_path))
+    except Exception:
+        return []
+    try:
+        hot: list[tuple[int, int]] = []
+        for index, page in enumerate(doc, start=1):
+            if table_pages and index not in table_pages:
+                continue
+            pairs = _span_overlap_pairs(page)
+            if pairs >= min_pairs:
+                hot.append((index, pairs))
+        if not hot:
+            return []
+        return [
+            QaFinding(
+                category="layout",
+                severity="blocker",
+                code="TABLE_TEXT_OVERLAP",
+                message="译文表格区域文字框严重重叠，列对齐可能已损坏",
+                evidence={
+                    "pages": [n for n, _ in hot],
+                    "overlap_pairs": {str(n): c for n, c in hot},
+                    "threshold": min_pairs,
+                },
+                location=locate.location(
+                    [
+                        locate.page_anchor(
+                            "translated",
+                            n,
+                            f"表格文字重叠（{c} 对）",
+                        )
+                        for n, c in hot[:5]
+                    ]
+                ),
+            )
+        ]
+    finally:
+        doc.close()
+
+
 def _artifact_excerpt(page: str) -> str | None:
     for pattern in ("\ufffd",):
         at = page.find(pattern)
         if at >= 0:
-            return locate.excerpt(page, at, at + 1, radius=30)
+            return visible_codepoint_excerpt(page, at, at + 1, radius=30)
     for regex in (_CONTROL_RE, _MOJIBAKE_RE):
         match = regex.search(page)
         if match:
-            return locate.excerpt(page, match.start(), match.end(), radius=30)
+            return visible_codepoint_excerpt(page, match.start(), match.end(), radius=30)
     return None
 
 
@@ -473,8 +611,22 @@ def read_pdf_facts(path: Path) -> PdfFacts | None:
         texts: list[str] = []
         hashes: set[str] = set()
         first: set[str] = set()
+        # Drop TEXT_USE_CID_FOR_UNKNOWN_UNICODE so blank spacing glyphs missing from
+        # ToUnicode are not surfaced as U+0003 (PLAN-082 S4). Keep whitespace/ligatures/clip.
+        try:
+            import pymupdf as _fitz  # type: ignore[import-not-found]
+            text_flags = (
+                getattr(_fitz, "TEXT_PRESERVE_LIGATURES", 1)
+                | getattr(_fitz, "TEXT_PRESERVE_WHITESPACE", 2)
+                | getattr(_fitz, "TEXT_MEDIABOX_CLIP", 64)
+            )
+        except Exception:
+            text_flags = 67
         for index, page in enumerate(doc):
-            texts.append(page.get_text("text") or "")
+            try:
+                texts.append(page.get_text("text", flags=text_flags) or "")
+            except TypeError:
+                texts.append(page.get_text("text") or "")
             for img in page.get_images(full=True):
                 try:
                     data = doc.extract_image(img[0]).get("image") or b""
@@ -555,6 +707,10 @@ def inspect_pdf_pair(
             from qyunslation.pipeline.qa.pdf_layout import check_output_layout
 
             findings.extend(check_output_layout(source_path, mono_path, output_kind=output_kind))
+            # PLAN-082 S5：表区文字框重叠（串格/表头糊在一起）
+            for finding in check_table_text_overlap(mono_path, source_path=source_path):
+                finding.evidence.setdefault("output_kind", output_kind)
+                findings.append(finding)
         if source.page_count != translated.page_count:
             findings.append(
                 QaFinding(

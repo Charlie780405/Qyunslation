@@ -33,6 +33,24 @@ CANCEL_TERMINAL = TERMINAL
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PROGRESS_RE = re.compile(r"\bProgress:\s*(?P<value>0(?:\.\d+)?|1(?:\.0+)?)\s*,\s*(?P<label>.*)$")
 _PERCENT_RE = re.compile(r"\b(?P<value>\d{1,3}(?:\.\d+)?)%\b")
+# Rich MofNCompleteColumn: "Translate Paragraphs (1/1) ━━━ 150/300 0:03:12 0:01:00"
+# Totals may be truncated to "…" under narrow terminals; no trailing \\b (ellipsis is non-word).
+_RICH_LINE_RE = re.compile(
+    r"^(?P<label>.+?)\s+(?:━|─|\[|=){2,}\s*(?P<cur>\d+)\s*/\s*(?P<total>\d+|…|\.\.\.)(?:\s|$)",
+    re.UNICODE,
+)
+# Overall babeldoc bar is named "translate" with total=100 (= overall_progress).
+_RICH_OVERALL_RE = re.compile(
+    r"^translate\s+(?:━|─|\[|=){2,}\s*(?P<cur>\d+)\s*/\s*(?P<total>\d+|…|\.\.\.)(?:\s|$)",
+    re.IGNORECASE | re.UNICODE,
+)
+# Stage weights for synthesizing a total when only a stage bar is available (PLAN-082 S3).
+_STAGE_PROGRESS_BANDS: tuple[tuple[tuple[str, ...], int, int], ...] = (
+    (("parse pdf", "detectscannedfile", "parse page", "parse paragraphs", "parse formulas", "parse"), 0, 15),
+    (("translate paragraphs", "translate"), 15, 75),
+    (("typesetting", "add fonts", "generate drawing", "subset font", "render"), 75, 95),
+    (("save pdf", "export"), 95, 99),
+)
 _LIVE_PROGRESS_LABELS: tuple[tuple[str, str], ...] = (
     ("translate paragraphs", "正在翻译段落"),
     ("parse pdf and create intermediate representation", "正在解析 PDF 结构"),
@@ -73,6 +91,81 @@ class _ManagedProcess:
     log_handle: Any
     state_path: Path
     task_id: str
+    pty_master: int | None = None
+    tee_task: asyncio.Task | None = None
+
+
+async def _tee_pty_to_log(master_fd: int, log_handle: Any) -> None:
+    """Copy PTY output into runner.log, turning CR updates into discrete lines."""
+    loop = asyncio.get_running_loop()
+
+    def _read() -> bytes:
+        try:
+            return os.read(master_fd, 8192)
+        except OSError:
+            return b""
+
+    try:
+        while True:
+            chunk = await loop.run_in_executor(None, _read)
+            if not chunk:
+                break
+            # Rich redraws with \\r; make each redraw a parseable log line.
+            normalized = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            try:
+                log_handle.write(normalized)
+                log_handle.flush()
+            except OSError:
+                break
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+
+async def _spawn_cli_process(
+    command: list[str],
+    *,
+    cwd: str,
+    log_handle: Any,
+    env: dict[str, str],
+) -> tuple[asyncio.subprocess.Process, int | None, asyncio.Task | None]:
+    """Start the CLI, preferring a PTY so Rich emits live progress (PLAN-082 S3)."""
+    if _runner_use_pty():
+        try:
+            import pty
+
+            master_fd, slave_fd = pty.openpty()
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=cwd,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    env=env,
+                    start_new_session=True,
+                )
+            except Exception:
+                os.close(master_fd)
+                os.close(slave_fd)
+                raise
+            os.close(slave_fd)
+            # Tee owns master_fd and closes it when the child exits.
+            tee_task = asyncio.create_task(_tee_pty_to_log(master_fd, log_handle))
+            return process, None, tee_task
+        except Exception:
+            pass
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        stdout=log_handle,
+        stderr=asyncio.subprocess.STDOUT,
+        env=env,
+        start_new_session=True,
+    )
+    return process, None, None
 
 
 def _utc_now() -> str:
@@ -123,7 +216,18 @@ def _runner_env() -> dict[str, str]:
         if item not in merged:
             merged.append(item)
     env["PYTHONPATH"] = os.pathsep.join(merged)
+    # Wide columns so Rich MofN totals are not truncated to "…"; xterm so Rich
+    # treats a PTY slave as an interactive terminal and emits live updates.
+    env.setdefault("COLUMNS", "200")
+    env.setdefault("TERM", "xterm-256color")
+    env.setdefault("NO_COLOR", "1")
+    env["PYTHONUNBUFFERED"] = "1"
     return env
+
+
+def _runner_use_pty() -> bool:
+    raw = (os.environ.get("QYUNSLATION_RUNNER_PTY") or "1").strip().casefold()
+    return raw not in {"0", "false", "off", "no"}
 
 
 def _pdf_needs_hpd(path: Path) -> bool:
@@ -348,6 +452,9 @@ def _progress_message_from_line(line: str) -> str | None:
     progress_match = _PROGRESS_RE.search(line)
     if progress_match:
         lowered = progress_match.group("label").casefold().strip()
+    # Skip the overall Rich bar named "translate" — it is not a stage label.
+    if re.match(r"^translate\s*(?:━|─|\[|=)", lowered):
+        return None
     for label, message in _LIVE_PROGRESS_LABELS:
         if label in lowered:
             return message
@@ -356,16 +463,68 @@ def _progress_message_from_line(line: str) -> str | None:
     return None
 
 
+def _stage_band_progress(label: str, cur: int, total: int | None) -> int | None:
+    """Map a Rich stage bar into the weighted overall band (capped at 99)."""
+    lowered = " ".join(label.casefold().split())
+    for keys, start, end in _STAGE_PROGRESS_BANDS:
+        if any(key in lowered for key in keys):
+            if total and total > 0:
+                ratio = max(0.0, min(1.0, cur / total))
+                return min(99, start + round((end - start) * ratio))
+            return start
+    return None
+
+
+def _parse_rich_progress(line: str) -> tuple[int | None, str | None]:
+    """Parse Rich progress bars written under a PTY (PLAN-082 S3)."""
+    text = " ".join(str(line).replace("\x00", " ").split())
+    if not text:
+        return None, None
+    overall = _RICH_OVERALL_RE.match(text)
+    if overall:
+        cur = int(overall.group("cur"))
+        total_raw = overall.group("total")
+        if total_raw.isdigit():
+            total = int(total_raw)
+            if total > 0:
+                return min(99, max(0, round(100 * cur / total))), "translating"
+        # total truncated to "…" — babeldoc's overall bar is out of 100
+        return min(99, max(0, cur)), "translating"
+    rich = _RICH_LINE_RE.match(text)
+    if rich:
+        label = rich.group("label").strip()
+        if label.casefold() == "translate":
+            return None, None
+        cur = int(rich.group("cur"))
+        total_raw = rich.group("total")
+        total = int(total_raw) if total_raw.isdigit() else None
+        value = _stage_band_progress(label, cur, total)
+        return value, _stage_for_label(label)
+    return None, None
+
+
 def _parse_progress(line: str) -> tuple[int | None, str | None]:
     match = _PROGRESS_RE.search(line)
     if match:
         value = max(0.0, min(1.0, float(match.group("value"))))
-        return round(value * 100), _stage_for_label(match.group("label"))
+        # Cap below 100 until the process exits so the UI does not look finished.
+        return min(99, round(value * 100)) if value < 1.0 else 99, _stage_for_label(match.group("label"))
+    rich_progress, rich_stage = _parse_rich_progress(line)
+    if rich_progress is not None or rich_stage is not None:
+        return rich_progress, rich_stage
     match = _PERCENT_RE.search(line)
     if match:
         value = max(0.0, min(100.0, float(match.group("value"))))
-        return round(value), None
+        return min(99, round(value)), None
     return None, None
+
+
+def _monotonic_progress(previous: Any, current: int | None) -> int | None:
+    if current is None:
+        return int(previous) if isinstance(previous, (int, float)) else None
+    if isinstance(previous, (int, float)):
+        return max(int(previous), int(current))
+    return int(current)
 
 
 def _safe_reason(value: str, fallback: str) -> str:
@@ -578,13 +737,11 @@ class Pdf2zhRunner:
         log_handle = log_path.open("ab", buffering=0)
         os.chmod(log_path, 0o600)
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
+            process, pty_master, tee_task = await _spawn_cli_process(
+                command,
                 cwd=str(run_dir),
-                stdout=log_handle,
-                stderr=asyncio.subprocess.STDOUT,
+                log_handle=log_handle,
                 env=_runner_env(),
-                start_new_session=True,
             )
         except Exception:
             log_handle.close()
@@ -601,7 +758,14 @@ class Pdf2zhRunner:
             pid=process.pid,
             started_at=_utc_now(),
         )
-        managed = _ManagedProcess(process=process, log_handle=log_handle, state_path=state_path, task_id=task_id)
+        managed = _ManagedProcess(
+            process=process,
+            log_handle=log_handle,
+            state_path=state_path,
+            task_id=task_id,
+            pty_master=pty_master,
+            tee_task=tee_task,
+        )
         self._processes[task_id] = managed
         self._watchers[task_id] = asyncio.create_task(
             self._monitor(
@@ -678,17 +842,17 @@ class Pdf2zhRunner:
             config_file=config_file,
         )
         try:
-            process = await asyncio.create_subprocess_exec(
-                *retry_command,
+            process, pty_master, tee_task = await _spawn_cli_process(
+                retry_command,
                 cwd=str(run_dir),
-                stdout=managed.log_handle,
-                stderr=asyncio.subprocess.STDOUT,
+                log_handle=managed.log_handle,
                 env=_runner_env(),
-                start_new_session=True,
             )
         except Exception as exc:
             return False, state, f"scanned PDF retry could not start: {_safe_reason(exc, 'unknown error')}"
         managed.process = process
+        managed.pty_master = pty_master
+        managed.tee_task = tee_task
         state = self._write_state(
             managed.state_path,
             state,
@@ -849,13 +1013,19 @@ class Pdf2zhRunner:
                             stage = _stage_for_label(line)
                         if progress is not None or stage is not None or progress_message:
                             next_stage = stage or state.get("stage") or "translating"
+                            next_progress = _monotonic_progress(state.get("progress"), progress)
+                            detail = {
+                                "stage": next_stage,
+                                "message": progress_message or state.get("progress_message"),
+                            }
                             state = self._write_state(
                                 state_path,
                                 state,
                                 status="rendering" if stage in {"rendering", "export"} else "translating",
-                                progress=progress if progress is not None else state.get("progress"),
+                                progress=next_progress,
                                 stage=next_stage,
                                 progress_message=progress_message or state.get("progress_message"),
+                                progress_detail=detail,
                             )
                             self._persist_runner_progress(
                                 state,
@@ -863,6 +1033,12 @@ class Pdf2zhRunner:
                                 message=progress_message or last_reason,
                             )
                 returncode = await managed.process.wait()
+                if managed.tee_task is not None:
+                    try:
+                        await asyncio.wait_for(managed.tee_task, timeout=2.0)
+                    except (asyncio.TimeoutError, asyncio.CancelledError, OSError):
+                        managed.tee_task.cancel()
+                    managed.tee_task = None
                 # Cancellation is written by the API task while this watcher
                 # is waiting for the process group to exit; reload the atomic
                 # state so a clean SIGTERM cannot be overwritten.
@@ -873,6 +1049,10 @@ class Pdf2zhRunner:
                 if returncode == 0 and outputs:
                     # PLAN-080d：译文产物就绪后、记录前，让下划线跟随译文（默认关闭，失败不影响交付）。
                     await asyncio.to_thread(self._realign_decorations, source, run_dir / "output")
+                    # PLAN-082 S4：补上空白字形 CID→空格的 ToUnicode（默认开启，失败不影响交付）。
+                    await asyncio.to_thread(self._fix_space_cmaps, run_dir / "output")
+                    # PLAN-082 S5：文献表后处理（默认 literature；失败不影响交付）。
+                    await asyncio.to_thread(self._postprocess_tables, source, run_dir / "output")
                     self._write_state(
                         state_path,
                         state,
@@ -942,6 +1122,46 @@ class Pdf2zhRunner:
             return summary
         except Exception:  # noqa: BLE001
             return None
+
+    @staticmethod
+    def _fix_space_cmaps(output_dir: Path) -> dict[str, Any] | None:
+        """PLAN-082 S4: map blank CID 3 → U+0020 in ToUnicode (default on, fail-open)."""
+        try:
+            from qyunslation.structure.pdf_space_cmap import fix_space_cmap_tree
+
+            return fix_space_cmap_tree(output_dir)
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _postprocess_tables(source: Path, output_dir: Path) -> dict[str, Any] | None:
+        """PLAN-082 S5: table normalize/translate after CLI (fail-open)."""
+        try:
+            from qyunslation.pipeline.events import StageEventBuffer
+            from qyunslation.pipeline.stages.postprocess import run_table_figure_stage, table_postprocess_mode
+
+            if table_postprocess_mode() == "off" or not output_dir.is_dir():
+                return None
+            mono = next(iter(sorted(output_dir.glob("*.zh.mono.pdf"))), None)
+            if mono is None:
+                mono = next(iter(sorted(output_dir.glob("*mono*.pdf"))), None)
+            dual = next(iter(sorted(output_dir.glob("*.zh.dual.pdf"))), None)
+            events = StageEventBuffer()
+            result = run_table_figure_stage(
+                mono_pdf=mono,
+                dual_pdf=dual,
+                events=events,
+                enabled=True,
+                origin_pdf=source if source.is_file() else None,
+            )
+            return {
+                "state": result.state,
+                "message": result.message,
+                "outputs": result.outputs,
+                "warnings": result.warnings,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"error": type(exc).__name__}
 
     @staticmethod
     def _discover_outputs(output_dir: Path) -> list[dict[str, Any]]:

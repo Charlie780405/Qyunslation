@@ -66,7 +66,7 @@ describe('task list follows the server lifecycle', () => {
     expect(row.text()).toContain('待处理质量问题');
     expect(row.text()).not.toContain('翻译中');
     expect(row.find('[role="progressbar"]').exists()).toBe(false);
-    expect(wrapper.find('.qy-live-progress').exists()).toBe(false);
+    expect(wrapper.find('[data-active-run-hint]').exists()).toBe(false);
     expect(buttons(wrapper)).not.toContain('取消');
     expect(buttons(wrapper)).toContain('归档');
     expect(buttons(wrapper)).toContain('删除');
@@ -84,23 +84,27 @@ describe('task list follows the server lifecycle', () => {
     wrapper.unmount();
   });
 
-  it('an executing run keeps progress and cancel', async () => {
+  it('an executing run keeps progress and cancel on the task card only', async () => {
     const { wrapper } = await mountWith([run({
       status: 'translating', stage: 'text', quality_state: 'draft', progress: 40, lifecycle: 'executing',
       allowed_actions: ['open', 'rename', 'cancel'], pending_counts: {},
     })]);
-    expect(wrapper.find('.qy-live-progress').exists()).toBe(true);
+    expect(wrapper.find('[data-active-run-hint]').exists()).toBe(true);
+    expect(wrapper.find('[data-active-run-hint]').text()).toContain('1 个任务进行中');
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1);
+    expect(wrapper.find('.qy-task-row [role="progressbar"]').exists()).toBe(true);
     expect(buttons(wrapper)).toContain('取消');
     expect(buttons(wrapper)).not.toContain('归档');
     wrapper.unmount();
   });
 
-  it('a QA-blocked run does not take over the live progress panel from a real one', async () => {
+  it('a QA-blocked run does not take over the active-run hint from a real one', async () => {
     const { wrapper } = await mountWith([
       run({ id: 'blocked' }),
       run({ id: 'live', status: 'translating', stage: 'text', quality_state: 'draft', progress: 10, lifecycle: 'executing', allowed_actions: ['open', 'cancel'], pending_counts: {} }),
     ]);
-    expect(wrapper.find('.qy-live-progress').text()).toContain('10%');
+    expect(wrapper.find('[data-active-run-hint]').text()).toContain('查看进度');
+    expect(wrapper.find('.qy-task-row[data-run-id="live"]').text()).toContain('10%');
     wrapper.unmount();
   });
 
