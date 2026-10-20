@@ -40,6 +40,7 @@
 | 34 | `apply-pdf2zh-050-workbench.py` | **050** 工作台壳层/检查器/响应式 |
 | 35 | `apply-pdf2zh-060-termbase-workbench.py` | **060** 术语审校面板 |
 | 36 | `apply-pdf2zh-060-browser-chrome.py` | **060** Gradio `js=` 必须是函数 |
+| 37 | `apply-pdf2zh-080c-fonts.py` | **080c** 统一译文字体（`QYUNSLATION_FONT_POLICY`，默认 off；须在 #28 033h 之后） |
 
 部署前自检：
 
