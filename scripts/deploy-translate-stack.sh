@@ -45,6 +45,8 @@ PY
 fi
 
 echo "== restart pdf2zh.service + qyunslation-office.service =="
+# unit 文件改动（如新增 ExecStartPre 补丁）不 reload 就不会生效
+systemctl --user daemon-reload
 systemctl --user restart pdf2zh.service qyunslation-office.service
 
 echo "== wait for sidecar health =="
