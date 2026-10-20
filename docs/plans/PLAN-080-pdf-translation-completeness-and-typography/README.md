@@ -1,6 +1,6 @@
 # PLAN-080：PDF 译文完整性、字体统一、装饰线随文与人名职务保留
 
-状态：**v5，080a–080h 已实现并已部署；保留策略修复已在生产生效，四个新开关默认关闭（灰度见 [runbook](../../runbooks/plan-080-rollout.md)）；部署后的第二轮补缺（080i）已完成，待推送并重启 pdf2zh**。实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)。
+状态：**v5，080a–080i 已实现并已部署；二轮补缺于 2026-10-20 重新部署，四个新开关仍默认关闭，真实生产作业复验待完成（灰度见 [runbook](../../runbooks/plan-080-rollout.md)）**。实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)。
 
 来源：一份 FDA 会议纪要译文暴露的四类问题（漏译大段、字体不一致、下划线照抄原位、人名职务不应翻译）。本计划按“同类问题改规则”处理，不只修这一份文件。
 

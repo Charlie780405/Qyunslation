@@ -1,6 +1,6 @@
 # PLAN-080：PDF 译文完整性、字体统一、装饰线随文与人名职务保留
 
-> 状态：**v5，080a–080h 全部实现并已部署（2026-10-20，用户执行），保留策略的修复已在生产生效；字体策略、装饰线随文、段落级 QA、Office 保留四个开关默认关闭，灰度见 [runbook](../../runbooks/plan-080-rollout.md)；部署后的第二轮补缺（参考文献、Office、字体策略目标语言、多样本标定等）见 WT-080 §6**（实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)）
+> 状态：**v5，080a–080i 已实现并已部署（2026-10-20）；保留策略修复已在生产生效，字体策略、装饰线随文、段落级 QA、Office 保留四个开关默认关闭；二轮补缺生产部署和待完成验证见 WT-080 §7–8，灰度见 [runbook](../../runbooks/plan-080-rollout.md)**（实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)）
 > 日期：2026-10-20
 > 范围：文字型 PDF（BabelDOC / pdf2zh-next 通道）的译文质量规则，覆盖所有内容画像（GENERIC / REGULATORY / RESEARCH / REVIEW），不只服务当前样本
 > 前置：[PLAN-041](../PLAN-041-pdf-regulatory-form-fidelity/)、[PLAN-042](../PLAN-042-regulatory-translation-quality/)（受控实体 042e）、[PLAN-044](../PLAN-044-regulatory-layout-normalize/)（字号归一）、[PLAN-047](../PLAN-047-delivery-loop-fidelity/)（never-drop、capture）、[PLAN-074](../PLAN-074-author-terms-qa/)（作者与单位原文保护）

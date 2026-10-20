@@ -8,7 +8,7 @@
 | 编号 | 状态 | 说明 |
 | --- | --- | --- |
 | 080a 逐段诊断 | 已完成（只读） | `scripts/qa/plan080_diagnose.py`；结果 `var/plan080/pind-e5be-gen2-mono.json`（不入库） |
-| 080b 完整性（首批） | 已修复两处根因，有单元测试；**已用样本重译验证一次**（见 §5.1）；未部署到生产服务 | `qyunslation/structure/babeldoc_policy.py`、`qyunslation/structure/frontmatter.py` |
+| 080b 完整性（首批） | 已修复两处根因，有单元测试；**已部署到生产服务（2026-10-20，见 §8）**；尚未用真实生产作业复验 | `qyunslation/structure/babeldoc_policy.py`、`qyunslation/structure/frontmatter.py` |
 | 080b 段落追踪（M3） | 已完成，结论：M3 不造成正文漏译（见 §2.2） | `scripts/qa/plan080_trace_run.py`、`scripts/qa/plan080_trace_report.py` |
 | 080h manifest 测试基线 | **已完成**：全量 956 passed、0 failed | [PLAN-080h](../plans/PLAN-080-pdf-translation-completeness-and-typography/PLAN-080h-manifest-schema-test-baseline.md) |
 | 080c 字体统一 | **已实现并已部署（补丁已写入引擎），开关默认关闭**（见 §5.2、§6） | `qyunslation/structure/font_policy.py`、`scripts/apply-pdf2zh-080c-fonts.py` |
@@ -144,7 +144,7 @@
 
 **剩余的字体种类**来自**被保留的原文**（抬头 Calibri、名单与抬头 Arial、一条 Symbol），它们不经过 `FontMapper`，保持源文件字体。按 C4（080e）处理，不在 080c 范围。
 
-**限制**：只验证了一份样本、一次运行；斜体强调在译文中丢失（思源宋体没有斜体，D2 已选定）；没有部署，生产要启用需在运行翻译的环境里设置 `QYUNSLATION_FONT_POLICY=unified`（工作台 runner 子进程继承该环境变量）并重启 pdf2zh 使补丁生效。
+**限制**：只验证了一份样本、一次运行；斜体强调在译文中丢失（思源宋体没有斜体，D2 已选定）；字体补丁已部署但开关仍关闭。生产启用需在运行翻译的环境里设置 `QYUNSLATION_FONT_POLICY=unified`（工作台 runner 子进程继承该环境变量）并重启 pdf2zh。
 
 ### 5.3 080d 装饰线随文（D3：默认关闭）
 
@@ -221,7 +221,7 @@
 
 ## 6. 部署记录与第二轮补缺（2026-10-20，部署之后）
 
-**部署**：6 个提交（`f008d33`…`7100e3c`）已由用户手动推送并部署。核对结果：远端与本地一致；`pdf2zh.service`、`qyunslation-office.service` 于 11:20 重启；安装版 `pdf2zh.service` 含 080c 的 `ExecStartPre`，引擎里有 `_QY_080C_FONT_POLICY`；近 3 小时无错误日志；三个新开关均未设置（= off），所以生产上生效的只有保留策略的修复。生产运行的是功能分支的本地检出，main 未合并。
+**首次部署记录**：6 个提交（`f008d33`…`7100e3c`）由用户手动推送并部署。核对结果：远端与当时本地一致；`pdf2zh.service`、`qyunslation-office.service` 于 11:20 重启；安装版 `pdf2zh.service` 含 080c 的 `ExecStartPre`，引擎里有 `_QY_080C_FONT_POLICY`；近 3 小时无错误日志；三个新开关均未设置（= off），所以当时生产上生效的只有保留策略修复。生产当时运行功能分支的本地检出；后续代码已进入 `main`，二轮补缺部署见 §8。
 
 部署后做了一轮缺口审计，发现并补了下面这些。
 
@@ -262,9 +262,15 @@
 
 ## 7. 仍然开放
 
-1. **推送本轮补缺并重新部署**：新的提交需要推送；要让保留谓词告警生效，需要重启 `pdf2zh.service`（`scripts/deploy-translate-stack.sh`）。
-2. **在生产上用真实作业验证**：部署后还没有用真实作业跑过；按 runbook 用 `QYUNSLATION_PLAN080_SAMPLE`/`QYUNSLATION_PLAN080_OUTPUT` 运行 `verify-plan-080.sh`。
-3. **按 runbook 灰度开启四个开关**：由用户决定范围与时间。
-4. **main 未合并、未建 PR**。
-5. **已推送历史里的原文节选**：见 6.2。
-6. **已知限制**：小标题下划线无法精确到词；被保留的原文保持源字体；斜体强调丢失；纯人名不做规则判定；装饰线只处理水平细线；非标准引文格式（无卷页、DOI、et al.）可能仍被翻译，开启 QA 后会被 `REFERENCE_ENTRIES_CHANGED` 报出。
+1. **在生产上用真实作业验证**：重新部署后还没有用真实作业跑过；按 runbook 用 `QYUNSLATION_PLAN080_SAMPLE`/`QYUNSLATION_PLAN080_OUTPUT` 运行 `verify-plan-080.sh`。
+2. **按 runbook 灰度开启四个开关**：由用户决定范围与时间；本次部署没有修改服务环境配置。
+3. **已推送历史里的原文节选**：见 6.2。
+4. **已知限制**：小标题下划线无法精确到词；被保留的原文保持源字体；斜体强调丢失；纯人名不做规则判定；装饰线只处理水平细线；非标准引文格式（无卷页、DOI、et al.）可能仍被翻译，开启 QA 后会被 `REFERENCE_ENTRIES_CHANGED` 报出。
+
+## 8. 生产重新部署记录
+
+- **时间**：2026-10-20 15:53 CST。维护脚本 `scripts/deploy-translate-stack.sh` 部署并重启了用户级 `pdf2zh.service` 与 `qyunslation-office.service`。
+- **代码版本**：脚本运行时工作树 HEAD 为 `891da2e5`；该提交只增加 PLAN-081 计划文档，生产行为代码与已在 `origin/main` 的 `b532a1d0` 一致。未推送 PLAN-081 文档分支。
+- **重启前门禁**：Alembic 迁移版本与代码 head 对齐，前端构建新鲜；7 个本地运行状态文件均为终态，未发现活动翻译 CLI 进程。
+- **重启后核验**：两个 systemd 用户服务均为 `active`；sidecar 健康检查通过，本地和远端代码指纹均为 `7542777de0fd`；API 路由门禁通过；GUI `127.0.0.1:7860/` 返回 HTTP 200。
+- **范围**：未应用数据库迁移、未运行真实翻译作业，也未启用 `QYUNSLATION_LAYOUT_QA`、`QYUNSLATION_DECORATION_REALIGN`、`QYUNSLATION_FONT_POLICY` 或 `QYUNSLATION_OFFICE_PRESERVE`。本次部署未重跑测试套件；既有测试结果见本 WT 前文。
