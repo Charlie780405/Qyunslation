@@ -60,7 +60,8 @@
 | **PLAN-078** | [PLAN-078-workbench-qa-task-experience](./PLAN-078-workbench-qa-task-experience/) | **工作台 QA 处理闭环、状态一致、参数确认、任务检索与批量/回收站（078a–078f）**（078a–e、f1–f7 已合并并部署，f8 仅出方案；见各子计划上线记录与 WT-078） |
 | **PLAN-079** | [PLAN-079-qa-gate-and-term-triage](./PLAN-079-qa-gate-and-term-triage/) | **QA 阻断分级、术语审核准入、对照视图定位与上线收口（A–E + F0–F17）**（v3；A–D 等已在工作区实现，未部署，见 WT-079） |
 | **PLAN-080** | [PLAN-080-pdf-translation-completeness-and-typography](./PLAN-080-pdf-translation-completeness-and-typography/) | **PDF 译文完整性、字体统一、装饰线随文与人名职务保留（080a–080g）**（v5：080a–080i 已实现；保留策略修复已部署，四个新开关默认关闭；见 WT-080 与灰度 runbook） |
+| **PLAN-081** | [PLAN-081-translation-admission-and-service-api](./PLAN-081-translation-admission-and-service-api/) | **双路翻译准入与排队提醒、服务 API、QyunsGen 接入及模型对照**（规划中） |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
 
-下一个可用父计划编号：**PLAN-081**。创建前须同时检查所有 worktree，避免未合并计划占号。
+下一个可用父计划编号：**PLAN-082**。创建前须同时检查所有 worktree，避免未合并计划占号。
