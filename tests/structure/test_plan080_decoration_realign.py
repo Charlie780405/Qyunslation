@@ -161,3 +161,19 @@ def test_failure_keeps_the_original_file_usable(tmp_path, src, monkeypatch):
     report = dr.realign_pdf(src, out, tmp_path / "res.pdf")
     assert report.failed_pages == [1]
     assert segments(tmp_path / "res.pdf") == segments(out)
+
+
+def test_page_count_mismatch_is_skipped_not_misaligned(tmp_path, src):
+    """交替页的 dual（页数翻倍）等情形页与页对不上：宁可不处理，也不能把线画到别的页上。"""
+    long = pymupdf.get_text_length(LONG, fontname="helv", fontsize=FS)
+    one = make_pdf(tmp_path / "one.pdf", text=SHORT, line=(72, 72 + long))
+    doc = pymupdf.open()
+    doc.insert_pdf(pymupdf.open(one))
+    doc.insert_pdf(pymupdf.open(one))
+    two = tmp_path / "two.pdf"
+    doc.save(two)
+    report = dr.realign_pdf(src, two, tmp_path / "res.pdf")
+    assert report.skipped_reason and "page_count_mismatch" in report.skipped_reason
+    assert report.trimmed == report.removed == report.moved == 0
+    assert segments(tmp_path / "res.pdf", 0) == segments(two, 0)
+    assert segments(tmp_path / "res.pdf", 1) == segments(two, 1)

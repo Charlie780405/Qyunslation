@@ -67,6 +67,7 @@ class RealignReport:
     removed: int = 0
     skipped_grid: int = 0
     skipped_shared: int = 0
+    skipped_reason: str | None = None
     failed_pages: list[int] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -79,6 +80,7 @@ class RealignReport:
             "removed": self.removed,
             "skipped_grid": self.skipped_grid,
             "skipped_shared": self.skipped_shared,
+            "skipped_reason": self.skipped_reason,
             "failed_pages": list(self.failed_pages),
         }
 
@@ -326,6 +328,14 @@ def realign_pdf(source: Path, output: Path, destination: Path | None = None) -> 
     src = pymupdf.open(source)
     doc = pymupdf.open(output)
     try:
+        if len(src) != len(doc):
+            # 交替页的 dual（页数是源文的两倍）、缺页或多页：页与页对不上，宁可不处理也不错位
+            report.skipped_reason = f"page_count_mismatch source={len(src)} output={len(doc)}"
+            if destination is not None and destination != output:
+                import shutil
+
+                shutil.copyfile(output, destination)  # 调用方指定了目标文件时，原样交付
+            return report
         for index in range(min(len(src), len(doc))):
             report.pages += 1
             try:
