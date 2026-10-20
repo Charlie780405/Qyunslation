@@ -17,6 +17,7 @@ from .role_fitter import (
     measure_textbox,
     table_hard_fail_codes,
 )
+from .table_cell_policy import has_script_runs, split_script_runs
 from .table_translate import (
     CONTINUATION_LABEL,
     TableTranslateError,
@@ -131,12 +132,8 @@ def _latin_name(bold: bool) -> str:
 
 
 def _helv_has(ch: str) -> bool:
-    """内置 Helvetica 只有 WinAnsi 字形；≥ 等符号须交给 china-ss，否则画成「·」。"""
-    try:
-        ch.encode("cp1252")
-        return True
-    except UnicodeEncodeError:
-        return False
+    """内置 Helvetica 落笔只可靠支持 Latin-1；≥、–（en dash）、’ 等须交给 CJK 字体，否则画成「·」或「?」。"""
+    return ord(ch) < 256
 
 
 def _script_runs(text: str, *, bold: bool) -> list[tuple[str, str]]:
@@ -276,6 +273,49 @@ def redact_table_region(
     return True
 
 
+_FILLS: list[tuple[tuple[float, float, float, float], tuple[float, float, float]]] = []
+_INK: tuple[float, float, float] = (0.0, 0.0, 0.0)
+_SCRIPT_SCALE = 0.7
+_SUB_DROP = 0.22
+_SUP_RISE = 0.38
+
+
+def snapshot_fills(page) -> None:
+    """落笔前记下本页的填充矩形（表头深色底、隔行浅灰底）；落笔后再取会读到我们自己画的白底。"""
+    global _FILLS
+    _FILLS = []
+    try:
+        page_area = float(page.rect.width) * float(page.rect.height)
+        for item in page.get_drawings():
+            fill = item.get("fill")
+            if not fill or len(fill) < 3:
+                continue
+            if float(item.get("fill_opacity", 1.0) or 1.0) < 0.5:
+                continue
+            rect = item.get("rect")
+            if rect is None or rect.is_empty:
+                continue
+            if rect.width * rect.height > 0.9 * page_area:
+                continue
+            _FILLS.append(((rect.x0, rect.y0, rect.x1, rect.y1), (float(fill[0]), float(fill[1]), float(fill[2]))))
+    except Exception:
+        _FILLS = []
+
+
+def _cell_fill(rect) -> tuple[float, float, float]:
+    """格子中心下面最上层的填充色；没有就是白底。"""
+    cx, cy = (rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2
+    for (x0, y0, x1, y1), color in reversed(_FILLS):
+        if x0 - 0.5 <= cx <= x1 + 0.5 and y0 - 0.5 <= cy <= y1 + 0.5:
+            return color
+    return (1.0, 1.0, 1.0)
+
+
+def _ink_for(fill: tuple[float, float, float]) -> tuple[float, float, float]:
+    lum = 0.299 * fill[0] + 0.587 * fill[1] + 0.114 * fill[2]
+    return (1.0, 1.0, 1.0) if lum < 0.5 else (0.0, 0.0, 0.0)
+
+
 def _wrap_to_width(text: str, *, font, font_size: float, width: float) -> list[str]:
     """西文整词换行；含汉字按字宽断行，避免窄格整句画不出。"""
     raw = (text or "").replace("\xa0", " ").strip()
@@ -345,13 +385,16 @@ def paint_cell(
     # 仅真竖排轴标签旋转；数字窄格（IGA=1）旋转会把整表拧碎
     if inset.width < 8.0 and inset.height >= 40.0:
         return _paint_cell_sideways(page, inset, text, fontname=fontname, font_size=size)
-    page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    global _INK
+    fill = _cell_fill(inset)
+    _INK = _ink_for(fill)
+    page.draw_rect(inset, color=fill, fill=fill, width=0)
     # 期刊表体行高常 <11pt：textbox 在 6pt 仍 rc<0 会“成功”却不落字
     if short:
         return _paint_short_line(
             page, inset, text, bold=bold, font_size=size, fontname=fontname, measure_font=measure_font
         )
-    mixed = _has_cjk(text) and re.search(r"[A-Za-z]", text or "")
+    mixed = (_has_cjk(text) and re.search(r"[A-Za-z]", text or "")) or has_script_runs(text)
     if mixed:
         return _paint_mixed(page, inset, text, bold=bold, font_size=size)
     while True:
@@ -364,6 +407,7 @@ def paint_cell(
                 fontname=_page_font(page, fontname, "\n".join(lines)),
                 fontsize=size,
                 align=0,
+                color=_INK,
             )
             if rc >= 0 or size <= 6.0:
                 return size
@@ -381,7 +425,7 @@ def _paint_short_line(
     measure_font,
 ) -> float:
     """单行落字：矮格用 insert_text，避免 textbox rc<0 却当成功。"""
-    if _has_cjk(text) and re.search(r"[A-Za-z]", text or ""):
+    if (_has_cjk(text) and re.search(r"[A-Za-z]", text or "")) or has_script_runs(text):
         return _paint_mixed(page, inset, text, bold=bold, font_size=min(font_size, inset.height))
     size = min(float(font_size), max(4.5, float(inset.height) * 0.92))
     while size > 4.5 and float(measure_font.text_length(text, fontsize=size)) > inset.width:
@@ -391,11 +435,12 @@ def _paint_short_line(
     # cell's top edge for 7pt Latin labels (notably ``Healthy Subjects``).
     # Keep a small bottom guard while positioning against the actual ascent.
     y = min(inset.y0 + size * 1.08, inset.y1 - size * 0.18)
-    page.insert_text((inset.x0, y), text, fontname=_page_font(page, fontname, text), fontsize=size)
+    page.insert_text((inset.x0, y), text, fontname=_page_font(page, fontname, text), fontsize=size, color=_INK)
     return size
 
 
 def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> float:
+    """中英混排落笔；角标（下标/上标）用小字号并偏移基线。"""
     import pymupdf
 
     fonts = {
@@ -405,28 +450,34 @@ def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> flo
     }
     size = max(6.0, float(font_size))
     leading = 1.15
+    parts = split_script_runs(text)
     while True:
-        lines: list[list[tuple[str, str]]] = [[]]
+        # line 元素：(字体, 片段, 角标种类)；宽度按该片段自己的字号算
+        lines: list[list[tuple[str, str, str]]] = [[]]
         line_w = 0.0
-        for fname, chunk in _script_runs(text, bold=bold):
-            font = fonts[fname]
-            pieces = list(chunk) if fname == "china-ss" else (chunk.split(" ") if chunk.strip() else [chunk])
-            for i, piece in enumerate(pieces):
-                if fname != "china-ss" and i and piece:
-                    piece = " " + piece
-                w = float(font.text_length(piece, fontsize=size)) if piece else 0.0
-                if lines[-1] and line_w + w > inset.width and piece.strip():
-                    lines.append([])
-                    line_w = 0.0
-                    piece = piece.lstrip()
-                    w = float(font.text_length(piece, fontsize=size)) if piece else 0.0
-                if not piece:
-                    continue
-                if lines[-1] and lines[-1][-1][0] == fname:
-                    lines[-1][-1] = (fname, lines[-1][-1][1] + piece)
-                else:
-                    lines[-1].append((fname, piece))
-                line_w += w
+        for part, kind in parts:
+            scale = _SCRIPT_SCALE if kind else 1.0
+            psize = size * scale
+            for fname, chunk in _script_runs(part, bold=bold):
+                font = fonts[fname]
+                pieces = list(chunk) if fname == "china-ss" else (chunk.split(" ") if chunk.strip() else [chunk])
+                for i, piece in enumerate(pieces):
+                    if fname != "china-ss" and i and piece:
+                        piece = " " + piece
+                    w = float(font.text_length(piece, fontsize=psize)) if piece else 0.0
+                    # 角标紧贴基名，不在它前面换行
+                    if lines[-1] and not kind and line_w + w > inset.width and piece.strip():
+                        lines.append([])
+                        line_w = 0.0
+                        piece = piece.lstrip()
+                        w = float(font.text_length(piece, fontsize=psize)) if piece else 0.0
+                    if not piece:
+                        continue
+                    if lines[-1] and lines[-1][-1][0] == fname and lines[-1][-1][2] == kind:
+                        lines[-1][-1] = (fname, lines[-1][-1][1] + piece, kind)
+                    else:
+                        lines[-1].append((fname, piece, kind))
+                    line_w += w
         need_h = max(len(lines), 1) * size * leading
         if need_h <= inset.height + 0.3 or size <= 6.0:
             y = inset.y0 + size * 0.95
@@ -434,9 +485,13 @@ def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> flo
                 if y > inset.y1 - 0.2:
                     break
                 x = inset.x0
-                for fname, chunk in line:
-                    page.insert_text((x, y), chunk, fontname=_page_font(page, fname, chunk), fontsize=size)
-                    x += float(fonts[fname].text_length(chunk, fontsize=size))
+                for fname, chunk, kind in line:
+                    psize = size * (_SCRIPT_SCALE if kind else 1.0)
+                    dy = size * _SUB_DROP if kind == "sub" else (-size * _SUP_RISE if kind == "sup" else 0.0)
+                    page.insert_text(
+                        (x, y + dy), chunk, fontname=_page_font(page, fname, chunk), fontsize=psize, color=_INK
+                    )
+                    x += float(fonts[fname].text_length(chunk, fontsize=psize))
                 y += size * leading
             return size
         size = max(6.0, size - 0.5)
@@ -447,7 +502,8 @@ def _paint_cell_sideways(page, inset, text: str, *, fontname: str, font_size: fl
 
     size = max(3.0, float(font_size))
     while True:
-        page.draw_rect(inset, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        fill = _cell_fill(inset)
+        page.draw_rect(inset, color=fill, fill=fill, width=0)
         # 字号需落在短边内；文本长度沿长边。
         fits_width = size <= inset.width * 0.95
         fits_len = len(text) * size * 0.55 <= inset.height
@@ -459,6 +515,7 @@ def _paint_cell_sideways(page, inset, text: str, *, fontname: str, font_size: fl
                 fontname=_page_font(page, fontname, text),
                 fontsize=size,
                 rotate=90,
+                color=_ink_for(fill),
             )
             return size
         size = max(3.0, size - 0.5)
@@ -504,6 +561,7 @@ def paint_fitted_blocks(
     allow_leftover: bool = True,
 ) -> tuple[list[str], str, list[str], list[list[str]]]:
     prepare_embedded_font(r.text for r in results)
+    snapshot_fills(page)
     codes: list[str] = []
     width = float(page.rect.width)
     title = ""

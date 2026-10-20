@@ -2,7 +2,7 @@
 name: table-translation-fidelity
 description: >-
   文献/期刊 PDF 表格译文保真全链：区域识别→HPD 逻辑网格→文字层对齐→翻译→字号→QC→落笔。
-  触发：表格崩了、串格、列并了、漏译、字号不统一、与原文格式不对应、无线表、三线表、
+  触发：表格崩了、串格、列并了、下角标/上角标没转换、表头文字重叠、深色表头、分组表头、脚注被拆进列、漏译、字号不统一、与原文格式不对应、无线表、三线表、
   期刊表、COLUMN_CLUSTER_DRIFT、HPD 网格、图被当成表、NOT_A_TABLE、GEOMETRY_CENTER_UNSAFE、
   HPD_GRID_MISMATCH、table normalize、.tbltr、.tblnorm、PLAN-048、PLAN-049、PLAN-049e、PLAN-049f、
   LITERATURE_LEAVE_BABELDOC、交还 BabelDOC、列内居中、居中对齐、数值贴左、全角括号、

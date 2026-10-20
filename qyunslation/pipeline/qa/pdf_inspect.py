@@ -48,6 +48,27 @@ class PdfFacts:
     first_page_image_hashes: set[str] = field(default_factory=set)
 
 
+def strip_reference_section(text: str) -> str:
+    """去掉参考文献区（标题行起，到附录/致谢等分节标题前）。
+
+    参考文献整区保持原文、不翻译（PLAN-033h）；其中的网址、DOI、英文行不属于「译文漏译/网址被改写」，
+    QA 不该为它们报警，更不能阻断。只认独立标题行，与 structure.references 同一套规则。
+    """
+    from qyunslation.structure.references import HEADING_RE, SECTION_BREAK_RE
+
+    kept: list[str] = []
+    in_refs = False
+    for line in (text or "").splitlines():
+        if HEADING_RE.match(line):
+            in_refs = True
+            continue
+        if in_refs and SECTION_BREAK_RE.match(line):
+            in_refs = False
+        if not in_refs:
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
@@ -582,7 +603,10 @@ def check_translation_text(
                 ),
             )
         )
-    findings.extend(check_protected_literals(source_text, translated_text, source_pages=source_pages))
+    # 参考文献区保持原文：网址/英文行不参与「受保护字面量」与「英文残留」检查。
+    findings.extend(
+        check_protected_literals(strip_reference_section(source_text), translated_text, source_pages=source_pages)
+    )
     findings.extend(check_author_metadata(source_text, translated_text, source_pages=source_pages))
 
     if target_is_chinese:
@@ -590,7 +614,7 @@ def check_translation_text(
             *(extract_protected_literals(source_text).values())
         )
         protected.update(_preserved_frontmatter_terms(source_text))
-        ratio = latin_residue_ratio(translated_text, protected=protected)
+        ratio = latin_residue_ratio(strip_reference_section(translated_text), protected=protected)
         if ratio >= residue_block:
             findings.append(
                 QaFinding(

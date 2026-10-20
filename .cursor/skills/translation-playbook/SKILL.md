@@ -3,7 +3,7 @@ name: translation-playbook
 description: >-
   qyunslation 翻译总入口（任何翻译/重译/译文质量任务先读它）：译前预检、译中取证、译后验收、
   症状路由到分域 skill、QA 警告什么该报什么不该报、近期计划质量改进汇总。
-  触发：翻译、重译、重新翻译、译文、文献翻译、PDF 翻译、表格译文、译文有错、译文缺漏、
+  触发：翻译、重译、重新翻译、参考文献警告、下角标、表头重叠、译文、文献翻译、PDF 翻译、表格译文、译文有错、译文缺漏、
   漏翻译、没翻译出来、角标、上标、下标、m2、kg/m2、中度、重度、括号里的英文、警告没有意义、
   QA 警告、误报、批准的术语译名未出现、网址丢失、进度条不动、没有进度条、浏览器里中文不显示、
   字体没内嵌、改了没效果、验收、PLAN-082、PLAN-083、PLAN-083b、PLAN-083c、SK-Q012。
@@ -42,6 +42,10 @@ description: >-
 | 表格里中文没了只剩英文 | 落笔字体是否内嵌（`page.get_fonts()` 看 `n/a`） | SK-Q009 |
 | 中度/重度、括号里的字没翻译 | `is_preserve_cell` 是否把带字括号当数值 | SK-Q009 |
 | 角标 m2 / 上标丢了 | 文本层压平上标；单位指数是否还原 | SK-Q007 |
+| 表里 Tmax / AUC0-τ / t1/2z 下标没了；`mga` 译成 `mg/kg` | `script_pairs`、`set_script_pairs` | SK-Q009 R10 |
+| 表头文字叠在一起 / 深色表头变白底 / `SAD phase` 被拆开 | `n_header_rows`、`snapshot_fills` | SK-Q009 R11 |
+| 脚注被拆进各列 | `table_bottom` | SK-Q009 R12 |
+| 破折号显示 `?` | `_helv_has` | SK-Q009 R13 |
 | 漏翻译 / 整段英文 | `UNTRANSLATED_PARAGRAPH`、Fallback 计数 | SK-Q007 |
 | 图内文字 | 图片链 | SK-Q002 |
 | 监管表单 | HPD 网格 | SK-Q003 |
@@ -60,6 +64,7 @@ description: >-
 | `LITERAL_MISSING_URL` | 比对前必须去零宽字符 `U+200B/200C/200D/2060/FEFF/00AD`；丢弃被换行截断的前缀碎片 | PDF 常在网址点、斜杠后塞零宽空格，肉眼相同、字符串不等；一条网址折成多行会产生 `https://`、`https://doi` 之类碎片 |
 | `TERM_TARGET_MISSING`（低风险词） | **默认不报**；`QYUNSLATION_QA_LOW_RISK_TERM_WARN=on` 才恢复 | `discontinuation→停药`、`pharmacokinetics→药代动力学` 常有等价译法，逐词报没有行动价值 |
 | `TERM_HIGH_RISK_CONFLICT` / 禁用译法 | **必须报**，阻断 | 药名、适应症、终点译错后果严重 |
+| 参考文献区里的网址/DOI/英文行 | **不报、不阻断**：参考文献整区保持原文不翻译，QA 先 `strip_reference_section` 再查 `LITERAL_MISSING_*` 与 `LATIN_RESIDUE` | 它们本来就该是英文原样；只认独立的 `References/参考文献` 标题行，到 `Appendix/致谢` 为止；正文里的网址仍照查 |
 | `LITERAL_MISSING_EMAIL/IND`、剂量/频次 | 保持 | 事实性错误 |
 | `QA_INSPECTION_SUMMARY` 及所有 INFO 提示 | 保留落库（审计、自动 QA 幂等依赖它），但**不计入「未处理」、不占待处理数、不当阻塞**；只在「全部」里可查，详情写「无需处理」 | 提示是检查记录，不是待办（`labels.js` `isOpenItem`/`isInfoItem`） |
 
@@ -73,6 +78,8 @@ description: >-
 - 数字比对先归一：细空格、全角括号、上标数字（`m²`≡`m2`）视为同一数字；某格真漂移只让**该格**保留原文，不拖垮整表。
 - 单位角标：文本层把 `kg/m²` 压平为 `kg/m2`，译后对 `[kcmμ]?m` 后的 `2/3` 还原为 `² ³`；不碰 `IL-2`、`M2`、`EASI-75`。负指数 `mL⁻¹` 字体无字形，保持 `mL-1`。
 - 表头/格内标点紧凑化（仅文献重建）：半角括号、`(n=30)`；组名与 `(n=…)` 之间留一个空格作换行点，窄列在此换行，不在括号内折断，也不要删这个空格（删了整表会被迫缩字）。
+- 角标：`Tmax`、`AUC0-τ`、`t1/2z`、`Vz/F` 按下标绘制（原文真实小号 span ∪ 内置 PK 写法），`150 mga` 的脚注上标翻译前拿掉、译后接回；只在文献重建期间开启。
+- 表头：分组行（`SAD phase`）自成一行，列表头各行合并成一格；深色表头保留底色、用白字；脚注不进表、不擦。
 - 整表一个字号，取原文 span 真实字号（不是词框高度），放不下整表一起降档，数值格不折行。
 - 中文必须**内嵌子集字体**（`prepare_embedded_font`），不得依赖 `china-ss`；全字库会让提取文字出现兼容字（「不」→U+F967）。
 

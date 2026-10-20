@@ -104,7 +104,11 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
                 bbox = BoundingBox(x0=x0, y0=y0, x1=x1, y1=y1)
             else:
                 bbox = None
-            role = BlockRole.TABLE_HEADER if ri == 0 else BlockRole.TABLE_CELL
+            role = (
+                BlockRole.TABLE_HEADER
+                if ri < int(getattr(result, "n_header_rows", 1) or 1)
+                else BlockRole.TABLE_CELL
+            )
             policy = (
                 TranslationPolicy.PRESERVE
                 if is_numeric_or_unit(src)
@@ -123,23 +127,7 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
                     column_index=ci,
                 )
             )
-    for fi, note in enumerate(result.footnotes or []):
-        note = (note or "").strip()
-        if not note:
-            continue
-        fs = max(6.0, float(getattr(result, "font_size", None) or 8.0) - 1.0)
-        blocks.append(
-            TranslatableBlock(
-                block_id=f"{sid}:fn{fi}",
-                source_text=note,
-                role=BlockRole.TABLE_FOOTNOTE,
-                translation_policy=TranslationPolicy.TRANSLATE,
-                bbox=None,
-                source_style=SourceStyle(font_size=fs),
-                row_index=len(result.rows) + fi,
-                column_index=0,
-            )
-        )
+    # 脚注不进表：重建区域之外保留 BabelDOC 自己译好的脚注，不擦不重画（PLAN-083d）
     return blocks
 
 
@@ -211,7 +199,17 @@ def _widen_numeric_columns(blocks, rebuilt, *, font_size: float) -> None:
                 b.bbox = BoundingBox(x0=b.bbox.x0, y0=b.bbox.y0, x1=new_x0 - 2.0, y1=b.bbox.y1)
 
 
-def _paint_literature_rebuild(
+def _paint_literature_rebuild(*args, **kwargs):
+    """角标还原只在文献重建期间开启，结束（含失败）一律关闭，不漏到监管路径。"""
+    from qyunslation.structure.table_cell_policy import set_script_pairs
+
+    try:
+        return _paint_literature_rebuild_impl(*args, **kwargs)
+    finally:
+        set_script_pairs(None)
+
+
+def _paint_literature_rebuild_impl(
     *,
     page,
     origin_page,
@@ -267,11 +265,30 @@ def _paint_literature_rebuild(
             "literature_rebuild_failed:empty_cells",
             {**checks, "qc": ["LITERATURE_REBUILD_FAILED", "REASON:empty_cells"]},
         )
+    from qyunslation.structure.table_cell_policy import set_script_pairs
+
+    set_script_pairs(list(getattr(rebuilt, "script_pairs", None) or []))
     try:
         _widen_numeric_columns(blocks, rebuilt, font_size=float(rebuilt.font_size or 9.0) * 0.9)
+        from qyunslation.structure.table_cell_policy import (
+            restore_footnote_markers,
+            strip_footnote_markers,
+        )
+
+        markers: dict[str, list[tuple[str, str]]] = {}
+        pairs = list(getattr(rebuilt, "script_pairs", None) or [])
+        for block in blocks:
+            if str(getattr(block.translation_policy, "value", block.translation_policy)).upper() == "TRANSLATE" and pairs:
+                clean, removed = strip_footnote_markers(block.source_text, pairs)
+                if removed:
+                    block.source_text = clean
+                    markers[block.block_id] = removed
         translations = translate_table_blocks(
             blocks, worker, drift_fallback_source=True, compact_punct=True
         )
+        for block_id, removed in markers.items():
+            if block_id in translations:
+                translations[block_id] = restore_footnote_markers(translations[block_id], removed)
         results = _fit_uniform(
             blocks_to_fit(blocks, translations),
             table_size_mode=table_size_mode or "source_p75",
@@ -286,9 +303,10 @@ def _paint_literature_rebuild(
             {**checks, "qc": ["LITERATURE_REBUILD_FAILED", f"REASON:{code}"], "error": str(exc)},
         )
     checks["font_size_painted"] = results[0].font_size if results else None
-    paint_region = BoundingBox(
-        x0=extended[0], y0=extended[1], x1=extended[2], y1=extended[3]
-    )
+    bottom = extended[3]
+    if rebuilt.table_bottom:
+        bottom = min(bottom, float(rebuilt.table_bottom))  # 脚注在表体之下，不擦
+    paint_region = BoundingBox(x0=extended[0], y0=extended[1], x1=extended[2], y1=bottom)
     wiped = redact_table_region(
         page,
         union_paint_bbox(paint_region, blocks),

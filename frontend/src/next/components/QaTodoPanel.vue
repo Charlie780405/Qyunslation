@@ -180,7 +180,7 @@
               :key="remedy.id"
               type="button"
               class="qy-remedy-btn"
-              :class="{ 'is-primary': remedy.recommended }"
+              :class="{ 'is-primary': isActiveRemedy(remedy), 'is-recommended': remedy.recommended }"
               :disabled="Boolean(busy) || submitting"
               :data-remedy="remedy.id"
               :aria-describedby="hintId"
@@ -399,6 +399,12 @@ const hintRemedy = computed(() => remedies.value.find((remedy) => remedy.id === 
   || remedies.value[0]
   || null);
 
+// 只有「当前选中」的方案高亮：鼠标/键盘焦点所在，或它的表单已打开；推荐项只带「推荐」标记，不常亮。
+function isActiveRemedy(remedy) {
+  return hinted.value === remedy.id
+    || (Boolean(activeAction.value) && remedy.kind === 'disposition' && remedy.action === activeAction.value);
+}
+
 function runRemedy(remedy) {
   switch (remedy.kind) {
     case 'revise':
@@ -565,8 +571,10 @@ li[data-severity='unavailable'] .qy-qa-item strong { color: #7a5200; }
 .qy-remedy-btn:hover:not(:disabled) { border-color: #005076; background: #eef5fa; }
 .qy-remedy-btn:focus-visible { outline: 3px solid #f2a900; outline-offset: 2px; }
 .qy-remedy-btn:disabled { opacity: .55; cursor: not-allowed; }
+.qy-remedy-btn.is-recommended { border-color: #005076; font-weight: 600; }
 .qy-remedy-btn.is-primary { color: #fff; background: #005076; border-color: #005076; font-weight: 600; }
 .qy-remedy-btn.is-primary:hover:not(:disabled) { background: #003f5c; }
+.qy-remedy-btn.is-primary .qy-remedy-tag { color: #005076; }
 .qy-remedy-tag { padding: 0 .4rem; font-size: .7rem; font-weight: 600; color: #005076; background: #fff; border-radius: 999px; }
 .qy-remedy-hint { margin: .5rem 0 0; font-size: .85rem; color: #3b4452; min-height: 1.3em; }
 .qy-remedy-info { display: grid; gap: .1rem; margin: 0 0 .5rem; padding: .35rem .6rem; font-size: .85rem; background: #fff8e6; border-left: 3px solid #d97706; }

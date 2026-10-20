@@ -232,7 +232,9 @@ describe('QA todo panel', () => {
     expect(box.exists()).toBe(true);
     const buttons = box.findAll('button');
     expect(buttons.map((b) => b.attributes('data-remedy'))).toEqual(['waive', 'revise']);
-    expect(buttons[0].classes()).toContain('is-primary');
+    // 默认谁都不常亮：推荐项只带「推荐」标记；选中（聚焦/悬停）哪个，哪个才高亮
+    expect(buttons[0].classes()).toContain('is-recommended');
+    expect(buttons[0].classes()).not.toContain('is-primary');
     expect(buttons[1].classes()).not.toContain('is-primary');
     expect(buttons[0].text()).toContain('推荐');
     // one explanation line, not one per option: the recommended option's by default, the focused one's when focused
@@ -240,7 +242,10 @@ describe('QA todo panel', () => {
     expect(box.find('[data-remedy-hint]').text()).toContain('你看过并认为可以接受时使用');
     await box.find('[data-remedy="revise"]').trigger('focus');
     expect(box.find('[data-remedy-hint]').text()).toContain('原版会保留');
+    expect(box.find('[data-remedy="revise"]').classes()).toContain('is-primary');
+    expect(box.find('[data-remedy="waive"]').classes()).not.toContain('is-primary');
     await box.find('[data-remedy="revise"]').trigger('blur');
+    expect(box.find('[data-remedy="revise"]').classes()).not.toContain('is-primary');
     expect(box.find('[data-remedy-hint]').text()).toContain('你看过并认为可以接受时使用');
     wrapper.unmount();
   });

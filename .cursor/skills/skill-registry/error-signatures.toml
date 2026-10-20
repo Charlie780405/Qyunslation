@@ -288,3 +288,36 @@ symptom = "「确定性 QA 取证摘要」等提示出现在未处理列表，�
 first_check = "该条 severity 是否为 info；前端 labels.js isOpenItem 是否排除 info"
 fix = "info 不计入未处理/已处理，只在「全部」里；详情写「无需处理」；新增 INFO 规则不配处置动作"
 verify = "qaTodoPanel.test.js：keeps the inspection summary out of the to-do list"
+
+[[signature]]
+id = "table-subscript-flattened"
+pattern = "Tmax|AUC0|t1/2z|mg/kg"
+symptom = "药代表下角标压平成普通字；150 mga 被译成 150 mg/kg"
+first_check = "rebuild_from_page().script_pairs；set_script_pairs 是否在落笔期间开启"
+fix = "按原文真实小号 span + 内置 PK 写法还原下标；脚注上标翻译前拿掉、译后接回"
+verify = "test_plan083d_table_scripts.py：角标/脚注标记/默认关闭"
+
+[[signature]]
+id = "table-header-overlap-filled"
+pattern = "表头.*(重叠|叠在一起)|SAD phase"
+symptom = "深色表头被白底盖住；SAD phase 拆成两格；列表头被拆成三行分别翻译"
+first_check = "n_header_rows；_dark_cell_rects；snapshot_fills"
+fix = "分组行自成一行、列表头合并成格；同色底 + 深色底白字"
+verify = "test_plan083d_table_scripts.py::test_cm512_group_header_filled_header_and_footnotes"
+
+[[signature]]
+id = "table-footnote-split-into-columns"
+pattern = "n \\(%\\), number and percentage"
+symptom = "无底线期刊表的脚注被拆进各列或被擦掉"
+first_check = "RebuildResult.table_bottom"
+fix = "_cut_footnote_lines 切掉脚注，擦除区只到 table_bottom，脚注保留 BabelDOC 版本"
+verify = "test_plan083d_table_scripts.py::test_cm512_group_header_filled_header_and_footnotes"
+
+[[signature]]
+id = "qa-reference-section-literal"
+pattern = "LITERAL_MISSING_URL|LATIN_RESIDUE"
+symptom = "参考文献里的网址/英文行报缺失或英文残留"
+first_check = "该行是否在 References/参考文献 标题之后"
+fix = "QA 先 strip_reference_section（到 Appendix/致谢 为止）再查"
+verify = "test_plan083c_qa_noise.py：参考文献不报、正文仍报"
+

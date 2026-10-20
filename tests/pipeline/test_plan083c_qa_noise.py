@@ -57,3 +57,32 @@ def test_low_risk_term_warning_can_be_restored(monkeypatch):
     snap = _snapshot(_term("discontinuation", "停药", "low"))
     codes = [f.code for f in check_terms_in_translation(snap, "停止治疗")]
     assert codes == ["TERM_TARGET_MISSING"]
+
+
+# ---- 参考文献区：保持原文，不报网址缺失/英文残留 ----------------------------------------------------
+
+def _check(source: str, translated: str):
+    from qyunslation.pipeline.qa.pdf_inspect import check_translation_text
+
+    return [f.code for f in check_translation_text(source_text=source, translated_text=translated)]
+
+
+def test_urls_in_reference_section_are_not_reported():
+    body = "Subjects received 300 mg Q2W."
+    src = f"{body}\nReferences\n1. Smith J. Lancet 2024;1:2. https://doi.org/10.1016/xyz\nAppendix\nok"
+    tr = "受试者接受 300 mg Q2W。\n附录\nok"
+    assert "LITERAL_MISSING_URL" not in _check(src, tr)
+
+
+def test_url_in_body_before_references_is_still_reported():
+    src = "Details at https://example.org/protocol.\nReferences\n1. Smith J. https://doi.org/10.1/x"
+    assert "LITERAL_MISSING_URL" in _check(src, "详见方案。")
+
+
+def test_english_reference_lines_do_not_count_as_untranslated_residue():
+    refs = "\n".join(
+        f"{i}. Smith J, Jones K, Brown L, Green M, White N. Randomized trial of dupilumab in adults. Lancet 2024;1:{i}."
+        for i in range(1, 9)
+    )
+    tr = "这是中文正文第一段。\n这是中文正文第二段。\nReferences\n" + refs
+    assert "LATIN_RESIDUE" not in _check("src", tr) and "UNTRANSLATED_BODY" not in _check("src", tr)

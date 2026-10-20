@@ -72,6 +72,9 @@ class RebuildResult:
     row_source: str = ""  # "rules" | "text_lines" | "hpd_geometry"
     font_size: float = 8.0
     frame_extended_to: float | None = None
+    n_header_rows: int = 1  # 分组表头（SAD phase / MAD phase）单独成行时为 2
+    table_bottom: float | None = None  # 表体最后一行文字下缘；其下是脚注，不擦不译
+    script_pairs: list[tuple[str, str, str]] = field(default_factory=list)  # 原文表里真实的 (基名, 角标, sub|sup)
 
     @property
     def ok(self) -> bool:
@@ -119,6 +122,7 @@ def rebuild_literature_table(
         return fail(reason="no_row_rules")
 
     lines = _cluster_lines(inside)
+    lines, cut_lines = _cut_footnote_lines(lines, x1 - x0)
     last_rule = bounds[-1]
     intervals: list[tuple[float, float, list[_Line]]] = []
     for i in range(len(bounds) - 1):
@@ -127,7 +131,7 @@ def rebuild_literature_table(
     if len(intervals) < 2:
         return fail(reason="no_row_rules")
 
-    foot_lines: list[_Line] = []
+    foot_lines: list[_Line] = list(cut_lines)
     for line in lines:
         if line.y_mid >= last_rule:
             foot_lines.append(line)
@@ -216,17 +220,45 @@ def rebuild_literature_table(
                 flush()
         return [c.strip() for c in cells]
 
-    header_row = [""] * n_cols
-    header_line_words: list[TableWord] = []
-    for hi, iv in enumerate(header):
-        for b, text in enumerate(cells_of(iv, is_header=True, top_header=hi < len(header) - 1)):
-            if text:
-                header_row[b] = (header_row[b] + " " + text).strip()
-        for line in iv[2]:
-            header_line_words.extend(line.words)
-    rows: list[list[str]] = [header_row]
-    row_y_ranges: list[tuple[float, float]] = [(header[0][0], header[-1][1])]
-    row_word_lists: list[list[TableWord]] = [header_line_words]
+    header_lines = sorted((ln for iv in header for ln in iv[2]), key=lambda item: item.y_mid)
+    group_lines, col_lines = _split_group_header(header_lines, bands)
+    group_x: dict[int, tuple[float, float]] = {}
+    if group_lines and col_lines:
+        # 分组表头（SAD phase / MAD phase）自成一行；列表头各行按列合并成一格（Pooled placebo (n = 8)）
+        group_row = [""] * n_cols
+        for line in group_lines:
+            for seg in line.segs:
+                b = _nearest_band_center(
+                    TableWord(text=seg.text, x0=seg.x0, y0=0.0, x1=seg.x1, y1=0.0), bands
+                )
+                group_row[b] = (group_row[b] + " " + seg.text).strip()
+                prev = group_x.get(b)
+                group_x[b] = (min(prev[0], seg.x0), max(prev[1], seg.x1)) if prev else (seg.x0, seg.x1)
+        col_row = cells_of(
+            (header[0][0], header[-1][1], col_lines), is_header=True, top_header=False
+        )
+        group_words = [w for ln in group_lines for w in ln.words]
+        col_words = [w for ln in col_lines for w in ln.words]
+        rows = [group_row, col_row]
+        row_y_ranges = [
+            (min(w.y0 for w in group_words), max(w.y1 for w in group_words)),
+            (min(w.y0 for w in col_words), max(w.y1 for w in col_words)),
+        ]
+        row_word_lists = [group_words, col_words]
+        n_header_rows = 2
+    else:
+        header_row = [""] * n_cols
+        header_line_words: list[TableWord] = []
+        for hi, iv in enumerate(header):
+            for b, text in enumerate(cells_of(iv, is_header=True, top_header=hi < len(header) - 1)):
+                if text:
+                    header_row[b] = (header_row[b] + " " + text).strip()
+            for line in iv[2]:
+                header_line_words.extend(line.words)
+        rows = [header_row]
+        row_y_ranges = [(header[0][0], header[-1][1])]
+        row_word_lists = [header_line_words]
+        n_header_rows = 1
     sparse = 0
     data_rows = 0
 
@@ -293,7 +325,12 @@ def rebuild_literature_table(
             if crossing:
                 limit = min(crossing) - 1.0
             ry1 = max(ry1, limit)
-        cell_boxes.append([(bx0, ry0, col_right[i], ry1) for i, (bx0, _bx1) in enumerate(bands)])
+        row_boxes = [(bx0, ry0, col_right[i], ry1) for i, (bx0, _bx1) in enumerate(bands)]
+        if ri == 0 and group_x:
+            # 分组表头横跨多列：格框按原文那几个词的宽度（略放宽），不挤在单列里
+            for b, (gx0, gx1) in group_x.items():
+                row_boxes[b] = (max(gx0 - 4.0, x0), ry0, min(gx1 + 4.0, x1), ry1)
+        cell_boxes.append(row_boxes)
 
     heights = sorted(w.height for w in inside if w.height > 0) or [8.0]
     font_size = max(6.0, float(heights[len(heights) // 2]))
@@ -308,6 +345,8 @@ def rebuild_literature_table(
         row_bounds=bounds,
         row_source=row_source,
         font_size=font_size,
+        n_header_rows=n_header_rows,
+        table_bottom=(max(w.y1 for ws in row_word_lists for w in ws) + 2.0) if cut_lines else None,
     )
 
 
@@ -446,7 +485,14 @@ def rebuild_from_page(
     extended, frame_y = extend_frame_to_bottom_rule(page, box)
     words = extract_words_from_page(page, extended)
     rules = extract_row_rules_from_page(page, extended)
-    result = rebuild_literature_table(words, rules, box=extended)
+    dark = _dark_cell_rects(page, extended)
+    header_bottom = _header_bottom(dark, extended[1]) if dark else None
+    cell_rects = None
+    if header_bottom is not None:
+        rules = sorted([*rules, header_bottom])
+        cell_rects = dark
+    result = rebuild_literature_table(words, rules, box=extended, cell_rects=cell_rects)
+    result.script_pairs = script_pairs_from_page(page, extended)
     result.frame_extended_to = frame_y
     if result.ok or result.reason != "no_row_rules" or not allow_hpd_fallback:
         fallback = result
@@ -457,6 +503,105 @@ def rebuild_from_page(
     if span_size:
         fallback.font_size = span_size
     return fallback
+
+
+def _cut_footnote_lines(lines: list[_Line], table_width: float) -> tuple[list[_Line], list[_Line]]:
+    """表体最后一条数据行之后、与它隔开一行以上或以脚注起头的整宽文字行，连同其后的行都是脚注。
+
+    没有底线的期刊表，脚注行会落在重建区域内：不切掉，它们会被当成表体行拆进各列。
+    """
+    ordered = sorted(lines, key=lambda item: item.y_mid)
+    numeric_idx = [i for i, line in enumerate(ordered) if _line_is_numeric_data(line)]
+    if not numeric_idx:
+        return ordered, []
+    last = numeric_idx[-1]
+    for i in range(last + 1, len(ordered)):
+        line = ordered[i]
+        text = " ".join(seg.text for seg in line.segs).strip()
+        wide = len(line.segs) == 1 and (line.segs[0].x1 - line.segs[0].x0) >= 0.5 * max(1.0, table_width)
+        if _FOOTNOTE_START_RE.match(text) or wide:
+            return ordered[:i], ordered[i:]
+    return ordered, []
+
+
+def _split_group_header(
+    lines: Sequence[_Line], bands: Sequence[tuple[float, float]]
+) -> tuple[list[_Line], list[_Line]]:
+    """表头最上面横跨多列的行（SAD phase / First dose）是分组行，其余是列表头。"""
+
+    def spans_bands(seg: _Segment) -> bool:
+        overlaps = sum(1 for b0, b1 in bands if min(seg.x1, b1) - max(seg.x0, b0) > 1.0)
+        return overlaps >= 2 and len(seg.words) <= 4
+
+    group: list[_Line] = []
+    for line in lines:
+        if line.segs and all(spans_bands(seg) for seg in line.segs):
+            group.append(line)
+        else:
+            break
+    rest = list(lines[len(group):])
+    if not group or not rest:
+        return [], list(lines)
+    return group, rest
+
+
+def _dark_cell_rects(page, box: tuple[float, float, float, float]) -> list[tuple[float, float, float, float]]:
+    """表头是深色/灰色填充格（常无横线）时，返回这些填充格的矩形；没有则空列表。
+
+    细边线（宽或高 < 6pt）不算格。与 ``_header_bottom`` 配合得到表头下缘。
+    """
+    x0, y0, x1, y1 = box
+    out: list[tuple[float, float, float, float]] = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return out
+    for item in drawings:
+        fill = item.get("fill")
+        rect = item.get("rect")
+        if not fill or len(fill) < 3 or rect is None:
+            continue
+        if 0.299 * fill[0] + 0.587 * fill[1] + 0.114 * fill[2] >= 0.7:
+            continue
+        if rect.width < 6.0 or rect.height < 6.0:
+            continue
+        if rect.x0 < x0 - 3.0 or rect.x1 > x1 + 3.0 or rect.y0 < y0 - 10.0 or rect.y0 > y1:
+            continue
+        out.append((float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)))
+    return out
+
+
+def script_pairs_from_page(page, box: tuple[float, float, float, float]) -> list[tuple[str, str, str]]:
+    """原文表里真实的角标：字号明显更小且基线偏移的 span，配上它前面的字母基名。"""
+    try:
+        import pymupdf
+
+        data = page.get_text("dict", clip=pymupdf.Rect(*box))
+    except Exception:
+        return []
+    pairs: dict[tuple[str, str], str] = {}
+    for block in data.get("blocks", []):
+        for line in block.get("lines", []):
+            spans = [sp for sp in line.get("spans", []) if (sp.get("text") or "").strip()]
+            if len(spans) < 2:
+                continue
+            top = max(float(sp.get("size") or 0) for sp in spans)
+            for i, span in enumerate(spans):
+                size = float(span.get("size") or 0)
+                if i == 0 or size <= 0 or size > 0.82 * top:
+                    continue
+                prev = spans[i - 1]
+                if float(prev.get("size") or 0) <= 0.82 * top:
+                    continue
+                base_match = re.search(r"([A-Za-z]{1,5})$", (prev.get("text") or "").rstrip())
+                sub = (span.get("text") or "").strip()
+                if not base_match or not sub or len(sub) > 10:
+                    continue
+                dy = float(span["origin"][1]) - float(prev["origin"][1])
+                if abs(dy) < 0.6:
+                    continue
+                pairs[(base_match.group(1), sub)] = "sub" if dy > 0 else "sup"
+    return [(b, sub, kind) for (b, sub), kind in pairs.items()]
 
 
 def _span_font_size(page, box: tuple[float, float, float, float]) -> float | None:

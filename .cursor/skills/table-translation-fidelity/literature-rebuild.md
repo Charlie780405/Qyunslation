@@ -1,4 +1,4 @@
-# 文献表行线重建（PLAN-082 S5 / 083 / 083b / 083c）
+# 文献表行线重建（PLAN-082 S5 / 083 / 083b / 083c / 083d）
 
 **取代**主 SKILL 里「文献默认不整区落笔」「禁止文献整区 redact+paint」的旧说法：自 PLAN-083 起，文献表在**行线重建成功**时按格落笔；**任何失败整表交回 BabelDOC**，不再叠加归一/居中。
 
@@ -95,6 +95,41 @@
 | 判据 | `总计 (n=93)` 单行；`安慰剂组` / `(n=32)` 在组名后换行（与原文 `Placebo group` / `(n = 32)` 两行一致）；表 2 保持 10pt；中文逗号、句号不动；监管表默认不启用 |
 | 反例 | 把组名与 `(n=…)` 之间的空格删掉：该词无换行点，排版器只能整表缩字（实测表 2 10pt→8pt） |
 
+### R10 表内下角标/上角标（Tmax、AUC0-τ、t1/2z、150 mg^a）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 药代表 `Tmax, 小时`、`Cmax`、`AUC0–τ`、`t1/2z`、`Vz/F`、`Rac_Cmax` 的角标被压平成同号普通字；`150 mga` 被模型译成 `150 mg/kg` |
+| 先查 | 文本层把 span 压平；`rebuild_from_page().script_pairs` 是否取到原文真实角标（小字号 + 基线偏移）；`set_script_pairs` 是否在落笔期间开启 |
+| 修法 | `script_pairs_from_page`（原文真实 span）∪ 内置 PK/统计常用写法（`_DEFAULT_SCRIPT_PAIRS`）→ `split_script_runs` → `_paint_mixed` 按 0.7 倍字号、基线下移/上移绘制；**文本内容不变**（数字比对、缓存不受影响）。脚注上标（`mga`）翻译前 `strip_footnote_markers` 拿掉、译后 `restore_footnote_markers` 接回基名之后 |
+| 判据 | `Cmax`→C+下标 max；`AUC0–τ`、`t1/2z`、`Vz/F`、`Rac_Cmax` 同；`Quiz`、`Hz`、`maximum` 不动；监管路径与非重建路径**默认关闭**（`set_script_pairs(None)`），`_paint_literature_rebuild` 的 `finally` 一律关 |
+
+### R11 分组表头、深色表头底与重叠
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 带深色/灰色表头的期刊表：`SAD phase` 被拆成 `SAD` `阶段` 两格；列表头 `Pooled / placebo / (n = 8)` 被拆成三行分别翻译（`合并`、`安慰剂`）；白底盖掉深色底，文字叠在一起、被上一行遮住 |
+| 先查 | `rebuild_from_page().n_header_rows`；`_dark_cell_rects`（原文深色填充格）能否推出表头下缘；表头里最上面的行是否横跨多列 |
+| 修法 | 深色填充格 → `_header_bottom` 作为表头下缘；`_split_group_header`：横跨 ≥2 列的最上行是**分组行**（格框按原文词宽放宽，不挤在单列），其余各行按列合并为一格；落笔前 `snapshot_fills` 取格子下的填充色，用**同色**底，深色底配**白字**（`_ink_for`） |
+| 判据 | `SAD阶段`、`MAD阶段` 各一格居于组上；`合并安慰剂组(n=8)` 一格；深色表头保留，字白、不重叠；普通白底表仍黑字白底 |
+
+### R12 脚注不进表
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 无底线的期刊表，脚注行被当表体行拆进各列（`n (%), number and percentage` 被切成十一段），或脚注被整区擦除 |
+| 先查 | `RebuildResult.table_bottom`；最后一条数值行之后有没有整宽文字行 |
+| 修法 | `_cut_footnote_lines`：最后一条数据行之后的整宽行或以 `*†‡§`、`Abbreviations`、`Note` 起头的行及其后各行都切掉；`_paint_literature_rebuild` 的擦除区只到 `table_bottom`，脚注**保留 BabelDOC 自己译好的版本**，不擦不重画 |
+| 判据 | 重建行里没有脚注行；脚注在输出里是完整的中文句子 |
+
+### R13 Helvetica 字形边界
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | `CM512–150 mg` 里的 en dash 显示成 `?`；`≥` 显示成 `·` |
+| 修法 | `_helv_has` 只认 Latin-1（`ord<256`），en dash、弯引号、`≥` 等一律走内嵌 CJK 子集 |
+| 判据 | `µ ± ² ×` 仍走 Helvetica；`– ≥ ’` 走 CJK |
+
 ## 验收（必须真实）
 
 ```bash
@@ -102,6 +137,7 @@
 .venv/bin/python /tmp/plan083c_offline.py   # 模式见 tests/structure/test_plan083b_real_tables.py
 ```
 
+- 带深色表头的样张：`/tmp/plan083d_offline.py`（CM512，第 5/6/7 页，mono+dual）；同样用真实缓存/LLM。
 - 离线要用**真实译文缓存/LLM**（`/tmp/plan033m-table-zh-cache.json`），假译员会漏掉 R1/R4/R5。
 - 看 mono 与 dual 第 6/8 页；在**浏览器**里打开确认中文。
 - 回归：`tests/structure/test_plan083*_*.py`、`tests/structure/test_plan049_literature_leave.py`。

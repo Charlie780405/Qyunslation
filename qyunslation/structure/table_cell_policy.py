@@ -127,3 +127,117 @@ def assert_digit_tokens_preserved(source: str, translated: str, *, block_id: str
         return
     suffix = f":{block_id}" if block_id else ""
     raise ValueError(f"TABLE_DIGIT_DRIFT{suffix}")
+
+
+# ---- 下角标/上角标（PLAN-083d）-------------------------------------------------------------------
+# 文本层把 C_max、AUC_0-τ、t_1/2z 压平成 Cmax、AUC0-τ、t1/2z。落笔时按「基名 + 角标」还原：
+# 角标用小字号、偏移基线；不改文本内容（数字比对、翻译缓存不受影响）。
+# 角标对优先取自原文表的真实 span（字号明显更小、基线偏移），再并上下面的内置 PK/统计常用写法。
+_DASH = "-\u2010\u2011\u2012\u2013\u2014\u2212"
+_DEFAULT_SCRIPT_PAIRS: tuple[tuple[str, str, str], ...] = (
+    ("C", "max", "sub"), ("C", "min", "sub"), ("C", "trough", "sub"), ("C", "ss", "sub"), ("C", "avg", "sub"),
+    ("T", "max", "sub"), ("T", "min", "sub"), ("t", "max", "sub"),
+    ("t", "1/2z", "sub"), ("t", "1/2", "sub"), ("V", "z", "sub"), ("V", "ss", "sub"),
+    ("AUC", "0-t", "sub"), ("AUC", "0-τ", "sub"), ("AUC", "0-∞", "sub"), ("AUC", "0-last", "sub"),
+    ("AUC", "inf", "sub"), ("AUC", "last", "sub"), ("AUC", "tau", "sub"), ("AUC", "τ", "sub"),
+    ("MRT", "inf", "sub"), ("MRT", "0-t", "sub"), ("MRT", "last", "sub"),
+    ("R", "ac_Cmax", "sub"), ("R", "ac_AUCtau", "sub"), ("R", "ac_AUC", "sub"), ("R", "ac", "sub"),
+)
+_script_pairs: list[tuple[str, str, str]] = []
+_script_re: re.Pattern[str] | None = None
+_script_kinds: dict[tuple[str, str], str] = {}
+
+
+def _escape_sub(sub: str) -> str:
+    return "".join(f"[{_DASH}]" if ch in _DASH else re.escape(ch) for ch in sub)
+
+
+def set_script_pairs(pairs=None) -> None:
+    """文献表落笔前设置角标对 (基名, 角标, "sub"|"sup")，内置 PK 常用写法一并启用。
+
+    None = 关闭（监管路径等不还原角标）；[] = 只用内置对。
+    """
+    global _script_pairs, _script_re, _script_kinds
+    merged: dict[tuple[str, str], str] = {}
+    if pairs is None:
+        _script_kinds, _script_pairs, _script_re = {}, [], None
+        return
+    for base, sub, kind in list(_DEFAULT_SCRIPT_PAIRS) + list(pairs):
+        base, sub = str(base or "").strip(), str(sub or "").strip()
+        if base and sub and kind in {"sub", "sup"}:
+            merged[(base, sub.translate(str.maketrans({c: "-" for c in _DASH})))] = kind
+    _script_kinds = merged
+    _script_pairs = [(b, s, k) for (b, s), k in merged.items()]
+    if not merged:
+        _script_re = None
+        return
+    ordered = sorted(merged, key=lambda p: -(len(p[0]) + len(p[1])))
+    body = "|".join(f"(?:{re.escape(b)})(?:{_escape_sub(s)})" for b, s in ordered)
+    _script_re = re.compile(rf"(?<![A-Za-z0-9µμ])(?:{body})(?![A-Za-z0-9])")
+
+
+set_script_pairs(None)
+
+
+def split_script_runs(text: str) -> list[tuple[str, str]]:
+    """[(片段, ""|"sub"|"sup")]：基名保持正常，角标部分单独成段。"""
+    text = text or ""
+    if _script_re is None or not text:
+        return [(text, "")]
+    out: list[tuple[str, str]] = []
+    cursor = 0
+    for match in _script_re.finditer(text):
+        raw = match.group(0)
+        pair = next(
+            (
+                (base, raw[len(base):], kind)
+                for (base, sub), kind in _script_kinds.items()
+                if raw.startswith(base) and raw[len(base):].translate(str.maketrans({c: "-" for c in _DASH})) == sub
+            ),
+            None,
+        )
+        if pair is None:
+            continue
+        base, sub_text, kind = pair
+        if match.start() > cursor:
+            out.append((text[cursor : match.start()], ""))
+        out.append((base, ""))
+        out.append((sub_text, kind))
+        cursor = match.end()
+    if cursor < len(text):
+        out.append((text[cursor:], ""))
+    return [(chunk, kind) for chunk, kind in out if chunk] or [(text, "")]
+
+
+def has_script_runs(text: str) -> bool:
+    return any(kind for _chunk, kind in split_script_runs(text))
+
+
+_MARKER_RE = re.compile(r"[A-Za-z*†‡§]{1,2}")
+
+
+def strip_footnote_markers(text: str, pairs) -> tuple[str, list[tuple[str, str]]]:
+    """把原文里压平的脚注上标（150 mga → 150 mg + 上标 a）拿掉再翻译，避免模型把 mga 当成 mg/kg 之类。
+
+    只处理来自原文真实上标 span 的 (基名, 标记, "sup")；返回 (去标记后的文本, [(基名, 标记)])。
+    """
+    removed: list[tuple[str, str]] = []
+    out = text or ""
+    for base, sub, kind in pairs or []:
+        if kind != "sup" or not _MARKER_RE.fullmatch(sub or ""):
+            continue
+        pattern = re.compile(rf"(?<![A-Za-z0-9])({re.escape(base)}){re.escape(sub)}(?![A-Za-z0-9])")
+        if pattern.search(out):
+            out = pattern.sub(lambda m: m.group(1), out, count=1)
+            removed.append((base, sub))
+    return out, removed
+
+
+def restore_footnote_markers(text: str, removed: list[tuple[str, str]]) -> str:
+    """译文里基名之后接回脚注标记（落笔时按上标画）；找不到基名就不加。"""
+    out = text or ""
+    for base, sub in removed:
+        out = re.sub(
+            rf"(?<![A-Za-z0-9])({re.escape(base)})(?![A-Za-z])", lambda m: m.group(1) + sub, out, count=1
+        )
+    return out
