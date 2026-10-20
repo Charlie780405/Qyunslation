@@ -36,3 +36,11 @@
 
 - 浏览器视觉 / axe：无隔离 Chrome DevTools MCP 时标 BLOCKED，不拿 HTTP 冒充。
 - 回滚：关上述开关或回退静态资源；无数据库迁移。
+
+## 部署证据（2026-10-20）
+
+- Commit：`c12900b1`（`feat(PLAN-082): fix workbench progress, stale preflight, encoding false positives, and table QA`）
+- 分支：`feat/PLAN-081-translation-admission-and-service-api` → 已推送 `origin`
+- 部署：`bash scripts/deploy-translate-stack.sh` → PASS（pre/post gates、fingerprint 一致）
+- 服务：`qyunslation-office.service` / `pdf2zh.service` active
+- 浏览器视觉验收：BLOCKED（无隔离 Chrome DevTools MCP）
