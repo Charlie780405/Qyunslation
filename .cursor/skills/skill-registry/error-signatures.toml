@@ -198,3 +198,39 @@ symptom = "规则明显改了但台账曲线没断点"
 first_check = "term-candidate-rules.toml 内容哈希 vs term-rules-versions.md"
 fix = "--promote 必须 bump version 并登记 fingerprint"
 verify = "当前 fingerprint 出现在 versions 表且与 version 同行"
+
+[[signature]]
+id = "SIG-PRESERVE-WHOLE-PARAGRAPH"
+skill = "SK-Q005"
+pattern = "_QY_033H_PRESERVE|paragraph_is_preserved|skipped:preserve"
+symptom = "编号问题段、背景段整段仍是英文，日志里没有 Fallback 也没有报错"
+first_check = "用 scripts/qa/plan080_trace_run.py 重跑并用 plan080_trace_report.py 看该段 fate 是否 skipped:preserve；直接调用 paragraph_is_preserved(段落文字)"
+fix = "编号条目（n. / n xxx）只在参考文献区内保留；机构/作者判定对长正文句（>30 词、含功能词或动词）不生效；见 PLAN-080a"
+verify = "追踪报告中无非名单类 skipped:preserve；verify-plan-080.sh 的 preserve policy 一行 PASS"
+
+[[signature]]
+id = "SIG-UNTRANSLATED-PARAGRAPH"
+skill = "SK-Q007"
+pattern = "UNTRANSLATED_PARAGRAPH"
+symptom = "全文英文占比很低，但个别整段没译"
+first_check = "QA 条目 UNTRANSLATED_PARAGRAPH 的页锚点；plan080_diagnose.py 的 kept_non_title_blocks"
+fix = "先查保留谓词（SIG-PRESERVE-WHOLE-PARAGRAPH），再查模型是否原样返回（追踪 fate=unchanged/fallback_unchanged）"
+verify = "QYUNSLATION_LAYOUT_QA=on 重检后该码消失；有名有据的保留（人名、职务、机构、网址、参考文献）不被标记"
+
+[[signature]]
+id = "SIG-FONT-SPRAWL"
+skill = "SK-Q003"
+pattern = "FONT_FAMILY_SPRAWL|LXGWWenKai|NotoSerif-Italic"
+symptom = "译文字体前后不一致（宋体、楷体、衬线斜体混用）"
+first_check = "FontMapper 的字体表：lang_out=zh 时多语种字体族被合并，斜体走 script 字体"
+fix = "QYUNSLATION_FONT_POLICY=unified（apply-pdf2zh-080c-fonts.py 已装入引擎）；被保留的原文不经 FontMapper，保持源字体"
+verify = "plan080_diagnose.py 的 font_family_max_per_page 下降；FONT_FAMILY_SPRAWL 消失"
+
+[[signature]]
+id = "SIG-DECORATION-DANGLING"
+skill = "SK-Q003"
+pattern = "DECORATION_DANGLING"
+symptom = "下划线比译文文字长、悬在空白处或压在别的文字下"
+first_check = "BabelDOC 只重写文字，不重写矢量图形；plan_page 给出每条线的处理"
+fix = "QYUNSLATION_DECORATION_REALIGN=on（runner 在 CLI 成功后处理 mono 与 dual）；擦除用 REMOVE_IF_TOUCHED 且只允许碰到线自身"
+verify = "plan080_diagnose.py 的 underline_out_over_limit_cjk=0 且 underline_out_orphan 不高于源文"

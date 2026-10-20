@@ -43,3 +43,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-13 | PLAN-034d0 术语 SSOT 实现（四层预置 + session 导出 + service 桥接；不新建 Skill） |
 | 2026-09-14 | SK-Q002 孤立数据标记不并框；题注/横轴 must_draw 整带擦除（ljae439 图1/4/5） |
 | 2026-09-15 | 补登 SK-Q010；登记 SK-Q011（PLAN-063） |
+| 2026-10-20 | SK-Q003 增补装饰线随文/字体统一/人名职务保留；SK-Q005 增补保留谓词静默跳过；SK-Q007 修正 Fallback 计数盲区（PLAN-080） |

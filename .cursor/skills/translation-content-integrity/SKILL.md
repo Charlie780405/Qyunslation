@@ -11,6 +11,7 @@ description: >-
 ## 铁律
 
 1. **日志 `Successful/Fallback` 计数必须进 verify**——Fallback 段落单独重译并校验残留拉丁串。
+   **但它只覆盖已送进 LLM 的段落**：被保留谓词在送翻译之前跳过的段落（编号问题、被误判为机构/作者的正文句）不在计数里，日志也没有任何痕迹（PLAN-080a）。另需用 `QYUNSLATION_LAYOUT_QA=on` 的 `UNTRANSLATED_PARAGRAPH`（译文与源文同页逐字相同的整段外文）或 `plan080_trace_report.py` 核对。
 2. **剂量口径走确定性映射**：`Q2W→每2周一次`、`Q4W→每4周一次`；禁止模型自由表达成「每周两次」。
 3. **药名走 glossary 白名单 + `detect_drug_name_drift` 黑名单双向兜底**；常见伪译（特罗金单抗）直替为曲罗芦单抗。
 4. **嵌套剂量式必须塌回短写**，中文数词形（`每四周一次（每 4 周一次（Q4W））`）也要覆盖。
