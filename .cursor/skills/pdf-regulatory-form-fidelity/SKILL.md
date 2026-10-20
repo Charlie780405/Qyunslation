@@ -34,6 +34,9 @@ description: >-
 17. **人名、职务、机构原文保留（D1，PLAN-080e）**——职务由 `structure/entity_preserve.py` 识别（整行只含首字母大写词、缩写与少数连接词，第一段以职务名词结尾或 "职务 of/for/to …"，不含句末标点和句子动词）。**不做**"两三个首字母大写词就是人名"的判定：它与 "Clinical Pharmacology" 之类标题无法区分，误保留标题的代价更大。带学位的人名走 frontmatter 的作者判定。
 18. **字体统一（D2，PLAN-080c）**——`lang_out=zh` 时 BabelDOC 合并多语种字体表，斜体汉字走霞鹜文楷、拉丁走 NotoSerif。开启 `QYUNSLATION_FONT_POLICY=unified` 后译文只用思源宋体 Regular/Bold（画像写 sans-serif 时用思源黑体）。被保留的原文不经 `FontMapper`，保持源文件字体；这是有意的，不是漏统一。
 19. **装饰线随文（PLAN-080d）**——BabelDOC 不重写矢量图形。`structure/decoration_realign.py` 只处理源页里确认是文字装饰的线（贴行下沿、不宽于文字、非表格线），按译文文字范围裁短/挪位/删除；无法精确到词，小标题线只保证不超出所在行。擦除只能碰到线自身。
+20. **参考文献按形状保留（PLAN-080）**——期刊引文（卷:页、DOI、et al.、年份）单条看开头、合并成长段落看密度，不依赖"References"标题和段落顺序；标题写法放宽到 "7. References"、"Literature Cited"、"Works Cited" 等。QA 码 `REFERENCE_ENTRIES_CHANGED` 检查源文引文在译文同页是否逐字保留。
+21. **Word / PPT（PLAN-080）**——`partition_docx_segments` / `partition_pptx_segments` 在 `QYUNSLATION_OFFICE_PRESERVE=on` 时对正文和表格单元格应用同一套人名、职务、机构、引文规则；每份文档用自己的 `ReferencePreserveGate`，不共享 PDF 路径的全局状态。
+22. **字体策略只对简体中文目标生效**——`lang_out` 为 en、zh-TW 等时不介入（字体表里虽有思源字体，但不是统一对象）。字体族默认思源宋体（D2），`QYUNSLATION_FONT_POLICY_FAMILY=profile` 才沿用画像的黑体。
 
 ## 错误台账
 

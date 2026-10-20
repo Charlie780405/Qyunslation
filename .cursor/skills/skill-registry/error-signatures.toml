@@ -234,3 +234,12 @@ symptom = "下划线比译文文字长、悬在空白处或压在别的文字下
 first_check = "BabelDOC 只重写文字，不重写矢量图形；plan_page 给出每条线的处理"
 fix = "QYUNSLATION_DECORATION_REALIGN=on（runner 在 CLI 成功后处理 mono 与 dual）；擦除用 REMOVE_IF_TOUCHED 且只允许碰到线自身"
 verify = "plan080_diagnose.py 的 underline_out_over_limit_cjk=0 且 underline_out_orphan 不高于源文"
+
+[[signature]]
+id = "SIG-REFERENCES-TRANSLATED"
+skill = "SK-Q005"
+pattern = "REFERENCE_ENTRIES_CHANGED|is_citation_block|is_citation_entry"
+symptom = "文献 PDF 的参考文献被翻译或改写（尤其双栏版面的后几页）"
+first_check = "plan080_trace_run.py 加 QYUNSLATION_PLAN080_TRACE_GATE=1，看保留谓词被调用的顺序与全局状态翻转次数"
+fix = "BabelDOC 的段落顺序是版面分析顺序而不是阅读顺序，依赖顺序的状态机不可靠；单条引文看开头（is_citation_entry），合并成长段落的多条引文看密度（is_citation_block），都不依赖状态"
+verify = "QYUNSLATION_LAYOUT_QA=on 重检后 REFERENCE_ENTRIES_CHANGED 消失；正文中的普通引用（作者, 年份）不被保留"

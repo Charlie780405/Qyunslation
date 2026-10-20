@@ -11,8 +11,8 @@
 | 080b 完整性（首批） | 已修复两处根因，有单元测试；**已用样本重译验证一次**（见 §5.1）；未部署到生产服务 | `qyunslation/structure/babeldoc_policy.py`、`qyunslation/structure/frontmatter.py` |
 | 080b 段落追踪（M3） | 已完成，结论：M3 不造成正文漏译（见 §2.2） | `scripts/qa/plan080_trace_run.py`、`scripts/qa/plan080_trace_report.py` |
 | 080h manifest 测试基线 | **已完成**：全量 956 passed、0 failed | [PLAN-080h](../plans/PLAN-080-pdf-translation-completeness-and-typography/PLAN-080h-manifest-schema-test-baseline.md) |
-| 080c 字体统一 | **已实现，默认关闭，未部署**（见 §5.2） | `qyunslation/structure/font_policy.py`、`scripts/apply-pdf2zh-080c-fonts.py` |
-| 080d 装饰线随文 | **已实现，默认关闭，未部署**（见 §5.3） | `qyunslation/structure/decoration_realign.py`、`qyunslation/workbench/runner.py` 钩子 |
+| 080c 字体统一 | **已实现并已部署（补丁已写入引擎），开关默认关闭**（见 §5.2、§6） | `qyunslation/structure/font_policy.py`、`scripts/apply-pdf2zh-080c-fonts.py` |
+| 080d 装饰线随文 | **已实现并已部署，开关默认关闭**（见 §5.3、§6） | `qyunslation/structure/decoration_realign.py`、`qyunslation/workbench/runner.py` 钩子 |
 | 080e 人名职务保留 | **已实现**（见 §5.4）；默认开启（是保留策略的一部分） | `qyunslation/structure/entity_preserve.py`、`babeldoc_policy.py` |
 | 080f 段落级 QA | **已实现，默认关闭**（见 §5.5） | `qyunslation/pipeline/qa/pdf_layout.py`、注册表 3 个新警告码 |
 | 080g 回归与沉淀 | **已完成**（见 §5.6） | `scripts/verify-plan-080.sh`、skill、签名表 |
@@ -52,7 +52,7 @@
 
 **根因 M2：前置信息分类把正文长句判为机构/作者行（已修复）**
 
-- `frontmatter._AFFILIATION` 匹配 `Co., Ltd.`、`Division of`、`Food and Drug Administration` 等标记，而 `_BODY_SENTENCE` 的动词表不含 "submitted"、"discuss" 等词，于是 "On June 12, 2026, Jiangsu GenScend Biopharma Co., Ltd. … submitted this BPD Type 2b meeting request…" 被判为 AFFILIATION 并保留。这正是用户反馈的"背景"段。
+- `frontmatter._AFFILIATION` 匹配 `Co., Ltd.`、`Division of`、`Food and Drug Administration` 等标记，而 `_BODY_SENTENCE` 的动词表不含 "submitted"、"discuss" 等词，于是 "On June 12, 2026, Example Biopharma Co., Ltd. … submitted this BPD Type 2b meeting request…" 被判为 AFFILIATION 并保留。这正是用户反馈的"背景"段。
 - 同类问题也出现在 AUTHOR 分支：正文里出现邮箱地址即判为 `explicit author marker`，第 18–20 页的长正文段因此被保留。
 
 **根因 M3：LLM 原样返回，BabelDOC 回退后仍是源文（已追踪，结论：不造成正文漏译）**
@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | translated | 246 | 与旧日志的 `Successful: 246` 一致 |
 | skipped:preserve | 64 | 抬头、人名、职务、机构、地址、一条指南标题（D1 范围） |
-| unchanged | 10 | 页码标识 "PIND 182646"、分隔线、签名 "Tomson Lu" 等 |
+| unchanged | 10 | 页码标识 "PIND 000000"、分隔线、签名 "Pat Kim" 等 |
 | not_sent | 10 | 1–11 字符的短标签与项目符号，低于 `min_text_length` |
 | fallback_unchanged | 3 | 三条 URL 脚注 |
 | skipped:numeric | 1 | 纯数字 |
@@ -177,11 +177,11 @@
 
 ### 5.4 080e 人名、职务、机构的保留（D1）
 
-**现状评估**：样本重译里有 21 条短职务被翻译（"Clinical Reviewer, DO/OSM"、"Medical Director"、"General Manager Assistant"…），而同一份名单里 "Deputy Director, Office of New Drugs" 因含机构标记被保留，这就是"一半译一半不译"。现有分类器对不含机构标记的职务（"General Manager"、"Regulatory Lead, IQVIA"）完全没有覆盖。
+**现状评估**：样本重译里有 21 条短职务被翻译（"Clinical Reviewer, DO/OSM"、"Medical Director"、"General Manager Assistant"…），而同一份名单里 "Deputy Director, Office of New Drugs" 因含机构标记被保留，这就是"一半译一半不译"。现有分类器对不含机构标记的职务（"General Manager"、"Regulatory Lead, Acme CRO"）完全没有覆盖。
 
 **做法**：`entity_preserve.is_job_title` 保守识别职务：整行只含首字母大写词、缩写和少数连接词，第一段以职务名词结尾或为 "职务 of/for/to …"，不含句末标点、句子动词和句首的 Please/Contact 等。接入 `paragraph_is_preserved`、`filter_paragraphs_for_llm` 与 `title_is_usable_context`（职务不作为翻译上下文）。`preserve_reason(text)` 给出固定原因 `PERSON_NAME`/`JOB_TITLE`/`ORG_NAME`，供 QA 区分"有意保留"和"漏译"。
 
-**不做**：纯人名（两三个首字母大写词，无学位）的规则判定——它与 "Clinical Pharmacology" 这类标题无法区分，误保留标题的代价更大。这类人名仍由模型处理（样本中 "Tomson Lu" 被原样返回）。
+**不做**：纯人名（两三个首字母大写词，无学位）的规则判定——它与 "Clinical Pharmacology" 这类标题无法区分，误保留标题的代价更大。这类人名仍由模型处理（样本中 "Pat Kim" 被原样返回）。
 
 **验证**：对上次追踪里 246 个"已翻译"段落重放，新规则额外保留 25 条，全部是职务，没有误伤标题或正文。负例（标题、含职务词的句子、"Please contact the Regulatory Lead…"）有单元测试。
 
@@ -219,14 +219,52 @@
 - skill：SK-Q003 增补铁律 16–19 与三行症状；SK-Q005 增补铁律 6–8 与 pitfalls 4–6（静默保留谓词、诊断顺序、`REMOVE_IF_COVERED` 的坑）；SK-Q007 修正铁律 1（Fallback 计数只覆盖已送翻译的段）。
 - `error-signatures.toml` 新增 4 条（`SIG-PRESERVE-WHOLE-PARAGRAPH`、`SIG-UNTRANSLATED-PARAGRAPH`、`SIG-FONT-SPRAWL`、`SIG-DECORATION-DANGLING`）；registry 审计表加一行。
 
-## 6. 未完成与下一步
+## 6. 部署记录与第二轮补缺（2026-10-20，部署之后）
 
-1. **部署与启用（需要你在有权限的环境操作）**：
-   - 翻译引擎：执行 `apply-pdf2zh-080c-fonts.py` 并重启 pdf2zh（已登记进 `pdf2zh.service` 启动链）。
-   - 运行翻译的进程环境里设置 `QYUNSLATION_FONT_POLICY=unified`、`QYUNSLATION_DECORATION_REALIGN=on`；需要 QA 警告时再设 `QYUNSLATION_LAYOUT_QA=on`。三者默认都是 off（D3）。
-   - 保留策略的修复（编号段落、机构/作者误判、职务）不是开关，下一次运行就生效。
-   - 用一次真实作业重译后，设置 `QYUNSLATION_PLAN080_SAMPLE`/`QYUNSLATION_PLAN080_OUTPUT` 运行 `verify-plan-080.sh` 确认。
-2. **`_QY_033H_PRESERVE` 的静默失败**：导入 `qyunslation` 失败时它静默返回 False，保留功能整体关闭。要改补丁脚本 `apply-pdf2zh-fidelity-033h.py` 并重新部署，未做。
-3. **多样本校准**：字体种类阈值、`UNTRANSLATED_PARAGRAPH` 的误报率、装饰线规则都只在一份样本上验证；建议用 2–3 份不同类型的 PDF（文献、普通商务文档）重跑诊断与 QA 后再考虑升级严重度（D4）。
-4. **画像字体**：书信、IND 递交资料画像的 `primary_font_family = "sans-serif"` 保持不变，字体策略会用思源黑体；如要全部改为宋体，需改 `scripts/doc_profiles.toml` 两行。
-5. **已知限制**：小标题下划线无法精确到词；被保留的原文保持源字体；斜体强调在译文中丢失。
+**部署**：6 个提交（`f008d33`…`7100e3c`）已由用户手动推送并部署。核对结果：远端与本地一致；`pdf2zh.service`、`qyunslation-office.service` 于 11:20 重启；安装版 `pdf2zh.service` 含 080c 的 `ExecStartPre`，引擎里有 `_QY_080C_FONT_POLICY`；近 3 小时无错误日志；三个新开关均未设置（= off），所以生产上生效的只有保留策略的修复。生产运行的是功能分支的本地检出，main 未合并。
+
+部署后做了一轮缺口审计，发现并补了下面这些。
+
+### 6.1 参考文献可能被翻译（我自己引入的风险，已修）
+
+保留策略改为"编号条目只在参考文献区内保留"之后，标题写法不标准（"7. References"、"Literature Cited" 等）或没有标题的文献，引文会被送去翻译。继续用真实文献夹具验证时又发现一个更深的问题：
+
+- `nature_comm_53384`（19 页）的译文第 17 页，参考文献被翻译成中文（"47.Bissonnette,R.等人。口服 CCR4 拮抗剂…"）。
+- **根因**：BabelDOC 的 `translate()` 先跑 `process_cross_page_paragraph`、`process_cross_column_paragraph`，最后才是 `process_page`，段落顺序是版面分析的顺序，不是阅读顺序。用 `QYUNSLATION_PLAN080_TRACE_GATE=1` 记录 771 次谓词调用：保留状态只翻转两次（#741 在 "References" 打开，#751 在 "Acknowledgements" 关闭），中间只经过 9 个段落，之后的条目被翻译。Nature 的双栏版面把条目合并成"从某一条中间开头"的长段落，既没有编号开头，也落在状态机的窗口之外。
+- **修复**：不再依赖顺序。`is_citation_entry`（编号开头 + 年份 + 期刊引文形状或作者缩写开头）；`is_citation_block`（段落里 ≥2 处期刊引文形状 + 年份，不要求开头）；标题识别放宽。正文里的普通引用（"Smith et al., 2020"）、单处 "doi: …"、"in 2020 that" 都不会误保留（有测试）。
+- **验证**：真实文献重译，修复前 QA 标出第 16、17 页 `REFERENCE_ENTRIES_CHANGED`，修复后消失。命中的误保留只有 Wiley 的 "Downloaded from…" 水印行和期刊页眉的 DOI 行，原样保留是无害的。
+- **新增 QA**：`REFERENCE_ENTRIES_CHANGED`（warning，默认关闭）：源文里的引文在译文同页不再逐字存在。
+
+### 6.2 其他补缺
+
+| 缺口 | 处理 |
+| --- | --- |
+| 保留谓词导入失败时静默关闭保留功能 | `apply-pdf2zh-fidelity-033h.py` 把引擎里的 helper 升级为"第一次失败记一条 WARNING"（行为不变）；在真实引擎文件的副本上演练通过且幂等；**重启 pdf2zh 后生效**（已在启动链里）。登记为 `033h-warn` 指纹 |
+| dual 为交替页布局时装饰线会错位 | 页数不一致时整体跳过（`skipped_reason`），QA 的字体与装饰线检查同样跳过，只保留不依赖配对的检查 |
+| 画像字体（书信、IND 递交资料写 sans-serif） | 策略默认一律思源宋体（D2、D5）；`QYUNSLATION_FONT_POLICY_FAMILY=profile` 才沿用画像的黑体。不改 `doc_profiles.toml` |
+| 字体策略在中译英时介入 | 真实 `FontMapper` 测试发现：`lang_out=en` 时字体表里同样有思源字体，策略会把英文译文改成思源宋体。已限定为简体中文目标（zh / zh-CN / zh-Hans）；开关本就默认关闭，所以未影响生产 |
+| Word / PPT 没有保留规则 | 新增 `office_preserve`，`QYUNSLATION_OFFICE_PRESERVE=on` 时，`partition_docx_segments` / `partition_pptx_segments` 对正文应用同一套规则（每份文档自己的参考文献状态），对表格单元格只应用人名/职务/机构规则；默认关闭。用真实 python-docx 文件验证（参会人表格、参考文献区） |
+| 中译英方向 | 保留规则只针对英文写法；加了测试：中文原文（职务、公司名、编号句）不会被保留。中文职务与公司名照常翻译 |
+| 测试覆盖 | runner 异步流程的端到端测试（伪造 CLI → 装饰线后处理 → 产物；关闭时逐字节不变；产物无法读取时仍交付）；真实 `FontMapper` 测试（用 pdf2zh 的 Python 环境，不存在则跳过）；真实 docx 测试 |
+| 提交里的原文节选 | 本轮改动的文件里，公司名、参会人姓名、页码标识都换成虚构文本。**已推送的历史提交里仍有原文**；清理需要重写历史并强制推送，由用户决定 |
+| 灰度上线说明 | `docs/runbooks/plan-080-rollout.md`：开关放哪、开启顺序、判据、回滚 |
+
+### 6.3 多样本标定（4 份文档，真实重译）
+
+| 文档 | 方向、页数 | 字体种类/页（源文 → 关闭 → 开启，最大值） | 新 QA |
+| --- | --- | --- | --- |
+| 监管信函（FDA 会议纪要） | 英→中，28 | 6 → 8 → 4（旧译文 → 字体统一） | 旧译文：`UNTRANSLATED_PARAGRAPH`×8；修复后无 |
+| 期刊文章 `ljae439` | 英→中，10 | 3 → 5 → 3 | 无 |
+| 文献 `nature_comm_53384` | 英→中，19 | 7 → 6 → 5 | 修复前 `REFERENCE_ENTRIES_CHANGED`（第 16、17 页）；修复后仅 `DECORATION_DANGLING`×3 |
+| 中文登记表 | 中→英，5 | 2 → 4 → （策略不介入） | 无 |
+
+结论：`UNTRANSLATED_PARAGRAPH` 在 4 份文档的修复后输出里 0 误报（样本小）；`FONT_FAMILY_SPRAWL` 阈值（≥7 且比源文多 2）偏保守，只会标出旧译文那种极端情形，3 份新文档的"关闭"输出都没有触发，不是漏报：它们的字体种类（5–6）确实没有极端到那个程度；`DECORATION_DANGLING` 能在文献上检出悬空线。
+
+## 7. 仍然开放
+
+1. **推送本轮补缺并重新部署**：新的提交需要推送；要让保留谓词告警生效，需要重启 `pdf2zh.service`（`scripts/deploy-translate-stack.sh`）。
+2. **在生产上用真实作业验证**：部署后还没有用真实作业跑过；按 runbook 用 `QYUNSLATION_PLAN080_SAMPLE`/`QYUNSLATION_PLAN080_OUTPUT` 运行 `verify-plan-080.sh`。
+3. **按 runbook 灰度开启四个开关**：由用户决定范围与时间。
+4. **main 未合并、未建 PR**。
+5. **已推送历史里的原文节选**：见 6.2。
+6. **已知限制**：小标题下划线无法精确到词；被保留的原文保持源字体；斜体强调丢失；纯人名不做规则判定；装饰线只处理水平细线；非标准引文格式（无卷页、DOI、et al.）可能仍被翻译，开启 QA 后会被 `REFERENCE_ENTRIES_CHANGED` 报出。

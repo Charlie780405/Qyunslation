@@ -26,6 +26,7 @@ description: >-
 6. **保留谓词（`_QY_033H_PRESERVE`）是静默跳过**——被它排除的段落不送 LLM、不写日志、不进 Fallback 计数。它必须与 `filter_paragraphs_for_llm` 用同一套状态逻辑（编号条目只在参考文献区内保留），机构/作者判定必须有"长正文句不是署名"的保护。导入 `qyunslation` 失败时它静默返回 False（整体关闭保留功能）。
 7. **诊断漏译先看段落去向，不要先猜原因**：`scripts/qa/plan080_trace_run.py` 在进程内包装 BabelDOC（fork 的子进程继承），`plan080_trace_report.py` 汇总每段 fate（translated / skipped:<原因> / unchanged / fallback_unchanged / not_sent）。PLAN-080 曾先后怀疑公式字体、长度、模型原样返回，数据一次排除。
 8. **不改引擎文件也能验证补丁效果**：补丁逻辑放在仓库模块里（`font_policy.install(FontMapper)`），生产补丁只追加一个带标记的调用块；测试时在进程内安装同一个函数。
+9. **保留判断不要依赖段落顺序**：BabelDOC 的段落顺序是版面分析顺序（含跨页、跨栏的乱序调用），全局状态机在多栏文献上会漏。能由段落自身内容判断的（引文的形状与密度）就不用状态。
 
 | 症状 | 先查 | 修法 | 判据 |
 | --- | --- | --- | --- |

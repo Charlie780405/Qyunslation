@@ -1,6 +1,6 @@
 # PLAN-080：PDF 译文完整性、字体统一、装饰线随文与人名职务保留
 
-> 状态：**v4，080a–080h 全部实现并经样本重译验证；未部署到生产服务（字体策略、装饰线随文、段落级 QA 默认关闭）；待部署与多样本校准见 WT-080 §6**（v1 于 2026-10-20 起草；v2 决策见 §8；实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)）
+> 状态：**v5，080a–080h 全部实现并已部署（2026-10-20，用户执行），保留策略的修复已在生产生效；字体策略、装饰线随文、段落级 QA、Office 保留四个开关默认关闭，灰度见 [runbook](../../runbooks/plan-080-rollout.md)；部署后的第二轮补缺（参考文献、Office、字体策略目标语言、多样本标定等）见 WT-080 §6**（实施记录见 [WT-080](../../walkthroughs/WT-080-pdf-translation-completeness-and-typography.md)）
 > 日期：2026-10-20
 > 范围：文字型 PDF（BabelDOC / pdf2zh-next 通道）的译文质量规则，覆盖所有内容画像（GENERIC / REGULATORY / RESEARCH / REVIEW），不只服务当前样本
 > 前置：[PLAN-041](../PLAN-041-pdf-regulatory-form-fidelity/)、[PLAN-042](../PLAN-042-regulatory-translation-quality/)（受控实体 042e）、[PLAN-044](../PLAN-044-regulatory-layout-normalize/)（字号归一）、[PLAN-047](../PLAN-047-delivery-loop-fidelity/)（never-drop、capture）、[PLAN-074](../PLAN-074-author-terms-qa/)（作者与单位原文保护）
@@ -99,7 +99,9 @@
 
 | 080h | **Manifest 2.0 遗留的 3 个测试失败与 schema 合同收口**（独立子计划，见 [PLAN-080h](./PLAN-080h-manifest-schema-test-baseline.md)）：失败与 PLAN-080 无关，但会污染本计划的验证基线；其中 `manifest_view` 拒绝 major 2 是一个真实的产品缺陷 | `tests/structure/test_manifest_*.py`、`qyunslation/ui/manifest_view.py`、`docs/contracts/document-structure-manifest-v1.schema.json` | P2 | 0.5–1 |
 
-合计约 11.5–17 人日（含 080h），未经排期。
+| 080i | **部署后的第二轮补缺**：参考文献不依赖标题与段落顺序（`is_citation_entry`/`is_citation_block`，新 QA `REFERENCE_ENTRIES_CHANGED`）、保留谓词静默失败告警、页数不一致时装饰线跳过、字体策略默认思源宋体且只对简体中文目标生效、Word/PPT 保留规则（`QYUNSLATION_OFFICE_PRESERVE`）、中译英保护测试、runner 端到端与真实 FontMapper 测试、4 份文档的多样本标定、灰度 runbook | 见 WT-080 §6 | P0 | 已完成约 3 |
+
+合计约 14.5–20 人日（含 080h、080i），未经排期。
 
 ### 080a 的硬要求
 

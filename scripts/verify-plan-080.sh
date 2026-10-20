@@ -30,6 +30,8 @@ REQUIRED=(
   "qyunslation/structure/font_policy.py"
   "qyunslation/structure/decoration_realign.py"
   "qyunslation/structure/entity_preserve.py"
+  "qyunslation/structure/office_preserve.py"
+  "docs/runbooks/plan-080-rollout.md"
   "qyunslation/pipeline/qa/pdf_layout.py"
   "docs/contracts/document-structure-manifest-v2.schema.json"
 )
@@ -41,23 +43,25 @@ if [[ ! -x "$PY" ]]; then
   blocked "Python interpreter unavailable ($PY)"
 else
   # D3：新规则默认关闭。不部署、不配置时输出必须与以前一致。
-  defaults=$(cd "$ROOT" && env -u QYUNSLATION_FONT_POLICY -u QYUNSLATION_DECORATION_REALIGN -u QYUNSLATION_LAYOUT_QA "$PY" -c "
+  defaults=$(cd "$ROOT" && env -u QYUNSLATION_FONT_POLICY -u QYUNSLATION_DECORATION_REALIGN -u QYUNSLATION_LAYOUT_QA -u QYUNSLATION_OFFICE_PRESERVE "$PY" -c "
 from qyunslation.structure.font_policy import font_policy_mode
 from qyunslation.structure.decoration_realign import realign_mode
 from qyunslation.pipeline.qa.pdf_layout import layout_qa_mode
-print(font_policy_mode(), realign_mode(), layout_qa_mode())" 2>/dev/null)
-  [[ "$defaults" == "off off off" ]] && pass "new post-processing rules default to off ($defaults)" || fail "unexpected defaults: '$defaults'"
+from qyunslation.structure.office_preserve import office_preserve_enabled
+print(font_policy_mode(), realign_mode(), layout_qa_mode(), 'on' if office_preserve_enabled() else 'off')" 2>/dev/null)
+  [[ "$defaults" == "off off off off" ]] && pass "new post-processing rules default to off ($defaults)" || fail "unexpected defaults: '$defaults'"
 
   # 保留策略是默认开启的修复（不是可选开关）：编号问题段与背景句必须进入翻译，职务必须保留
   policy=$(cd "$ROOT" && "$PY" -c "
 from qyunslation.structure import babeldoc_policy as bp
 bp.reset_preserve_gate()
 a = bp.paragraph_is_preserved('2. The protocol synopsis does not detail planned subgroup analyses for the primary endpoint.')
-b = bp.paragraph_is_preserved('On June 12, 2026, Jiangsu GenScend Biopharma Co., Ltd. submitted this meeting request to discuss the proposed strategy and plan.')
+b = bp.paragraph_is_preserved('On June 12, 2026, Example Biopharma Co., Ltd. submitted this meeting request to discuss the proposed strategy and plan.')
 c = bp.paragraph_is_preserved('Medical Director')
 d = bp.paragraph_is_preserved('Clinical Pharmacology')
-print(a, b, c, d)" 2>/dev/null)
-  [[ "$policy" == "False False True False" ]] && pass "preserve policy: numbered items and prose are translated, titles are kept" || fail "preserve policy unexpected: '$policy'"
+e = bp.paragraph_is_preserved('activity in patients with atopic dermatitis. J. Dermatol. Sci. 44, 93–99 (2006). 47. Bissonnette, R. et al. Clinical effects of an oral antagonist. Allergy 79, 924–936 (2024).')
+print(a, b, c, d, e)" 2>/dev/null)
+  [[ "$policy" == "False False True False True" ]] && pass "preserve policy: numbered items and prose are translated; titles and merged citations are kept" || fail "preserve policy unexpected: '$policy'"
 
   mapfile -t TESTS < <(cd "$ROOT" && ls tests/*/test_plan080*.py 2>/dev/null; ls tests/structure/test_manifest_contract.py tests/structure/test_manifest_store.py tests/structure/test_plan059_fidelity.py tests/ui/test_plan050_state_manifest.py 2>/dev/null)
   if (cd "$ROOT" && "$PY" -m pytest -q -o addopts= -p no:cacheprovider "${TESTS[@]}" >"$LOGDIR/verify-plan-080-backend.log" 2>&1); then
@@ -112,7 +116,15 @@ if [[ -f "$SITE/babeldoc/format/pdf/document_il/utils/fontmap.py" ]]; then
 else
   blocked "找不到翻译引擎 site-packages（$SITE），无法确认补丁部署"
 fi
-blocked "生产启用与灰度（QYUNSLATION_FONT_POLICY、QYUNSLATION_DECORATION_REALIGN、QYUNSLATION_LAYOUT_QA）需要用户在运行环境设置"
+ENGINE_IL="$SITE/babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"
+if [[ -f "$ENGINE_IL" ]]; then
+  if grep -q "_qy_033h_warn_once" "$ENGINE_IL"; then
+    pass "033h preserve helper in the engine logs a warning when the policy cannot be imported"
+  else
+    blocked "引擎里的保留谓词仍是旧版（导入失败时静默关闭保留功能）；部署后执行 apply-pdf2zh-fidelity-033h.py 并重启 pdf2zh"
+  fi
+fi
+blocked "生产启用与灰度（QYUNSLATION_FONT_POLICY、QYUNSLATION_DECORATION_REALIGN、QYUNSLATION_LAYOUT_QA、QYUNSLATION_OFFICE_PRESERVE）需要用户在运行环境设置"
 
 if [[ "$FAILURES" -gt 0 ]]; then
   printf 'SUMMARY: FAIL fail=%s blocked=%s\n' "$FAILURES" "$BLOCKED"

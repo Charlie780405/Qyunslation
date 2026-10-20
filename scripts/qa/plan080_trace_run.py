@@ -67,6 +67,28 @@ def install() -> None:
     wrap_predicate("_pdf2zh_skip_already_target_lang", "target_lang", True)
     wrap_predicate("_QY_033H_PRESERVE", "preserve", True)
 
+    if os.environ.get("QYUNSLATION_PLAN080_TRACE_GATE"):
+        # 每次调用保留谓词都记录一条（含返回 False 的），并带上调用前的参考文献状态与线程，用来诊断乱序调用
+        from qyunslation.structure import babeldoc_policy as policy
+
+        inner = llm._QY_033H_PRESERVE
+
+        def traced_preserve(text):
+            before = policy._GATE.in_references
+            result = inner(text)
+            emit(
+                "preserve_call",
+                text=_excerpt(text),
+                result=bool(result),
+                in_refs_before=bool(before),
+                in_refs_after=bool(policy._GATE.in_references),
+                thread=threading.get_ident(),
+                stack=sys._getframe(1).f_code.co_name,
+            )
+            return result
+
+        llm._QY_033H_PRESERVE = traced_preserve
+
     cls = llm.ILTranslatorLLMOnly
 
     original_process_page = cls.process_page
