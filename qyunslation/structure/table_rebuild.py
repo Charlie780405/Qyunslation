@@ -16,6 +16,7 @@ from typing import Iterable, Sequence
 
 _NUMERIC_SEG_RE = re.compile(r"^[\s0-9.,±+\-−–—/()%≥≤<>*†‡]+$")
 _NUMBER_TOKEN_RE = re.compile(r"[0-9]+(?:[.,][0-9]+)?")
+_VALUE_GROUP_RE = re.compile(r"[0-9]+(?:[.,][0-9]+)?\s*\([^)]*\)")
 _FOOTNOTE_START_RE = re.compile(
     r"^(?:[*†‡§¶]|[a-z]\s|(?i:abbreviations?|notes?|data|values|source)\b)"
 )
@@ -68,6 +69,9 @@ class RebuildResult:
     n_cols: int = 0
     col_bands: list[tuple[float, float]] = field(default_factory=list)
     row_bounds: list[float] = field(default_factory=list)
+    row_source: str = ""  # "rules" | "text_lines" | "hpd_geometry"
+    font_size: float = 8.0
+    frame_extended_to: float | None = None
 
     @property
     def ok(self) -> bool:
@@ -151,6 +155,12 @@ def rebuild_literature_table(
         return fail(reason="too_few_columns")
     n_cols = len(bands)
 
+    # PLAN-083b: three-line tables pack many numeric text lines into one rule interval.
+    use_text_rows = any(
+        sum(1 for line in bucket if _line_is_numeric_data(line)) >= 3 for _, _, bucket in body
+    )
+    row_source = "text_lines" if use_text_rows else "rules"
+
     def cells_of(iv: tuple[float, float, list[_Line]], *, is_header: bool, top_header: bool) -> list[str]:
         iy0, iy1, bucket = iv
         cells = [""] * n_cols
@@ -165,7 +175,13 @@ def rebuild_literature_table(
             cells[band] += text
 
         for line in sorted(bucket, key=lambda item: item.y_mid):
-            if (not is_header) and len(line.segs) == 1 and line.segs[0].x1 > bands[0][1] + 4.0:
+            # Section/label row: single segment that *starts* in column 0.
+            if (
+                (not is_header)
+                and len(line.segs) == 1
+                and _segment_starts_in_band0(line.segs[0], bands)
+                and line.segs[0].x1 > bands[0][1] + 4.0
+            ):
                 append_to(0, line.segs[0].text)
                 continue
             mid_spans = None
@@ -201,27 +217,53 @@ def rebuild_literature_table(
         return [c.strip() for c in cells]
 
     header_row = [""] * n_cols
+    header_line_words: list[TableWord] = []
     for hi, iv in enumerate(header):
         for b, text in enumerate(cells_of(iv, is_header=True, top_header=hi < len(header) - 1)):
             if text:
                 header_row[b] = (header_row[b] + " " + text).strip()
+        for line in iv[2]:
+            header_line_words.extend(line.words)
     rows: list[list[str]] = [header_row]
-    row_intervals: list[tuple[float, float]] = [(header[0][0], header[-1][1])]
+    row_y_ranges: list[tuple[float, float]] = [(header[0][0], header[-1][1])]
+    row_word_lists: list[list[TableWord]] = [header_line_words]
     sparse = 0
     data_rows = 0
-    for iv in body:
-        cells = cells_of(iv, is_header=False, top_header=False)
-        non_empty = sum(1 for c in cells if c)
-        if non_empty == 0:
-            continue
-        data_rows += 1
-        if non_empty <= 1:
-            sparse += 1
-        rows.append(cells)
-        row_intervals.append((iv[0], iv[1]))
+
+    if use_text_rows:
+        for iv in body:
+            split_rows = _split_interval_by_text_lines(iv[2], bands, n_cols)
+            for cells, y_range, line_words in split_rows:
+                non_empty = sum(1 for c in cells if c)
+                if non_empty == 0:
+                    continue
+                data_rows += 1
+                if non_empty <= 1:
+                    sparse += 1
+                rows.append(cells)
+                row_y_ranges.append(y_range)
+                row_word_lists.append(line_words)
+    else:
+        for iv in body:
+            cells = cells_of(iv, is_header=False, top_header=False)
+            non_empty = sum(1 for c in cells if c)
+            if non_empty == 0:
+                continue
+            data_rows += 1
+            if non_empty <= 1:
+                sparse += 1
+            rows.append(cells)
+            row_y_ranges.append((iv[0], iv[1]))
+            words_iv: list[TableWord] = []
+            for line in iv[2]:
+                words_iv.extend(line.words)
+            row_word_lists.append(words_iv)
+
     if data_rows == 0:
         return fail(reason="no_data_rows")
     if data_rows >= 3 and sparse / data_rows >= 0.6:
+        return fail(reason="collapsed_rows")
+    if _has_collapsed_value_cells(rows):
         return fail(reason="collapsed_rows")
 
     body_lines: list[_Line] = []
@@ -231,8 +273,15 @@ def rebuild_literature_table(
         return fail(reason="numbers_unplaced")
 
     cell_boxes: list[list[tuple[float, float, float, float]]] = []
-    for ry0, ry1 in row_intervals:
+    for ri, (ry0, ry1) in enumerate(row_y_ranges):
+        words_r = row_word_lists[ri] if ri < len(row_word_lists) else []
+        if words_r:
+            ry0 = min(ry0, min(w.y0 for w in words_r))
+            ry1 = max(ry1, max(w.y1 for w in words_r))
         cell_boxes.append([(bx0, ry0, bx1, ry1) for bx0, bx1 in bands])
+
+    heights = sorted(w.height for w in inside if w.height > 0) or [8.0]
+    font_size = max(6.0, float(heights[len(heights) // 2]))
 
     return RebuildResult(
         rows=rows,
@@ -242,6 +291,8 @@ def rebuild_literature_table(
         n_cols=n_cols,
         col_bands=bands,
         row_bounds=bounds,
+        row_source=row_source,
+        font_size=font_size,
     )
 
 
@@ -289,6 +340,63 @@ def extract_row_rules_from_page(page, box: tuple[float, float, float, float]) ->
     return sorted(ys)
 
 
+def extend_frame_to_bottom_rule(
+    page, box: tuple[float, float, float, float]
+) -> tuple[tuple[float, float, float, float], float | None]:
+    """PLAN-083b: stretch a header-only scan box down to the table bottom rule.
+
+    Only extends when the gap contains continuous multi-column numeric text lines.
+    Does not change global table detection thresholds.
+    """
+    from qyunslation.structure.tables import _horizontal_lines
+
+    x0, y0, x1, y1 = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+    width = max(1.0, x1 - x0)
+    try:
+        page_h = float(page.rect.height)
+    except Exception:
+        page_h = y1 + 200.0
+    candidates: list[float] = []
+    try:
+        hlines = _horizontal_lines(page)
+    except Exception:
+        return (x0, y0, x1, y1), None
+    for lx0, lx1, y in hlines:
+        y = float(y)
+        if y <= y1 + 2.0 or y > page_h - 30.0:
+            continue
+        overlap = min(lx1, x1) - max(lx0, x0)
+        if overlap / width >= 0.60:
+            candidates.append(y)
+    # Deduplicate.
+    merged: list[float] = []
+    for y in sorted(candidates):
+        if not merged or y - merged[-1] > 1.5:
+            merged.append(y)
+    for cand in merged:
+        probe = (x0, y1, x1, cand)
+        words = extract_words_from_page(page, probe)
+        if len(words) < 4:
+            continue
+        lines = _cluster_lines(words)
+        if len(lines) < 3:
+            continue
+        heights = sorted(w.height for w in words if w.height > 0) or [10.0]
+        med_h = max(2.0, heights[len(heights) // 2])
+        gaps_ok = all(
+            lines[i + 1].y_mid - lines[i].y_mid <= 2.5 * med_h for i in range(len(lines) - 1)
+        )
+        if not gaps_ok:
+            continue
+        numeric = sum(1 for line in lines if _line_is_numeric_data(line))
+        multi = sum(1 for line in lines if len(line.segs) >= 2)
+        if numeric < 0.5 * len(lines) or multi < 0.4 * len(lines):
+            # Looks like body prose / footnotes — stop looking further.
+            break
+        return (x0, y0, x1, float(cand)), float(cand)
+    return (x0, y0, x1, y1), None
+
+
 def verify_hpd_grid_against_words(
     hpd_rows: Sequence[Sequence[str]],
     words: Sequence[TableWord],
@@ -320,12 +428,16 @@ def rebuild_from_page(
     allow_hpd_fallback: bool = True,
 ) -> RebuildResult:
     """Rebuild using text-layer words/rules; optional HPD geometry when rules are missing."""
-    words = extract_words_from_page(page, box)
-    rules = extract_row_rules_from_page(page, box)
-    result = rebuild_literature_table(words, rules, box=box)
+    extended, frame_y = extend_frame_to_bottom_rule(page, box)
+    words = extract_words_from_page(page, extended)
+    rules = extract_row_rules_from_page(page, extended)
+    result = rebuild_literature_table(words, rules, box=extended)
+    result.frame_extended_to = frame_y
     if result.ok or result.reason != "no_row_rules" or not allow_hpd_fallback:
         return result
-    return _hpd_geometry_fallback(page, box, words, prior=result)
+    fallback = _hpd_geometry_fallback(page, extended, words, prior=result)
+    fallback.frame_extended_to = frame_y
+    return fallback
 
 
 def _hpd_geometry_fallback(
@@ -394,6 +506,8 @@ def _hpd_geometry_fallback(
         n_cols=n_cols,
         col_bands=bands,
         row_bounds=[],
+        row_source="hpd_geometry",
+        font_size=_median_font_size(words),
     )
 
 
@@ -446,6 +560,113 @@ def _fit_band_count(
 
 
 # ---- internals ----------------------------------------------------------------
+
+
+def _median_font_size(words: Sequence[TableWord]) -> float:
+    heights = sorted(w.height for w in words if w.height > 0) or [8.0]
+    return max(6.0, float(heights[len(heights) // 2]))
+
+
+def _segment_starts_in_band0(seg: _Segment, bands: Sequence[tuple[float, float]]) -> bool:
+    if not bands:
+        return False
+    b0, b1 = bands[0]
+    return seg.x0 <= b1 and (seg.x0 + seg.x1) / 2 <= b1 + 4.0
+
+
+def _line_is_numeric_data(line: _Line) -> bool:
+    if not line.segs:
+        return False
+    if len(line.segs) >= 2 and any(_NUMBER_TOKEN_RE.search(s.text) for s in line.segs[1:]):
+        return True
+    if len(line.segs) == 1 and _NUMERIC_SEG_RE.match(line.segs[0].text or ""):
+        return bool(_NUMBER_TOKEN_RE.search(line.segs[0].text))
+    return False
+
+
+def _has_collapsed_value_cells(rows: Sequence[Sequence[str]]) -> bool:
+    """Reject when a data cell packs multiple value groups (row collapse)."""
+    for ri, row in enumerate(rows):
+        if ri == 0:
+            continue
+        for ci, cell in enumerate(row):
+            if ci == 0:
+                continue
+            if len(_VALUE_GROUP_RE.findall(cell or "")) >= 2:
+                return True
+    return False
+
+
+def _split_interval_by_text_lines(
+    bucket: Sequence[_Line],
+    bands: Sequence[tuple[float, float]],
+    n_cols: int,
+) -> list[tuple[list[str], tuple[float, float], list[TableWord]]]:
+    """Split one rule interval into logical rows using text-line geometry."""
+    if not bucket or n_cols < 2 or not bands:
+        return []
+    heights = [w.height for line in bucket for w in line.words if w.height > 0] or [10.0]
+    med_h = max(2.0, sorted(heights)[len(heights) // 2])
+    out: list[tuple[list[str], tuple[float, float], list[TableWord]]] = []
+    cur_cells: list[str] | None = None
+    cur_y0 = cur_y1 = 0.0
+    cur_words: list[TableWord] = []
+    prev_y_mid = 0.0
+
+    def flush() -> None:
+        nonlocal cur_cells, cur_words
+        if cur_cells is not None and any(cur_cells):
+            out.append(([c.strip() for c in cur_cells], (cur_y0, cur_y1), list(cur_words)))
+        cur_cells = None
+        cur_words = []
+
+    def append_cell(cells: list[str], band: int, text: str) -> None:
+        if not text or band < 0 or band >= n_cols:
+            return
+        if cells[band] and not (
+            text.startswith(",") or text.startswith(")") or cells[band].endswith("(")
+        ):
+            cells[band] += " "
+        cells[band] += text
+
+    for line in sorted(bucket, key=lambda item: item.y_mid):
+        ly0 = min(w.y0 for w in line.words) if line.words else line.y_mid - 4
+        ly1 = max(w.y1 for w in line.words) if line.words else line.y_mid + 4
+        # Assign each word to a band.
+        band_texts: list[str] = [""] * n_cols
+        for w in line.words:
+            b = _band_of_word(w, bands)
+            append_cell(band_texts, b, w.text)
+        band_texts = [c.strip() for c in band_texts]
+        starts_label = bool(line.segs) and _segment_starts_in_band0(line.segs[0], bands)
+        only_data = not band_texts[0] and any(band_texts[1:])
+        is_section = (
+            starts_label
+            and not any(band_texts[1:])
+            and not (len(line.segs) == 1 and _NUMERIC_SEG_RE.match(line.segs[0].text or ""))
+        )
+        close = cur_cells is not None and (line.y_mid - prev_y_mid) <= 0.35 * med_h
+        if cur_cells is not None and (close or only_data) and not is_section:
+            for b, text in enumerate(band_texts):
+                if text:
+                    append_cell(cur_cells, b, text)
+            cur_y0 = min(cur_y0, ly0)
+            cur_y1 = max(cur_y1, ly1)
+            cur_words.extend(line.words)
+            prev_y_mid = line.y_mid
+            continue
+        flush()
+        if is_section:
+            cur_cells = [band_texts[0] or (line.segs[0].text if line.segs else "")] + [""] * (
+                n_cols - 1
+            )
+        else:
+            cur_cells = list(band_texts)
+        cur_y0, cur_y1 = ly0, ly1
+        cur_words = list(line.words)
+        prev_y_mid = line.y_mid
+    flush()
+    return out
 
 
 def _cluster_lines(words: Sequence[TableWord]) -> list[_Line]:

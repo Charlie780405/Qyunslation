@@ -110,6 +110,7 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
                 if is_numeric_or_unit(src)
                 else TranslationPolicy.TRANSLATE
             )
+            fs = float(getattr(result, "font_size", None) or 8.0)
             blocks.append(
                 TranslatableBlock(
                     block_id=f"{sid}:r{ri}c{ci}",
@@ -117,7 +118,7 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
                     role=role,
                     translation_policy=policy,
                     bbox=bbox,
-                    source_style=SourceStyle(font_size=8.0),
+                    source_style=SourceStyle(font_size=fs),
                     row_index=ri,
                     column_index=ci,
                 )
@@ -126,6 +127,7 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
         note = (note or "").strip()
         if not note:
             continue
+        fs = max(6.0, float(getattr(result, "font_size", None) or 8.0) - 1.0)
         blocks.append(
             TranslatableBlock(
                 block_id=f"{sid}:fn{fi}",
@@ -133,7 +135,7 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
                 role=BlockRole.TABLE_FOOTNOTE,
                 translation_policy=TranslationPolicy.TRANSLATE,
                 bbox=None,
-                source_style=SourceStyle(font_size=7.0),
+                source_style=SourceStyle(font_size=fs),
                 row_index=len(result.rows) + fi,
                 column_index=0,
             )
@@ -156,9 +158,14 @@ def _paint_literature_rebuild(
 
     Returns (painted, reason_code, checks).
     """
+    from qyunslation.structure.models import BoundingBox
     from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.table_qc import assert_table_qc_clean, evaluate_table_qc
-    from qyunslation.structure.table_rebuild import rebuild_from_page, table_rebuild_mode
+    from qyunslation.structure.table_rebuild import (
+        extend_frame_to_bottom_rule,
+        rebuild_from_page,
+        table_rebuild_mode,
+    )
     from qyunslation.structure.table_translate import translate_table_blocks
     from qyunslation.structure.table_writeback import (
         blocks_to_fit,
@@ -169,12 +176,16 @@ def _paint_literature_rebuild(
 
     if table_rebuild_mode() == "off":
         return False, "literature_leave_babeldoc", {"qc": ["LITERATURE_LEAVE_BABELDOC"]}
+    extended, frame_y = extend_frame_to_bottom_rule(origin_page, box)
     rebuilt = rebuild_from_page(origin_page, box, allow_hpd_fallback=True)
     checks: dict = {
         "grid_source": "literature_rebuild",
         "rebuild_reason": rebuilt.reason or "ok",
         "n_cols": rebuilt.n_cols,
         "n_rows": len(rebuilt.rows),
+        "row_source": rebuilt.row_source or "",
+        "frame_extended_to": frame_y if frame_y is not None else rebuilt.frame_extended_to,
+        "font_size": rebuilt.font_size,
     }
     if not rebuilt.ok:
         return (
@@ -197,9 +208,12 @@ def _paint_literature_rebuild(
     )
     records, hard = evaluate_table_qc(blocks, translations, results)
     assert_table_qc_clean(records, hard, isolate_residue=isolate_residue, literature=True)
+    paint_region = BoundingBox(
+        x0=extended[0], y0=extended[1], x1=extended[2], y1=extended[3]
+    )
     wiped = redact_table_region(
         page,
-        union_paint_bbox(obj.bbox, blocks),
+        union_paint_bbox(paint_region, blocks),
         x_min_frac=x_min_frac,
     )
     if not wiped:
@@ -387,10 +401,11 @@ def translate_pdf_tables(
                         )
                         changed = True
                         logger.info(
-                            "table %s literature rebuild painted cols=%s rows=%s",
+                            "table %s literature rebuild painted cols=%s rows=%s row_source=%s",
                             obj.semantic_id,
                             checks.get("n_cols"),
                             checks.get("n_rows"),
+                            checks.get("row_source"),
                         )
                     else:
                         write_output_evidence(

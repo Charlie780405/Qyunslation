@@ -75,6 +75,31 @@ def _replace_with_sidecar(original: Path, sidecar: Path | None) -> Path | None:
         return None
 
 
+def _table_result_summaries(manifest) -> list[str]:
+    """PLAN-083b: human-readable per-table paint / leave-BabelDOC outcomes."""
+    from qyunslation.structure.models import ObjectType
+
+    out: list[str] = []
+    for obj in getattr(manifest, "objects", []) or []:
+        if getattr(obj, "type", None) is not ObjectType.TABLE:
+            continue
+        sid = getattr(obj, "semantic_id", None) or "table"
+        reason = getattr(obj, "reason_code", None) or ""
+        checks = getattr(getattr(obj, "output_evidence", None), "checks", None) or {}
+        if reason == "literature_rebuild_painted":
+            out.append(
+                f"{sid} painted rows={checks.get('n_rows')} cols={checks.get('n_cols')} "
+                f"row_source={checks.get('row_source') or '?'}"
+            )
+        elif reason.startswith("literature_rebuild_failed:"):
+            out.append(f"{sid} left_babeldoc:{reason.split(':', 1)[-1]}")
+        elif reason == "literature_leave_babeldoc":
+            out.append(f"{sid} left_babeldoc:off")
+        elif reason:
+            out.append(f"{sid} {reason}")
+    return out
+
+
 def run_table_figure_stage(
     *,
     mono_pdf: Path | None,
@@ -148,6 +173,29 @@ def run_table_figure_stage(
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"translate: {type(exc).__name__}: {exc}"[:200])
 
+        # PLAN-083b: also paint dual (right half) when present; reuse translate cache.
+        if (
+            mode in {"translate", "literature"}
+            and dual_pdf is not None
+            and dual_pdf.is_file()
+        ):
+            try:
+                dual_manifest = PdfStructureScanner().scan(origin)
+                dual_result = tbl.translate_pdf_tables(
+                    dual_pdf,
+                    origin=origin,
+                    structure_manifest=dual_manifest,
+                    x_min_frac=0.5,
+                )
+                dual_sidecar = Path(dual_result) if dual_result else None
+                if dual_sidecar and dual_sidecar.name.endswith(".tbltr.pdf"):
+                    if _replace_with_sidecar(dual_pdf, dual_sidecar):
+                        applied.append("tbltr_dual")
+                        outputs["tbltr_dual"] = str(dual_sidecar)
+                outputs["dual_table_results"] = _table_result_summaries(dual_manifest)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"translate_dual: {type(exc).__name__}: {exc}"[:200])
+
         # Normalize / size-band fallback when translate did not write, or mode is normalize.
         if mode == "normalize" or (mode == "literature" and "tbltr" not in applied):
             try:
@@ -158,21 +206,24 @@ def run_table_figure_stage(
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"normalize: {type(exc).__name__}: {exc}"[:200])
 
+        table_results = _table_result_summaries(manifest)
+        outputs["table_results"] = table_results
         outputs["applied"] = applied
+        summary = "; ".join(table_results) if table_results else ",".join(applied) or "no table writes needed"
         if not applied:
-            events.emit("table_figure", "completed", message="no table writes needed")
+            events.emit("table_figure", "completed", message=summary)
             return PostprocessResult(
                 stage="table_figure",
                 state="completed",
-                message="no table writes needed",
+                message=summary,
                 warnings=warnings,
                 outputs=outputs,
             )
-        events.emit("table_figure", "completed", message=",".join(applied))
+        events.emit("table_figure", "completed", message=summary)
         return PostprocessResult(
             stage="table_figure",
             state="completed",
-            message=",".join(applied),
+            message=summary,
             warnings=warnings,
             outputs=outputs,
         )
