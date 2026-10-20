@@ -53,7 +53,7 @@ def codes(findings):
 
 
 def test_codes_are_registered_as_warnings():
-    for code in ("UNTRANSLATED_PARAGRAPH", "FONT_FAMILY_SPRAWL", "DECORATION_DANGLING"):
+    for code in ("UNTRANSLATED_PARAGRAPH", "REFERENCE_ENTRIES_CHANGED", "FONT_FAMILY_SPRAWL", "DECORATION_DANGLING"):
         assert is_registered(code)
         assert rule_for(code).rule_class == "W"
 
@@ -154,3 +154,51 @@ def test_inspect_pdf_pair_includes_the_layout_findings(tmp_path, monkeypatch):
     monkeypatch.setenv(pl.MODE_ENV, "off")
     findings, _summary = inspect_pdf_pair(source_path=src, mono_path=mono, dual_path=None)
     assert "UNTRANSLATED_PARAGRAPH" not in codes(findings)
+
+
+def test_page_count_mismatch_only_runs_the_pairing_free_check(tmp_path):
+    """页数对不上时字体与装饰线的配对不可靠；漏译检查不依赖配对，仍然运行。"""
+    long = "Draft Guidance for Industry on Combination Product Risk Analysis"
+    width = pymupdf.get_text_length(long, fontname="helv", fontsize=11)
+    src = make(tmp_path / "s.pdf", [[(100, long, "helv")]], lines={0: [(72, 72 + width, 102.0)]})
+    out = make(
+        tmp_path / "o.pdf",
+        [[(100, "产品风险分析指南", "helv")], [(100, PARA, "helv")]],
+        lines={0: [(72, 72 + width, 102.0)]},
+    )
+    found = codes(pl.check_output_layout(src, out))
+    assert "DECORATION_DANGLING" not in found and "FONT_FAMILY_SPRAWL" not in found
+    assert "UNTRANSLATED_PARAGRAPH" in found
+
+
+REFERENCE = (
+    "1. Smith J, Doe A, Lee K. Efficacy of drug X in atopic dermatitis. J Allergy Clin Immunol. 2024;153(2):345-52. "
+    "doi:10.1016/j.jaci.2023.10.001"
+)
+
+
+def make_blocks(path: Path, pages: list[str]) -> Path:
+    """每页一个文本框（真实的段落是一个文本块，而不是逐行独立的文本）。"""
+    doc = pymupdf.open()
+    for text in pages:
+        page = doc.new_page(width=612, height=792)
+        font = "china-s" if any("\u4e00" <= c <= "\u9fff" for c in text) else "helv"
+        page.insert_textbox(pymupdf.Rect(72, 80, 540, 300), text, fontname=font, fontsize=11)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_translated_reference_is_flagged_and_verbatim_reference_is_not(tmp_path):
+    src = make_blocks(tmp_path / "s.pdf", [REFERENCE])
+    kept = make_blocks(tmp_path / "k.pdf", [REFERENCE])
+    changed = make_blocks(tmp_path / "c.pdf", [ZH])
+    assert "REFERENCE_ENTRIES_CHANGED" not in codes(pl.check_output_layout(src, kept))
+    (finding,) = [f for f in pl.check_output_layout(src, changed) if f.code == "REFERENCE_ENTRIES_CHANGED"]
+    assert finding.severity == "warning" and finding.evidence["pages"] == [1]
+
+
+def test_reference_check_needs_the_same_page_count(tmp_path):
+    src = make_blocks(tmp_path / "s.pdf", [REFERENCE])
+    out = make_blocks(tmp_path / "o.pdf", [ZH, ZH])
+    assert "REFERENCE_ENTRIES_CHANGED" not in codes(pl.check_output_layout(src, out))

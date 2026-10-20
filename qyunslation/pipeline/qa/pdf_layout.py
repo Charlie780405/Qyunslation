@@ -6,6 +6,8 @@
 
 * ``UNTRANSLATED_PARAGRAPH``：译文里有整段外文，且与源文同页逐字相同（"应译而原样保留"），
   并且它不是有名有据的保留（人名、职务、机构、网址、参考文献区、重复页眉页脚）。
+* ``REFERENCE_ENTRIES_CHANGED``：源文里的参考文献（引文条目或一堆引文的段落）在译文同页不再逐字存在，
+  也就是被翻译或改写了；参考文献应当原样保留。
 * ``FONT_FAMILY_SPRAWL``：某页译文用了太多种字体（族 + 粗/斜体计一种，≥7 种且比源文该页多 2 种以上）。
 * ``DECORATION_DANGLING``：还有下划线等装饰线没有跟上译文（过长、悬空或位置不对），判断与
   ``structure.decoration_realign`` 共用同一套逻辑。
@@ -100,6 +102,23 @@ def untranslated_paragraphs(src: Any, out: Any) -> list[tuple[int, str]]:
     return hits
 
 
+def changed_reference_blocks(src: Any, out: Any) -> list[tuple[int, str]]:
+    """[(页码, 节选)]：源文里的引文条目/引文段落，在译文同页没有逐字保留。需要页数一致才能比较。"""
+    from qyunslation.structure.references import is_citation_block, is_citation_entry
+
+    if len(src) != len(out):
+        return []
+    hits: list[tuple[int, str]] = []
+    for index in range(len(src)):
+        out_compact = _compact(out[index].get_text("text") or "")
+        for text in _text_blocks(src[index]):
+            if len(_compact(text)) < MIN_CHARS or not (is_citation_entry(text) or is_citation_block(text)):
+                continue
+            if _compact(text) not in out_compact:
+                hits.append((index + 1, locate.snippet(text, 120)))
+    return hits
+
+
 def _page_families(page: Any) -> set[str]:
     counts: Counter[str] = Counter()
     for block in page.get_text("dict")["blocks"]:
@@ -151,7 +170,13 @@ def check_output_layout(source_path: Path, output_path: Path, *, output_kind: st
     except Exception:  # noqa: BLE001
         return []
     try:
-        for check in (_check_untranslated, _check_fonts, _check_decorations):
+        # 字体和装饰线要把源页与译文页一一配对；页数不一致时配对不可靠，只做不依赖配对的漏译检查
+        checks = (
+            (_check_untranslated, _check_references, _check_fonts, _check_decorations)
+            if len(src) == len(out)
+            else (_check_untranslated,)
+        )
+        for check in checks:
             try:
                 finding = check(src, out, output_kind)
             except Exception:  # noqa: BLE001 — 某一项出错不影响其他项
@@ -177,6 +202,23 @@ def _check_untranslated(src: Any, out: Any, output_kind: str) -> QaFinding | Non
         evidence={"output_kind": output_kind, "count": len(hits), "pages": pages[:20]},
         location=locate.location(
             [locate.page_anchor("translated", page, "整段仍为外文", text) for page, text in hits[: locate.MAX_ANCHORS]]
+        ),
+    )
+
+
+def _check_references(src: Any, out: Any, output_kind: str) -> QaFinding | None:
+    hits = changed_reference_blocks(src, out)
+    if not hits:
+        return None
+    pages = sorted({page for page, _ in hits})
+    return QaFinding(
+        category="integrity",
+        severity="warning",
+        code="REFERENCE_ENTRIES_CHANGED",
+        message=f"{len(hits)} 处参考文献在译文中不再与源文一致（可能被翻译或改写）",
+        evidence={"output_kind": output_kind, "count": len(hits), "pages": pages[:20]},
+        location=locate.location(
+            [locate.page_anchor("translated", page, "参考文献与源文不一致", text) for page, text in hits[: locate.MAX_ANCHORS]]
         ),
     )
 
