@@ -527,6 +527,19 @@ def _monotonic_progress(previous: Any, current: int | None) -> int | None:
     return int(current)
 
 
+# BabelDOC 日志进度只占 0–89%，90–99% 留给 CLI 之后的表格重排等后处理，
+# 否则进度会停在 99% 数分钟不动。
+_BABEL_PROGRESS_SHARE = 0.9
+POSTPROCESS_PROGRESS_START = 90
+POSTPROCESS_PROGRESS_END = 99
+
+
+def _scale_babel_progress(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return min(POSTPROCESS_PROGRESS_START - 1, round(float(value) * _BABEL_PROGRESS_SHARE))
+
+
 def _safe_reason(value: str, fallback: str) -> str:
     clean = " ".join(str(value).replace("\x00", " ").split())
     return (clean[:512] or fallback)[:512]
@@ -1013,7 +1026,7 @@ class Pdf2zhRunner:
                             stage = _stage_for_label(line)
                         if progress is not None or stage is not None or progress_message:
                             next_stage = stage or state.get("stage") or "translating"
-                            next_progress = _monotonic_progress(state.get("progress"), progress)
+                            next_progress = _monotonic_progress(state.get("progress"), _scale_babel_progress(progress))
                             detail = {
                                 "stage": next_stage,
                                 "message": progress_message or state.get("progress_message"),
@@ -1048,11 +1061,24 @@ class Pdf2zhRunner:
                 outputs = self._discover_outputs(run_dir / "output")
                 if returncode == 0 and outputs:
                     # PLAN-080d：译文产物就绪后、记录前，让下划线跟随译文（默认关闭，失败不影响交付）。
+                    babel_message = state.get("progress_message")
+                    state = self._report_postprocess(state_path, state, 90, "正在对齐装饰线")
                     await asyncio.to_thread(self._realign_decorations, source, run_dir / "output")
                     # PLAN-082 S4：补上空白字形 CID→空格的 ToUnicode（默认开启，失败不影响交付）。
+                    state = self._report_postprocess(state_path, state, 91, "正在修复文字映射")
                     await asyncio.to_thread(self._fix_space_cmaps, run_dir / "output")
                     # PLAN-082 S5：文献表后处理（默认 literature；失败不影响交付）。
-                    await asyncio.to_thread(self._postprocess_tables, source, run_dir / "output")
+                    state = self._report_postprocess(state_path, state, 92, "正在重排表格译文")
+                    holder = {"state": state}
+
+                    def _on_table(pct: int, message: str, _h=holder) -> None:
+                        _h["state"] = self._report_postprocess(state_path, _h["state"], pct, message)
+
+                    await asyncio.to_thread(
+                        self._postprocess_tables, source, run_dir / "output", _on_table
+                    )
+                    # 后处理的临时文案不带进终态；完成态沿用 BabelDOC 的最后一条。
+                    state = {**holder["state"], "progress_message": babel_message}
                     self._write_state(
                         state_path,
                         state,
@@ -1133,8 +1159,31 @@ class Pdf2zhRunner:
         except Exception:  # noqa: BLE001
             return None
 
+    def _report_postprocess(
+        self, state_path: Path, state: dict[str, Any], percent: int, message: str
+    ) -> dict[str, Any]:
+        """后处理阶段的进度汇报：只增不减，写入原子状态并落库，失败不影响交付。"""
+        try:
+            pct = max(POSTPROCESS_PROGRESS_START, min(POSTPROCESS_PROGRESS_END, int(percent)))
+            nxt = _monotonic_progress(state.get("progress"), pct)
+            state = self._write_state(
+                state_path,
+                state,
+                status="rendering",
+                progress=nxt,
+                stage="table_figure",
+                progress_message=message,
+                progress_detail={"stage": "table_figure", "message": message},
+            )
+            self._persist_runner_progress(state, stage="table_figure", message=message)
+        except Exception:  # noqa: BLE001
+            pass
+        return state
+
     @staticmethod
-    def _postprocess_tables(source: Path, output_dir: Path) -> dict[str, Any] | None:
+    def _postprocess_tables(
+        source: Path, output_dir: Path, on_progress=None
+    ) -> dict[str, Any] | None:
         """PLAN-082 S5: table normalize/translate after CLI (fail-open)."""
         try:
             from qyunslation.pipeline.events import StageEventBuffer
@@ -1153,6 +1202,7 @@ class Pdf2zhRunner:
                 events=events,
                 enabled=True,
                 origin_pdf=source if source.is_file() else None,
+                on_progress=on_progress,
             )
             return {
                 "state": result.state,

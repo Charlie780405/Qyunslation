@@ -98,3 +98,29 @@ def test_real_611_font_size_from_spans():
     doc = pymupdf.open(SAMPLE)
     result = rebuild_from_page(doc[5], (71.0, 94.0, 539.0, 300.0))
     assert result.font_size == pytest.approx(10.0, abs=0.5)
+
+
+def test_painted_cjk_is_embedded_subset_not_base14(tmp_path):
+    """浏览器查看器不会替 china-ss 兜底；落笔必须内嵌（且是子集，不是 7MB 全字库）。"""
+    import pymupdf
+
+    from qyunslation.structure.table_writeback import (
+        CJK_REGULAR,
+        _page_font,
+        prepare_embedded_font,
+    )
+
+    if not CJK_REGULAR.is_file():
+        pytest.skip("CJK font not installed")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    prepare_embedded_font(["任何不良事件 ≥ 5%"])
+    name = _page_font(page, "china-ss")
+    assert name.startswith("qcjk")
+    page.insert_text((72, 100), "任何不良事件 ≥ 5%", fontname=name, fontsize=10)
+    out = tmp_path / "t.pdf"
+    doc.save(out, garbage=3, deflate=True)
+    fonts = [f for f in pymupdf.open(out)[0].get_fonts() if f[4].startswith("qcjk")]
+    assert fonts and all(f[3] != "Song" for f in fonts)
+    assert out.stat().st_size < 400_000
+    assert "任何不良事件" in pymupdf.open(out)[0].get_text()

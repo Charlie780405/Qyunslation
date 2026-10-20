@@ -107,8 +107,28 @@ def run_table_figure_stage(
     events: StageEventBuffer,
     enabled: bool = True,
     origin_pdf: Path | None = None,
+    on_progress=None,
 ) -> PostprocessResult:
-    """PLAN-082 S5: run real table postprocess (normalize / translate) with degradation."""
+    """PLAN-082 S5: run real table postprocess (normalize / translate) with degradation.
+
+    ``on_progress(percent, message)``：表格逐张落笔时汇报（92–98%），供工作台进度条使用。
+    """
+
+    def _report(pct: int, message: str) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(pct, message)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _table_cb(base: int, span: int, label: str, total_hint: int = 0):
+        def cb(index: int, total: int) -> None:
+            n = max(int(total or total_hint or 1), 1)
+            _report(base + int(span * (index - 1) / n), f"{label}（{index}/{n}）")
+
+        return cb
+
     events.emit("table_figure", "running", message="table/image postprocess")
     mode = table_postprocess_mode()
     if not enabled or mode == "off":
@@ -164,7 +184,12 @@ def run_table_figure_stage(
         applied: list[str] = []
         if mode in {"translate", "literature"}:
             try:
-                result = tbl.translate_pdf_tables(mono_pdf, origin=origin, structure_manifest=manifest)
+                result = tbl.translate_pdf_tables(
+                    mono_pdf,
+                    origin=origin,
+                    structure_manifest=manifest,
+                    progress_cb=_table_cb(92, 3, "正在重排单语表格"),
+                )
                 sidecar = Path(result) if result else None
                 if sidecar and sidecar.name.endswith(".tbltr.pdf"):
                     if _replace_with_sidecar(mono_pdf, sidecar):
@@ -180,12 +205,14 @@ def run_table_figure_stage(
             and dual_pdf.is_file()
         ):
             try:
+                _report(95, "正在重排双语表格")
                 dual_manifest = PdfStructureScanner().scan(origin)
                 dual_result = tbl.translate_pdf_tables(
                     dual_pdf,
                     origin=origin,
                     structure_manifest=dual_manifest,
                     x_min_frac=0.5,
+                    progress_cb=_table_cb(95, 3, "正在重排双语表格"),
                 )
                 dual_sidecar = Path(dual_result) if dual_result else None
                 if dual_sidecar and dual_sidecar.name.endswith(".tbltr.pdf"):

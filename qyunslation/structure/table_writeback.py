@@ -2,6 +2,7 @@
 """PLAN-033j：把已译表格块写回 PDF（矢量网格 + 可搜索文字 + 续页）。"""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -31,6 +32,86 @@ CJK_BOLD = Path(
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _CJK_FONT_RE = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
 _PAGE_FONTS: dict[int, tuple[str, str]] = {}
+_EMBED_NAME = "qcjk"
+_CJK_MEASURE = None
+_ACTIVE_FONT: tuple[str, Path, frozenset[str]] | None = None  # (内嵌名, 子集文件, 字符集)
+_SUBSET_DIR = Path(os.environ.get("QYUNSLATION_FONT_SUBSET_DIR", "/tmp/qyunslation-font-subsets"))
+_BASE_CHARS = "".join(chr(c) for c in range(0x20, 0x7F)) + "，。、；：？！（）【】《》“”‘’…—·％≥≤±×μ°"
+
+
+def _cjk_font():
+    """CJK 量字宽字体：与内嵌字体同一份，缺文件才回退 china-ss。"""
+    import pymupdf
+
+    global _CJK_MEASURE
+    if _CJK_MEASURE is None:
+        try:
+            _CJK_MEASURE = (
+                pymupdf.Font(fontfile=str(CJK_REGULAR))
+                if CJK_REGULAR.is_file()
+                else pymupdf.Font("china-ss")
+            )
+        except Exception:
+            _CJK_MEASURE = pymupdf.Font("china-ss")
+    return _CJK_MEASURE
+
+
+def _subset_font(chars: frozenset[str]) -> tuple[str, Path, frozenset[str]] | None:
+    """按字符集生成（并按内容缓存）Noto 子集；fontTools 不可用或失败返回 None。"""
+    if not CJK_REGULAR.is_file():
+        return None
+    ordered = "".join(sorted(chars))
+    digest = hashlib.sha1(ordered.encode("utf-8")).hexdigest()[:10]
+    target = _SUBSET_DIR / f"NotoSansSC-Regular-{digest}.otf"
+    try:
+        if not target.is_file():
+            from fontTools import subset
+
+            _SUBSET_DIR.mkdir(parents=True, exist_ok=True)
+            opts = subset.Options()
+            opts.layout_features = []
+            opts.notdef_outline = True
+            opts.name_IDs = [1, 2]
+            font = subset.load_font(str(CJK_REGULAR), opts)
+            sub = subset.Subsetter(opts)
+            sub.populate(text=ordered)
+            sub.subset(font)
+            tmp = target.with_suffix(".tmp")
+            subset.save_font(font, str(tmp), opts)
+            tmp.replace(target)
+        return f"{_EMBED_NAME}{digest}", target, chars
+    except Exception:
+        return None
+
+
+def prepare_embedded_font(texts) -> None:
+    """按本表实际用字准备子集 Noto（数十 KB）；之后 _page_font 命中即复用。"""
+    global _ACTIVE_FONT
+    chars = frozenset(_BASE_CHARS) | frozenset(
+        ch for t in texts for ch in (t or "") if not ch.isspace()
+    )
+    _ACTIVE_FONT = _subset_font(chars)
+
+
+def _page_font(page, fname: str, text: str = "") -> str:
+    """china-ss 不内嵌，浏览器查看器画不出中文；改用内嵌 Noto 子集并在本页登记。
+
+    全字库提取文字时会把「不」等映射成兼容字，所以只用子集；子集缺字时临时补一个小子集。
+    """
+    if fname != "china-ss" or not CJK_REGULAR.is_file():
+        return fname
+    need = frozenset(ch for ch in (text or "") if not ch.isspace())
+    chosen = _ACTIVE_FONT if _ACTIVE_FONT and need <= _ACTIVE_FONT[2] else None
+    if chosen is None:
+        chosen = _subset_font(need | {" "})
+    if chosen is not None:
+        name, path, _chars = chosen
+    else:
+        name, path = _EMBED_NAME, CJK_REGULAR
+    # 以页面实际字体表为准（按 id 缓存会在文档对象复用地址时漏登记）
+    if not any(f[4] == name for f in page.get_fonts()):
+        page.insert_font(fontname=name, fontfile=str(path))
+    return name
 
 
 def _has_cjk(text: str) -> bool:
@@ -41,7 +122,7 @@ def _paint_font(text: str, *, bold: bool):
     import pymupdf
 
     if _has_cjk(text) or not all(_helv_has(ch) for ch in text or ""):
-        return "china-ss", pymupdf.Font("china-ss")
+        return "china-ss", _cjk_font()
     return ("hebo" if bold else "helv"), pymupdf.Font("helv")
 
 
@@ -280,7 +361,7 @@ def paint_cell(
             rc = page.insert_textbox(
                 inset,
                 "\n".join(lines),
-                fontname=fontname,
+                fontname=_page_font(page, fontname, "\n".join(lines)),
                 fontsize=size,
                 align=0,
             )
@@ -310,7 +391,7 @@ def _paint_short_line(
     # cell's top edge for 7pt Latin labels (notably ``Healthy Subjects``).
     # Keep a small bottom guard while positioning against the actual ascent.
     y = min(inset.y0 + size * 1.08, inset.y1 - size * 0.18)
-    page.insert_text((inset.x0, y), text, fontname=fontname, fontsize=size)
+    page.insert_text((inset.x0, y), text, fontname=_page_font(page, fontname, text), fontsize=size)
     return size
 
 
@@ -320,7 +401,7 @@ def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> flo
     fonts = {
         "helv": pymupdf.Font("helv"),
         "hebo": pymupdf.Font("helv"),
-        "china-ss": pymupdf.Font("china-ss"),
+        "china-ss": _cjk_font(),
     }
     size = max(6.0, float(font_size))
     leading = 1.15
@@ -354,7 +435,7 @@ def _paint_mixed(page, inset, text: str, *, bold: bool, font_size: float) -> flo
                     break
                 x = inset.x0
                 for fname, chunk in line:
-                    page.insert_text((x, y), chunk, fontname=fname, fontsize=size)
+                    page.insert_text((x, y), chunk, fontname=_page_font(page, fname, chunk), fontsize=size)
                     x += float(fonts[fname].text_length(chunk, fontsize=size))
                 y += size * leading
             return size
@@ -375,7 +456,7 @@ def _paint_cell_sideways(page, inset, text: str, *, fontname: str, font_size: fl
             page.insert_text(
                 origin,
                 text,
-                fontname=fontname,
+                fontname=_page_font(page, fontname, text),
                 fontsize=size,
                 rotate=90,
             )
@@ -422,6 +503,7 @@ def paint_fitted_blocks(
     x_min_frac: float | None,
     allow_leftover: bool = True,
 ) -> tuple[list[str], str, list[str], list[list[str]]]:
+    prepare_embedded_font(r.text for r in results)
     codes: list[str] = []
     width = float(page.rect.width)
     title = ""
@@ -514,12 +596,13 @@ def paint_fitted_blocks(
 def _write_lines(page, lines: list[str], *, x: float = 36.0, y: float = 36.0) -> None:
     for line in lines:
         fontname, _ = _paint_font(line, bold=False)
-        page.insert_text((x, y), line, fontname=fontname, fontsize=10)
+        page.insert_text((x, y), line, fontname=_page_font(page, fontname, line), fontsize=10)
         y += 14
 
 
 def append_mono_continuation(doc, *, title: str, header: list[str], rows: list[list[str]]) -> int:
     number = _table_number_from_title(title)
+    prepare_embedded_font([title, CONTINUATION_LABEL, *header, *(c for r in rows for c in r)])
     page = doc.new_page()
     lines = [f"表 {number}{CONTINUATION_LABEL}"]
     if header:
@@ -541,6 +624,7 @@ def append_dual_continuation(
     import pymupdf
 
     plan_dual_continuations(source_page_index + 1, 1)
+    prepare_embedded_font([title, CONTINUATION_LABEL, *header, *(c for r in rows for c in r)])
     src = origin_doc[source_page_index]
     page = doc.new_page(width=src.rect.width * 2, height=src.rect.height)
     left = pymupdf.Rect(0, 0, src.rect.width, src.rect.height)
