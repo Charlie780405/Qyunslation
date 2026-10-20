@@ -272,13 +272,28 @@ def rebuild_literature_table(
     if not _numbers_covered(body_lines, rows):
         return fail(reason="numbers_unplaced")
 
-    cell_boxes: list[list[tuple[float, float, float, float]]] = []
+    y_spans: list[tuple[float, float]] = []
     for ri, (ry0, ry1) in enumerate(row_y_ranges):
         words_r = row_word_lists[ri] if ri < len(row_word_lists) else []
         if words_r:
-            ry0 = min(ry0, min(w.y0 for w in words_r))
-            ry1 = max(ry1, max(w.y1 for w in words_r))
-        cell_boxes.append([(bx0, ry0, bx1, ry1) for bx0, bx1 in bands])
+            ry0 = min(w.y0 for w in words_r)
+            ry1 = max(w.y1 for w in words_r)
+        y_spans.append((ry0, ry1))
+    # 格框左缘对齐原文列，右/下缘放到下一列/下一行起点，给中文留出统一字号空间
+    col_right = [
+        max(bx1, bands[i + 1][0] - 2.0) if i + 1 < len(bands) else max(bx1, box[2] if box else bx1)
+        for i, (_bx0, bx1) in enumerate(bands)
+    ]
+    cell_boxes: list[list[tuple[float, float, float, float]]] = []
+    for ri, (ry0, ry1) in enumerate(y_spans):
+        if ri + 1 < len(y_spans):
+            limit = y_spans[ri + 1][0] - 0.5
+            # 白底不得越过表头线/行线
+            crossing = [y for y in bounds if ry1 <= y <= limit]
+            if crossing:
+                limit = min(crossing) - 1.0
+            ry1 = max(ry1, limit)
+        cell_boxes.append([(bx0, ry0, col_right[i], ry1) for i, (bx0, _bx1) in enumerate(bands)])
 
     heights = sorted(w.height for w in inside if w.height > 0) or [8.0]
     font_size = max(6.0, float(heights[len(heights) // 2]))
@@ -434,10 +449,34 @@ def rebuild_from_page(
     result = rebuild_literature_table(words, rules, box=extended)
     result.frame_extended_to = frame_y
     if result.ok or result.reason != "no_row_rules" or not allow_hpd_fallback:
-        return result
-    fallback = _hpd_geometry_fallback(page, extended, words, prior=result)
-    fallback.frame_extended_to = frame_y
+        fallback = result
+    else:
+        fallback = _hpd_geometry_fallback(page, extended, words, prior=result)
+        fallback.frame_extended_to = frame_y
+    span_size = _span_font_size(page, extended)
+    if span_size:
+        fallback.font_size = span_size
     return fallback
+
+
+def _span_font_size(page, box: tuple[float, float, float, float]) -> float | None:
+    """表内文字层 span 字号中位数（词框高度含行距，比真实字号大约 25%）。"""
+    try:
+        import pymupdf
+
+        data = page.get_text("dict", clip=pymupdf.Rect(*box))
+    except Exception:
+        return None
+    sizes = sorted(
+        float(span.get("size") or 0)
+        for block in data.get("blocks", [])
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+        if (span.get("text") or "").strip() and float(span.get("size") or 0) > 0
+    )
+    if not sizes:
+        return None
+    return sizes[len(sizes) // 2]
 
 
 def _hpd_geometry_fallback(

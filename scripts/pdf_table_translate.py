@@ -143,6 +143,74 @@ def _blocks_from_rebuild(result, *, semantic_id: str):
     return blocks
 
 
+def _fit_uniform(fit_blocks, *, table_size_mode: str):
+    """整表一个字号：先逐格求可放下的字号，再全表取最小值重排。"""
+    from dataclasses import replace
+
+    from qyunslation.structure.role_fitter import fit_group
+    from qyunslation.structure.table_cell_policy import is_numeric_or_unit
+
+    def _net(b):
+        # 落笔会内缩格框（paint_cell inset），测量按同样净宽，否则末列被二次缩字
+        w = max(1.0, b.box_w - (1.2 if b.box_h < 20 else 3.2))
+        h = max(1.0, b.box_h - (0.5 if b.box_h < 20 else 2.0))
+        if is_numeric_or_unit(b.translated_text):
+            h = min(h, b.source_size * 1.3)  # 数值格单行，不折行
+        # blocks_to_fit 给的是 "BlockRole.TABLE_CELL"；role_fitter 按 "table_*" 取下限
+        role = str(getattr(b.role, "value", b.role)).split(".")[-1].lower()
+        return replace(b, role=role, box_w=w, box_h=h)
+
+    fit_blocks = [_net(b) for b in fit_blocks]
+    first = fit_group(fit_blocks, normalize_table_sizes=True, table_size_mode=table_size_mode)
+    body = [
+        r.font_size
+        for b, r in zip(fit_blocks, first)
+        if b.role in {"table_header", "table_cell"} and r.text.strip()
+    ]
+    if not body:
+        return first
+    uniform = min(body)
+    capped = [
+        replace(b, source_size=min(b.source_size, uniform))
+        if b.role in {"table_header", "table_cell"}
+        else b
+        for b in fit_blocks
+    ]
+    return fit_group(capped, normalize_table_sizes=True, table_size_mode=table_size_mode)
+
+
+def _widen_numeric_columns(blocks, rebuilt, *, font_size: float) -> None:
+    """数值列放不下单行时整列左移（不越过前一列文字 + 6pt），保持列内左对齐。"""
+    import pymupdf
+
+    from qyunslation.structure.models import BoundingBox
+    from qyunslation.structure.table_cell_policy import is_numeric_or_unit
+
+    helv = pymupdf.Font("helv")
+    bands = list(rebuilt.col_bands or [])
+    by_col: dict[int, list] = {}
+    for block in blocks:
+        if block.bbox is not None and block.column_index is not None:
+            by_col.setdefault(int(block.column_index), []).append(block)
+    for col in range(1, len(bands)):
+        cells = by_col.get(col) or []
+        nums = [b for b in cells if is_numeric_or_unit(b.source_text)]
+        if not nums:
+            continue
+        need = max(helv.text_length(b.source_text, fontsize=font_size) for b in nums) + 4.0
+        avail = min(b.bbox.x1 - b.bbox.x0 for b in nums)
+        room = bands[col][0] - bands[col - 1][1] - 6.0
+        shift = min(need - avail, room)
+        if shift <= 0:
+            continue
+        new_x0 = bands[col][0] - shift
+        for b in cells:
+            b.bbox = BoundingBox(x0=new_x0, y0=b.bbox.y0, x1=b.bbox.x1, y1=b.bbox.y1)
+        for b in by_col.get(col - 1) or []:
+            if b.bbox.x1 > new_x0 - 2.0:
+                b.bbox = BoundingBox(x0=b.bbox.x0, y0=b.bbox.y0, x1=new_x0 - 2.0, y1=b.bbox.y1)
+
+
 def _paint_literature_rebuild(
     *,
     page,
@@ -159,7 +227,6 @@ def _paint_literature_rebuild(
     Returns (painted, reason_code, checks).
     """
     from qyunslation.structure.models import BoundingBox
-    from qyunslation.structure.role_fitter import fit_group
     from qyunslation.structure.table_qc import assert_table_qc_clean, evaluate_table_qc
     from qyunslation.structure.table_rebuild import (
         extend_frame_to_bottom_rule,
@@ -200,14 +267,23 @@ def _paint_literature_rebuild(
             "literature_rebuild_failed:empty_cells",
             {**checks, "qc": ["LITERATURE_REBUILD_FAILED", "REASON:empty_cells"]},
         )
-    translations = translate_table_blocks(blocks, worker)
-    results = fit_group(
-        blocks_to_fit(blocks, translations),
-        normalize_table_sizes=True,
-        table_size_mode=table_size_mode or "source_p75",
-    )
-    records, hard = evaluate_table_qc(blocks, translations, results)
-    assert_table_qc_clean(records, hard, isolate_residue=isolate_residue, literature=True)
+    try:
+        _widen_numeric_columns(blocks, rebuilt, font_size=float(rebuilt.font_size or 9.0) * 0.9)
+        translations = translate_table_blocks(blocks, worker, drift_fallback_source=True)
+        results = _fit_uniform(
+            blocks_to_fit(blocks, translations),
+            table_size_mode=table_size_mode or "source_p75",
+        )
+        records, hard = evaluate_table_qc(blocks, translations, results)
+        assert_table_qc_clean(records, hard, isolate_residue=isolate_residue, literature=True)
+    except Exception as exc:
+        code = str(exc).split(":", 1)[0] or type(exc).__name__
+        return (
+            False,
+            f"literature_rebuild_failed:{code}",
+            {**checks, "qc": ["LITERATURE_REBUILD_FAILED", f"REASON:{code}"], "error": str(exc)},
+        )
+    checks["font_size_painted"] = results[0].font_size if results else None
     paint_region = BoundingBox(
         x0=extended[0], y0=extended[1], x1=extended[2], y1=extended[3]
     )
@@ -553,6 +629,8 @@ def translate_pdf_tables(
                         continue
                     if status is ExecutionStatus.EXPLICITLY_SKIPPED:
                         checks = getattr(getattr(obj, "output_evidence", None), "checks", None) or {}
+                        if checks.get("grid_source") == "literature_rebuild":
+                            continue  # 重建已落笔或已整表交还 BabelDOC，不再涂改
                         if checks.get("grid_source") == "not_a_table" or (
                             isinstance(checks.get("qc"), list) and "NOT_A_TABLE" in checks["qc"]
                         ):

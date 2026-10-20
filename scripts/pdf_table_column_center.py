@@ -727,7 +727,8 @@ def header_slots_from_blob(blob: str, n_cols: int) -> list[str]:
     slots = [""] * max(n_cols, 0)
     s = normalize_ascii(blob or "")
     if n_cols == 4:
-        if re.search(r"曲罗|安慰|Tralok|Placebo|Q[24]W", s, re.I):
+        # 仅曲罗芦单抗 Q2W/Q4W 表；其它 4 列安慰剂对照表（如 611 Group A）不得套用
+        if re.search(r"曲罗|Tralok", s, re.I) and re.search(r"Q[24]W", s, re.I):
             slots[1] = "曲罗芦单抗 Q2W"
             slots[2] = "曲罗芦单抗 Q4W"
             slots[3] = "安慰剂 Q2W"

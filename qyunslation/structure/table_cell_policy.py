@@ -74,7 +74,12 @@ def classify_cell_policy(text: str) -> TranslationPolicy:
 
 
 def extract_digit_tokens(text: str) -> list[str]:
-    return _DIGIT_TOKEN.findall(text or "")
+    # 「n = 30」与「n\u2009=\u200930」、「（12）」与「(12)」是同一数字
+    norm = (text or "").translate(_FULLWIDTH_PARENS)
+    return [re.sub(r"\s+", "", tok) for tok in _DIGIT_TOKEN.findall(norm)]
+
+
+_FULLWIDTH_PARENS = str.maketrans({"（": "(", "）": ")", "％": "%", "＝": "="})
 
 
 def digit_tokens_preserved(source: str, translated: str) -> bool:

@@ -40,7 +40,7 @@ def _has_cjk(text: str) -> bool:
 def _paint_font(text: str, *, bold: bool):
     import pymupdf
 
-    if _has_cjk(text):
+    if _has_cjk(text) or not all(_helv_has(ch) for ch in text or ""):
         return "china-ss", pymupdf.Font("china-ss")
     return ("hebo" if bold else "helv"), pymupdf.Font("helv")
 
@@ -49,12 +49,21 @@ def _latin_name(bold: bool) -> str:
     return "hebo" if bold else "helv"
 
 
+def _helv_has(ch: str) -> bool:
+    """内置 Helvetica 只有 WinAnsi 字形；≥ 等符号须交给 china-ss，否则画成「·」。"""
+    try:
+        ch.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 def _script_runs(text: str, *, bold: bool) -> list[tuple[str, str]]:
     runs: list[tuple[str, str]] = []
     buf: list[str] = []
     cjk: bool | None = None
     for ch in text:
-        now = bool(_CJK_FONT_RE.match(ch))
+        now = bool(_CJK_FONT_RE.match(ch)) or not _helv_has(ch)
         if cjk is None:
             cjk = now
         elif now != cjk:

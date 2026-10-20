@@ -54,7 +54,10 @@ def _policy_value(block: TranslatableBlock) -> TranslationPolicy:
 def translate_table_blocks(
     blocks: list[TranslatableBlock],
     translator,
+    *,
+    drift_fallback_source: bool = False,
 ) -> dict[str, str]:
+    """``drift_fallback_source``：单格数字/标识漂移时该格保留原文，不拖垮整表。"""
     payloads = []
     maps: dict[str, dict[str, str]] = {}
     preserved: dict[str, str] = {}
@@ -206,13 +209,16 @@ def translate_table_blocks(
                     )
                 except ValueError:
                     # 列表序号已补回仍漂移：回退源文重绘，不拖垮整表
-                    if _CJK_RE.search(block.source_text or ""):
+                    if drift_fallback_source or _CJK_RE.search(block.source_text or ""):
                         text = block.source_text or text
                     else:
                         raise TableTranslateError(
                             f"TABLE_DIGIT_DRIFT:{block.block_id}"
                         ) from None
         missing_tokens = missing_protected_tokens(block.source_text, text)
+        if missing_tokens and drift_fallback_source:
+            text = block.source_text or text
+            missing_tokens = []
         if missing_tokens:
             raise TableTranslateError(
                 f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"
