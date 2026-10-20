@@ -871,6 +871,8 @@ class Pdf2zhRunner:
                     return
                 outputs = self._discover_outputs(run_dir / "output")
                 if returncode == 0 and outputs:
+                    # PLAN-080d：译文产物就绪后、记录前，让下划线跟随译文（默认关闭，失败不影响交付）。
+                    await asyncio.to_thread(self._realign_decorations, source, run_dir / "output")
                     self._write_state(
                         state_path,
                         state,
@@ -918,6 +920,28 @@ class Pdf2zhRunner:
             self._watchers.pop(managed.task_id, None)
             (run_dir / "runner-config.toml").unlink(missing_ok=True)
             (run_dir / "run.lock").unlink(missing_ok=True)
+
+    @staticmethod
+    def _realign_decorations(source: Path, output_dir: Path) -> dict[str, Any] | None:
+        """PLAN-080d：对输出目录里的 PDF（mono 与 dual）做装饰线随文。
+
+        开关 ``QYUNSLATION_DECORATION_REALIGN``（默认 off）。任何异常都吞掉，保留原产物：
+        这一步的失败模式必须是"线条不够漂亮"，不能是"交付失败"。返回各文件的统计，关闭时为 None。
+        """
+        try:
+            from qyunslation.structure.decoration_realign import realign_mode, realign_pdf
+
+            if realign_mode() != "on" or not source.is_file() or not output_dir.is_dir():
+                return None
+            summary: dict[str, Any] = {}
+            for pdf in sorted(output_dir.glob("*.pdf")):
+                try:
+                    summary[pdf.name] = realign_pdf(source, pdf).as_dict()
+                except Exception as exc:  # noqa: BLE001
+                    summary[pdf.name] = {"error": type(exc).__name__}
+            return summary
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _discover_outputs(output_dir: Path) -> list[dict[str, Any]]:
