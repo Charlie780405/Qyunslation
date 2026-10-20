@@ -6,7 +6,13 @@ import re
 
 from .entity_preserve import is_job_title
 from .frontmatter import AFFILIATION, AUTHOR, classify_frontmatter_text
-from .references import is_reference_entry, is_reference_heading, is_section_break
+from .references import (
+    is_citation_block,
+    is_citation_entry,
+    is_reference_entry,
+    is_reference_heading,
+    is_section_break,
+)
 
 # PLAN-080a：[n] 形式在正文中几乎不出现，可以不等参考文献标题直接保留。
 # "n. xxx" 与 "n xxx" 形式在正文中很常见（如监管信函的编号问题），只能在参考文献区内保留。
@@ -64,17 +70,27 @@ def current_llm_spy() -> LlmRequestSpy | None:
     return _SPY
 
 
-def paragraph_is_preserved(text: str | None) -> bool:
+def paragraph_is_preserved(text: str | None, gate: ReferencePreserveGate | None = None) -> bool:
+    """这段文字送翻译前是否应当原样保留。
+
+    ``gate`` 缺省用模块级的全局状态（BabelDOC 在单个子进程里按段落顺序调用）；Word/PPT 的分段逻辑
+    每份文档传入自己的状态，避免并发的多份文档互相干扰。
+    """
+    gate = gate if gate is not None else _GATE
     blob = text or ""
     role = classify_frontmatter_text(blob).role
     if role in {AUTHOR, AFFILIATION} or is_job_title(blob):  # PLAN-080e：职务同样保留
         return True
     if _BRACKET_ENTRY_RE.match(blob) and not is_section_break(blob):
         return True
-    # 编号段落只有在参考文献区内才是条目；否则会把正文的编号问题整段留成英文（PLAN-080a）。
-    if _GATE.in_references and is_reference_entry(blob) and not is_section_break(blob):
+    # 标题缺失、写法不标准或 BabelDOC 的段落顺序不是阅读顺序时，期刊引文仍保留（PLAN-080）：
+    # 单条引文看开头，合并成一个长段落的多条引文看密度，都不依赖全局状态。
+    if is_citation_entry(blob) or is_citation_block(blob):
         return True
-    return _GATE.should_preserve(blob)
+    # 编号段落只有在参考文献区内才是条目；否则会把正文的编号问题整段留成英文（PLAN-080a）。
+    if gate.in_references and is_reference_entry(blob) and not is_section_break(blob):
+        return True
+    return gate.should_preserve(blob)
 
 
 def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = None) -> list[str]:
@@ -85,6 +101,9 @@ def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = N
         if (
             classify_frontmatter_text(text).role in {AUTHOR, AFFILIATION}
             or is_job_title(text)
+            or bool(_BRACKET_ENTRY_RE.match(text))
+            or is_citation_entry(text)
+            or is_citation_block(text)
             or gate.should_preserve(text)
         ):
             continue

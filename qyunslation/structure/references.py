@@ -13,8 +13,13 @@ import re
 # source section back into the result.
 _REFERENCE_SENTINEL_RE = re.compile(r"__QYUNSLATION_REFERENCE_([0-9A-F]{8})__")
 
+# PLAN-080：常见的非标准写法也认——"7. References"、"REFERENCES AND NOTES"、"Literature Cited"、
+# "Works Cited"、"Reference List"。仍然只认独立标题行（整行只有这几个词）。
 HEADING_RE = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(references|bibliography|参考文献|参考资料)\s*[:：]?\s*\.?\s*$",
+    r"^\s*(?:#{1,6}\s*)?(?:(?:\d{1,2}|[IVX]{1,5})[.)]?\s+)?"
+    r"(?:references?(?:\s+(?:cited|list|and\s+notes))?|bibliography|literature\s+cited|works\s+cited|"
+    r"cited\s+(?:references|literature)|参考文献|参考资料|引用文献)"
+    r"\s*[:：]?\s*\.?\s*$",
     re.IGNORECASE,
 )
 SECTION_BREAK_RE = re.compile(
@@ -29,6 +34,59 @@ ENTRY_RE = re.compile(
     r"|\d{1,3}(?=[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\-']{1,})"  # 1Langanan 粘连
     r")"
 )
+
+
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# 期刊引文的形状：卷(期):页、年;卷:页、DOI、et al.、pp.、Vol.
+_JOURNAL_RE = re.compile(
+    r"\b\d{1,4}\s*\(\d{1,3}\)\s*:\s*[\w-]+"  # 153(2):345-52
+    r"|[;,]\s*\d{1,4}\s*:\s*[\w-]+"  # 2024;153:345
+    r"|\b\d{1,4},\s*\d{1,6}\s*[–—-]\s*\d{1,6}\s*\(\s*(?:19|20)\d{2}\s*\)"  # Nature：184, 437–449 (2021)
+    r"|\bdoi\b\s*:?\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/\S+|\bdoi\b"  # "doi: 10.x/y" 只算一处
+    r"|\bet\s+al\b|\bpp?\.\s*\d|\bvol\.?\s*\d",
+    re.IGNORECASE,
+)
+
+
+# 作者列表开头："Smith, J. J." / "Scarisbrick, J. J. & Morris, S."（Nature、Vancouver 的缩写写法）
+_CITED_YEAR_RE = re.compile(r"\(\s*(?:19|20)\d{2}[a-z]?\s*\)|\b(?:19|20)\d{2}[a-z]?\s*[;.:,]")
+_AUTHORS_RE = re.compile(r"^\W*(?:\d{1,3}\.?\s*)?[A-Z][A-Za-z'’-]+,\s+(?:[A-Z]\.\s?){1,3}")
+
+
+def is_citation_entry(text: str) -> bool:
+    """不依赖"参考文献"标题也能认出的期刊引文条目：编号开头，并且有年份和期刊引文的形状。
+
+    监管信函里的编号问题（"2. The protocol synopsis ..."）没有年份加卷期页码，不会命中；
+    参考文献标题写法不标准、或标题被版面丢失时，引文仍然保留原文。
+    """
+    blob = " ".join((text or "").split())
+    if not blob or not is_reference_entry(blob):
+        return False
+    if not _YEAR_RE.search(blob):
+        return False
+    if _JOURNAL_RE.search(blob):
+        return True
+    # 只有作者缩写开头时证据较弱：要求年份像引文里的年份（括号里，或后面紧跟标点），而不是句子里的 "in 2020 that"
+    return bool(_AUTHORS_RE.match(blob) and _CITED_YEAR_RE.search(blob))
+
+
+_CITATION_BLOCK_MIN = 2
+
+
+def citation_density(text: str) -> int:
+    """段落里期刊引文形状（卷:页、DOI、et al.、Nature 的"卷, 页 (年)"）出现了几处。"""
+    return len(_JOURNAL_RE.findall(" ".join((text or "").split())))
+
+
+def is_citation_block(text: str) -> bool:
+    """段落本身就是一堆引文：不要求以编号开头，也不依赖前面有没有"参考文献"标题。
+
+    双栏文献里，BabelDOC 的段落顺序是版面分析的顺序而不是阅读顺序，参考文献条目常被合并成
+    一个从某一条中间开头的长段落，标题的位置也可能晚于条目；依赖顺序的状态机会漏掉它们。
+    正文很少出现两处以上"卷:页 / DOI / et al."，所以密度可以作为不依赖顺序的判据。
+    """
+    blob = " ".join((text or "").split())
+    return citation_density(blob) >= _CITATION_BLOCK_MIN and bool(_YEAR_RE.search(blob))
 
 
 def first_line(text: str) -> str:

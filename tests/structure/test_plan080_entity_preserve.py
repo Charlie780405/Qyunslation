@@ -10,7 +10,7 @@ from qyunslation.structure import entity_preserve as ep
 TITLES = [
     "General Manager",
     "Chief Medical Officer",
-    "Regulatory Lead, IQVIA",
+    "Regulatory Lead, Acme CRO",
     "Senior Director, Regulatory Affairs",
     "Vice President of Clinical Development",
     "Head of Biostatistics",
@@ -53,8 +53,8 @@ def test_headings_and_sentences_are_not_mistaken_for_titles(text):
 
 
 def test_reason_enumeration():
-    assert ep.preserve_reason("Alex Gorovets, MD") == ep.PERSON_NAME
-    assert ep.preserve_reason("Jiangsu GenScend Biopharma Co., Ltd.") == ep.ORG_NAME
+    assert ep.preserve_reason("Alex Morgan, MD") == ep.PERSON_NAME
+    assert ep.preserve_reason("Example Biopharma Co., Ltd.") == ep.ORG_NAME
     # 带机构标记的职务按职务记，而不是机构
     assert ep.preserve_reason("Deputy Director, Office of New Drugs (OND)") == ep.JOB_TITLE
     assert ep.preserve_reason("Hello there") is None

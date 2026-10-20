@@ -3,7 +3,7 @@
 
 用户决定（D1）：人名、职务、部门、机构名可以不译。此前只有 ``frontmatter`` 的作者/机构启发式在起作用，
 含机构标记的职务（"Deputy Director, Office of New Drugs"）被保留，不含的（"Medical Director"、
-"Regulatory Lead, IQVIA"）却被送去翻译，于是同一份名单一半译一半不译。
+"Regulatory Lead, Acme CRO"）却被送去翻译，于是同一份名单一半译一半不译。
 
 这里补上职务的识别，并给每个"保留"一个固定的原因，供 QA 区分"有意保留"和"漏译"：
 
