@@ -91,6 +91,30 @@ def restore_unit_superscripts(text: str) -> str:
     return _UNIT_EXPONENT.sub(lambda m: m.group(1) + _EXPONENT_SUP[m.group(2)], text or "")
 
 
+_CELL_PUNCT = str.maketrans(
+    {"（": "(", "）": ")", "％": "%", "＝": "=", "＋": "+", "＜": "<", "＞": ">", "−": "-"}
+    | {0xFF10 + i: ord("0") + i for i in range(10)}
+    | {0xFF21 + i: ord("A") + i for i in range(26)}
+    | {0xFF41 + i: ord("a") + i for i in range(26)}
+)
+_NEQ_PAREN = re.compile(r"\(\s*([nN])\s*=\s*(\d+)\s*\)")
+# 组名与 (n=30) 之间必须有空格：原文表头就是两行（Placebo group / (n = 32)），空格是排版器唯一的换行点
+_CJK_BEFORE_NEQ = re.compile(r"(?<=[\u4e00-\u9fff])[ \u2009]*(?=\([nN]=\d+\))")
+
+
+def compact_table_punctuation(text: str) -> str:
+    """文献表单元格的标点紧凑化（窄列不折行、括号不撑宽）。
+
+    - 全角括号/百分号/等号/全角字母数字 → 半角（Noto 全角括号两侧留白，`（ n = 30 ）` 偏宽）
+    - `(n = 30)` → `(n=30)`
+    - 汉字与 `(n=…)` 之间恰好一个空格：`总计(n=93)` → `总计 (n=93)`，窄列在此处换行，不在括号内折断
+    只动这些符号，不碰 `，。：；？！` 等中文标点；数字比对本就忽略空白，不受影响。
+    """
+    out = (text or "").translate(_CELL_PUNCT)
+    out = _NEQ_PAREN.sub(lambda m: f"({m.group(1)}={m.group(2)})", out)
+    return _CJK_BEFORE_NEQ.sub(" ", out)
+
+
 _FULLWIDTH_PARENS = str.maketrans({"（": "(", "）": ")", "％": "%", "＝": "="})
 
 

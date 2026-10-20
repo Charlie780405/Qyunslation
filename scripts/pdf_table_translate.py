@@ -269,7 +269,9 @@ def _paint_literature_rebuild(
         )
     try:
         _widen_numeric_columns(blocks, rebuilt, font_size=float(rebuilt.font_size or 9.0) * 0.9)
-        translations = translate_table_blocks(blocks, worker, drift_fallback_source=True)
+        translations = translate_table_blocks(
+            blocks, worker, drift_fallback_source=True, compact_punct=True
+        )
         results = _fit_uniform(
             blocks_to_fit(blocks, translations),
             table_size_mode=table_size_mode or "source_p75",

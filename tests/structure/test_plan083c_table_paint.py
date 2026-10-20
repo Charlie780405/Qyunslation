@@ -149,3 +149,32 @@ def test_unit_superscripts_restored_without_false_positives():
         assert restore_unit_superscripts(untouched) == untouched
     # 译文把 m2 写成 m² 不算数字漂移
     assert digit_tokens_preserved("BMI, kg/m2", "BMI，kg/m²")
+
+
+def test_compact_table_punctuation_headers_and_scope():
+    from qyunslation.structure.table_cell_policy import (
+        compact_table_punctuation as compact,
+        digit_tokens_preserved,
+    )
+
+    assert compact("611 A组（n = 30）") == "611 A组 (n=30)"
+    assert compact("总计（n = 93）") == "总计 (n=93)"
+    assert compact("安慰剂组(n=32)") == "安慰剂组 (n=32)"  # 保留唯一换行点
+    assert compact("IGA评分，例数（%）") == "IGA评分，例数(%)"  # 中文逗号不动
+    assert compact("Ｔotal") == "Total"
+    assert digit_tokens_preserved("Total (n\u2009=\u200993)", compact("总计（n = 93）"))
+
+
+def test_compact_punct_is_opt_in_and_literature_only():
+    """监管表单路径不受影响：默认不紧凑化。"""
+    from qyunslation.structure.table_translate import translate_table_blocks
+
+    blocks = [_block("t:r0c1", "Total (n = 93)")]
+
+    def worker(payloads):
+        return {p["id"]: "总计（n = 93）" for p in payloads}
+
+    assert translate_table_blocks(blocks, worker)["t:r0c1"] == "总计（n = 93）"
+    assert (
+        translate_table_blocks(blocks, worker, compact_punct=True)["t:r0c1"] == "总计 (n=93)"
+    )

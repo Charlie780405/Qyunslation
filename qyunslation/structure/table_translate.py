@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 from .models import TranslationPolicy, TranslatableBlock, DEFERRED_TRANSLATION_POLICIES
 from .protect import missing_protected_tokens, protect_tokens, restore_tokens
-from .table_cell_policy import assert_digit_tokens_preserved, restore_unit_superscripts
+from .table_cell_policy import (
+    assert_digit_tokens_preserved,
+    compact_table_punctuation,
+    restore_unit_superscripts,
+)
 
 _LIST_PREFIX = re.compile(r"^(\d+\s*[.、．)]\s*)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -56,8 +60,12 @@ def translate_table_blocks(
     translator,
     *,
     drift_fallback_source: bool = False,
+    compact_punct: bool = False,
 ) -> dict[str, str]:
-    """``drift_fallback_source``：单格数字/标识漂移时该格保留原文，不拖垮整表。"""
+    """``drift_fallback_source``：单格数字/标识漂移时该格保留原文，不拖垮整表。
+
+    ``compact_punct``：文献表专用的标点紧凑化（半角括号、``(n=30)``），监管表不启用。
+    """
     payloads = []
     maps: dict[str, dict[str, str]] = {}
     preserved: dict[str, str] = {}
@@ -223,7 +231,8 @@ def translate_table_blocks(
             raise TableTranslateError(
                 f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"
             )
-        out[block.block_id] = restore_unit_superscripts(text)
+        text = restore_unit_superscripts(text)
+        out[block.block_id] = compact_table_punctuation(text) if compact_punct else text
     return out
 
 
