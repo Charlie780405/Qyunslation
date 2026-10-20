@@ -940,6 +940,11 @@ def should_center_literature_table(checks: dict | None, box) -> bool:
     """大图假表跳过；表2 量级矮窄 not_a_table 仍按原文行对齐。"""
     src = (checks or {}).get("grid_source")
     qc = (checks or {}).get("qc") or []
+    # PLAN-083：行线重建已按格落笔，禁止再跑 BabelDOC 列居中破坏分列
+    if src == "literature_rebuild" or (
+        isinstance(qc, list) and "LITERATURE_REBUILD_PAINTED" in qc
+    ):
+        return False
     not_tbl = src == "not_a_table" or (isinstance(qc, list) and "NOT_A_TABLE" in qc)
     if not not_tbl:
         return True

@@ -80,6 +80,151 @@ def _llm_translator(to_lang: str):
     return translate
 
 
+def _blocks_from_rebuild(result, *, semantic_id: str):
+    """Turn a RebuildResult into TranslatableBlocks (text layer only)."""
+    from qyunslation.structure.models import (
+        BlockRole,
+        BoundingBox,
+        SourceStyle,
+        TranslatableBlock,
+        TranslationPolicy,
+    )
+    from qyunslation.structure.table_cell_policy import is_numeric_or_unit
+
+    blocks = []
+    sid = semantic_id or "table"
+    for ri, row in enumerate(result.rows):
+        boxes = result.cell_boxes[ri] if ri < len(result.cell_boxes) else []
+        for ci, text in enumerate(row):
+            src = (text or "").strip()
+            if not src:
+                continue
+            if ci < len(boxes):
+                x0, y0, x1, y1 = boxes[ci]
+                bbox = BoundingBox(x0=x0, y0=y0, x1=x1, y1=y1)
+            else:
+                bbox = None
+            role = BlockRole.TABLE_HEADER if ri == 0 else BlockRole.TABLE_CELL
+            policy = (
+                TranslationPolicy.PRESERVE
+                if is_numeric_or_unit(src)
+                else TranslationPolicy.TRANSLATE
+            )
+            blocks.append(
+                TranslatableBlock(
+                    block_id=f"{sid}:r{ri}c{ci}",
+                    source_text=src,
+                    role=role,
+                    translation_policy=policy,
+                    bbox=bbox,
+                    source_style=SourceStyle(font_size=8.0),
+                    row_index=ri,
+                    column_index=ci,
+                )
+            )
+    for fi, note in enumerate(result.footnotes or []):
+        note = (note or "").strip()
+        if not note:
+            continue
+        blocks.append(
+            TranslatableBlock(
+                block_id=f"{sid}:fn{fi}",
+                source_text=note,
+                role=BlockRole.TABLE_FOOTNOTE,
+                translation_policy=TranslationPolicy.TRANSLATE,
+                bbox=None,
+                source_style=SourceStyle(font_size=7.0),
+                row_index=len(result.rows) + fi,
+                column_index=0,
+            )
+        )
+    return blocks
+
+
+def _paint_literature_rebuild(
+    *,
+    page,
+    origin_page,
+    obj,
+    box: tuple[float, float, float, float],
+    worker,
+    x_min_frac: float | None,
+    table_size_mode: str | None,
+    isolate_residue: bool,
+) -> tuple[bool, str, dict]:
+    """PLAN-083: rebuild → translate cells → redact region → paint.
+
+    Returns (painted, reason_code, checks).
+    """
+    from qyunslation.structure.role_fitter import fit_group
+    from qyunslation.structure.table_qc import assert_table_qc_clean, evaluate_table_qc
+    from qyunslation.structure.table_rebuild import rebuild_from_page, table_rebuild_mode
+    from qyunslation.structure.table_translate import translate_table_blocks
+    from qyunslation.structure.table_writeback import (
+        blocks_to_fit,
+        paint_fitted_blocks,
+        redact_table_region,
+        union_paint_bbox,
+    )
+
+    if table_rebuild_mode() == "off":
+        return False, "literature_leave_babeldoc", {"qc": ["LITERATURE_LEAVE_BABELDOC"]}
+    rebuilt = rebuild_from_page(origin_page, box, allow_hpd_fallback=True)
+    checks: dict = {
+        "grid_source": "literature_rebuild",
+        "rebuild_reason": rebuilt.reason or "ok",
+        "n_cols": rebuilt.n_cols,
+        "n_rows": len(rebuilt.rows),
+    }
+    if not rebuilt.ok:
+        return (
+            False,
+            f"literature_rebuild_failed:{rebuilt.reason or 'unknown'}",
+            {**checks, "qc": ["LITERATURE_REBUILD_FAILED", f"REASON:{rebuilt.reason}"]},
+        )
+    blocks = _blocks_from_rebuild(rebuilt, semantic_id=obj.semantic_id or "table")
+    if not blocks:
+        return (
+            False,
+            "literature_rebuild_failed:empty_cells",
+            {**checks, "qc": ["LITERATURE_REBUILD_FAILED", "REASON:empty_cells"]},
+        )
+    translations = translate_table_blocks(blocks, worker)
+    results = fit_group(
+        blocks_to_fit(blocks, translations),
+        normalize_table_sizes=True,
+        table_size_mode=table_size_mode or "source_p75",
+    )
+    records, hard = evaluate_table_qc(blocks, translations, results)
+    assert_table_qc_clean(records, hard, isolate_residue=isolate_residue, literature=True)
+    wiped = redact_table_region(
+        page,
+        union_paint_bbox(obj.bbox, blocks),
+        x_min_frac=x_min_frac,
+    )
+    if not wiped:
+        return (
+            False,
+            "literature_rebuild_failed:redact",
+            {**checks, "qc": ["LITERATURE_REBUILD_FAILED", "REASON:redact"]},
+        )
+    _codes, _title, _header, leftover = paint_fitted_blocks(
+        page,
+        blocks,
+        results,
+        x_min_frac=x_min_frac,
+        allow_leftover=False,
+    )
+    records, hard = evaluate_table_qc(blocks, translations, results, leftover=leftover)
+    assert_table_qc_clean(records, hard, isolate_residue=isolate_residue, literature=True)
+    checks["blocks"] = {record.block_id: record.as_dict() for record in records}
+    checks["cells"] = [record.as_dict() for record in records]
+    checks["continuation_rows"] = len(leftover)
+    checks["digits_preserved"] = True
+    checks["qc"] = ["LITERATURE_REBUILD_PAINTED"]
+    return True, "literature_rebuild_painted", checks
+
+
 def translate_pdf_tables(
     src: Path | str,
     *,
@@ -203,18 +348,62 @@ def translate_pdf_tables(
                         obj.semantic_id,
                     )
                     continue
-                # PLAN-049a：文献三线表交还 BabelDOC，禁止整区擦除重画
+                # PLAN-083：文献表行线重建成功才按格落笔；失败交还 BabelDOC
                 if literature:
-                    write_output_evidence(
-                        obj,
-                        status=ExecutionStatus.EXPLICITLY_SKIPPED,
-                        reason_code="literature_leave_babeldoc",
-                        checks={"grid_source": src, "qc": ["LITERATURE_LEAVE_BABELDOC"]},
+                    box = obj.bbox
+                    if box is None or origin_doc is None or page_index >= len(origin_doc):
+                        write_output_evidence(
+                            obj,
+                            status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                            reason_code="literature_rebuild_failed:no_origin",
+                            checks={
+                                "grid_source": src,
+                                "qc": ["LITERATURE_REBUILD_FAILED", "REASON:no_origin"],
+                            },
+                        )
+                        continue
+                    region = (
+                        float(box.x0),
+                        float(box.y0),
+                        float(box.x1),
+                        float(box.y1),
                     )
-                    logger.info(
-                        "table %s literature — skip paint, leave BabelDOC",
-                        obj.semantic_id,
+                    painted, reason, checks = _paint_literature_rebuild(
+                        page=doc[page_index],
+                        origin_page=origin_doc[page_index],
+                        obj=obj,
+                        box=region,
+                        worker=worker,
+                        x_min_frac=x_min_frac,
+                        table_size_mode=table_size_mode,
+                        isolate_residue=isolate_residue,
                     )
+                    if painted:
+                        write_output_evidence(
+                            obj,
+                            status=ExecutionStatus.TRANSLATED,
+                            reason_code=reason,
+                            checks=checks,
+                        )
+                        changed = True
+                        logger.info(
+                            "table %s literature rebuild painted cols=%s rows=%s",
+                            obj.semantic_id,
+                            checks.get("n_cols"),
+                            checks.get("n_rows"),
+                        )
+                    else:
+                        write_output_evidence(
+                            obj,
+                            status=ExecutionStatus.EXPLICITLY_SKIPPED,
+                            reason_code=reason,
+                            checks={**checks, "grid_source": checks.get("grid_source") or src},
+                        )
+                        logger.info(
+                            "table %s literature — leave BabelDOC (%s)",
+                            obj.semantic_id,
+                            reason,
+                        )
                     continue
                 assert_grid_source_safe(obj)
                 if literature and src in {"hpd", "gutter"} and not literature_paint_safe(blocks):

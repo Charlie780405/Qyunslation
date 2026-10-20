@@ -82,7 +82,11 @@ def test_literature_wide_table_leaves_babeldoc_text(tmp_path):
     )
     assert dest == src
     assert not src.with_name(src.stem + ".tbltr.pdf").is_file()
-    assert manifest.objects[0].reason_code == "literature_leave_babeldoc"
+    reason = manifest.objects[0].reason_code or ""
+    # PLAN-083：重建失败或开关 off 时交还 BabelDOC（不再整表盲画）
+    assert reason == "literature_leave_babeldoc" or reason.startswith(
+        "literature_rebuild_failed:"
+    )
     text = pymupdf.open(src)[0].get_text()
     assert "年龄（岁）" in text
     assert "应被忽略的重画" not in text
@@ -418,6 +422,10 @@ def test_should_center_small_not_a_table():
     fig = SimpleNamespace(x0=40.0, y0=200.0, x1=400.0, y1=500.0)
     assert should_center_literature_table({"grid_source": "not_a_table"}, fig) is False
     assert should_center_literature_table({"grid_source": "hpd"}, fig) is True
+    assert should_center_literature_table({"grid_source": "literature_rebuild"}, fig) is False
+    assert (
+        should_center_literature_table({"qc": ["LITERATURE_REBUILD_PAINTED"]}, fig) is False
+    )
 
 
 def test_lock_visit_same_column():
