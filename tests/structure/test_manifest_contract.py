@@ -15,7 +15,7 @@ from qyunslation.structure import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_PATH = ROOT / "docs/contracts/document-structure-manifest-v1.schema.json"
+SCHEMA_PATH = ROOT / "docs/contracts/document-structure-manifest-v2.schema.json"
 SOURCE_SHA256 = "a" * 64
 OBJECT_ID = "obj:" + "b" * 64
 

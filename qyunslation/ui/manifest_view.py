@@ -12,6 +12,10 @@ class ManifestViewError(ValueError):
 
 _UNKNOWN = "unknown"
 _STATUS_OK = "ok"
+# 与 qyunslation.structure.models.SUPPORTED_SCHEMA_MAJORS 保持一致；这里不导入它，
+# 以免 UI 摘要依赖 pydantic 模型。Manifest 2.0（PLAN-071b）的 summary/canvases/objects
+# 字段与 1.x 同名同义，升到 2 时 PLAN-050c 的这处检查被遗漏（PLAN-080h）。
+_SUPPORTED_MAJORS = frozenset({1, 2})
 
 
 def _major(version: str) -> int | None:
@@ -38,7 +42,7 @@ def _count_or_unknown(value: Any, *, truncated: bool) -> int | str:
 def summarize_for_ui(payload: dict[str, Any] | str | None) -> dict[str, Any]:
     """给预扫描卡 / 检查器的稳定摘要。
 
-    - schema major ≠ 1 → 抛 ManifestViewError
+    - schema major 不在 {1, 2} → 抛 ManifestViewError
     - truncated / blocked / missing summary → 计数为 ``unknown``，不是 0
     """
     if payload is None:
@@ -55,7 +59,7 @@ def summarize_for_ui(payload: dict[str, Any] | str | None) -> dict[str, Any]:
 
     version = str(data.get("schema_version") or "")
     major = _major(version)
-    if major is None or major != 1:
+    if major is None or major not in _SUPPORTED_MAJORS:
         raise ManifestViewError("MANIFEST_VERSION_UNSUPPORTED")
 
     issues = data.get("issues") if isinstance(data.get("issues"), list) else []

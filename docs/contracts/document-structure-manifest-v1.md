@@ -19,7 +19,8 @@ Figure/Table 主计数来自去重后的语义对象，不来自 bitmap、xref�
 
 ## 版本
 
-- 当前版本为 `1.3.0`（PLAN-034b；此前代码曾停在 `1.2.0`，本合同曾误写 `1.0.0`，已收口）。
+- 当前模型版本为 `2.0.0`（PLAN-071b，`CURRENT_SCHEMA_VERSION`）；读取器接受 major 1 与 2（`SUPPORTED_SCHEMA_MAJORS`），UI 摘要 `ui/manifest_view.py` 与之一致（PLAN-080h）。`1.3.0` 是 PLAN-034b 的最后一个 1.x 版本。
+- 本文件名中的 `v1` 是合同族名称，不是当前 schema major；机器可读 schema 为 `document-structure-manifest-v2.schema.json`，由 `DocumentStructureManifest.model_json_schema()` 生成，变更模型后必须重新生成（`tests/structure/test_manifest_contract.py` 会比对）。
 - 相同 major 可增加可选字段；不得删除字段或改变已有字段语义。
 - 读取器接受相同 major 的未知扩展字段；写入器只产生当前模型字段。
 - **兼容**：`1.2.0` / `1.1.0` 等同 major 清单仍可 `model_validate`；新字段均为可选，缺省为 `null`/空。

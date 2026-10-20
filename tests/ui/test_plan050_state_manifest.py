@@ -59,8 +59,24 @@ def test_ljae439_semantic_counts():
 
 
 def test_bad_major_fail_closed():
-    with pytest.raises(ManifestViewError, match="VERSION"):
-        summarize_for_ui({"schema_version": "2.0.0", "summary": {}})
+    for version in ("3.0.0", "0.9.0", "", "x.y.z"):
+        with pytest.raises(ManifestViewError, match="VERSION"):
+            summarize_for_ui({"schema_version": version, "summary": {}})
+
+
+def test_manifest_2_is_supported():
+    """PLAN-080h：Manifest 2.0 的摘要字段与 1.x 一致，不得再被当作不支持的版本。"""
+    card = summarize_for_ui(
+        {
+            "schema_version": "2.0.0",
+            "canvases": [{}, {}],
+            "summary": {"figure_count": 4, "table_count": 2, "physical_image_count": 6},
+        }
+    )
+    assert card["figure_count"] == 4
+    assert card["table_count"] == 2
+    assert card["physical_image_count"] == 6
+    assert card["page_count"] == 2
 
 
 def test_missing_summary_fail_closed():

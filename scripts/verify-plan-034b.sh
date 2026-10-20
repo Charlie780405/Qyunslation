@@ -34,7 +34,7 @@ fi
 
 PLAN_B="$ROOT/docs/plans/PLAN-034-pharma-rd-mvp/PLAN-034b-semantic-policy.md"
 CONTRACT="$ROOT/docs/contracts/document-structure-manifest-v1.md"
-SCHEMA="$ROOT/docs/contracts/document-structure-manifest-v1.schema.json"
+SCHEMA="$ROOT/docs/contracts/document-structure-manifest-v2.schema.json"
 WT="$ROOT/docs/walkthroughs/WT-034b-semantic-policy.md"
 
 [[ -f "$PLAN_B" ]] && pass "PLAN-034b doc" || fail "missing PLAN-034b"
@@ -42,13 +42,15 @@ WT="$ROOT/docs/walkthroughs/WT-034b-semantic-policy.md"
 [[ -f "$CONTRACT" ]] && pass "manifest contract md" || fail "missing contract md"
 [[ -f "$SCHEMA" ]] && pass "manifest schema json" || fail "missing schema"
 
-grep -q '当前版本为 `1.3.0`' "$CONTRACT" \
-  && pass "contract version 1.3.0" || fail "contract version not 1.3.0"
+# 1.3.0 之后模型升到 2.0.0（PLAN-071b）；合同必须写明当前模型版本，而不是固定的 1.3.0（PLAN-080h）。
+CURRENT_VERSION="$("$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION as v; print(v)")"
+grep -q "当前模型版本为 \`$CURRENT_VERSION\`" "$CONTRACT" \
+  && pass "contract states current version $CURRENT_VERSION" || fail "contract does not state current version $CURRENT_VERSION"
 grep -q 'TERM_ONLY' "$CONTRACT" && pass "contract TERM_ONLY" || fail "contract TERM_ONLY"
 grep -q 'HUMAN_REVIEW' "$SCHEMA" && pass "schema HUMAN_REVIEW" || fail "schema HUMAN_REVIEW"
 
-run_pass "schema version assert" "$STAGE_DIR/ver.log" \
-  "$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION; assert CURRENT_SCHEMA_VERSION == '1.3.0'"
+run_pass "schema version is at least 1.3.0" "$STAGE_DIR/ver.log" \
+  "$PY" -c "from qyunslation.structure.models import CURRENT_SCHEMA_VERSION; assert tuple(map(int, CURRENT_SCHEMA_VERSION.split('.'))) >= (1, 3, 0)"
 
 run_pass "034b pytest" "$STAGE_DIR/t.log" \
   "$PY" -m pytest -q --no-cov \
@@ -60,7 +62,7 @@ run_pass "schema matches model" "$STAGE_DIR/sch.log" \
 import json
 from pathlib import Path
 from qyunslation.structure.models import DocumentStructureManifest
-committed = json.loads(Path('docs/contracts/document-structure-manifest-v1.schema.json').read_text())
+committed = json.loads(Path('docs/contracts/document-structure-manifest-v2.schema.json').read_text())
 assert committed == DocumentStructureManifest.model_json_schema()
 "
 

@@ -9,6 +9,7 @@ import pytest
 from qyunslation.structure import ManifestStore, PdfStructureScanner
 from qyunslation.structure.interfaces import ManifestConsumer, StructureScanner
 from qyunslation.structure.manifest_store import default_cache_root
+from qyunslation.structure.models import CURRENT_SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 LJAE = ROOT / "tests/fixtures/structure/reference/ljae439.pdf"
@@ -56,7 +57,9 @@ def test_schema_major_mismatch_is_treated_as_miss(tmp_path, manifest):
     target = store.path_for(manifest.document.source_sha256)
 
     payload = json.loads(target.read_text(encoding="utf-8"))
-    payload["schema_version"] = "2.0.0"
+    # 从当前版本推导"不符"的 major，升版后用例不必再改（PLAN-080h）。
+    current_major = int(CURRENT_SCHEMA_VERSION.split(".")[0])
+    payload["schema_version"] = f"{current_major + 1}.0.0"
     target.write_text(json.dumps(payload), encoding="utf-8")
 
     assert store.get(manifest.document.source_sha256) is None

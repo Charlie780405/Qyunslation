@@ -182,6 +182,8 @@
     },
     "BlockRole": {
       "enum": [
+        "author",
+        "affiliation",
         "heading",
         "body",
         "caption",
@@ -2770,6 +2772,11 @@
           ],
           "default": null,
           "title": "Translation Policy"
+        },
+        "review_required": {
+          "default": false,
+          "title": "Review Required",
+          "type": "boolean"
         },
         "source_style": {
           "anyOf": [
