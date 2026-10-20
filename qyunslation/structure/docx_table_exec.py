@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .models import DocumentStructureManifest, TranslationPolicy, DEFERRED_TRANSLATION_POLICIES
 from .protect import protect_tokens, restore_tokens
 from .table_cell_policy import classify_cell_policy
+from .office_preserve import new_office_gate
 
 _CELL_BLOCK = re.compile(r"^cell:(\d+):(\d+):(\d+)$")
 
@@ -66,6 +67,7 @@ def partition_docx_segments(
     llm_to_original: list[int] = []
     token_maps: dict[int, dict[str, str]] = {}
     preserved: set[int] = set()
+    office_gate = new_office_gate()
 
     for index, (original, info) in enumerate(zip(originals, elements)):
         policy = resolve_table_cell_policy(
@@ -73,6 +75,16 @@ def partition_docx_segments(
             source_text=original,
             policies=policies,
         )
+        if policy is None and office_gate is not None and office_gate.should_preserve(original):
+            preserved.add(index)  # PLAN-080：非表格段落中的人名、职务、机构、引文原样保留
+            continue
+        if (
+            policy in (TranslationPolicy.TRANSLATE, TranslationPolicy.PROTECT_TOKENS)
+            and office_gate is not None
+            and office_gate.should_preserve_cell(original)
+        ):
+            preserved.add(index)  # PLAN-080：表格里的参会人名单、职务同样原样保留
+            continue
         if policy is TranslationPolicy.PRESERVE:
             preserved.add(index)
             continue
