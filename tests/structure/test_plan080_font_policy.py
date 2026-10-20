@@ -89,10 +89,27 @@ def test_bold_is_the_only_variant():
     assert cls().map(pymupdf_like, "A").name == "SourceHanSerifCN-Bold.ttf"
 
 
-def test_profile_sans_serif_is_respected():
+def test_sans_serif_profile_still_gets_serif_by_default():
+    """D2/D5：思源宋体适用所有画像，书信与 IND 递交资料画像（sans-serif）也不例外。"""
+    cls = make_mapper_class(primary=2)
+    fp.install(cls)
+    assert fp.font_policy_family() == "serif"
+    assert cls().map(italic_arial(), "中").name == "SourceHanSerifCN-Regular.ttf"
+
+
+def test_profile_family_option_respects_sans_serif(monkeypatch):
+    monkeypatch.setenv(fp.FAMILY_ENV, "profile")
     cls = make_mapper_class(primary=2)
     fp.install(cls)
     assert cls().map(italic_arial(), "中").name == "SourceHanSansCN-Regular.ttf"
+    serif_profile = make_mapper_class(primary=1)
+    fp.install(serif_profile)
+    assert serif_profile().map(italic_arial(), "中").name == "SourceHanSerifCN-Regular.ttf"
+
+
+def test_unknown_family_value_means_serif(monkeypatch):
+    monkeypatch.setenv(fp.FAMILY_ENV, "comic-sans")
+    assert fp.font_policy_family() == "serif"
 
 
 def test_missing_glyph_falls_back_to_legacy_mapping():
@@ -123,3 +140,15 @@ def test_install_is_idempotent_and_wrapper_errors_fall_back():
     broken = cls()
     broken.fontid2font = None  # 触发包装内部异常
     assert broken.map(italic_arial(), "中") == "legacy"
+
+
+def test_policy_applies_only_to_simplified_chinese_targets():
+    from types import SimpleNamespace
+
+    for lang, applies in (("zh", True), ("zh-CN", True), ("zh_cn", True), ("en", False), ("zh-TW", False), ("ja", False)):
+        cls = make_mapper_class()
+        fp.install(cls)
+        mapper = cls()
+        mapper.translation_config = SimpleNamespace(lang_out=lang)
+        picked = mapper.map(italic_arial(), "中")
+        assert (picked != "legacy") is applies, lang
