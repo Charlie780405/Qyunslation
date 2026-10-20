@@ -21,12 +21,39 @@ HOOK_SHOULD = f"""
             return False
 """
 
-HELPER = f'''
+# PLAN-080：旧版 helper 在导入 qyunslation 失败时静默返回 False，保留功能整体无声关闭。
+# 新版第一次失败时记一条 WARNING；行为不变（仍返回 False），只是不再无声。
+OLD_HELPER = f'''
 def {MARKER}(text):
     try:
         from qyunslation.structure.babeldoc_policy import paragraph_is_preserved
         return paragraph_is_preserved(text)
     except Exception:
+        return False
+'''
+
+HELPER = f'''
+_QY_033H_WARNED = False
+
+
+def _qy_033h_warn_once(exc):
+    global _QY_033H_WARNED
+    if not _QY_033H_WARNED:
+        _QY_033H_WARNED = True
+        logger.warning(
+            "PLAN-033h preserve policy unavailable (%s: %s); front matter, job titles and "
+            "reference sections will be sent for translation",
+            type(exc).__name__,
+            exc,
+        )
+
+
+def {MARKER}(text):
+    try:
+        from qyunslation.structure.babeldoc_policy import paragraph_is_preserved
+        return paragraph_is_preserved(text)
+    except Exception as exc:
+        _qy_033h_warn_once(exc)
         return False
 '''
 
@@ -49,7 +76,10 @@ def _once(text: str, needle: str, insert: str) -> tuple[str, bool]:
 
 def patch_il(text: str) -> tuple[str, bool]:
     changed = False
-    if HELPER.strip() not in text:
+    if OLD_HELPER.strip() in text:  # PLAN-080：把静默失败的旧 helper 升级为带告警的版本
+        text = text.replace(OLD_HELPER.strip(), HELPER.strip(), 1)
+        changed = True
+    elif HELPER.strip() not in text:
         anchor = "logger = logging.getLogger(__name__)"
         if anchor in text:
             text = text.replace(anchor, anchor + "\n" + HELPER, 1)

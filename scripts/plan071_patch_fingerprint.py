@@ -47,6 +47,7 @@ KNOWN_PATCHES: list[tuple[str, str, str, str]] = [
     ("047c", "apply-pdf2zh-047c-no-drop.py", "_QY_047C_NO_DROP", "babeldoc/format/pdf/document_il/backend/pdf_creater.py"),
     ("047d", "apply-pdf2zh-047d-para-layout.py", "_QY_047D_PARA_LAYOUT", ""),
     ("033h", "apply-pdf2zh-fidelity-033h.py", "_QY_033H_PRESERVE", ""),
+    ("033h-warn", "apply-pdf2zh-fidelity-033h.py", "_qy_033h_warn_once", "babeldoc/format/pdf/document_il/midend/il_translator_llm_only.py"),
     ("080c-fonts", "apply-pdf2zh-080c-fonts.py", "_QY_080C_FONT_POLICY", "babeldoc/format/pdf/document_il/utils/fontmap.py"),
     ("060-term-bridge", "apply-pdf2zh-060-termbase-workbench.py", "_qy_060_term_bridge_runtime", "pdf2zh_next/gui.py"),
     ("050-workbench", "apply-pdf2zh-050-workbench.py", "_qy_050_workbench_js", "pdf2zh_next/gui.py"),
