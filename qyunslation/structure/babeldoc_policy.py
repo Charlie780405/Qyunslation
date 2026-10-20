@@ -2,8 +2,15 @@
 """PLAN-033h：BabelDOC 送 LLM 前消费参考文献 PRESERVE 策略。"""
 from __future__ import annotations
 
+import re
+
+from .entity_preserve import is_job_title
 from .frontmatter import AFFILIATION, AUTHOR, classify_frontmatter_text
 from .references import is_reference_entry, is_reference_heading, is_section_break
+
+# PLAN-080a：[n] 形式在正文中几乎不出现，可以不等参考文献标题直接保留。
+# "n. xxx" 与 "n xxx" 形式在正文中很常见（如监管信函的编号问题），只能在参考文献区内保留。
+_BRACKET_ENTRY_RE = re.compile(r"^\s*\[\d+\]\s*\S")
 
 
 class ReferencePreserveGate:
@@ -60,9 +67,12 @@ def current_llm_spy() -> LlmRequestSpy | None:
 def paragraph_is_preserved(text: str | None) -> bool:
     blob = text or ""
     role = classify_frontmatter_text(blob).role
-    if role in {AUTHOR, AFFILIATION}:
+    if role in {AUTHOR, AFFILIATION} or is_job_title(blob):  # PLAN-080e：职务同样保留
         return True
-    if is_reference_heading(blob) or is_reference_entry(blob):
+    if _BRACKET_ENTRY_RE.match(blob) and not is_section_break(blob):
+        return True
+    # 编号段落只有在参考文献区内才是条目；否则会把正文的编号问题整段留成英文（PLAN-080a）。
+    if _GATE.in_references and is_reference_entry(blob) and not is_section_break(blob):
         return True
     return _GATE.should_preserve(blob)
 
@@ -72,7 +82,11 @@ def filter_paragraphs_for_llm(texts: list[str], *, spy: LlmRequestSpy | None = N
     recorder = spy or _SPY
     kept: list[str] = []
     for text in texts:
-        if classify_frontmatter_text(text).role in {AUTHOR, AFFILIATION} or gate.should_preserve(text):
+        if (
+            classify_frontmatter_text(text).role in {AUTHOR, AFFILIATION}
+            or is_job_title(text)
+            or gate.should_preserve(text)
+        ):
             continue
         kept.append(text)
         if recorder is not None:
@@ -84,6 +98,7 @@ def title_is_usable_context(text: str | None) -> bool:
     blob = text or ""
     return (
         classify_frontmatter_text(blob).role not in {AUTHOR, AFFILIATION}
+        and not is_job_title(blob)
         and not is_reference_heading(blob)
         and not is_reference_entry(blob)
     )

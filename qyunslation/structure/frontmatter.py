@@ -31,6 +31,22 @@ _AFFILIATION = re.compile(
     r"\blaborator(?:y|ies)(?=\s+(?:of|at|for)\b|[,;:]|$)",
     re.I,
 )
+# PLAN-080a：机构名标记（如 "Co., Ltd."、"Division of"）偶尔出现在长正文句中；
+# 超过此词数的段落不按署名/机构处理，交给翻译。
+_AFFILIATION_MAX_WORDS = 30
+# 机构行里很少出现的功能词；正文句几乎总有。动词表（_BODY_SENTENCE）漏掉的句子靠它兜底。
+_FUNCTION_WORDS = re.compile(
+    r"\b(?:the|this|that|these|those|to|by|with|their|its|our|your|from|which|who|whose|but|not|"
+    r"if|when|while|because|has|have|been|into|about|also|such)\b",
+    re.I,
+)
+_LONG_LINE_WORDS = 12
+
+
+def _looks_like_prose(value: str) -> bool:
+    """两个以上功能词，或超过 12 个词还有一个功能词（"Office of the Director" 这类短机构行不算）。"""
+    hits = len(_FUNCTION_WORDS.findall(value))
+    return hits >= 2 or (hits >= 1 and len(value.split()) > _LONG_LINE_WORDS)
 _BODY_SENTENCE = re.compile(
     r"\b(?:patient|patients|study|treatment|evaluated|received|reported|showed|"
     r"demonstrated|encouraged|encourages|recommend(?:ed|s)?|should|must|need(?:ed|s)?|"
@@ -59,18 +75,24 @@ def classify_frontmatter_text(text: str | None) -> FrontmatterClassification:
     value = " ".join((text or "").split()).strip()
     if not value:
         return FrontmatterClassification(BODY, False, False, 0.0, "empty")
-    prose = bool(_BODY_SENTENCE.search(value))
+    prose = bool(_BODY_SENTENCE.search(value)) or _looks_like_prose(value)
     affiliation = bool(_AFFILIATION.search(value))
-    if affiliation and not prose:
+    if affiliation and not prose and len(value.split()) <= _AFFILIATION_MAX_WORDS:
         return FrontmatterClassification(
             AFFILIATION, True, False, 0.95, "organization/address markers; preserve source"
         )
     names = _NAME.findall(value)
     degree = bool(_DEGREE.search(value))
+    # PLAN-080a：正文句里出现的邮箱或 "corresponding" 不是署名标记；ORCID 足够强，保留无条件判定。
     explicit_author = bool(
-        _CORRESPONDING.search(value)
-        or _ORCID.search(value)
-        or (_EMAIL.search(value) and (names or "author" in value.casefold()))
+        _ORCID.search(value)
+        or (
+            not prose
+            and (
+                _CORRESPONDING.search(value)
+                or (_EMAIL.search(value) and (names or "author" in value.casefold()))
+            )
+        )
     )
     signature = bool(_SIGNATURE.search(value))
     titled_name = bool(_PERSON_TITLE.search(value)) and len(names) >= 1 and not prose
