@@ -50,3 +50,4 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-10-20 | SK-Q009 增补 literature-rebuild.md（PLAN-082/083/083b/083c：R1–R8），并标注「文献不整区落笔」旧口径已被取代 |
 | 2026-10-20 | SK-Q007 增补角标、括号含字、QA 去零宽字符与低风险术语降噪；SK-Q011 router 指向 SK-Q012；新增 4 条错误签名（PLAN-083c） |
 | 2026-10-20 | SK-Q009 literature-rebuild.md 增补 R9 表内标点紧凑化与表头换行；SK-Q012 同步（PLAN-083c） |
+| 2026-10-20 | SK-Q012 QA 噪声表：INFO 提示（QA_INSPECTION_SUMMARY）不计入待处理、不阻塞（PLAN-083c） |

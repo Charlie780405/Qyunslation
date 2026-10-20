@@ -534,3 +534,26 @@ describe('QA todo panel', () => {
     wrapper.unmount();
   });
 });
+
+describe('QA todo panel: info records', () => {
+  const INFO = item({
+    id: 'inf1', severity: 'info', code: 'QA_INSPECTION_SUMMARY', rule_class: 'I', message: '确定性 QA 取证摘要',
+    title: '确定性 QA 取证摘要', why: '记录本轮检查的输入范围。', how: '无需处理。', allowed_dispositions: [],
+    evidence: { pages: 8 }, location: { anchors: [] },
+  });
+
+  it('keeps the inspection summary out of the to-do list and says it needs no action', async () => {
+    apiMock.getQaItems.mockResolvedValue({ items: [INFO] });
+    apiMock.getRun.mockResolvedValue({ ...RUN, pending_counts: { qa_blockers: 0, qa_unavailable: 0, unresolved_terms: 0 }, qa_summary: {}, formal_gate: { passed: true, reasons: [] } });
+    const { wrapper } = await mountPage();
+    const root = panel(wrapper);
+    expect(root.text()).toContain('0 项待处理');
+    expect(byText(root, '未处理').text()).toContain('（0）');
+    expect(byText(root, '已处理').text()).toContain('（0）');
+    expect(byText(root, '全部').text()).toContain('（1）');
+    await byText(root, '全部').trigger('click');
+    await pick(wrapper, 0);
+    expect(root.find('[data-qa-info-note]').text()).toContain('无需处理');
+    expect(root.find('[data-qa-no-remedy]').exists()).toBe(false);
+  });
+});

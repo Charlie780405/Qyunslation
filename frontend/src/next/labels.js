@@ -220,8 +220,11 @@ export function anchorText(anchor) {
 }
 
 // A finding still stands between the run and delivery unless a valid disposition closed it.
+// 提示（info）是检查记录（如「确定性 QA 取证摘要」），不影响交付：不计入待处理，只在「全部」里可查。
+export const isInfoItem = (item) => item.severity === 'info';
+
 export function isOpenItem(item) {
-  if (item.resolved) return false;
+  if (item.resolved || isInfoItem(item)) return false;
   return !['false_positive_confirmed', 'waived', 'acknowledged'].includes(item.status || 'open');
 }
 

@@ -139,9 +139,9 @@
           <p v-else>{{ selected.location?.unlocatable_reason || '检查没有返回具体位置' }}</p>
         </dd>
         <dt>为什么影响交付</dt>
-        <dd>{{ selected.why || selected.message }}</dd>
+        <dd>{{ selected.severity === 'info' ? '不影响交付，仅作审计记录。' : (selected.why || selected.message) }}</dd>
         <dt>怎么处理</dt>
-        <dd>{{ selected.how || '请联系管理员查看该检查项。' }}</dd>
+        <dd>{{ selected.severity === 'info' ? '无需处理。' : (selected.how || '请联系管理员查看该检查项。') }}</dd>
       </dl>
       <p v-if="selected.rule_class === 'C1'" class="qy-qa-critical-note">
         关键事实类问题不能直接放行：请修复后生成修订版；如果确认是检查规则误判，请反馈误报，由有确认权限的人（术语管理员、管理员、所有者）确认。
@@ -166,7 +166,10 @@
 
       <section class="qy-qa-remedies" data-qa-remedies aria-label="解决方案">
         <h4>怎么解决</h4>
-        <template v-if="remedies.length || infoRemedies.length">
+        <p v-if="selected.severity === 'info'" class="qy-muted" data-qa-info-note>
+          这是检查记录，不影响交付，无需处理。
+        </p>
+        <template v-else-if="remedies.length || infoRemedies.length">
           <p v-for="info in infoRemedies" :key="info.id" class="qy-remedy-info" data-remedy-info>
             <strong>{{ info.label }}</strong>
             <span>{{ info.why }}</span>
@@ -233,6 +236,7 @@ import {
   actionLabel,
   anchorText,
   can,
+  isInfoItem,
   isOpenItem,
   itemStatusLabel,
   lifecycleOf,
@@ -276,7 +280,7 @@ const locationSummary = (entry) => {
 
 const currentItems = computed(() => props.items.filter((entry) => entry.is_current !== false));
 const openItems = computed(() => currentItems.value.filter(isOpenItem));
-const closedItems = computed(() => currentItems.value.filter((entry) => !isOpenItem(entry)));
+const closedItems = computed(() => currentItems.value.filter((entry) => !isOpenItem(entry) && !isInfoItem(entry)));
 const filters = computed(() => [
   { key: 'open', label: '未处理', count: openItems.value.length },
   { key: 'closed', label: '已处理', count: closedItems.value.length },

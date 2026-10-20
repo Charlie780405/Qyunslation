@@ -61,7 +61,9 @@ description: >-
 | `TERM_TARGET_MISSING`（低风险词） | **默认不报**；`QYUNSLATION_QA_LOW_RISK_TERM_WARN=on` 才恢复 | `discontinuation→停药`、`pharmacokinetics→药代动力学` 常有等价译法，逐词报没有行动价值 |
 | `TERM_HIGH_RISK_CONFLICT` / 禁用译法 | **必须报**，阻断 | 药名、适应症、终点译错后果严重 |
 | `LITERAL_MISSING_EMAIL/IND`、剂量/频次 | 保持 | 事实性错误 |
-| `QA_INSPECTION_SUMMARY` | 保留（INFO，审计用） | 不要求处理 |
+| `QA_INSPECTION_SUMMARY` 及所有 INFO 提示 | 保留落库（审计、自动 QA 幂等依赖它），但**不计入「未处理」、不占待处理数、不当阻塞**；只在「全部」里可查，详情写「无需处理」 | 提示是检查记录，不是待办（`labels.js` `isOpenItem`/`isInfoItem`） |
+
+新增 INFO 级规则时：只在 `registry.py` 登记为 INFO，不要给它配处置动作；前端按 `severity==='info'` 自动排除出待办。
 
 新增/调整 QA 规则时：写明误报形态 → 加「真的丢了仍报」与「噪声不报」两个测试 → 需要时加环境开关而不是删规则。
 

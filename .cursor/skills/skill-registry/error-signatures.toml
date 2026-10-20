@@ -281,3 +281,10 @@ first_check = "QA 条目 evidence_json.missing 是否含 U+200B 或 https:// 之
 fix = "比对前去零宽字符；丢弃换行截断的前缀碎片（_whole_urls）"
 verify = "test_plan083c_qa_noise.py：零宽+换行不报，真丢仍报"
 
+[[signature]]
+id = "qa-info-counted-as-todo"
+pattern = "QA_INSPECTION_SUMMARY"
+symptom = "「确定性 QA 取证摘要」等提示出现在未处理列表，待处理数不为 0"
+first_check = "该条 severity 是否为 info；前端 labels.js isOpenItem 是否排除 info"
+fix = "info 不计入未处理/已处理，只在「全部」里；详情写「无需处理」；新增 INFO 规则不配处置动作"
+verify = "qaTodoPanel.test.js：keeps the inspection summary out of the to-do list"
