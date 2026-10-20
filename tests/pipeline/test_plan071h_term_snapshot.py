@@ -63,9 +63,13 @@ def test_snapshot_is_ready_hashed_and_consistent(session):
     assert again["content_hash"] == snap["content_hash"]
 
 
-def test_missing_normal_term_is_warning_and_present_is_clean(session):
+def test_missing_normal_term_is_warning_only_when_enabled(session, monkeypatch):
+    """PLAN-083c：低风险术语译名未出现默认不报（常为等价译法）；开关打开才是警告。"""
     _curated(session, "placebo", "安慰剂")
     snap = _snap(session)
+    monkeypatch.delenv("QYUNSLATION_QA_LOW_RISK_TERM_WARN", raising=False)
+    assert check_terms_in_translation(snap, "患者接受了赠剂。") == []
+    monkeypatch.setenv("QYUNSLATION_QA_LOW_RISK_TERM_WARN", "on")
     assert codes(check_terms_in_translation(snap, "患者接受了赠剂。")) == {"TERM_TARGET_MISSING": "warning"}
     assert check_terms_in_translation(snap, "患者接受了安慰剂。") == []
 

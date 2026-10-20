@@ -9,12 +9,16 @@ description: >-
   字母被拉开、遮盖、串行、NRS 拆行、缺底线、字体不统一、字体缺失、HPD 补全、
   PLAN-049g、PLAN-049h、PLAN-049i、PLAN-049j、表头重叠、字偏小、N=130、行距不等、丢末列、EASI、粘连、90.0111、
   剂量重复、表头没分开、伴ADA访视的EASI、Visit with ADA、折行表头、
-  第一列格线、格线不贯穿、表2格线不完整、SK-Q009。
+  第一列格线、格线不贯穿、表2格线不完整、SK-Q009、
+  PLAN-082、PLAN-083、PLAN-083b、PLAN-083c、行线重建、三线表重建、literature_rebuild、TABLE_DIGIT_DRIFT、
+  中度重度没翻译、括号里的英文、角标、kg/m2、浏览器里表格中文消失、字体未内嵌、统一字号。
 ---
 
 # 表格类翻译保真（SK-Q009）
 
 表格链总纲。监管表单特殊规则见 [SK-Q003](../pdf-regulatory-form-fidelity/SKILL.md)；本 skill 覆盖期刊三线表/无线表与 Hermes HPD 网格路径。
+
+> **PLAN-083 起文献表走「行线重建」**：成功才按格落笔，失败整表交回 BabelDOC。铁律 R1–R8 与验收见 [literature-rebuild.md](literature-rebuild.md)；下文凡写「文献默认不整区落笔 / 禁止文献整区 redact+paint」处以该文件为准。总入口见 [SK-Q012](../translation-playbook/SKILL.md)。
 
 ## 施工顺序
 
@@ -145,12 +149,12 @@ description: >-
 - 运行时 `page.find_tables()`（与 SK-Q003 一致）
 - 把 HPD 脚注 OCR 原文写入交付译文
 - 对 `geometry_center` 网格落笔
-- 文献整区 `redact_table_region` + `paint_fitted_blocks`
+- 文献整区 `redact_table_region` + `paint_fitted_blocks`（**PLAN-083 例外**：仅行线重建成功时允许，失败不得擦除；见 literature-rebuild.md）
 - 实样 PDF/截图入库（用 `QYUNSLATION_PLAN048_SAMPLE`）
 
 ## 降级阶梯
 
-0. **文献（RESEARCH/REVIEW）默认不整区落笔**（PLAN-049）——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**；**049j origin 形态剥 token、粘连切分**；**折行表头并格后每槽只写一次（规范末列=伴ADA访视的EASI）**
+0. **（PLAN-049 旧口径，已被 PLAN-083 行线重建取代，见 literature-rebuild.md）文献（RESEARCH/REVIEW）默认不整区落笔**——BabelDOC 段流保留；窄矮表仅字号归一；**049e 只按列挪位**；**049f 西文半角 + 原文行 y**；**049g HPD 列 + Noto + 三线**；**049h 表头按格写、格内换行不缩字**；**049i 表头 N= 回写、仅溢出拆行、矮窄 not_a_table 仍对行、七列强制 EASI**；**049j origin 形态剥 token、粘连切分**；**折行表头并格后每槽只写一次（规范末列=伴ADA访视的EASI）**
 1. 监管表单：HPD 网格 + 三闸门过 → 落笔 `.tbltr`
 2. `NOT_A_TABLE` → 大图交图片链；**表2 量级矮窄框仍列居中对行**（049i）
 3. 闸门未过 / `geometry_center` → 不落笔，字号归一

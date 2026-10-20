@@ -25,6 +25,8 @@ SKILL_DIRS = {
     "SK-Q007": "translation-content-integrity",
     "SK-Q008": "translation-pitfall-capture",
     "SK-Q009": "table-translation-fidelity",
+    "SK-Q011": "translation-quality-evolution",
+    "SK-Q012": "translation-playbook",
 }
 
 

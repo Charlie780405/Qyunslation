@@ -10,7 +10,8 @@ from .protect import protect_tokens
 
 _PRESERVE_CELL = re.compile(
     r"^(?:"
-    r"[-+±]?\d+(?:\.\d+)?(?:%|(?:\s*\([^)]*\))?)?"
+    # 括号内只允许数值/符号：「46.1 (18.3)」是数据，「3 (Moderate)」「12 (SD 3.4)」含文字，必须翻译
+    r"[-+±]?\d+(?:\.\d+)?(?:%|(?:\s*\([\d\s.,;:%–—\-+±/≥≤<>=]*\))?)?"
     r"|n\s*=\s*\d+"
     r"|\(\d+(?:[.,]\d+)?%?\)"
     r"|\d+/\d+"
@@ -74,9 +75,20 @@ def classify_cell_policy(text: str) -> TranslationPolicy:
 
 
 def extract_digit_tokens(text: str) -> list[str]:
-    # 「n = 30」与「n\u2009=\u200930」、「（12）」与「(12)」是同一数字
-    norm = (text or "").translate(_FULLWIDTH_PARENS)
+    # 「n = 30」与「n\u2009=\u200930」、「（12）」与「(12)」、「m2」与「m²」是同一数字
+    norm = (text or "").translate(_FULLWIDTH_PARENS).translate(_SUPERSCRIPT_DIGITS)
     return [re.sub(r"\s+", "", tok) for tok in _DIGIT_TOKEN.findall(norm)]
+
+
+_SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+# 面积/体积单位的角标：kg/m2 → kg/m²。只认小写长度单位，避免误伤 M2 巨噬细胞、IL-2 等。
+_UNIT_EXPONENT = re.compile(r"(?<![A-Za-z0-9])((?:[kcmμµ]?m))([23])(?![A-Za-z0-9.\-])")
+_EXPONENT_SUP = {"2": "²", "3": "³"}
+
+
+def restore_unit_superscripts(text: str) -> str:
+    """文本层把角标压平成普通数字（m2）；单位后的 2/3 还原为 ² ³。"""
+    return _UNIT_EXPONENT.sub(lambda m: m.group(1) + _EXPONENT_SUP[m.group(2)], text or "")
 
 
 _FULLWIDTH_PARENS = str.maketrans({"（": "(", "）": ")", "％": "%", "＝": "="})

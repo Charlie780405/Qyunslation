@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -12,6 +14,8 @@ from qyunslation.glossary.candidate_rules import classify_risk_by_rules
 from qyunslation.glossary.term_policy import compile_term_policy
 from qyunslation.glossary.termbase import resolve_runtime_terms, runtime_termbase_version
 from qyunslation.pipeline.qa.engine import QaFinding
+
+logger = logging.getLogger(__name__)
 
 SNAPSHOT_SCHEMA = "071h-term-snapshot-v1"
 MAX_TERMS = 300
@@ -97,6 +101,12 @@ def build_term_snapshot(
     return snapshot
 
 
+def low_risk_term_warn() -> bool:
+    """``QYUNSLATION_QA_LOW_RISK_TERM_WARN=on`` 恢复低风险术语“译名未出现”警告（默认关闭）。"""
+    raw = (os.environ.get("QYUNSLATION_QA_LOW_RISK_TERM_WARN") or "").strip().casefold()
+    return raw in {"1", "on", "true", "yes"}
+
+
 def snapshot_is_consistent(snapshot: dict[str, Any] | None) -> bool:
     if not snapshot or snapshot.get("status") != "ready":
         return False
@@ -162,6 +172,11 @@ def check_terms_in_translation(
                     )
                 )
         if target and target.casefold() not in folded:
+            if not high and not low_risk_term_warn():
+                # 低风险通用词（discontinuation→停药、pharmacokinetics→药代动力学）常有等价译法，
+                # 逐词报“未出现”是噪声；药名/适应症等高风险词仍严格检查。
+                logger.info("low-risk term target not literal, not reported: %s -> %s", term["source_term"], target)
+                continue
             findings.append(
                 QaFinding(
                     category="terminology",

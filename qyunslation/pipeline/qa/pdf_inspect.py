@@ -52,8 +52,16 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+# PDF 文本层常在网址的点、斜杠后塞零宽空格（便于折行），肉眼不可见但字符串不相等。
+_INVISIBLE_RE = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u00ad]")
+
+
+def _strip_invisible(text: str) -> str:
+    return _INVISIBLE_RE.sub("", text or "")
+
+
 def _compact(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
+    return re.sub(r"\s+", "", _strip_invisible(text))
 
 
 _LITERAL_PATTERNS: dict[str, tuple[re.Pattern[str], Any]] = {
@@ -68,7 +76,7 @@ _LITERAL_PATTERNS: dict[str, tuple[re.Pattern[str], Any]] = {
 def iter_literal_matches(text: str, kind: str):
     """Yield (normalised value, (start, end)) for every protected literal of ``kind``."""
     pattern, normalise = _LITERAL_PATTERNS[kind]
-    for match in pattern.finditer(text or ""):
+    for match in pattern.finditer(_strip_invisible(text)):
         yield normalise(match.group(0)), match.span()
 
 
@@ -83,10 +91,11 @@ def _literal_anchors(
     wanted = set(missing)
     anchors: list[dict[str, Any]] = []
     for segment in segments:
+        clean = _strip_invisible(segment.text)
         for value, (start, end) in iter_literal_matches(segment.text, kind):
             if value in wanted:
                 anchors.append(
-                    locate.anchor("source", segment, value, locate.excerpt(segment.text, start, end))
+                    locate.anchor("source", segment, value, locate.excerpt(clean, start, end))
                 )
                 wanted.discard(value)  # one place per value is enough to go and look
         if len(anchors) >= locate.MAX_ANCHORS or not wanted:
@@ -151,13 +160,25 @@ def _freq_present(value: str, translated_text: str) -> bool:
     return any(re.search(pattern, compact) for pattern in _FREQ_PATTERNS.get(value.upper(), ()))
 
 
+def _whole_urls(values: set[str]) -> set[str]:
+    """丢掉被换行截断的网址碎片（https://、https://doi、另一条网址的前缀）。
+
+    PDF 里一条网址常断成多行，逐行匹配会得到一堆前缀；它们不是独立网址，
+    译文里只要完整网址在就不该报缺失。
+    """
+    hosted = {v for v in values if re.match(r"https?://[^/\s]+\.[A-Za-z]{2,}", v)}
+    return {v for v in hosted if not any(o != v and o.startswith(v) for o in hosted)}
+
+
 def check_protected_literals(
     source_text: str, translated_text: str, *, source_pages: list[str] | None = None
 ) -> list[QaFinding]:
     findings: list[QaFinding] = []
     translated_compact = _compact(translated_text).lower()
-    translated_ind = re.sub(r"[\s-]", "", translated_text).upper()
+    translated_ind = re.sub(r"[\s-]", "", _strip_invisible(translated_text)).upper()
     for kind, values in extract_protected_literals(source_text).items():
+        if kind == "url":
+            values = _whole_urls(values)
         missing = []
         for value in sorted(values):
             if kind == "ind":

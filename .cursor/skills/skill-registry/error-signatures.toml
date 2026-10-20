@@ -243,3 +243,41 @@ symptom = "文献 PDF 的参考文献被翻译或改写（尤其双栏版面的�
 first_check = "plan080_trace_run.py 加 QYUNSLATION_PLAN080_TRACE_GATE=1，看保留谓词被调用的顺序与全局状态翻转次数"
 fix = "BabelDOC 的段落顺序是版面分析顺序而不是阅读顺序，依赖顺序的状态机不可靠；单条引文看开头（is_citation_entry），合并成长段落的多条引文看密度（is_citation_block），都不依赖状态"
 verify = "QYUNSLATION_LAYOUT_QA=on 重检后 REFERENCE_ENTRIES_CHANGED 消失；正文中的普通引用（作者, 年份）不被保留"
+
+# PLAN-083c：文献表重建与 QA 噪声
+[[signature]]
+id = "SIG-TABLE-DIGIT-DRIFT"
+skill = "SK-Q009"
+pattern = "TABLE_DIGIT_DRIFT"
+symptom = "整表交回 BabelDOC；表头被列居中改成别的药名"
+first_check = "assert_digit_tokens_preserved 的源/译 token；细空格、全角括号、上标数字"
+fix = "extract_digit_tokens 归一；单格漂移 drift_fallback_source 保留该格原文"
+verify = "真实 LLM 缓存离线重跑：literature_rebuild_painted"
+
+[[signature]]
+id = "SIG-TABLE-WRITEBACK-FAILED"
+skill = "SK-Q009"
+pattern = "table writeback failed"
+symptom = "表格没按格落笔，只剩 BabelDOC 原样"
+first_check = "output_evidence.reason_code 与 checks.error"
+fix = "按原因码修；失败必须整表交回，不叠加归一/居中"
+verify = "evidence 为 literature_rebuild_painted 或带原因的 left_babeldoc"
+
+[[signature]]
+id = "SIG-FONT-NOT-EMBEDDED"
+skill = "SK-Q009"
+pattern = "table font subset skipped|need font file or buffer"
+symptom = "浏览器里表格中文消失，只剩英文/数字（pymupdf 看正常）"
+first_check = "page.get_fonts() 是否有 Song/china-ss/Helvetica（n/a）；fonttools 是否安装"
+fix = "prepare_embedded_font + _page_font 内嵌 Noto Sans SC 子集；字体表以页面为准，不按 id 缓存"
+verify = "输出无 Song；get_text 可提取中文；单文件增量 <1MB"
+
+[[signature]]
+id = "SIG-QA-URL-ZWSP"
+skill = "SK-Q007"
+pattern = "LITERAL_MISSING_URL"
+symptom = "原文网址在译文中缺失警告，但译文里网址其实在"
+first_check = "QA 条目 evidence_json.missing 是否含 U+200B 或 https:// 之类碎片"
+fix = "比对前去零宽字符；丢弃换行截断的前缀碎片（_whole_urls）"
+verify = "test_plan083c_qa_noise.py：零宽+换行不报，真丢仍报"
+

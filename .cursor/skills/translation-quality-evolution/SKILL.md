@@ -3,7 +3,7 @@ name: translation-quality-evolution
 description: >-
   全局翻译质量自进化总纲：裁决反哺规则、领域准确度台账、症状路由到分域 skill。
   触发：规则进化、term-exclusions、台账、SCREEN_BLIND、候选突然很少、already patched、
-  PLAN-063、SK-Q011、promote 规则。
+  PLAN-063、SK-Q011、promote 规则、翻译总入口、SK-Q012。
 ---
 
 # 翻译质量自进化总纲（SK-Q011）
@@ -25,8 +25,11 @@ description: >-
 | 改了没效果 / 依然如故 | SK-Q004 |
 | 补丁 already patched 但行为是旧的 | SK-Q004 + 本 skill 标记清单 |
 | 译文段落丢 / 摘要碎片 | SK-Q005、SK-Q007 |
+| 表格中文没了 / 中度重度没翻 / 角标 / 译文警告没意义 / 进度条不动 | SK-Q012（总入口）→ SK-Q009 / SK-Q007 |
 | 术语链（候选污染、两列空、保存被顶掉） | 本 skill |
 | 候选突然很少 / 缩写一个都没进待确认 | 本 skill 的 screen 盲区 |
+
+> 任何翻译任务先过 [SK-Q012 translation-playbook](../translation-playbook/SKILL.md)（预检/验收清单、QA 判定准则、近期计划汇总）。
 
 ## 每轮固定动作
 

@@ -15,6 +15,7 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | SK-Q009 | table-translation-fidelity | active | 本仓 | pitfalls.md |
 | SK-Q010 | qyunslation-ui-ux | active | 本仓 | （规范，无独立 pitfalls） |
 | SK-Q011 | translation-quality-evolution | active | 本仓 | pitfalls.md |
+| SK-Q012 | translation-playbook | active | 本仓 | plan-quality-digest.md |
 
 ## 审计
 
@@ -45,3 +46,6 @@ SK-ID 前缀 `SK-Q`（避免与 qyunsgen `SK-A/B/C/D/E/F/G` 冲突）。
 | 2026-09-15 | 补登 SK-Q010；登记 SK-Q011（PLAN-063） |
 | 2026-10-20 | SK-Q003 增补装饰线随文/字体统一/人名职务保留；SK-Q005 增补保留谓词静默跳过；SK-Q007 修正 Fallback 计数盲区（PLAN-080） |
 | 2026-10-20 | SK-Q005 增补段落顺序与全局状态机（pitfalls 7–8、铁律 9）；SK-Q003 增补参考文献按形状保留、Office 保留、字体策略目标语言（PLAN-080 第二轮补缺） |
+| 2026-10-20 | 登记 SK-Q012 translation-playbook（翻译总入口：预检/验收清单、症状路由、QA 警告判定准则、PLAN-071→083c 质量改进汇总） |
+| 2026-10-20 | SK-Q009 增补 literature-rebuild.md（PLAN-082/083/083b/083c：R1–R8），并标注「文献不整区落笔」旧口径已被取代 |
+| 2026-10-20 | SK-Q007 增补角标、括号含字、QA 去零宽字符与低风险术语降噪；SK-Q011 router 指向 SK-Q012；新增 4 条错误签名（PLAN-083c） |

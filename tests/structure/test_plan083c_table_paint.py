@@ -124,3 +124,28 @@ def test_painted_cjk_is_embedded_subset_not_base14(tmp_path):
     assert fonts and all(f[3] != "Song" for f in fonts)
     assert out.stat().st_size < 400_000
     assert "任何不良事件" in pymupdf.open(out)[0].get_text()
+
+
+def test_parenthesised_words_are_not_numeric_cells():
+    """「3 (Moderate)」「12 (SD 3.4)」含文字必须翻译；「46.1 (18.3)」才是数据。"""
+    from qyunslation.structure.table_cell_policy import is_preserve_cell
+
+    for text in ("3 (Moderate)", "4 (Severe)", "12 (SD 3.4)"):
+        assert not is_preserve_cell(text), text
+    for text in ("46.1 (18.3)", "17 (56.7)", "8 (26.7%)", "1 (≥ 5%)"):
+        assert is_preserve_cell(text), text
+
+
+def test_unit_superscripts_restored_without_false_positives():
+    from qyunslation.structure.table_cell_policy import (
+        digit_tokens_preserved,
+        restore_unit_superscripts,
+    )
+
+    assert restore_unit_superscripts("BMI，kg/m2") == "BMI，kg/m²"
+    assert restore_unit_superscripts("25 mg/m2") == "25 mg/m²"
+    assert restore_unit_superscripts("10 mm3") == "10 mm³"
+    for untouched in ("IL-2", "M2 macrophage", "EASI-75", "COVID-19"):
+        assert restore_unit_superscripts(untouched) == untouched
+    # 译文把 m2 写成 m² 不算数字漂移
+    assert digit_tokens_preserved("BMI, kg/m2", "BMI，kg/m²")

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .models import TranslationPolicy, TranslatableBlock, DEFERRED_TRANSLATION_POLICIES
 from .protect import missing_protected_tokens, protect_tokens, restore_tokens
-from .table_cell_policy import assert_digit_tokens_preserved
+from .table_cell_policy import assert_digit_tokens_preserved, restore_unit_superscripts
 
 _LIST_PREFIX = re.compile(r"^(\d+\s*[.、．)]\s*)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -223,7 +223,7 @@ def translate_table_blocks(
             raise TableTranslateError(
                 f"TABLE_TOKEN_DRIFT:{block.block_id}:{missing_tokens}"
             )
-        out[block.block_id] = text
+        out[block.block_id] = restore_unit_superscripts(text)
     return out
 
 
