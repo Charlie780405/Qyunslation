@@ -728,6 +728,154 @@ class ConceptForbidden(Base):
     concept: Mapped[Concept] = relationship(back_populates="forbiddens")
 
 
+# --- PLAN-086：术语库、风格指南、错法表的版本化资产 ---
+
+
+class LanguageAssetRelease(Base):
+    """不可变的语言资产发布快照。
+
+    Authoring records remain editable in their own tables; a release is the only
+    representation allowed into a translation run snapshot.
+    """
+
+    __tablename__ = "language_asset_release"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "project_id", "asset_type", "scope", "version",
+            name="uq_language_asset_release_version",
+        ),
+        Index("ix_language_asset_release_lookup", "tenant_id", "project_id", "asset_type", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=True
+    )
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=True
+    )
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="tenant")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    src_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
+    tgt_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="zh")
+    document_profile: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    license: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    provenance: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    published_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), nullable=False, default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    items: Mapped[list["LanguageAssetReleaseItem"]] = relationship(
+        back_populates="release", cascade="all, delete-orphan", order_by="LanguageAssetReleaseItem.sort_order"
+    )
+
+
+class LanguageAssetReleaseItem(Base):
+    __tablename__ = "language_asset_release_item"
+    __table_args__ = (
+        UniqueConstraint("release_id", "item_key", name="uq_language_asset_release_item"),
+        Index("ix_language_asset_release_item_release", "release_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    release_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("language_asset_release.id", ondelete="CASCADE"), nullable=False
+    )
+    item_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    release: Mapped[LanguageAssetRelease] = relationship(back_populates="items")
+
+
+class LanguageAssetImportBatch(Base):
+    __tablename__ = "language_asset_import_batch"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_sha256", "asset_type", name="uq_language_asset_import_digest"),
+        Index("ix_language_asset_import_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_sub: Mapped[str] = mapped_column(String(256), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    filename: Mapped[str] = mapped_column(String(256), nullable=False, default="import.txt")
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    license: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    provenance: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="tenant")
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="previewed")
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    preview_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    release_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    error_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StyleProfile(Base):
+    __tablename__ = "style_profile"
+    __table_args__ = (Index("ix_style_profile_scope", "tenant_id", "project_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    src_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
+    tgt_lang: Mapped[str] = mapped_column(String(16), nullable=False, default="zh")
+    document_profile: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="tenant")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    rules: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    release_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class QualityRuleDefinition(Base):
+    __tablename__ = "quality_rule_definition"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_quality_rule_tenant_code"),
+        Index("ix_quality_rule_scope_status", "tenant_id", "scope", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=True)
+    code: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    detector: Mapped[str] = mapped_column(String(32), nullable=False, default="deterministic")
+    severity: Mapped[str] = mapped_column(String(32), nullable=False, default="warning")
+    remediation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    false_positive: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="tenant")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    release_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
 class TmUnit(Base):
     """批准驱动的翻译记忆句段（与 concept 分表）。"""
 

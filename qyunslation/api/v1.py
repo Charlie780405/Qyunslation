@@ -52,6 +52,10 @@ from qyunslation.persist.models import (
     TranslationRunRecord,
     UploadSession,
     WebPreference,
+    LanguageAssetRelease,
+    LanguageAssetImportBatch,
+    StyleProfile,
+    QualityRuleDefinition,
 )
 from qyunslation.core.schemas import AutoWorkflowParams
 from qyunslation.structure.ingest import DEFAULT_MAX_UPLOAD_BYTES
@@ -1972,6 +1976,18 @@ def _run_qa_pass(
         translated_text_sample=None,
         logo_present=None,
     )
+    if facts and facts.get("translated") is not None:
+        try:
+            from qyunslation.language_assets import check_pitfall_rules
+
+            findings.extend(
+                check_pitfall_rules(
+                    (run.settings_snapshot or {}).get("language_assets"),
+                    facts["translated"].text,
+                )
+            )
+        except Exception:
+            logger.warning("plan086 pitfall rules unavailable for run %s", run.id, exc_info=True)
     findings.extend(inspected)
     if _artifact_digest(runner_state) != digest_before:
         # The output was replaced while we were checking it (e.g. a resume): do not store a
@@ -3467,6 +3483,25 @@ async def create_translation_run(
         termbase_version=termbase_version,
         pipeline=resolve_pipeline_mode(getattr(tenant, "slug", None)),
     )
+    # PLAN-086: freeze the selected language assets with the run.  The compiler
+    # only returns bounded, relevant release items; the complete authoring
+    # records remain server-side and later edits cannot alter this run.
+    try:
+        from qyunslation.language_assets import build_language_asset_bundle, render_prompt_asset_block
+
+        language_asset_snapshot = build_language_asset_bundle(
+            session,
+            tenant_id=tenant.id,
+            project_id=None,
+            src_lang=source_language,
+            tgt_lang=target_language,
+            document_profile=body.profile,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "ASSET_SNAPSHOT_UNAVAILABLE", "message": "语言资产快照生成失败"},
+        ) from exc
     prompt_snapshot: dict[str, Any] | None = None
     ad_prompt_text: str | None = None
     if domain_profile == "ad":
@@ -3479,6 +3514,7 @@ async def create_translation_run(
                     "direction": direction,
                     "profile": body.profile,
                     "target_language": target_language,
+                    "language_assets": language_asset_snapshot,
                 },
                 termbase_version=termbase_version,
                 model_profile_id=model_profile_id,
@@ -3522,6 +3558,8 @@ async def create_translation_run(
             "document_classification": classification,
             "model_profile_id": model_profile_id,
             "term_model_profile_id": term_profile_id,
+            "language_assets": language_asset_snapshot,
+            "language_asset_prompt": render_prompt_asset_block(language_asset_snapshot),
             **mode_snapshot,
         },
         status="queued",
@@ -6618,6 +6656,59 @@ class ConceptCreate(BaseModel):
     term_type: str = Field(default="general", max_length=64)
 
 
+class LanguageAssetImportPreviewBody(BaseModel):
+    asset_type: str = Field(min_length=1, max_length=32)
+    filename: str = Field(default="import.csv", min_length=1, max_length=256)
+    content: str = Field(min_length=1, max_length=10 * 1024 * 1024)
+    license: str | None = Field(default=None, max_length=256)
+    provenance: str | None = Field(default=None, max_length=512)
+    scope: str = Field(default="tenant", max_length=32)
+    project_id: str | None = Field(default=None, max_length=36)
+    src_lang: str = Field(default="en", max_length=16)
+    tgt_lang: str = Field(default="zh", max_length=16)
+    document_profile: str | None = Field(default=None, max_length=128)
+    name: str = Field(default="", max_length=256)
+
+
+class StyleProfileCreateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
+    src_lang: str = Field(default="en", max_length=16)
+    tgt_lang: str = Field(default="zh", max_length=16)
+    document_profile: str | None = Field(default=None, max_length=128)
+    scope: str = Field(default="tenant", max_length=32)
+    project_id: str | None = Field(default=None, max_length=36)
+    rules: list[dict[str, Any]] = Field(default_factory=list, max_length=2000)
+
+
+class StyleProfilePatchBody(BaseModel):
+    name: str | None = Field(default=None, max_length=256)
+    document_profile: str | None = Field(default=None, max_length=128)
+    rules: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
+
+
+class QualityRuleCreateBody(BaseModel):
+    code: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=256)
+    trigger: str = Field(default="", max_length=20000)
+    detector: str = Field(default="deterministic", max_length=32)
+    severity: str = Field(default="warning", max_length=32)
+    remediation: str = Field(default="", max_length=20000)
+    false_positive: str | None = Field(default=None, max_length=20000)
+    evidence: str | None = Field(default=None, max_length=20000)
+    scope: str = Field(default="tenant", max_length=32)
+    project_id: str | None = Field(default=None, max_length=36)
+
+
+class QualityRulePatchBody(BaseModel):
+    name: str | None = Field(default=None, max_length=256)
+    trigger: str | None = Field(default=None, max_length=20000)
+    detector: str | None = Field(default=None, max_length=32)
+    severity: str | None = Field(default=None, max_length=32)
+    remediation: str | None = Field(default=None, max_length=20000)
+    false_positive: str | None = Field(default=None, max_length=20000)
+    evidence: str | None = Field(default=None, max_length=20000)
+
+
 @router.get("/concepts")
 def list_concepts_api(
     status: str | None = None,
@@ -6745,6 +6836,364 @@ def _term_admin_membership(session: Session, *, tenant_id: str, user_sub: str):
     return membership, membership.role in {"term_admin", "admin", "owner"}
 
 
+def _asset_admin(session: Session, identity: IdentityContext, tenant_id: str) -> None:
+    # Resolve provider role into the local membership before checking.  Calling
+    # ensure_membership with its default role would silently turn a Dev/OIDC
+    # term_admin header into a member on first use.
+    role = _effective_role(session, identity)
+    if role not in {"term_admin", "admin", "owner"}:
+        raise HTTPException(status_code=403, detail={"code": "ASSET_ADMIN_REQUIRED", "message": "term_admin role required"})
+
+
+def _asset_project(session: Session, *, tenant_id: str, project_id: str | None) -> str | None:
+    if not project_id:
+        return None
+    if repo.get_project(session, project_id=project_id, tenant_id=tenant_id) is None:
+        raise HTTPException(status_code=404, detail={"code": "PROJECT_NOT_FOUND", "message": "project not found"})
+    return project_id
+
+
+def _asset_error(exc: Exception) -> HTTPException:
+    from qyunslation.language_assets import AssetValidationError
+
+    if isinstance(exc, AssetValidationError):
+        status = 409 if exc.code in {"ASSET_SCOPE_CONFLICT", "ASSET_IMPORT_DUPLICATE"} else 422
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc), "details": exc.details})
+    return HTTPException(status_code=500, detail={"code": "ASSET_INTERNAL_ERROR", "message": "language asset operation failed"})
+
+
+def _release_visible(release: LanguageAssetRelease, tenant_id: str, project_id: str | None = None) -> bool:
+    return (
+        release.tenant_id in {None, tenant_id}
+        and release.status in {"draft", "published"}
+        and (project_id is None or release.project_id in {None, project_id})
+    )
+
+
+@router.get("/language-assets/releases")
+def list_language_asset_releases_api(
+    asset_type: str | None = Query(default=None, max_length=32),
+    project_id: str | None = Query(default=None, max_length=36),
+    status: str | None = Query(default=None, max_length=32),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    from qyunslation.language_assets import normalize_asset_type, release_dict
+
+    if asset_type:
+        try:
+            asset_type = normalize_asset_type(asset_type)
+        except ValueError as exc:
+            raise _asset_error(exc) from exc
+    stmt = select(LanguageAssetRelease).where(
+        or_(LanguageAssetRelease.tenant_id.is_(None), LanguageAssetRelease.tenant_id == tenant.id),
+        or_(LanguageAssetRelease.project_id.is_(None), LanguageAssetRelease.project_id == project_id),
+    )
+    if asset_type:
+        stmt = stmt.where(LanguageAssetRelease.asset_type == asset_type)
+    if status:
+        stmt = stmt.where(LanguageAssetRelease.status == status)
+    rows = session.scalars(stmt.options(selectinload(LanguageAssetRelease.items)).order_by(LanguageAssetRelease.created_at.desc())).unique().all()
+    return {"items": [release_dict(row, include_items=False) for row in rows], "count": len(rows)}
+
+
+@router.get("/language-assets/releases/{release_id}")
+def get_language_asset_release_api(
+    release_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    from qyunslation.language_assets import release_dict
+
+    release = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.id == release_id))
+    if release is None or not _release_visible(release, tenant.id):
+        raise HTTPException(status_code=404, detail={"code": "ASSET_RELEASE_NOT_FOUND", "message": "release not found"})
+    return release_dict(release)
+
+
+@router.get("/language-assets/releases/{release_id}/diff")
+def diff_language_asset_release_api(
+    release_id: str,
+    against: str | None = Query(default=None, max_length=36),
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    release = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.id == release_id))
+    if release is None or not _release_visible(release, tenant.id):
+        raise HTTPException(status_code=404, detail={"code": "ASSET_RELEASE_NOT_FOUND", "message": "release not found"})
+    if against:
+        previous = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.id == against))
+    else:
+        previous = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.tenant_id == release.tenant_id, LanguageAssetRelease.project_id == release.project_id, LanguageAssetRelease.asset_type == release.asset_type, LanguageAssetRelease.scope == release.scope, LanguageAssetRelease.version < release.version).order_by(LanguageAssetRelease.version.desc()).limit(1))
+    before = {item.item_key: item.payload for item in (previous.items if previous else [])}
+    after = {item.item_key: item.payload for item in release.items}
+    return {"release_id": release.id, "against": previous.id if previous else None, "added": [key for key in after if key not in before], "removed": [key for key in before if key not in after], "changed": [key for key in after if key in before and after[key] != before[key]]}
+
+
+@router.post("/language-assets/imports/preview")
+def preview_language_asset_import_api(
+    body: LanguageAssetImportPreviewBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    _asset_project(session, tenant_id=tenant.id, project_id=body.project_id)
+    from qyunslation.language_assets import preview_import
+
+    try:
+        preview = preview_import(asset_type=body.asset_type, content=body.content, filename=body.filename, license=body.license, provenance=body.provenance, scope=body.scope)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    source_sha256 = hashlib.sha256(body.content.encode("utf-8")).hexdigest()
+    existing = session.scalar(select(LanguageAssetImportBatch).where(LanguageAssetImportBatch.tenant_id == tenant.id, LanguageAssetImportBatch.source_sha256 == source_sha256, LanguageAssetImportBatch.asset_type == body.asset_type.strip().casefold()))
+    if existing is not None:
+        return {"batch_id": existing.id, "status": existing.status, "row_count": existing.row_count, "content_hash": existing.preview_json.get("content_hash"), "duplicate": True}
+    batch = LanguageAssetImportBatch(tenant_id=tenant.id, actor_sub=identity.user_sub, asset_type=body.asset_type.strip().casefold(), filename=body.filename, source_sha256=source_sha256, license=body.license, provenance=body.provenance, scope=body.scope.strip().casefold(), project_id=body.project_id, status="previewed", row_count=preview["row_count"], preview_json=preview, raw_content=body.content)
+    session.add(batch)
+    session.flush()
+    record_audit(session, actor_sub=identity.user_sub, action="language_asset.import.preview", source_sha256=source_sha256, extra={"batch_id": batch.id, "asset_type": batch.asset_type, "row_count": batch.row_count})
+    return {"batch_id": batch.id, "status": batch.status, "row_count": batch.row_count, "content_hash": preview["content_hash"], "rows": preview["rows"], "duplicate": False}
+
+
+@router.post("/language-assets/imports/{batch_id}/apply")
+def apply_language_asset_import_api(
+    batch_id: str,
+    response: Response,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import create_release, release_dict
+
+    batch = session.scalar(select(LanguageAssetImportBatch).where(LanguageAssetImportBatch.id == batch_id, LanguageAssetImportBatch.tenant_id == tenant.id))
+    if batch is None:
+        raise HTTPException(status_code=404, detail={"code": "ASSET_IMPORT_NOT_FOUND", "message": "import batch not found"})
+    if batch.release_id:
+        release = session.get(LanguageAssetRelease, batch.release_id)
+        return {"release": release_dict(release, include_items=True), "idempotent": True}
+    try:
+        preview = batch.preview_json or {}
+        release = create_release(session, tenant_id=tenant.id, project_id=batch.project_id, actor_sub=identity.user_sub, asset_type=batch.asset_type, rows=preview.get("rows") or [], scope=batch.scope, license=batch.license, provenance=batch.provenance, source_sha256=batch.source_sha256)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    batch.release_id = release.id
+    batch.status = "applied"
+    batch.applied_at = datetime.now(timezone.utc)
+    batch.raw_content = None
+    response.status_code = 201
+    record_audit(session, actor_sub=identity.user_sub, action="language_asset.import.apply", source_sha256=batch.source_sha256, extra={"batch_id": batch.id, "release_id": release.id})
+    return {"release": release_dict(release, include_items=True), "idempotent": False}
+
+
+@router.post("/language-assets/releases/{release_id}/publish")
+def publish_language_asset_release_api(
+    release_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import publish_release, release_dict
+
+    release = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.id == release_id, LanguageAssetRelease.tenant_id == tenant.id))
+    if release is None:
+        raise HTTPException(status_code=404, detail={"code": "ASSET_RELEASE_NOT_FOUND", "message": "release not found"})
+    try:
+        publish_release(session, release, actor_sub=identity.user_sub)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    record_audit(session, actor_sub=identity.user_sub, action="language_asset.release.publish", extra={"release_id": release.id, "asset_type": release.asset_type, "version": release.version})
+    return {"release": release_dict(release, include_items=True)}
+
+
+@router.post("/language-assets/releases/{release_id}/rollback")
+def rollback_language_asset_release_api(
+    release_id: str,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a new published release from an older approved release.
+
+    Existing releases are never mutated; rollback is therefore reproducible in
+    run snapshots and remains visible in the audit trail.
+    """
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import create_release, publish_release, release_dict
+
+    source = session.scalar(select(LanguageAssetRelease).options(selectinload(LanguageAssetRelease.items)).where(LanguageAssetRelease.id == release_id, LanguageAssetRelease.tenant_id == tenant.id, LanguageAssetRelease.status == "published"))
+    if source is None:
+        raise HTTPException(status_code=404, detail={"code": "ASSET_RELEASE_NOT_FOUND", "message": "published release not found"})
+    try:
+        clone = create_release(
+            session,
+            tenant_id=source.tenant_id,
+            project_id=source.project_id,
+            actor_sub=identity.user_sub,
+            asset_type=source.asset_type,
+            rows=[item.payload for item in source.items],
+            scope=source.scope,
+            src_lang=source.src_lang,
+            tgt_lang=source.tgt_lang,
+            document_profile=source.document_profile,
+            name=f"rollback:{source.name}",
+            license=source.license,
+            provenance=f"rollback:{source.id}",
+            source_sha256=source.source_sha256,
+        )
+        publish_release(session, clone, actor_sub=identity.user_sub)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    record_audit(session, actor_sub=identity.user_sub, action="language_asset.release.rollback", extra={"from_release_id": source.id, "release_id": clone.id})
+    return {"release": release_dict(clone, include_items=True), "rolled_back_from": source.id}
+
+
+def _style_dict(row: StyleProfile) -> dict[str, Any]:
+    return {"id": row.id, "name": row.name, "src_lang": row.src_lang, "tgt_lang": row.tgt_lang, "document_profile": row.document_profile, "scope": row.scope, "project_id": row.project_id, "status": row.status, "version": row.version, "rules": row.rules or [], "release_id": row.release_id}
+
+
+@router.get("/style-profiles")
+def list_style_profiles_api(identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    rows = session.scalars(select(StyleProfile).where(StyleProfile.tenant_id == tenant.id).order_by(StyleProfile.updated_at.desc())).all()
+    return {"items": [_style_dict(row) for row in rows], "count": len(rows)}
+
+
+@router.post("/style-profiles", status_code=201)
+def create_style_profile_api(body: StyleProfileCreateBody, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import normalize_scope
+
+    try:
+        scope = normalize_scope(body.scope)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    row = StyleProfile(tenant_id=tenant.id, project_id=_asset_project(session, tenant_id=tenant.id, project_id=body.project_id), name=body.name.strip(), src_lang=body.src_lang, tgt_lang=body.tgt_lang, document_profile=body.document_profile, scope=scope, rules=body.rules, created_by=identity.user_sub)
+    session.add(row)
+    session.flush()
+    record_audit(session, actor_sub=identity.user_sub, action="style_profile.create", extra={"profile_id": row.id})
+    return _style_dict(row)
+
+
+@router.patch("/style-profiles/{profile_id}")
+def patch_style_profile_api(profile_id: str, body: StyleProfilePatchBody, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    row = session.scalar(select(StyleProfile).where(StyleProfile.id == profile_id, StyleProfile.tenant_id == tenant.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="style profile not found")
+    if row.status == "published":
+        raise HTTPException(status_code=409, detail={"code": "ASSET_RELEASE_IMMUTABLE", "message": "published style profile is immutable"})
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(row, key, value)
+    row.version += 1
+    row.updated_by = identity.user_sub
+    session.flush()
+    return _style_dict(row)
+
+
+@router.post("/style-profiles/{profile_id}/publish")
+def publish_style_profile_api(profile_id: str, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import create_release, publish_release, release_dict
+
+    row = session.scalar(select(StyleProfile).where(StyleProfile.id == profile_id, StyleProfile.tenant_id == tenant.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="style profile not found")
+    if row.release_id:
+        release = session.get(LanguageAssetRelease, row.release_id)
+    else:
+        try:
+            release = create_release(session, tenant_id=tenant.id, project_id=row.project_id, actor_sub=identity.user_sub, asset_type="style", rows=row.rules, scope=row.scope, src_lang=row.src_lang, tgt_lang=row.tgt_lang, document_profile=row.document_profile, name=row.name, license="internal", provenance="style-profile")
+            publish_release(session, release, actor_sub=identity.user_sub)
+        except Exception as exc:
+            raise _asset_error(exc) from exc
+        row.release_id = release.id
+        row.status = "published"
+        session.flush()
+    return {"profile": _style_dict(row), "release": release_dict(release, include_items=True)}
+
+
+def _quality_rule_dict(row: QualityRuleDefinition) -> dict[str, Any]:
+    return {"id": row.id, "code": row.code, "name": row.name, "trigger": row.trigger, "detector": row.detector, "severity": row.severity, "remediation": row.remediation, "false_positive": row.false_positive, "evidence": row.evidence, "scope": row.scope, "project_id": row.project_id, "status": row.status, "version": row.version, "release_id": row.release_id}
+
+
+@router.get("/quality-rules")
+def list_quality_rules_api(identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    rows = session.scalars(select(QualityRuleDefinition).where(QualityRuleDefinition.tenant_id == tenant.id).order_by(QualityRuleDefinition.code)).all()
+    return {"items": [_quality_rule_dict(row) for row in rows], "count": len(rows)}
+
+
+@router.post("/quality-rules", status_code=201)
+def create_quality_rule_api(body: QualityRuleCreateBody, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import normalize_scope
+
+    try:
+        scope = normalize_scope(body.scope)
+    except Exception as exc:
+        raise _asset_error(exc) from exc
+    row = QualityRuleDefinition(tenant_id=tenant.id, project_id=_asset_project(session, tenant_id=tenant.id, project_id=body.project_id), code=body.code.strip(), name=body.name.strip(), trigger=body.trigger, detector=body.detector, severity=body.severity, remediation=body.remediation, false_positive=body.false_positive, evidence=body.evidence, scope=scope, created_by=identity.user_sub)
+    session.add(row)
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail={"code": "QUALITY_RULE_DUPLICATE", "message": "rule code already exists"}) from exc
+    return _quality_rule_dict(row)
+
+
+@router.patch("/quality-rules/{rule_id}")
+def patch_quality_rule_api(rule_id: str, body: QualityRulePatchBody, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    row = session.scalar(select(QualityRuleDefinition).where(QualityRuleDefinition.id == rule_id, QualityRuleDefinition.tenant_id == tenant.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="quality rule not found")
+    if row.status == "published":
+        raise HTTPException(status_code=409, detail={"code": "ASSET_RELEASE_IMMUTABLE", "message": "published quality rule is immutable"})
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(row, key, value)
+    row.version += 1
+    row.updated_by = identity.user_sub
+    session.flush()
+    return _quality_rule_dict(row)
+
+
+@router.post("/quality-rules/{rule_id}/publish")
+def publish_quality_rule_api(rule_id: str, identity: IdentityContext = Depends(require_identity), session: Session = Depends(get_db)) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.language_assets import create_release, publish_release, release_dict
+
+    row = session.scalar(select(QualityRuleDefinition).where(QualityRuleDefinition.id == rule_id, QualityRuleDefinition.tenant_id == tenant.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="quality rule not found")
+    if row.release_id:
+        release = session.get(LanguageAssetRelease, row.release_id)
+    else:
+        payload = {"code": row.code, "name": row.name, "trigger": row.trigger, "detector": row.detector, "severity": row.severity, "remediation": row.remediation, "false_positive": row.false_positive, "evidence": row.evidence}
+        try:
+            release = create_release(session, tenant_id=tenant.id, project_id=row.project_id, actor_sub=identity.user_sub, asset_type="pitfall", rows=[payload], scope=row.scope, name=row.name, license="internal", provenance="quality-rule")
+            publish_release(session, release, actor_sub=identity.user_sub)
+        except Exception as exc:
+            raise _asset_error(exc) from exc
+        row.release_id = release.id
+        row.status = "published"
+        session.flush()
+    return {"rule": _quality_rule_dict(row), "release": release_dict(release, include_items=True)}
+
+
 @router.post("/terms/resolve")
 def resolve_terms_api(
     body: TermResolveRequest,
@@ -6772,7 +7221,11 @@ def resolve_terms_api(
         tgt_lang=body.tgt_lang,
     )
     termbase_version = runtime_termbase_version(
-        session, tenant_id=tenant.id, project_id=body.project_id
+        session,
+        tenant_id=tenant.id,
+        project_id=body.project_id,
+        src_lang=body.src_lang,
+        tgt_lang=body.tgt_lang,
     )
     policy = compile_term_policy(matches, termbase_version=termbase_version)
     return {

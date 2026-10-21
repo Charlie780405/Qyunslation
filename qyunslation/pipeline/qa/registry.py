@@ -201,6 +201,7 @@ _RULES: dict[str, RuleInfo] = dict(
            "对照原文位置逐项核对频次。", locatable="excerpt", identity_keys=("kind", "missing")),
         _r("TERM_SNAPSHOT_PENDING", WARN, "术语快照尚未完成", "术语检查可能不完整。", "稍后重新检查。", batchable=True),
         _r("DRUG_NAME_DRIFT", WARN, "译文出现术语库之外的药名", "可能混入了其他药物的名称。", "核对药名。"),
+        _r("ASSET_PITFALL_TRIGGER", C4, "错法表命中", "译文命中了已批准的错误表达规则。", "按错法表中的修复建议修改译文，然后重新检查。", identity_keys=("rule_code", "trigger")),
         # ---- info -------------------------------------------------------------------------------
         _r("QA_INSPECTION_SUMMARY", INFO, "确定性 QA 取证摘要", "记录本轮检查的输入范围。", "无需处理。"),
     ]

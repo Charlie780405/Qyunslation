@@ -50,7 +50,14 @@ def build_term_snapshot(
         tgt_lang=tgt_lang,
         document_profile=document_profile,
     )
-    version = runtime_termbase_version(session, tenant_id=tenant_id, project_id=project_id)
+    version = runtime_termbase_version(
+        session,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        src_lang=src_lang,
+        tgt_lang=tgt_lang,
+        document_profile=document_profile,
+    )
     hits_by_concept: dict[str, list[dict[str, Any]]] = {}
     for match in matches:
         if match.match_type not in {"exact", "alias"}:

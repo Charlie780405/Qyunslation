@@ -59,7 +59,12 @@ def build_run_glossary_path(
         document_profile=profile,
     )
     version = runtime_termbase_version(
-        session, tenant_id=run.tenant_id, project_id=getattr(run, "project_id", None)
+        session,
+        tenant_id=run.tenant_id,
+        project_id=getattr(run, "project_id", None),
+        src_lang=run.direction.split("→")[0].strip() if "→" in run.direction else "en",
+        tgt_lang=run.direction.split("→")[-1].strip() if "→" in run.direction else "zh",
+        document_profile=profile,
     )
     policy = compile_term_policy(matches, termbase_version=version)
     hard_terms = policy_to_glossary(policy)

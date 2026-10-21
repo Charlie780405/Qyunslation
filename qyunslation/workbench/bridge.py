@@ -422,7 +422,13 @@ def start_run(body: StartRunBody, session: Session = Depends(get_db)) -> dict:
         src_lang=body.src_lang,
         tgt_lang=body.tgt_lang,
     )
-    version = runtime_termbase_version(session, tenant_id=tenant.id, project_id=project.id)
+    version = runtime_termbase_version(
+        session,
+        tenant_id=tenant.id,
+        project_id=project.id,
+        src_lang=body.src_lang,
+        tgt_lang=body.tgt_lang,
+    )
     policy = compile_term_policy(matches, termbase_version=version)
     job = repo.create_job(
         session,

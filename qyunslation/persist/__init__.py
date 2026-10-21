@@ -35,6 +35,11 @@ from qyunslation.persist.models import (
     WebSession,
     UserMembership,
     WorkbenchTranslationRun,
+    LanguageAssetRelease,
+    LanguageAssetReleaseItem,
+    LanguageAssetImportBatch,
+    StyleProfile,
+    QualityRuleDefinition,
 )
 
 __all__ = [
@@ -62,6 +67,11 @@ __all__ = [
     "WebSession",
     "UserMembership",
     "WorkbenchTranslationRun",
+    "LanguageAssetRelease",
+    "LanguageAssetReleaseItem",
+    "LanguageAssetImportBatch",
+    "StyleProfile",
+    "QualityRuleDefinition",
     "get_database_url",
     "get_engine",
     "get_session",

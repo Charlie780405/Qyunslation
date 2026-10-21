@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from typing import Any
 
 from qyunslation.pipeline.ad_prompt import PromptContext, compile_prompt
@@ -69,6 +70,16 @@ def compile_runtime_settings(
     compiled = compile_prompt(PromptContext(domain, direction, document, "translate"))
     current["custom_prompt"] = compiled.text
     snapshot = compiled.snapshot()
+    try:
+        from qyunslation.language_assets import render_prompt_asset_block
+
+        asset_block = render_prompt_asset_block(current.get("language_assets"))
+    except Exception:
+        asset_block = ""
+    if asset_block:
+        current["custom_prompt"] = f"{compiled.text}\n\n{asset_block}"
+        snapshot["digest"] = "sha256:" + hashlib.sha256(current["custom_prompt"].encode("utf-8")).hexdigest()
+        snapshot["language_asset_bundle_hash"] = str((current.get("language_assets") or {}).get("bundle_hash") or "")
     snapshot["domain_profile"] = "ad"
     snapshot["termbase_version"] = termbase_version
     snapshot["qa_rule_version"] = QA_RULE_VERSION

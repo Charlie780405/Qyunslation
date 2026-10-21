@@ -104,6 +104,53 @@ def list_runtime_terms(
                 previous.role == "preferred",
             ):
                 records[key] = record
+    # PLAN-086 published imports are runtime data too.  They remain separate
+    # from editable Concept rows, but exact resolution uses the immutable
+    # release selected for this tenant/project and task profile.
+    try:
+        from qyunslation.language_assets import build_language_asset_bundle
+
+        bundle = build_language_asset_bundle(
+            session,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            document_profile=document_profile,
+        )
+        scope_layer = {"global": "session", "domain": "clinical", "tenant": "org", "project": "project"}
+        release_scope = str(((bundle.get("releases") or {}).get("termbase") or {}).get("scope") or "global")
+        layer = scope_layer.get(release_scope, "clinical")
+        for index, item in enumerate((bundle.get("termbase") or {}).get("items") or []):
+            source = str(item.get("source") or "").strip()
+            target = str(item.get("target") or item.get("preferred_target") or "").strip()
+            if not source or not target:
+                continue
+            item_src = normalize_lang(str(item.get("src_lang") or src_lang)) or src_lang
+            item_tgt = normalize_lang(str(item.get("tgt_lang") or tgt_lang)) or tgt_lang
+            if item_src != src_lang or item_tgt != tgt_lang:
+                continue
+            forbidden = tuple(str(value).strip() for value in (item.get("forbidden") or []) if str(value).strip())
+            record = TermRecord(
+                concept_id=f"asset:{((bundle.get('releases') or {}).get('termbase') or {}).get('id', 'unknown')}:{index}",
+                source_term=source,
+                target_term=target,
+                layer=layer,
+                src_lang=src_lang,
+                tgt_lang=tgt_lang,
+                role="preferred",
+                term_type=str(item.get("term_type") or "general"),
+                do_not_translate=bool(item.get("do_not_translate")),
+                forbidden_targets=forbidden,
+            )
+            key = (record.normalized_source, src_lang.casefold(), tgt_lang.casefold())
+            previous = records.get(key)
+            if previous is None or (record.priority, True) > (previous.priority, previous.role == "preferred"):
+                records[key] = record
+    except Exception:
+        # A missing asset table on an older deployment must not take down the
+        # existing Concept resolver; the migration gate reports the rollout issue.
+        pass
     return sorted(records.values(), key=lambda record: record.normalized_source)
 
 
@@ -133,6 +180,9 @@ def runtime_termbase_version(
     *,
     tenant_id: str,
     project_id: str | None,
+    src_lang: str = "en",
+    tgt_lang: str = "zh",
+    document_profile: str | None = None,
 ) -> str:
     """Return a stable scope/version token for translation and resolution caches."""
     stmt = (
@@ -146,6 +196,24 @@ def runtime_termbase_version(
         f"{concept_id}:{version}:{updated_at.isoformat() if updated_at else ''}"
         for concept_id, version, updated_at in session.execute(stmt)
     ]
+    try:
+        from qyunslation.language_assets import build_language_asset_bundle
+
+        bundle = build_language_asset_bundle(
+            session,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            document_profile=document_profile,
+        )
+        for asset_type, metadata in sorted((bundle.get("releases") or {}).items()):
+            parts.append(
+                f"asset:{asset_type}:{metadata.get('id')}:{metadata.get('version')}:{metadata.get('content_hash')}"
+            )
+    except Exception:
+        # Preserve the legacy Concept version token on pre-086 deployments.
+        pass
     digest = sha256("|".join(parts).encode("utf-8")).hexdigest()
     return f"058-{digest[:24]}"
 

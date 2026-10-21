@@ -201,6 +201,18 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);
   },
+  listLanguageAssetReleases: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return apiRequest(`${API_PREFIX}/language-assets/releases${query ? `?${query}` : ''}`);
+  },
+  getLanguageAssetRelease: (releaseId) => apiRequest(`${API_PREFIX}/language-assets/releases/${encodeURIComponent(releaseId)}`),
+  previewLanguageAssetImport: (payload) => apiRequest(`${API_PREFIX}/language-assets/imports/preview`, { method: 'POST', body: JSON.stringify(payload) }),
+  applyLanguageAssetImport: (batchId) => apiRequest(`${API_PREFIX}/language-assets/imports/${encodeURIComponent(batchId)}/apply`, { method: 'POST' }),
+  publishLanguageAssetRelease: (releaseId) => apiRequest(`${API_PREFIX}/language-assets/releases/${encodeURIComponent(releaseId)}/publish`, { method: 'POST' }),
+  rollbackLanguageAssetRelease: (releaseId) => apiRequest(`${API_PREFIX}/language-assets/releases/${encodeURIComponent(releaseId)}/rollback`, { method: 'POST' }),
+  listStyleProfiles: () => apiRequest(`${API_PREFIX}/style-profiles`),
+  createStyleProfile: (payload) => apiRequest(`${API_PREFIX}/style-profiles`, { method: 'POST', body: JSON.stringify(payload) }),
+  listQualityRules: () => apiRequest(`${API_PREFIX}/quality-rules`),
   // `expectedSha256` lets the server answer with the pre-check it already has for the same file (f7).
   uploadPreflightResumable: async (file, fields = {}, onProgress = null, storageKey = null, { expectedSha256 = null } = {}) => {
     const chunkSize = 1024 * 1024;
