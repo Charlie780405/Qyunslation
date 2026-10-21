@@ -6717,6 +6717,7 @@ def list_concepts_api(
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     tenant = _tenant_bundle(session, identity)
+    from qyunslation.glossary.term_compliance import preferred_pair, same_source_flags
     from qyunslation.persist.concept_repo import (
         LIST_LIMIT_DEFAULT,
         LIST_LIMIT_MAX,
@@ -6726,7 +6727,21 @@ def list_concepts_api(
 
     size = min(max(int(limit or LIST_LIMIT_DEFAULT), 1), LIST_LIMIT_MAX)
     rows = list_concepts(session, status=status, tenant_id=tenant.id, limit=size)
-    return [concept_to_dict(c) for c in rows]
+    # 同源多译/同源重复只在本次返回的有效词条内比对，驳回的不参与。
+    flags = same_source_flags(
+        [
+            (c.id, *preferred_pair(list(c.terms)))
+            for c in rows
+            if c.status != "rejected"
+        ]
+    )
+    items = []
+    for c in rows:
+        item = concept_to_dict(c)
+        if item.get("compliance") is None and c.id in flags:
+            item["compliance"] = flags[c.id]
+        items.append(item)
+    return items
 
 
 class ConceptPatchBody(BaseModel):

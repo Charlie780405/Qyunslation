@@ -69,6 +69,35 @@ def assess_concept(
     return {"code": code, "label": REASONS[code]}
 
 
+SAME_SOURCE_LABELS: dict[str, str] = {
+    "SAME_SOURCE_CONFLICT": "同源多译（同一源词对应不同译名，需人工统一）",
+    "SAME_SOURCE_DUPLICATE": "同源重复（同一源词与同一译名重复入库，应合并为别名）",
+}
+
+
+def normalize_match_key(text: str | None) -> str:
+    """大小写、标点、空白不敏感的比对键：'Co., Ltd.' 与 'Co. Ltd.' 得到同一结果。"""
+    return re.sub(r"[\W_]+", " ", (text or "").lower()).strip()
+
+
+def same_source_flags(rows: list[tuple[str, str | None, str | None]]) -> dict[str, dict[str, str]]:
+    """rows: (concept_id, 优选源术语, 优选译名)。同一比对键下多个词条时打标，只标记不改数据。"""
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for concept_id, source, target in rows:
+        key = normalize_match_key(source)
+        tgt = (target or "").strip()
+        if key and tgt:
+            groups.setdefault(key, []).append((concept_id, tgt))
+    flags: dict[str, dict[str, str]] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        code = "SAME_SOURCE_CONFLICT" if len({t for _, t in members}) > 1 else "SAME_SOURCE_DUPLICATE"
+        for concept_id, _ in members:
+            flags[concept_id] = {"code": code, "label": SAME_SOURCE_LABELS[code]}
+    return flags
+
+
 def preferred_pair(terms: list[Any]) -> tuple[str, str]:
     """(英文优选源术语, 非英文优选译名)；缺失返回空串。"""
     source = next((t.text for t in terms if t.role == "preferred" and t.lang == "en"), "")
