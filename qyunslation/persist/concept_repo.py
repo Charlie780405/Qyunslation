@@ -2,6 +2,8 @@
 """PLAN-034d：Concept 仓储与禁用译法检测。"""
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -15,6 +17,9 @@ from qyunslation.persist.models import Concept, ConceptForbidden, ConceptTerm
 
 VALID_CONCEPT_STATUS = frozenset({"curated", "staging", "rejected"})
 VALID_TERM_ROLES = frozenset({"preferred", "synonym", "abbreviation"})
+# 词库页一次取全：旧上限 200 会让超出的术语完全看不到。
+LIST_LIMIT_DEFAULT = 2000
+LIST_LIMIT_MAX = 5000
 
 
 def make_import_key(*, source: str, layer: str, src_lng: str, tgt_lng: str) -> str:
@@ -33,16 +38,17 @@ def list_concepts(
     *,
     status: str | None = None,
     tenant_id: str | None = None,
-    limit: int = 200,
+    limit: int = LIST_LIMIT_DEFAULT,
 ) -> list[Concept]:
     stmt = select(Concept).options(
         selectinload(Concept.terms),
         selectinload(Concept.forbiddens),
     )
     if tenant_id:
+        # 全局术语（无租户）：已批准的可见，被驳回的也要可见，否则驳回后无处恢复。
         stmt = stmt.where(
             (Concept.tenant_id == tenant_id)
-            | ((Concept.tenant_id.is_(None)) & (Concept.status == "curated"))
+            | ((Concept.tenant_id.is_(None)) & (Concept.status.in_(("curated", "rejected"))))
         )
     if status:
         stmt = stmt.where(Concept.status == status)
@@ -239,7 +245,88 @@ def detect_forbidden(text: str, forbidden_hits: list[str] | None) -> bool:
     return False
 
 
+def set_concept_status(concept: Concept, status: str, *, actor: str, note: str = "") -> bool:
+    """改状态（curated / staging / rejected）；无变化返回 False。留痕写进 evidence 并升版本。"""
+    if status not in VALID_CONCEPT_STATUS:
+        raise ValueError(f"invalid concept status: {status}")
+    if concept.status == status:
+        return False
+    previous = concept.status
+    concept.status = status
+    concept.version = (concept.version or 1) + 1
+    concept.evidence = f"{concept.evidence or ''};status:{previous}->{status};by:{actor}" + (
+        f";note:{note}" if note else ""
+    )
+    return True
+
+
+_REJECT_TRAIL = re.compile(r"status:(curated|staging)->rejected")
+
+
+def previous_status(concept: Concept) -> str:
+    """被驳回前的状态（取留痕里最近一次）；查不到回到待审核，绝不自动变成已批准。"""
+    matches = _REJECT_TRAIL.findall(concept.evidence or "")
+    return matches[-1] if matches else "staging"
+
+
+def resolve_requested_status(concept: Concept, requested: str) -> str:
+    """``restore`` 还原到驳回前；已不是驳回状态则保持不动。"""
+    if requested != "restore":
+        return requested
+    return previous_status(concept) if concept.status == "rejected" else concept.status
+
+
+def set_preferred_target(
+    session: Session, concept: Concept, *, text: str, tgt_lng: str = "zh"
+) -> None:
+    """补充/更新译名：替换该语言的优选译名，并取消“保持原文”标记。"""
+    clean = (text or "").strip()
+    if not clean:
+        raise ValueError("target text is empty")
+    lang = normalize_lang(tgt_lng) or "zh"
+    for term in list(concept.terms):
+        if term.role == "preferred" and term.lang == lang:
+            session.delete(term)
+    session.flush()
+    session.add(
+        ConceptTerm(
+            concept_id=concept.id,
+            lang=lang,
+            text=clean,
+            normalized_text=normalize_source(clean),
+            role="preferred",
+        )
+    )
+    concept.do_not_translate = False
+    concept.version = (concept.version or 1) + 1
+    session.flush()
+    session.refresh(concept)
+
+
 def concept_to_dict(concept: Concept) -> dict:
+    from qyunslation.glossary.term_compliance import assess_concept, preferred_pair
+
+    source, target = preferred_pair(list(concept.terms))
+    if target:
+        target_state = "translated"
+    elif concept.do_not_translate:
+        target_state = "keep_source"
+    else:
+        target_state = "missing"
+    return {
+        "target_state": target_state,
+        "compliance": assess_concept(
+            source,
+            target,
+            do_not_translate=bool(concept.do_not_translate),
+            evidence=concept.evidence,
+            term_type=concept.term_type,
+        ),
+        **_concept_core(concept),
+    }
+
+
+def _concept_core(concept: Concept) -> dict:
     return {
         "id": concept.id,
         "domain": concept.domain,

@@ -205,6 +205,14 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  updateConcept: (conceptId, payload) => apiRequest(`${API_PREFIX}/concepts/${encodeURIComponent(conceptId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }),
+  batchConceptStatus: (payload) => apiRequest(`${API_PREFIX}/concepts/batch-status`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   listLanguageAssetReleases: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/language-assets/releases${query ? `?${query}` : ''}`);

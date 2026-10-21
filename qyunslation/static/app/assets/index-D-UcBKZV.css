@@ -3122,6 +3122,44 @@ input[type="range"]::-webkit-slider-thumb {
 .qy-suggest-control { display: grid; gap: 4px; justify-items: start; }
 .qy-suggest-note { max-width: 36ch; color: var(--qy-text-secondary); font-size: 12px; }
 .qy-suggest-note.is-external { color: var(--qy-warning); }
+
+/* 词库页：列表在有限高度内双向滚动（滚动条始终在视野内）、固定表头、筛选面板、批量栏。 */
+.qy-term-scroll { max-height: calc(100vh - 330px); min-height: 260px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.qy-term-scroll:focus-visible { outline: none; box-shadow: inset var(--qy-focus); }
+.qy-term-scroll thead th { position: -webkit-sticky; position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 var(--qy-border); }
+.qy-term-table tbody tr.is-selected { background: #EEF5F8; }
+.qy-term-check { width: 40px; padding-right: 0; }
+.qy-term-check input { width: 16px; height: 16px; cursor: pointer; }
+.qy-term-table td.qy-term-wrap { white-space: normal; min-width: 170px; max-width: 340px; overflow-wrap: anywhere; }
+.qy-term-count { margin: 0; padding: 8px 16px; border-bottom: 1px solid #E9EEF0; color: var(--qy-text-secondary); font-size: 12px; }
+.qy-filter-button { position: relative; }
+.qy-filter-button.is-active { color: var(--qy-primary); background: #E3EEF2; }
+.qy-filter-count { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; color: #fff; background: var(--qy-primary); font-size: 10px; font-weight: 700; line-height: 1; }
+.qy-term-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--qy-border); background: #F8FBFC; }
+.qy-term-filters .qy-field { margin-bottom: 0; }
+.qy-term-filter-actions { display: flex; align-items: center; min-height: 42px; }
+.qy-term-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #E9C99A; background: #FFF8EC; }
+.qy-term-bulkbar .qy-secondary-button { min-height: 36px; }
+.qy-suspect-tag { display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; padding: 1px 6px; border-radius: 4px; color: var(--qy-warning); background: #FFF6E7; font-size: 11px; font-weight: 700; }
+.qy-suspect-tag svg { width: 12px; height: 12px; }
+.qy-target-keep { color: var(--qy-text-secondary); font-style: italic; }
+.qy-target-missing { margin-right: 8px; color: var(--qy-warning); font-weight: 700; }
+.qy-status-badge.is-rejected { color: var(--qy-danger); background: #FDECEA; }
+.qy-primary-button.qy-danger-button { background: var(--qy-danger); border-color: var(--qy-danger); }
+.qy-secondary-button.qy-danger-button { color: var(--qy-danger); border-color: #E5B4AE; }
+.qy-secondary-button.qy-danger-button:hover { background: #FDECEA; border-color: var(--qy-danger); }
+.qy-import-callout { flex-wrap: wrap; }
+.qy-import-callout textarea { flex: 1 1 100%; min-height: 110px; padding: 10px 12px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); font: inherit; resize: vertical; }
+.qy-file-pick { position: relative; overflow: hidden; }
+.qy-file-pick input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.qy-import-file { margin: 0; color: var(--qy-text-secondary); font-size: 12px; }
+.qy-term-edit { display: grid; gap: 8px; margin: 0 0 18px; }
+.qy-term-edit .qy-field { margin-bottom: 0; }
+.qy-term-edit input { min-height: 42px; width: 100%; padding: 0 11px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); background: #fff; }
+.qy-detail-hint { margin: -12px 0 14px; color: var(--qy-text-secondary); font-size: 12px; }
+.qy-term-detail-actions { margin: 16px 0; }
+.qy-term-detail { position: -webkit-sticky; position: sticky; top: 16px; }
+@media (max-width: 860px) { .qy-term-detail { position: static; } .qy-term-filters { grid-template-columns: 1fr; } .qy-term-scroll { max-height: 70vh; } }
 /* generated from QyunsApps@4f289eb3792e (tokens sha256:1db8c44ec9cc) — do not edit */
 :root {
   color-scheme: light;

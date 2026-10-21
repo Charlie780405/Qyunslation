@@ -6712,14 +6712,135 @@ class QualityRulePatchBody(BaseModel):
 @router.get("/concepts")
 def list_concepts_api(
     status: str | None = None,
+    limit: int | None = None,
     identity: IdentityContext = Depends(require_identity),
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     tenant = _tenant_bundle(session, identity)
-    from qyunslation.persist.concept_repo import concept_to_dict, list_concepts
+    from qyunslation.persist.concept_repo import (
+        LIST_LIMIT_DEFAULT,
+        LIST_LIMIT_MAX,
+        concept_to_dict,
+        list_concepts,
+    )
 
-    rows = list_concepts(session, status=status, tenant_id=tenant.id)
+    size = min(max(int(limit or LIST_LIMIT_DEFAULT), 1), LIST_LIMIT_MAX)
+    rows = list_concepts(session, status=status, tenant_id=tenant.id, limit=size)
     return [concept_to_dict(c) for c in rows]
+
+
+class ConceptPatchBody(BaseModel):
+    preferred_target: str | None = Field(default=None, min_length=1, max_length=512)
+    tgt_lng: str = Field(default="zh", max_length=16)
+    status: str | None = Field(default=None, max_length=16)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ConceptBatchStatusBody(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    status: str = Field(max_length=16)
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _editable_concept(session: Session, identity: IdentityContext, tenant_id: str, concept_id: str):
+    """本租户的术语，管理员可改；全局共享术语只有 admin / owner 能改。"""
+    from qyunslation.persist.concept_repo import get_concept
+
+    concept = get_concept(session, concept_id)
+    if concept is None or concept.tenant_id not in {None, tenant_id}:
+        raise HTTPException(status_code=404, detail="concept not found")
+    if concept.tenant_id is None and _effective_role(session, identity) not in {"admin", "owner"}:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "GLOBAL_CONCEPT_ADMIN_REQUIRED", "message": "共享术语只有管理员/所有者可修改"},
+        )
+    return concept
+
+
+@router.patch("/concepts/{concept_id}")
+def patch_concept_api(
+    concept_id: str,
+    body: ConceptPatchBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.persist.concept_repo import (
+        VALID_CONCEPT_STATUS,
+        concept_to_dict,
+        resolve_requested_status,
+        set_concept_status,
+        set_preferred_target,
+    )
+
+    if body.preferred_target is None and body.status is None:
+        raise HTTPException(status_code=422, detail="nothing to update")
+    if body.status is not None and body.status not in VALID_CONCEPT_STATUS | {"restore"}:
+        raise HTTPException(status_code=422, detail="invalid status")
+    concept = _editable_concept(session, identity, tenant.id, concept_id)
+    changes: dict[str, Any] = {}
+    if body.preferred_target is not None:
+        set_preferred_target(session, concept, text=body.preferred_target, tgt_lng=body.tgt_lng)
+        changes["preferred_target"] = True
+    if body.status is not None:
+        target_status = resolve_requested_status(concept, body.status)
+        if set_concept_status(concept, target_status, actor=identity.user_sub, note=body.note or ""):
+            changes["status"] = target_status
+    session.flush()
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="concept.update",
+        extra={"concept_id": concept.id, "changes": changes, "api_key": "should-strip"},
+    )
+    return concept_to_dict(concept)
+
+
+@router.post("/concepts/batch-status")
+def batch_concept_status_api(
+    body: ConceptBatchStatusBody,
+    identity: IdentityContext = Depends(require_identity),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """批量驳回/恢复。逐条校验权限，单条无权不影响其它条；全部留审计。"""
+    tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
+    from qyunslation.persist.concept_repo import (
+        VALID_CONCEPT_STATUS,
+        resolve_requested_status,
+        set_concept_status,
+    )
+
+    if body.status not in VALID_CONCEPT_STATUS | {"restore"}:
+        raise HTTPException(status_code=422, detail="invalid status")
+    changed: list[str] = []
+    unchanged: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for concept_id in dict.fromkeys(body.ids):
+        try:
+            concept = _editable_concept(session, identity, tenant.id, concept_id)
+        except HTTPException as exc:
+            skipped.append({"id": concept_id, "reason": "not_found" if exc.status_code == 404 else "forbidden"})
+            continue
+        target_status = resolve_requested_status(concept, body.status)
+        if set_concept_status(concept, target_status, actor=identity.user_sub, note=body.note or ""):
+            changed.append(concept.id)
+        else:
+            unchanged.append(concept.id)
+    session.flush()
+    record_audit(
+        session,
+        actor_sub=identity.user_sub,
+        action="concept.batch_status",
+        extra={
+            "status": body.status,
+            "changed": changed,
+            "skipped": skipped,
+            "api_key": "should-strip",
+        },
+    )
+    return {"status": body.status, "changed": changed, "unchanged": unchanged, "skipped": skipped}
 
 
 @router.post("/concepts", status_code=201)
