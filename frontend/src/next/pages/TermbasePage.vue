@@ -153,7 +153,7 @@
         </div>
       </section>
 
-      <aside class="qy-term-detail">
+      <aside ref="detailPanel" class="qy-term-detail">
         <div v-if="selectedTerm" class="qy-panel qy-detail-card">
           <div class="qy-detail-heading"><div><span class="qy-eyebrow">TERM DETAIL</span><h2>{{ selectedTerm.source }}</h2></div><button class="qy-icon-button" type="button" aria-label="关闭详情" @click="selectedTerm = null"><XMarkIcon aria-hidden="true" /></button></div>
           <div class="qy-detail-translation">
@@ -234,6 +234,7 @@ const statusBusy = ref(false);
 const bulkBusy = ref(false);
 const targetDraft = ref('');
 const targetInput = ref(null);
+const detailPanel = ref(null);
 const newTermPanel = ref(null);
 const importPanel = ref(null);
 const newTerm = ref({ source: '', target: '', domain: '', risk: 'normal', forbidden: '' });
@@ -352,7 +353,11 @@ function resetFilters() {
 
 function selectTerm(term, focusTarget = false) {
   selectedTerm.value = term;
-  if (focusTarget) nextTick(() => targetInput.value?.focus?.());
+  nextTick(() => {
+    // 窄屏上详情在列表上方，选中后把它带到视野内。
+    if (window.innerWidth <= 860) detailPanel.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    if (focusTarget) targetInput.value?.focus?.();
+  });
 }
 
 function toggleSelect(id) {
