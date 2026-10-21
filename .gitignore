@@ -62,3 +62,6 @@ var/plan071-browser/
 
 # 运行产物与证据目录（不入库；证据路径见 WT/PLAN 文档）
 var/
+
+# 本机 IDE 的 MCP 配置（含本地路径/凭据，不入库；scripts/verify-plan-055.sh 仍检查其存在）
+.cursor/mcp.json
