@@ -87,3 +87,10 @@ PLAN-079 的第一版上线后，用户在生产环境反馈了以下问题：
 **不做**：不放宽 QA 规则；不以授权例外放行；不改其他字体的映射；不改 `QYUNSLATION_ENCODING_INHERITANCE` 等开关。
 
 **验收**：单元测试覆盖两条映射；用真实源文件跑 `fix_symbol_fonts_pdf`，确认第 1–2 页提取文本不再含 U+0001 / U+FFFD；重新翻译 `50-LIT` 后 QA 无 `TEXT_ENCODING_*` 条目，浏览器中两处符号可见。
+
+**实测结果（2026-10-21，生产，新一代 `9682686d` = generation 2，冻结配置与原任务相同）**
+- 阻断项 `TEXT_ENCODING_ARTIFACT`：已消失（blocker 0）。
+- 单版（mono）输出：• 与 ■ 均为正确字符，文本层无 U+0001 / U+FFFD。
+- 双语版（dual）第 2 页原文侧仍有 1 条 `TEXT_ENCODING_INHERITED` 警告（`MG-K10` 前的 •）。双语版原文侧的字体由引擎重建，未读取本次补入的 ToUnicode，这一点尚未修复。
+- 未批准 generation 2；`a3887b13`（generation 1）仍保留，未放行。
+- 遗留决定：是否接受这一条警告，或继续在 pdf2zh/BabelDOC 侧修复双语原文侧的字体映射（需按 SK-Q005 做补丁安全评估）。
