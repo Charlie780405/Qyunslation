@@ -177,6 +177,27 @@ def artifact_evidence(text: str | None) -> dict[str, list[str]]:
     return found
 
 
+def _unmapped_marks(text: str) -> int:
+    return len(_C0_RE.findall(text or "")) + (text or "").count("\ufffd")
+
+
+def is_decorative_unmapped_inherited(source_page: str, translated_page: str, *, copies: int = 1) -> bool:
+    """True when the translated page's only artifacts are unmapped-glyph marks (C0 / U+FFFD) that the source page has too.
+
+    Typical: running-header ■ or list bullets in a symbol font whose ToUnicode is U+0001. The translation keeps the
+    glyph (it renders), only the text layer differs (U+0001 -> U+FFFD). Mojibake or C1 never qualifies, and the
+    translated page may not have more marks than the source page (times ``copies``: 2 for a bilingual PDF that
+    carries both the source and the translated glyph), so new garbling still blocks.
+    """
+    evidence = artifact_evidence(translated_page)
+    if not evidence or evidence.keys() - {"c0", "fffd"}:
+        return False
+    if artifact_evidence(source_page).keys() - {"c0", "fffd"}:
+        return False
+    source_marks = _unmapped_marks(source_page)
+    return source_marks > 0 and _unmapped_marks(translated_page) <= source_marks * max(1, copies)
+
+
 def _is_wordish(ch: str) -> bool:
     return bool(ch and _WORDISH_RE.match(ch))
 

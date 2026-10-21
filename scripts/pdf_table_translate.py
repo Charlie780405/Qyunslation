@@ -488,6 +488,16 @@ def translate_pdf_tables(
                         table_size_mode=table_size_mode,
                         isolate_residue=isolate_residue,
                     )
+                    # PLAN-084：白字黑底的「TABLE 1.」标签译后被写成黑字；成败都修（不确定就不动）。
+                    try:
+                        from qyunslation.structure.table_caption_fix import repair_dark_caption_label
+
+                        if repair_dark_caption_label(
+                            doc[page_index], origin_doc[page_index], region, x_min_frac=x_min_frac
+                        ):
+                            changed = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("table caption label repair skipped: %s", exc)
                     if painted:
                         write_output_evidence(
                             obj,

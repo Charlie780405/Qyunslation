@@ -47,6 +47,10 @@ description: >-
 | 脚注被拆进各列 | `table_bottom` | SK-Q009 R12 |
 | 破折号显示 `?` | `_helv_has` | SK-Q009 R13 |
 | 漏翻译 / 整段英文 | `UNTRANSLATED_PARAGRAPH`、Fallback 计数 | SK-Q007 |
+| 乱码阻断（`TEXT_ENCODING_ARTIFACT`）但译文肉眼看不到乱码 | 是文本层问题不是画面：`QYUNSLATION_ENCODING_INHERITANCE`（默认 `auto`）；符号字体 ToUnicode 缺 | SK-Q007 坑 4–6 |
+| `±` 变成 `-` / `≥` 丢了 / `©` 乱码 | 源 PDF 的 `AdvPSSymbol/AdvPSSym` 子集字体 ToUnicode 错；`QYUNSLATION_FIX_SYMBOL_CMAP` | SK-Q007 坑 5 |
+| Introduction 首字母大写 A 与正文叠字 / 中文首字不突出 | 首字下沉被当公式；`QYUNSLATION_FIX_DROPCAP`、`QYUNSLATION_DROPCAP_ZH_SCALE` | SK-Q006 坑 5 |
+| 表头少列 / 表题「表 1.」消失 / 深色标签条空白 | 表头 rc<0 不落笔；redact 误伤表题；深色条标签 | SK-Q009 R14–R16 |
 | 图内文字 | 图片链 | SK-Q002 |
 | 监管表单 | HPD 网格 | SK-Q003 |
 | 段落丢 / 摘要碎片 / 顺序乱 | never-drop、全局状态机 | SK-Q005、SK-Q006 |

@@ -20,6 +20,7 @@ from qyunslation.structure.text_sanitize import (
     _CONTROL_RE,
     _MOJIBAKE_RE,
     artifact_evidence,
+    is_decorative_unmapped_inherited,
     detect_text_artifacts,
     space_map_evidence,
     visible_codepoint_excerpt,
@@ -313,7 +314,11 @@ def _merge_families(parts: list[dict[str, list[str]]]) -> dict[str, list[str]]:
 
 
 def _encoding_findings(
-    translated_text: str, translated_pages: list[str] | None, source_pages: list[str] | None
+    translated_text: str,
+    translated_pages: list[str] | None,
+    source_pages: list[str] | None,
+    *,
+    bilingual: bool = False,
 ) -> list[QaFinding]:
     """PLAN-079 D / PLAN-082 S4: garbled-text findings with space-glyph false-positive downgrade."""
     hits = [
@@ -341,9 +346,12 @@ def _encoding_findings(
             )
         ]
     comparable = bool(source_pages) and len(source_pages or []) == len(translated_pages or [])
-    # The source-inheritance downgrade is opt-in until PLAN-079 stage B2 has labelled samples; by default every
-    # garbled page stays a blocker, exactly as before.
-    inheritance = os.environ.get("QYUNSLATION_ENCODING_INHERITANCE", "0").strip().casefold() in {"1", "true", "on"}
+    # Family-overlap downgrade stays opt-in ("1"). Default "auto" only downgrades the decorative-glyph case proven on
+    # MG-K10: the source font maps a bullet/■ to U+0001, the translation keeps the same glyph (renders fine) but its
+    # text layer shows U+FFFD. Allowed only when the page has no more unmapped marks than the source page did.
+    mode = os.environ.get("QYUNSLATION_ENCODING_INHERITANCE", "auto").strip().casefold()
+    inheritance = mode in {"1", "true", "on"}
+    auto_inherit = comparable and mode in {"auto", ""}
     blocking: list[tuple[int, dict[str, list[str]]]] = []
     inherited: list[tuple[int, dict[str, list[str]]]] = []
     space_mapped: list[tuple[int, dict[str, list[str]]]] = []
@@ -354,7 +362,10 @@ def _encoding_findings(
             space_mapped.append((number, evidence))
             continue
         in_source = artifact_evidence(source_pages[number - 1]) if (comparable and inheritance) else {}
-        (inherited if set(in_source) & set(evidence) else blocking).append((number, evidence))
+        decorative = auto_inherit and is_decorative_unmapped_inherited(
+            source_pages[number - 1], page, copies=2 if bilingual else 1
+        )
+        (inherited if (set(in_source) & set(evidence)) or decorative else blocking).append((number, evidence))
     out: list[QaFinding] = []
     if blocking:
         out.append(
@@ -540,6 +551,7 @@ def check_translation_text(
     residue_block: float = 0.8,
     source_pages: list[str] | None = None,
     translated_pages: list[str] | None = None,
+    bilingual: bool = False,
 ) -> list[QaFinding]:
     findings: list[QaFinding] = []
     if not _norm(translated_text):
@@ -587,7 +599,7 @@ def check_translation_text(
         )
     for code in detect_text_artifacts(translated_text):
         if code == "TEXT_ENCODING_ARTIFACT":
-            findings.extend(_encoding_findings(translated_text, translated_pages, source_pages))
+            findings.extend(_encoding_findings(translated_text, translated_pages, source_pages, bilingual=bilingual))
             continue
         findings.append(
             QaFinding(
@@ -740,6 +752,7 @@ def inspect_pdf_pair(
             target_is_chinese=target_is_chinese and output_kind == "mono",
             source_pages=source.pages,
             translated_pages=translated.pages,
+            bilingual=output_kind == "dual",
         )
         for finding in current:
             finding.evidence.setdefault("output_kind", output_kind)

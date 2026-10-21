@@ -130,6 +130,36 @@
 | 修法 | `_helv_has` 只认 Latin-1（`ord<256`），en dash、弯引号、`≥` 等一律走内嵌 CJK 子集 |
 | 判据 | `µ ± ² ×` 仍走 Helvetica；`– ≥ ’` 走 CJK |
 
+### R14 表头某格整格消失（`insert_textbox` rc<0）
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表 3 / 表 1 表头第 3 列（`MG-K10 300 mg Q4W(n=41)`）空白，其余列正常 |
+| 先查 | `paint_cell` 的 `insert_textbox` 返回值；字号是否已压到下限 6pt 仍 rc<0 |
+| 根因 | `insert_textbox` 放不下时**静默不画**，不抛错，也不报 `painted=False` |
+| 修法 | 最后一级回退 `_draw_lines_anyway(page, inset, lines, fontname=, font_size=)`：按行 `insert_text` 硬画（宁可略溢出格框也不丢表头） |
+| 判据 | 表头每列都有字；数值格 `±` 全在 |
+
+### R15 表题（`表 1. 基线特征`）被擦掉
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表区擦除后上方的题注文字消失 |
+| 根因 | `redact_table_region` 的 pad 把 rect 上沿推进题注；PyMuPDF `apply_redactions` 对**任何与 rect 相交的字形**都删，**不看中心点**。而 `get_text("words", clip=rect)` 只返回中心在 rect 内的词——题注词不在返回里，保护逻辑形同虚设 |
+| 修法 | 探测要用**向上扩大的 clip**（`rect.y0-24 … rect.y0+4`），再用词中心 `< y0` 且 `w[3] > rect.y0` 判定；rect 上沿下移到该词底边 +0.05 |
+| 判据 | 擦除后 `get_text("dict")` 仍能读到 `表 1.` / `基线特征` |
+
+### R16 深色标签条里「表 1.」变黑看不见
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 原文题注是「深色条 + 白字 `Table 1.` + 深色题名」；译文条是空的，或字黑在黑条上 |
+| 根因 | BabelDOC 把整句题注按一种颜色（黑）落笔，白字标签丢色 |
+| 修法 | `table_caption_fix.repair_dark_caption_label(page, origin_page, box, x_min_frac=)`：在原文页找条（`_dark_label_rect`）和标签/题名（`_source_label_and_caption`），把译文页对应的 `表 N.` 改成白字，题名保持深色。`pdf_table_translate.py` 在 `_paint_literature_rebuild` 之后调用，异常时 fail-open |
+| 判据 | 条内白字 `表 1.`，右侧深色 `基线特征`；dual 右半同样 |
+
+**R14–R16 验证**：`/tmp/qy/offline.py`（MG-K10，页 5/9，mono+dual），先用 `set -a; . ./.env; set +a` 加载环境。
+
 ## 验收（必须真实）
 
 ```bash

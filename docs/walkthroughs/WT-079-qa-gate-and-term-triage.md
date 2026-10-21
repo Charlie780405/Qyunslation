@@ -11,7 +11,7 @@
 | A 对照视图定位 | 已实现，**Chromium + WebKit 三种宽度实测通过**（用拦截接口的本地构建，未登录真实环境） | `DualCanvasViewer.focusAnchor`：目标侧切换、同页重复点击也执行、滚入视口并短暂高亮、`aria-live` 播报、越界/未加载给出原因、加载中暂存锚点。`RunDetailPage.locateAnchor` 改为调用它；浏览器实测另发现并修复 `PdfPane` 的页偏移缺陷（见 §5） |
 | B 只读基线 | 已实现并在本机库跑过一次 | `scripts/qa/plan079_baseline.py`，结果见 §3 |
 | C 术语与门禁解耦 | 已实现，**默认 `legacy`** | `QYUNSLATION_TERM_GATE_MODE=legacy/shadow/enforce`、`TERM_REVIEW_REQUIRED`、`violation`→阻断型 `TERM_TARGET_MISSING`、`phrase_denylist`（规则版本 `079-v1`）、前端文案 |
-| D 乱码证据与分级 | 已实现；**源文继承降级默认关闭** | 检测器与码点写入证据。源文同页也有的字符降为警告 `TEXT_ENCODING_INHERITED`，但**只有设置 `QYUNSLATION_ENCODING_INHERITANCE=1` 才启用**（B2 标注未做，不能在默认路径上验证它）。收紧 `Ã`/`Â` 判定，葡/西语大写名不再命中（这一条默认生效） |
+| D 乱码证据与分级 | 已实现；**源文继承降级默认 auto（仅限未映射字形标记，见 PLAN 乱码修复）** | 检测器与码点写入证据。源文同页也有的字符降为警告 `TEXT_ENCODING_INHERITED`，默认 `auto` 仅对 C0/U+FFFD 这类未映射字形标记生效（译文标记数不得超过源文，双语 PDF 允许 2 倍）；`1` 为旧的整族重叠降级；`0` 关闭。收紧 `Ã`/`Â` 判定，葡/西语大写名不再命中（这一条默认生效） |
 | E 回归、影子灰度、切换 | **未做**（E1 已做，E2/E3 需要部署与一周观察） | 见 §6 |
 | F2 预检误阻断 | 已评估 | §4 |
 | F5 测试基线 | 已清零 | §5 |
@@ -143,7 +143,7 @@ F14：`TermbasePage` 的加载失败现在显示可重试的提示；`stores/wor
 | 项 | 默认配置下是否生效 | 影响 |
 | --- | --- | --- |
 | 术语门禁 `legacy/shadow/enforce` | 默认 `legacy`，门禁口径不变 | 无 |
-| 乱码源文继承降级 | **默认关闭**（`QYUNSLATION_ENCODING_INHERITANCE`） | 无；默认下每个乱码页都是阻断，与之前一致 |
+| 乱码源文继承降级 | **默认 auto**（`QYUNSLATION_ENCODING_INHERITANCE`=0/1/auto） | 仅未映射标记且不多于源文时降为警告；新增乱码、C1、mojibake 仍阻断 |
 | 乱码正则收紧 | **生效** | 大写葡/西语名（`JOÃO`、`SÃO PAULO`）不再被判为乱码。这是对误报的修正，但它确实减少了一类阻断，需要知道 |
 | 预检复用时的语言提示 | **生效** | 复用预检时按新选的源语言重算语言提示（修正） |
 | docx/pptx 工作流 | **生效** | `factory.py` 此前把 `domain_profile`/`document_profile` 传给翻译器配置，所有翻译器 dataclass 都不接受，docx/pptx 经该路径会 `TypeError`。在 `main` 上已复现（`test_plan060_evidence` 在干净工作树上失败）。修复后这条路径可用 |

@@ -710,6 +710,11 @@ class Pdf2zhRunner:
         output_dir = run_dir / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
+            # PLAN-084: same-named repaired copy for BabelDOC/tables: truthful ToUnicode for publisher symbol fonts
+            # (± ≥ © drawn under en-dash/dagger slots) and drop caps restored to inline letters. Fail-open.
+            from qyunslation.structure.source_prepare import prepare_source
+
+            source = await asyncio.to_thread(prepare_source, source, run_dir / "source")
             runtime_config = _prepare_runtime_config(_config_file(), run_dir, settings)
             command = build_pdf2zh_command(
                 executable=executable,
@@ -1077,6 +1082,8 @@ class Pdf2zhRunner:
                     await asyncio.to_thread(
                         self._postprocess_tables, source, run_dir / "output", _on_table
                     )
+                    # PLAN-084：首字下沉——中文首字放大，双语左半换回原件页（失败不影响交付）。
+                    await asyncio.to_thread(self._finish_dropcaps, run_dir, run_dir / "output")
                     # 后处理的临时文案不带进终态；完成态沿用 BabelDOC 的最后一条。
                     state = {**holder["state"], "progress_message": babel_message}
                     self._write_state(
@@ -1146,6 +1153,15 @@ class Pdf2zhRunner:
                 except Exception as exc:  # noqa: BLE001
                     summary[pdf.name] = {"error": type(exc).__name__}
             return summary
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _finish_dropcaps(run_dir: Path, output_dir: Path) -> dict[str, Any] | None:
+        try:
+            from qyunslation.structure.source_prepare import finish_translated_outputs
+
+            return finish_translated_outputs(run_dir, output_dir)
         except Exception:  # noqa: BLE001
             return None
 

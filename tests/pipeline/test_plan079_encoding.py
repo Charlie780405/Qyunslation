@@ -81,16 +81,39 @@ def test_without_page_text_the_finding_still_carries_detectors():
     assert found["TEXT_ENCODING_ARTIFACT"].evidence["detectors"] == {"fffd": ["U+FFFD"]}
 
 
-def test_by_default_source_overlap_does_not_downgrade_anything(monkeypatch):
-    """Production default: the downgrade is off, so a garbled page is a blocker even if the source has the same mark."""
+def test_default_auto_downgrades_only_inherited_unmapped_marks(monkeypatch):
+    """Default is auto: source-inherited C0/U+FFFD marks warn; extra marks or mojibake still block."""
     monkeypatch.delenv("QYUNSLATION_ENCODING_INHERITANCE", raising=False)
     source = ["原文\x07带控制字符"]
-    translated = ["译文\x07带控制字符"]
+    same = ["译文\x07带控制字符"]
     found = _by_code(check_translation_text(
-        source_text=source[0], translated_text=translated[0], source_pages=source, translated_pages=translated,
+        source_text=source[0], translated_text=same[0], source_pages=source, translated_pages=same,
+    ))
+    assert "TEXT_ENCODING_ARTIFACT" not in found and "TEXT_ENCODING_INHERITED" in found
+    more = ["译文\x07\x07\x07带控制字符"]
+    found = _by_code(check_translation_text(
+        source_text=source[0], translated_text=more[0], source_pages=source, translated_pages=more,
     ))
     assert found["TEXT_ENCODING_ARTIFACT"].severity == "blocker"
-    assert "TEXT_ENCODING_INHERITED" not in found
+    clean = ["原文干净"]
+    found = _by_code(check_translation_text(
+        source_text=clean[0], translated_text=same[0], source_pages=clean, translated_pages=same,
+    ))
+    assert found["TEXT_ENCODING_ARTIFACT"].severity == "blocker"
+
+
+def test_bilingual_pdf_allows_two_copies_of_inherited_marks(monkeypatch):
+    monkeypatch.delenv("QYUNSLATION_ENCODING_INHERITANCE", raising=False)
+    source = ["原文\x07"]
+    dual = ["原文\x07译文\x07"]
+    found = _by_code(check_translation_text(
+        source_text=source[0], translated_text=dual[0], source_pages=source, translated_pages=dual, bilingual=True,
+    ))
+    assert "TEXT_ENCODING_ARTIFACT" not in found
+    found = _by_code(check_translation_text(
+        source_text=source[0], translated_text=dual[0], source_pages=source, translated_pages=dual,
+    ))
+    assert found["TEXT_ENCODING_ARTIFACT"].severity == "blocker"
 
 
 def test_babeldoc_space_glyph_control_is_warning_not_blocker():

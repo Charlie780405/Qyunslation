@@ -266,6 +266,17 @@ def redact_table_region(
             dx = width * float(x_min_frac)
             x0, x1 = x0 + dx, x1 + dx
     rect = pymupdf.Rect(x0 - pad, y0 - pad, x1 + pad, y1 + pad) & page.rect
+    # PLAN-084: the 2pt top pad used to clip the caption line sitting just above the table (its glyph boxes dip
+    # below the table's top edge), and redaction removes every glyph it touches — the table title vanished.
+    try:
+        top = rect.y0
+        probe = pymupdf.Rect(rect.x0, rect.y0 - 24.0, rect.x1, rect.y0 + 4.0)
+        for word in page.get_text("words", clip=probe):
+            if (float(word[1]) + float(word[3])) / 2.0 < y0 and float(word[3]) > rect.y0:
+                top = max(top, float(word[3]) + 0.05)
+        rect.y0 = min(top, max(rect.y0, y0))
+    except Exception:
+        pass
     if rect.is_empty or rect.width < 4 or rect.height < 4:
         return False
     page.add_redact_annot(rect, fill=False, cross_out=False)
@@ -409,9 +420,24 @@ def paint_cell(
                 align=0,
                 color=_INK,
             )
-            if rc >= 0 or size <= 6.0:
+            if rc >= 0:
+                return size
+            if size <= 6.0:
+                # insert_textbox draws nothing when the text misses the box by a hair; never leave a header cell blank
+                # (PLAN-084: 「MG-K10 300 mg Q4W (n=41)」整格消失)。
+                _draw_lines_anyway(page, inset, lines, fontname=fontname, font_size=size)
                 return size
         size = max(6.0, size - 0.5)
+
+
+def _draw_lines_anyway(page, inset, lines: list[str], *, fontname: str, font_size: float) -> None:
+    text = "\n".join(lines)
+    name = _page_font(page, fontname, text)
+    y = inset.y0 + font_size * 0.95
+    for line in lines:
+        if line:
+            page.insert_text((inset.x0, y), line, fontname=name, fontsize=font_size, color=_INK)
+        y += font_size * 1.12
 
 
 def _paint_short_line(
