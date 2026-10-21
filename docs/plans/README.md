@@ -65,7 +65,7 @@
 | **PLAN-083** | （无独立计划目录与 WT；见提交 `425d7501` 至 `76517451`） | **文献三线表按行规则重建（083、083b–d）**（已提交，随 `62413cc0` 部署） |
 | **PLAN-084** | （无独立计划目录与 WT；见提交 `65770f02`） | **符号字体 ± ≥ © 映射、首字下沉规整、表题保护**（已提交，随 `62413cc0` 部署） |
 | **PLAN-085** | （见 WT-085；无独立计划目录） | **横向表整页转正翻译、表内汉字字重、符号字形不再阻断**（已部署，指纹 `7542777de0fd`，见 WT-085） |
-| **PLAN-086** | [PLAN-086-language-assets-quality-system](./PLAN-086-language-assets-quality-system/) | **术语库、错法表与风格指南质量系统**（核心闭环已实现，待专家金标与部署） |
+| **PLAN-086** | [PLAN-086-language-assets-quality-system](./PLAN-086-language-assets-quality-system/) | **术语库、错法表与风格指南质量系统**（核心闭环已实现，代码已随 `62413cc0` 部署（2026-10-21），待专家金标与灰度） |
 | **PLAN-087** | [PLAN-087-qa-post-release-remediation](./PLAN-087-qa-post-release-remediation/) | **PLAN-079 上线后反馈与修复：乱码单人授权、可点击解决方案、自我确认、沿用结论、导出页（原提交沿用 PLAN-079 编号，已拆分归档）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
