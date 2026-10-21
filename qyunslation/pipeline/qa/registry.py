@@ -95,6 +95,11 @@ _RULES: dict[str, RuleInfo] = dict(
            "页面通常仍可读；复制或搜索时会出现异常符号。常见于部分 PDF 字体把空格字形的 ToUnicode 写成了控制字符。",
            "对照页面确认正文可读即可确认已阅；若复制结果也要干净，可重新导出或开启空格 CMap 修复后再交付。",
            locatable="page", identity_keys=("detectors",)),
+        _r("TEXT_LAYER_SYMBOL_GLYPH", WARN, "译文文本层里有单独的符号字形（项目符号、页眉分隔符）",
+           "这些字符独占一个词位（前后都是空白），是项目符号或页眉分隔符之类的符号字形，字体没有给它写文字映射；"
+           "页面上能正常显示，只有复制或搜索文本层时才看到异常符号。夹在文字中间的乱码不属于这一类，仍会阻断。",
+           "对照页面确认符号显示正常即可确认已阅。",
+           locatable="page", identity_keys=("detectors",)),
         _r("TEXT_ENCODING_INHERITED", WARN, "译文中的异常字符在源文同一页也存在",
            "同一页的源文已经带有这些字符，多半来自源文 PDF 的字体或编码，不是翻译造成的。",
            "对照源文同一页确认；确属源文原样的可确认已阅。",
@@ -230,6 +235,7 @@ def is_registered(code: str) -> bool:
 _WAIVER_REASONS: dict[str, str] = {
     "TEXT_ENCODING_ARTIFACT": "已查看对应页面，页面上读不出乱码，内容可以接受（命中的多半是文本层里不可见的控制字符）。",
     "TEXT_LAYER_SPACE_MAP": "已查看对应页面，正文可读；命中的是文本层空格字形映射，不影响阅读。",
+    "TEXT_LAYER_SYMBOL_GLYPH": "已查看对应页面，项目符号和页眉分隔符显示正常；命中的只是文本层里的符号字形。",
     "TABLE_TEXT_OVERLAP": "已对照原文表格，重叠不影响关键数据核对，或仅为脚注/装饰叠字。",
     "LOGO_MISSING": "已核对首页，标识或印章在译文中以其他形式保留，或本文不需要保留，不影响使用。",
     "PAGE_COUNT_MISMATCH": "已核对，译文页数与原文不同来自排版（行宽、字体或表格），内容完整。",

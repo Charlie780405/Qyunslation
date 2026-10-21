@@ -358,6 +358,7 @@ def extract_words_from_page(page, box: tuple[float, float, float, float]) -> lis
         raw = page.get_text("words") or []
     except Exception:
         return out
+    vertical = _vertical_text_rects(page)
     for item in raw:
         if len(item) < 5:
             continue
@@ -371,9 +372,30 @@ def extract_words_from_page(page, box: tuple[float, float, float, float]) -> lis
         if not text:
             continue
         cx, cy = (wx0 + wx1) / 2, (wy0 + wy1) / 2
+        if any(vx0 <= cx <= vx1 and vy0 <= cy <= vy1 for vx0, vy0, vx1, vy1 in vertical):
+            continue
         if x0 - 2 <= cx <= x1 + 2 and y0 - 2 <= cy <= y1 + 2:
             out.append(TableWord(text=text, x0=wx0, y0=wy0, x1=wx1, y1=wy1))
     return out
+
+
+def _vertical_text_rects(page) -> list[tuple[float, float, float, float]]:
+    """竖排文字行（页边版权行、页码等）的外框。它们不是表格内容，混进表框会把行判成「塌行」。
+
+    横向页转正后，原本横排的页脚会变成竖排；表格自身的文字永远是横排的，所以只要行方向接近竖直就排除。
+    """
+    rects: list[tuple[float, float, float, float]] = []
+    try:
+        blocks = page.get_text("dict").get("blocks") or []
+    except Exception:
+        return rects
+    for block in blocks:
+        for line in block.get("lines") or []:
+            direction = line.get("dir") or (1.0, 0.0)
+            if abs(float(direction[1])) > 0.9 and line.get("bbox"):
+                bx0, by0, bx1, by1 = (float(v) for v in line["bbox"])
+                rects.append((bx0 - 0.5, by0 - 0.5, bx1 + 0.5, by1 + 0.5))
+    return rects
 
 
 def extract_row_rules_from_page(page, box: tuple[float, float, float, float]) -> list[float]:
@@ -444,7 +466,7 @@ def extend_frame_to_bottom_rule(
             continue
         numeric = sum(1 for line in lines if _line_is_numeric_data(line))
         multi = sum(1 for line in lines if len(line.segs) >= 2)
-        if numeric < 0.5 * len(lines) or multi < 0.4 * len(lines):
+        if numeric < 0.4 * len(lines) or multi < 0.4 * len(lines):
             # Looks like body prose / footnotes — stop looking further.
             break
         return (x0, y0, x1, float(cand)), float(cand)

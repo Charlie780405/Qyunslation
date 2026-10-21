@@ -23,6 +23,7 @@ from qyunslation.structure.text_sanitize import (
     is_decorative_unmapped_inherited,
     detect_text_artifacts,
     space_map_evidence,
+    symbol_glyph_evidence,
     visible_codepoint_excerpt,
 )
 
@@ -355,11 +356,15 @@ def _encoding_findings(
     blocking: list[tuple[int, dict[str, list[str]]]] = []
     inherited: list[tuple[int, dict[str, list[str]]]] = []
     space_mapped: list[tuple[int, dict[str, list[str]]]] = []
+    symbol_glyphs: list[tuple[int, dict[str, list[str]]]] = []
     pages = translated_pages or []
     for number, evidence in hits:
         page = pages[number - 1]
         if space_map_evidence(page):
             space_mapped.append((number, evidence))
+            continue
+        if symbol_glyph_evidence(page):
+            symbol_glyphs.append((number, evidence))
             continue
         in_source = artifact_evidence(source_pages[number - 1]) if (comparable and inheritance) else {}
         decorative = auto_inherit and is_decorative_unmapped_inherited(
@@ -392,6 +397,20 @@ def _encoding_findings(
                 },
                 location=locate.location(
                     [locate.page_anchor("translated", n, "空格字形映射伪影", _artifact_excerpt(pages[n - 1])) for n, _ in space_mapped]
+                ),
+            )
+        )
+    if symbol_glyphs:
+        out.append(
+            QaFinding(
+                category="integrity", severity="warning", code="TEXT_LAYER_SYMBOL_GLYPH",
+                message="译文文本层里有单独的符号字形（项目符号、页眉分隔符）；页面能正常显示，只有复制文本时可能出现异常符号",
+                evidence={
+                    "detectors": _merge_families([e for _, e in symbol_glyphs]),
+                    "pages": [n for n, _ in symbol_glyphs],
+                },
+                location=locate.location(
+                    [locate.page_anchor("translated", n, "符号字形无文字映射", _artifact_excerpt(pages[n - 1])) for n, _ in symbol_glyphs]
                 ),
             )
         )

@@ -160,6 +160,54 @@
 
 **R14–R16 验证**：`/tmp/qy/offline.py`（MG-K10，页 5/9，mono+dual），先用 `set -a; . ./.env; set +a` 加载环境。
 
+### R17 横向（旋转）整页：先转正再翻译，译后转回去
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 期刊宽表整页旋转 90° 印在竖版页上（`/Rotate`=0，文字方向竖直）：BabelDOC 只认横排文字，整页表格和说明一个字没译；页脚、页码也被丢掉 |
+| 先查 | `page.get_text("dict")` 里各行 `dir`：竖直字符占 ≥60% 且 ≥200 字；`source/rotations.json` 有没有记录 |
+| 修法 | `pdf_rotate.normalize_rotated_pages`：翻译前给内容流包一层 `cm` 转正（`cw=90` 自下而上的文字转成自左向右），页框横过来；表格重排、QA 都按正常横版页处理。译后 `finish_rotated_pages`（放在首字下沉处理**之后**，最后一步）：`show_pdf_page(rotate=cw)` 转回原方向（rotate 是**逆时针**），双语并排页左半换回原件页、右半转回。原页上横排的页脚/页码（转正后变竖排被引擎丢弃）记在 `keep` 里，译后擦白盖回原样 |
+| 开关 | `QYUNSLATION_ROTATED_PAGES=0` 关闭；失败一律回到原文件 |
+| 判据 | 表 2 的第 6、7 页有中文，回到竖版方向；页脚版权行和页码还在；dual 左半是原件 |
+
+### R18 汉字比数字淡：`QYUNSLATION_FONT` 指向可变字体
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 表里汉字发灰发细，数字（Helvetica）又黑又粗；`span.font` 是 `Noto Sans SC Thin Thin` |
+| 根因 | `.env` 里 `QYUNSLATION_FONT=/home/dev/.fonts/NotoSansSC.ttf` 是**可变字体**，默认实例 wght=100（Thin）；子集化不应用字重轴，嵌进去的汉字就是 Thin。同源坑见 image-overlay-translation 坑 6 |
+| 修法 | `cjk_font.resolve_static_cjk`：配置的字体有 `fvar` 或 OS/2 字重 <300 就换成静态 `NotoSansSC-Regular/Bold.otf`（再退 `SourceHanSansCN-*`）。`table_writeback.CJK_REGULAR/CJK_BOLD`、`pdf_table_column_center._FONT_PATH`、`role_fitter` 都走它 |
+| 判据 | 落笔字体名是 `Noto Sans SC Static Regular`；汉字与数字深浅一致，第一列中文与数字同一无衬线族 |
+
+### R19 个别格仍是英文 / 译文串到邻格
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 第一列 `Difference versus placebo, %,`、`Responders, n (%)` 之类还是英文；每次重跑出错的格不一样 |
+| 根因 | 批量译文按序号对应，模型偶尔把相邻两格合并，后面整体错位（`placebo, (95% CI)` 得到 `应答者，n (%)`）。数字守恒检查拦下后**回退成源文**；而译文缓存按 id 存，错位结果被缓存，原 id 重试会原样取回 |
+| 修法 | `table_translate._retry_single_cell`：数字漂移时用**新 id**（`<id>#retry`）单格重译一次，通过数字守恒才采用；仍不过才回退源文。没有数字的格错位拦不住，所以换行折断的标签行是根源——尽量让标签行成整句 |
+| 判据 | 重跑同一份文件，第一列没有残留英文标签（`EASI-50` 这类缩写本来就保留） |
+
+### R20 页边竖排文字混进表框 → `collapsed_rows`
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 横向表的续表页重建失败 `literature_rebuild_failed:collapsed_rows`，BabelDOC 版本里数字挤成一行 |
+| 根因 | 转正后原本横排的页脚变成竖排，扫描出的表框 `x0≈4`，把竖排版权行当成表格的一列 |
+| 修法 | `table_rebuild._vertical_text_rects` + `extract_words_from_page`：行方向接近竖直的文字不算表格词。`extend_frame_to_bottom_rule` 的「数字行占比」阈值从 0.5 降到 0.4（标签折行多的临床表数字行只有 47%） |
+| 判据 | 表 2 两页都是 `literature_rebuild_painted` |
+
+### R21 表题条上的标签带控制符
+
+| 项 | 内容 |
+| --- | --- |
+| 症状 | 横向表表题 `表 2. 第 16 周的疗效结果` 黑底黑字、与标题叠在一起，`repair_dark_caption_label` 没动手 |
+| 根因 | BabelDOC 把词间空格写成 U+0003（空格字形 ToUnicode），`表\x032.` 过不了 `表\s*\d+`；另外表框左缘被污染时 `abs(bar.x0-box.x0)≤8` 也不成立 |
+| 修法 | 正则前先把 C0 控制符换成空格；题名里多空白折叠；深色条只要求 `box.x0-8 ≤ bar.x0 ≤ box.x0+60` |
+| 判据 | 白字 `表 2.` + 深色题名；续表页的 `表 2.（续）` 同样处理 |
+
+**R14–R21 验证**：`/tmp/qy/offline.py`（MG-K10，页 5/9，mono+dual）；横向表用 `/tmp/qy/e2e.py 5-7 --post`（先 `prepare_source` 再真实 pdf2zh_next，PYTHONPATH 指向仓库）。先用 `set -a; . ./.env; set +a` 加载环境。
+
 ## 验收（必须真实）
 
 ```bash

@@ -170,6 +170,8 @@ description: >-
 | `QYUNSLATION_HPD_GRID_CACHE` | 缓存目录 |
 | `QYUNSLATION_PLAN048_SAMPLE` | 实样 PDF 路径（verify 可选） |
 | `QYUNSLATION_FONT` | 表内一族字体，默认 `NotoSansSC-Regular.otf` |
+| `QYUNSLATION_FONT` | 表内一族字体，默认 `NotoSansSC-Regular.otf`；指向可变字体/Thin 会被自动换成静态字面（R18） |
+| `QYUNSLATION_ROTATED_PAGES` | 横向整页转正再翻译，默认开，`0` 关闭（R17） |
 
 ## 相关文件
 

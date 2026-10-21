@@ -214,6 +214,28 @@ def is_space_map_control_context(text: str, index: int) -> bool:
     return _is_wordish(left) and _is_wordish(right)
 
 
+def symbol_glyph_evidence(text: str | None) -> dict[str, list[str]]:
+    """Evidence for standalone symbol glyphs (bullet, header separator) whose font has no ToUnicode entry.
+
+    Every C0 / U+FFFD mark must be a token of its own (start/whitespace before and whitespace/end after), e.g.
+    ``"\x01 MG-K10"`` or ``"Gu 等 \n\x01 MG-K10"``. A mark inside a word, C1 or mojibake never qualifies, so real
+    garbling keeps blocking. Empty when not applicable.
+    """
+    raw = text or ""
+    evidence = artifact_evidence(raw)
+    if not evidence or evidence.keys() - {"c0", "fffd"}:
+        return {}
+    marks = list(re.finditer(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffd]", raw))
+    if not marks:
+        return {}
+    for mark in marks:
+        before = raw[mark.start() - 1] if mark.start() > 0 else " "
+        after = raw[mark.end()] if mark.end() < len(raw) else " "
+        if not before.isspace() or not after.isspace():
+            return {}
+    return evidence
+
+
 def space_map_evidence(text: str | None) -> dict[str, list[str]]:
     """Evidence for PLAN-082 space-glyph ToUnicode false positives; empty when not applicable.
 

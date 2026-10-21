@@ -17,6 +17,7 @@ from .role_fitter import (
     measure_textbox,
     table_hard_fail_codes,
 )
+from .cjk_font import resolve_static_cjk
 from .table_cell_policy import has_script_runs, split_script_runs
 from .table_translate import (
     CONTINUATION_LABEL,
@@ -24,11 +25,12 @@ from .table_translate import (
     plan_dual_continuations,
 )
 
-CJK_REGULAR = Path(
+# 可变/Thin 字体（.env 里的 NotoSansSC.ttf）会让汉字比数字淡一截，统一换静态字面。
+CJK_REGULAR = resolve_static_cjk(
     os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC-Regular.otf")
 )
-CJK_BOLD = Path(
-    os.environ.get("QYUNSLATION_FONT_BOLD", "/home/dev/.fonts/NotoSansSC-Bold.otf")
+CJK_BOLD = resolve_static_cjk(
+    os.environ.get("QYUNSLATION_FONT_BOLD", "/home/dev/.fonts/NotoSansSC-Bold.otf"), bold=True
 )
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _CJK_FONT_RE = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")

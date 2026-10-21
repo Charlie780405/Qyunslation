@@ -38,7 +38,9 @@ _KEEP_ABBREV = re.compile(
 )
 _DOSE_ZH = re.compile(r"^每([24])周$")
 _HEADER_N_EQ = re.compile(r"^\(?\s*N\s*=\s*\d+\s*\)?$", re.I)
-_FONT_PATH = Path(
+from qyunslation.structure.cjk_font import resolve_static_cjk  # noqa: E402
+
+_FONT_PATH = resolve_static_cjk(
     os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC-Regular.otf")
 )
 _FONTNAME = "qy-tbl"

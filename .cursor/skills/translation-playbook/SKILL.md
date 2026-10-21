@@ -51,6 +51,11 @@ description: >-
 | `±` 变成 `-` / `≥` 丢了 / `©` 乱码 | 源 PDF 的 `AdvPSSymbol/AdvPSSym` 子集字体 ToUnicode 错；`QYUNSLATION_FIX_SYMBOL_CMAP` | SK-Q007 坑 5 |
 | Introduction 首字母大写 A 与正文叠字 / 中文首字不突出 | 首字下沉被当公式；`QYUNSLATION_FIX_DROPCAP`、`QYUNSLATION_DROPCAP_ZH_SCALE` | SK-Q006 坑 5 |
 | 表头少列 / 表题「表 1.」消失 / 深色标签条空白 | 表头 rc<0 不落笔；redact 误伤表题；深色条标签 | SK-Q009 R14–R16 |
+| 横向（旋转）表格完全没翻译 | 页面文字方向是竖的：`source/rotations.json`、`QYUNSLATION_ROTATED_PAGES` | SK-Q009 R17 |
+| 表里汉字比数字淡 / 第一列字体和数字不一致 | `.env` 的 `QYUNSLATION_FONT` 是可变字体（默认 Thin）：看落笔字体名是否 `Thin` | SK-Q009 R18 |
+| 表格个别格仍是英文 / 译文串到邻格 | 批量译文错位 + 数字守恒回退源文；`table_translate._retry_single_cell` | SK-Q009 R19 |
+| 横向表重建失败 `collapsed_rows` / 表题条被叠字 | 页边竖排文字混进表框；条上标签含 U+0003；表框左缘被污染 | SK-Q009 R20–R21 |
+| 乱码阻断但只是项目符号 / 页眉分隔符 | `symbol_glyph_evidence`：独占词位的 C0/U+FFFD 降为 `TEXT_LAYER_SYMBOL_GLYPH` 警告 | SK-Q007 坑 7 |
 | 图内文字 | 图片链 | SK-Q002 |
 | 监管表单 | HPD 网格 | SK-Q003 |
 | 段落丢 / 摘要碎片 / 顺序乱 | never-drop、全局状态机 | SK-Q005、SK-Q006 |

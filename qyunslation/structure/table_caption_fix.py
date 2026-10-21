@@ -40,7 +40,7 @@ def _dark_label_rect(origin_page, box):
             continue
         if _luma(fill) > 0.35 or not (15 <= rect.width <= 160 and 6 <= rect.height <= 26):
             continue
-        if not (box[1] - 22 <= rect.y1 <= box[1] + 4) or abs(rect.x0 - box[0]) > 8:
+        if not (box[1] - 22 <= rect.y1 <= box[1] + 4) or not (box[0] - 8 <= rect.x0 <= box[0] + 60):
             continue
         if best is None or rect.y1 > best.y1:
             best = rect
@@ -95,11 +95,13 @@ def repair_dark_caption_label(page, origin_page, box, *, x_min_frac: float | Non
     if not on_bar or any(_luma(_rgb(int(s.get("color", 0)))) > 0.6 for s in on_bar):
         return False
     text = "".join(str(s.get("text") or "") for s in sorted(spans, key=lambda s: s["bbox"][0]))
+    # BabelDOC 把词间空白写成 U+0003 之类的控制符（空格字形 ToUnicode），先还原成空格。
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
     match = _LABEL_RE.match(text)
     if not match:
         return False
     number = re.sub(r"\s+", " ", match.group(1)).strip()
-    label_text, caption_text = f"{number}.", match.group(2)
+    label_text, caption_text = f"{number}.", re.sub(r"\s+", " ", match.group(2)).strip()
     union = fitz.Rect(spans[0]["bbox"])
     for s in spans[1:]:
         union |= fitz.Rect(s["bbox"])

@@ -139,7 +139,9 @@ def _font_text_length(text: str, font_size: float) -> float:
 
         import pymupdf
 
-        font_path = Path(
+        from .cjk_font import resolve_static_cjk
+
+        font_path = resolve_static_cjk(
             os.environ.get("QYUNSLATION_FONT", "/home/dev/.fonts/NotoSansSC-Regular.otf")
         )
         if font_path.is_file():

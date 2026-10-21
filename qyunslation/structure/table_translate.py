@@ -216,8 +216,12 @@ def translate_table_blocks(
                         block.source_text, text, block_id=block.block_id
                     )
                 except ValueError:
+                    # 先单格重译一次（批量时模型偶尔丢 95%/n=41 之类数字，整格留英文）；仍漂移才回退源文。
+                    retried = _retry_single_cell(block, payloads, maps, translator)
+                    if retried is not None:
+                        text = retried
                     # 列表序号已补回仍漂移：回退源文重绘，不拖垮整表
-                    if drift_fallback_source or _CJK_RE.search(block.source_text or ""):
+                    elif drift_fallback_source or _CJK_RE.search(block.source_text or ""):
                         text = block.source_text or text
                     else:
                         raise TableTranslateError(
@@ -234,6 +238,32 @@ def translate_table_blocks(
         text = restore_unit_superscripts(text)
         out[block.block_id] = compact_table_punctuation(text) if compact_punct else text
     return out
+
+
+def _retry_single_cell(block, payloads, maps, translator) -> str | None:
+    """单格重译：数字守恒通过才返回译文，任何异常都返回 None（调用方回退源文）。"""
+    try:
+        payload = next(p for p in payloads if p["id"] == block.block_id)
+        # 换新 id：批量译文按 id 缓存，用原 id 会把错位的旧译文原样取回来。
+        retry_id = f"{block.block_id}#retry"
+        out = translator([{"id": retry_id, "text": payload["text"]}])
+        raw = str((out or {}).get(retry_id) or "").strip()
+        if not raw:
+            return None
+        text = restore_tokens(raw, maps.get(block.block_id) or {})
+        try:
+            from .text_sanitize import sanitize_translated_text
+
+            text, _codes = sanitize_translated_text(text)
+        except Exception:  # noqa: BLE001
+            pass
+        text = _restore_list_prefix(block.source_text or "", text)
+        assert_digit_tokens_preserved(block.source_text, text, block_id=block.block_id)
+        if missing_protected_tokens(block.source_text, text):
+            return None
+        return text
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _restore_list_prefix(source: str, text: str) -> str:
