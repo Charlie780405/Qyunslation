@@ -60,3 +60,10 @@ PLAN-079 的第一版上线后，用户在生产环境反馈了以下问题：
 2. 抽查审计中的 `self_review` 记录，确认自我确认的使用情况。
 3. 观察 `enforce` 下一周的误阻断与漏放情况，决定是否需要收紧候选规则。
 4. 回滚路径（已验证语法，未在线上执行）：删除 `~/.config/systemd/user/qyunslation-office.service.d/plan079-mode.conf`，执行 `systemctl --user daemon-reload && systemctl --user restart qyunslation-office.service`，门禁回到 `legacy`。
+
+## 7. 试行决定（2026-10-21，用户确认）
+
+1. **同一人审核批准（试行）**：`review-decision` 接口本身不限制提交人与审批人相同，代码无需改动；自审通过 `self_review=true` 留痕，并在处置记录中标注“提交人自审”。本次不新增门槛，试行期间由用户自行承担审计责任。
+2. **删除 `docker-compose.plan034c.yml`**：该文件记录了默认口令回退 `qyunslation_dev_only`，删除后也随之消失。运行中的容器 `qyunslation-plan034c-pg` 不依赖该文件，数据卷不受影响。同步移除 `scripts/verify-plan-034c.sh` 中对该文件存在性的校验。以后重建 PG 容器需另行提供配置，不能再用本仓库的 compose 文件。
+3. **合并与部署**：feat 分支的 WT-079 复核记录已合并进 `main`（`a1b572b0`），随后从 `main` 部署到生产。
+4. **完成页与导出的验收**：以真实登录环境下已批准的任务为准做只读核对（完成页、下载、回到 QA）。未通过授权例外放行仍有阻断问题的任务。

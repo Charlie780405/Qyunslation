@@ -41,8 +41,6 @@ WT="$ROOT/docs/walkthroughs/WT-034c-saas-persistence.md"
 [[ -f "$ROOT/qyunslation/api/v1.py" ]] && pass "api v1" || fail "api v1"
 [[ -f "$ROOT/alembic/versions/034c0001_initial_saas_tables.py" ]] \
   && pass "alembic revision" || fail "alembic revision"
-[[ -f "$ROOT/docker-compose.plan034c.yml" ]] && pass "compose file" || fail "compose file"
-
 grep -q 'QYUNSLATION_DATABASE_URL' "$WT" \
   && pass "WT documents DATABASE_URL" || fail "WT missing DATABASE_URL"
 grep -q '无密钥' "$WT" || grep -q '勿' "$WT" \
