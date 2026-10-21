@@ -20,6 +20,8 @@ from typing import Any
 SYMBOL_FONT_FIXES: dict[str, dict[int, str]] = {
     "AdvPSSymbol": {150: "\u00b1", 135: "\u2265"},  # ± ≥
     "AdvPSSym": {170: "\u00a9"},  # ©
+    "AdvP4C4E74": {1: "\u2022"},  # • 项目符号（code 1 原先读成 U+0001）
+    "AdvMathpi6": {1: "\u25a0"},  # ■ 页眉分隔符（code 1 原先读成 U+0001）
 }
 _SUBSET_PREFIX_RE = re.compile(r"^[A-Z]{6}\+")
 

@@ -72,3 +72,18 @@ PLAN-079 的第一版上线后，用户在生产环境反馈了以下问题：
 2. **删除 `docker-compose.plan034c.yml`**：该文件记录了默认口令回退 `qyunslation_dev_only`，删除后也随之消失。运行中的容器 `qyunslation-plan034c-pg` 不依赖该文件，数据卷不受影响。同步移除 `scripts/verify-plan-034c.sh` 中对该文件存在性的校验。以后重建 PG 容器需另行提供配置，不能再用本仓库的 compose 文件。
 3. **合并与部署**：feat 分支的 WT-079 复核记录已合并进 `main`（`a1b572b0`），随后从 `main` 部署到生产。
 4. **完成页与导出的验收**：以真实登录环境下已批准的任务为准做只读核对（完成页、下载、回到 QA）。未通过授权例外放行仍有阻断问题的任务。
+
+## 8. 乱码与多余警告的根因修复（2026-10-21，用户授权）
+
+**现象**：`50-LIT-2026-MGK10-Trial.pdf`（`a3887b13`）第 2 页因 `TEXT_ENCODING_ARTIFACT` 阻断，第 1 页有两条 `TEXT_ENCODING_INHERITED` 警告。页面上看到的 ■、• 字形本身正常。
+
+**根因（已用源文件核实）**：源 PDF 两个符号子集字体没有 ToUnicode，code 1 按 cp1252 读成 U+0001，BabelDOC 把它当成文字送进翻译，译文文本层变成 U+FFFD。
+- `AdvP4C4E74`：code 1 为实心圆点 •（第 2 页两处，项目符号）。
+- `AdvMathpi6`：code 1 为实心方块 ■（第 1–11 页页眉分隔符）。
+- 全文档 U+0001 只出现在这两个字体的 code 1 上，无其他用途。
+
+**修法**：在 `qyunslation/structure/pdf_symbol_cmap.py` 的 `SYMBOL_FONT_FIXES` 中增加 `AdvP4C4E74: {1: "•"}`、`AdvMathpi6: {1: "■"}`。沿用现有修补机制（仅对无 ToUnicode 的字体生效，不改译文，不事后替换）。
+
+**不做**：不放宽 QA 规则；不以授权例外放行；不改其他字体的映射；不改 `QYUNSLATION_ENCODING_INHERITANCE` 等开关。
+
+**验收**：单元测试覆盖两条映射；用真实源文件跑 `fix_symbol_fonts_pdf`，确认第 1–2 页提取文本不再含 U+0001 / U+FFFD；重新翻译 `50-LIT` 后 QA 无 `TEXT_ENCODING_*` 条目，浏览器中两处符号可见。

@@ -8,6 +8,19 @@ def test_symbol_font_fixes_cover_plusminus_ge_copyright():
     assert sc.SYMBOL_FONT_FIXES["AdvPSSym"][170] == "\u00a9"
 
 
+def test_symbol_font_fixes_cover_bullet_and_header_square():
+    assert sc.SYMBOL_FONT_FIXES["AdvP4C4E74"][1] == "\u2022"
+    assert sc.SYMBOL_FONT_FIXES["AdvMathpi6"][1] == "\u25a0"
+
+
+def test_bullet_and_square_are_not_read_as_control_codes():
+    for family, char in (("AdvP4C4E74", "2022"), ("AdvMathpi6", "25A0")):
+        cmap = sc.build_to_unicode(1, [500], sc.SYMBOL_FONT_FIXES[family])
+        data = (cmap if isinstance(cmap, bytes) else str(cmap).encode()).upper()
+        assert f"<01> <{char}>".encode() in data
+        assert b"<01> <0001>" not in data
+
+
 def test_build_to_unicode_maps_overrides():
     cmap = sc.build_to_unicode(32, [500] * 3, {33: "\u00b1"})
     data = cmap if isinstance(cmap, bytes) else str(cmap).encode()
