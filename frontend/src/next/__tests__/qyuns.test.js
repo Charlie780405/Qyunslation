@@ -95,7 +95,7 @@ describe('qyuns logout flow', () => {
 describe('qyuns appbar mount', () => {
   afterEach(() => {
     document.querySelector('qyuns-appbar')?.remove();
-    document.head.querySelectorAll('script[src$="qyuns-appbar.js"]').forEach((s) => s.remove());
+    document.head.querySelectorAll('script[src*="qyuns-appbar.js"]').forEach((s) => s.remove());
     document.body.className = '';
   });
 
@@ -109,9 +109,9 @@ describe('qyuns appbar mount', () => {
   });
 
   it('脚本地址跟随 vite 的 base（/app-assets/），且是同源路径', () => {
-    expect(appbarScriptUrl('/app-assets/')).toBe('/app-assets/qyuns-appbar.js');
-    expect(appbarScriptUrl('/app-assets')).toBe('/app-assets/qyuns-appbar.js');
-    expect(appbarScriptUrl()).toBe('/qyuns-appbar.js');
+    expect(appbarScriptUrl('/app-assets/')).toBe('/app-assets/qyuns-appbar.js?v=069eab1fc531');
+    expect(appbarScriptUrl('/app-assets')).toBe('/app-assets/qyuns-appbar.js?v=069eab1fc531');
+    expect(appbarScriptUrl()).toBe('/qyuns-appbar.js?v=069eab1fc531');
   });
 
   it('displayName：display_name 优先，其次 name、email，缺失为空', () => {
@@ -132,11 +132,11 @@ describe('qyuns appbar mount', () => {
     expect(bar.getAttribute('portal-href')).toBe('https://apps.qyunsgen.com/');
     expect(bar.getAttribute('theme')).toBe('light');
     expect(bar.getAttribute('user-name')).toBe('Alice');
-    expect(document.head.querySelector('script[src="/app-assets/qyuns-appbar.js"]')).not.toBeNull();
+    expect(document.head.querySelector('script[src="/app-assets/qyuns-appbar.js?v=069eab1fc531"]')).not.toBeNull();
     expect(document.body.classList.contains('qyuns-appbar-on')).toBe(true);
     syncAppbar({ authenticated: true, isPreview: false, user: { display_name: 'Alice' } }, env); // 幂等
     expect(document.querySelectorAll('qyuns-appbar').length).toBe(1);
-    expect(document.head.querySelectorAll('script[src="/app-assets/qyuns-appbar.js"]').length).toBe(1);
+    expect(document.head.querySelectorAll('script[src="/app-assets/qyuns-appbar.js?v=069eab1fc531"]').length).toBe(1);
     syncAppbar({ authenticated: false }, env);
     expect(document.querySelector('qyuns-appbar')).toBeNull();
     expect(document.body.classList.contains('qyuns-appbar-on')).toBe(false);

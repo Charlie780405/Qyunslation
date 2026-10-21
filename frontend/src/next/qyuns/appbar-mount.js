@@ -10,9 +10,13 @@ export function shouldShowAppbar({ hostname, authenticated, isPreview, disabled 
   return !disabled && authenticated && !isPreview && PLATFORM_HOSTS.has(hostname);
 }
 
+// 与 public/qyuns-appbar.js 头部的 QyunsApps@<sha> 保持一致。/app-assets/ 静态资源被边缘设为 1 年 immutable，
+// 旧版本（修复前菜单被 contain:content 裁切）会被浏览器长期缓存，靠版本参数换一个新 URL 来绕过。
+export const APPBAR_VERSION = '069eab1fc531';
+
 /** vite 的 base 是 /app-assets/，public/ 下的文件构建后位于 /app-assets/qyuns-appbar.js。 */
 export function appbarScriptUrl(base = '/') {
-  return `${base.endsWith('/') ? base : `${base}/`}qyuns-appbar.js`;
+  return `${base.endsWith('/') ? base : `${base}/`}qyuns-appbar.js?v=${APPBAR_VERSION}`;
 }
 
 export function displayName(user) {
