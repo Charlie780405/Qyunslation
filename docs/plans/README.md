@@ -61,6 +61,10 @@
 | **PLAN-079** | [PLAN-079-qa-gate-and-term-triage](./PLAN-079-qa-gate-and-term-triage/) | **QA 阻断分级、术语审核准入、对照视图定位与上线收口（A–E + F0–F17）**（v3；A–D 等已在工作区实现，未部署，见 WT-079） |
 | **PLAN-080** | [PLAN-080-pdf-translation-completeness-and-typography](./PLAN-080-pdf-translation-completeness-and-typography/) | **PDF 译文完整性、字体统一、装饰线随文与人名职务保留（080a–080g）**（v5：080a–080i 已实现；保留策略修复已部署，四个新开关默认关闭；见 WT-080 与灰度 runbook） |
 | **PLAN-081** | [PLAN-081-translation-admission-and-service-api](./PLAN-081-translation-admission-and-service-api/) | **双路翻译准入与排队提醒、服务 API、QyunsGen 接入及模型对照**（规划中） |
+| **PLAN-082** | （见 WT-082；无独立计划目录） | **工作台进度、预检过期、乱码误报与表格混乱修复**（已部署 2026-10-20，提交 `c12900b1`、`708295a3`） |
+| **PLAN-083** | （无独立计划目录与 WT；见提交 `425d7501` 至 `76517451`） | **文献三线表按行规则重建（083、083b–d）**（已提交，随 `62413cc0` 部署） |
+| **PLAN-084** | （无独立计划目录与 WT；见提交 `65770f02`） | **符号字体 ± ≥ © 映射、首字下沉规整、表题保护**（已提交，随 `62413cc0` 部署） |
+| **PLAN-085** | （见 WT-085；无独立计划目录） | **横向表整页转正翻译、表内汉字字重、符号字形不再阻断**（已部署，指纹 `7542777de0fd`，见 WT-085） |
 | **PLAN-086** | [PLAN-086-language-assets-quality-system](./PLAN-086-language-assets-quality-system/) | **术语库、错法表与风格指南质量系统**（核心闭环已实现，待专家金标与部署） |
 | **PLAN-087** | [PLAN-087-qa-post-release-remediation](./PLAN-087-qa-post-release-remediation/) | **PLAN-079 上线后反馈与修复：乱码单人授权、可点击解决方案、自我确认、沿用结论、导出页（原提交沿用 PLAN-079 编号，已拆分归档）** |
 

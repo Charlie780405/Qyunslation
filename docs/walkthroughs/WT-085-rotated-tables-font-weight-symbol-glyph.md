@@ -20,4 +20,12 @@
 - 转回后的横向页是 `show_pdf_page` 的表单对象，文字仍可提取，但页面内容流不再是 BabelDOC 原样。
 
 ## 部署
-见提交记录与 `scripts/deploy-translate-stack.sh` 输出（部署后补指纹）。
+2026-10-21 13:37（北京时间）在提交 `62413cc0`（含本计划的 `b806bdf0`）上运行 `scripts/deploy-translate-stack.sh`：
+
+- 部署前门禁：migration、frontend 构建新鲜度均为 PASS；部署后门禁：API 路由已注册，PASS。
+- 本地与远端指纹一致：`7542777de0fd`。
+- 引擎能力：`has_rotated_tier: True`、`has_ocr_garbage_filter: True`、`figure_tier_min_px: 22`、`figure_tier_max_px: 72`、`tier_k_floor: 0.95`。
+- `qyunslation-office` 与 `pdf2zh` 重启后均为 active；8010 与 7860 返回 200（`pdf2zh` 启动约一分钟内 7860 曾连接失败，属于启动下载资源期间的正常现象）。
+- 部署时数据库中没有执行中的翻译任务，本次重启没有中断任务。
+
+**未验证：** 本次部署没有用真实横向表样张重新跑一遍翻译，样张结果以上文走查为准。
