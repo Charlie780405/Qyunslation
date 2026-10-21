@@ -62,7 +62,8 @@
 | **PLAN-080** | [PLAN-080-pdf-translation-completeness-and-typography](./PLAN-080-pdf-translation-completeness-and-typography/) | **PDF 译文完整性、字体统一、装饰线随文与人名职务保留（080a–080g）**（v5：080a–080i 已实现；保留策略修复已部署，四个新开关默认关闭；见 WT-080 与灰度 runbook） |
 | **PLAN-081** | [PLAN-081-translation-admission-and-service-api](./PLAN-081-translation-admission-and-service-api/) | **双路翻译准入与排队提醒、服务 API、QyunsGen 接入及模型对照**（规划中） |
 | **PLAN-086** | [PLAN-086-language-assets-quality-system](./PLAN-086-language-assets-quality-system/) | **术语库、错法表与风格指南质量系统**（核心闭环已实现，待专家金标与部署） |
+| **PLAN-087** | [PLAN-087-qa-post-release-remediation](./PLAN-087-qa-post-release-remediation/) | **PLAN-079 上线后反馈与修复：乱码单人授权、可点击解决方案、自我确认、沿用结论、导出页（原提交沿用 PLAN-079 编号，已拆分归档）** |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
 
-下一个可用父计划编号：**PLAN-087**。创建前须同时检查所有 worktree，避免未合并计划占号。
+下一个可用父计划编号：**PLAN-088**。创建前须同时检查所有 worktree，避免未合并计划占号。

@@ -1,6 +1,6 @@
 # PLAN-079：QA 阻断分级、术语审核准入、对照视图定位与上线收口
 
-> 状态：**v3；A、B、C、D 与 F2、F5、F10、F14 已在工作区实现（未提交、未部署，开关默认 `legacy`；A 已做浏览器实测），E 的灰度与切换、登录后走查、其余 F 项未做**（实施记录见 [WT-079](../../walkthroughs/WT-079-qa-gate-and-term-triage.md)） · 日期：2026-10-19 · 范围：翻译工作台 QA 定位、正式门禁、文档术语候选，以及相关上线收口
+> 状态：**v3；阶段 A–D、E1 与部分 F 项已合并到 main。门禁于 2026-10-19 先以 `legacy` 上线（提交 `183d6c0`），随后按 [WT-079](../../walkthroughs/WT-079-qa-gate-and-term-triage.md) §13 切换为 `enforce`，未经过 E2/E3 的影子观察期。上线后的反馈与修复（可点击解决方案、自我确认、沿用结论、导出页）已拆分为 [PLAN-087](../PLAN-087-qa-post-release-remediation/PLAN-087-qa-post-release-remediation.md) 归档；本文件不再描述这些内容。**（实施记录见 [WT-079](../../walkthroughs/WT-079-qa-gate-and-term-triage.md)） · 日期：2026-10-19 · 范围：翻译工作台 QA 定位、正式门禁、文档术语候选，以及相关上线收口
 > 依赖：PLAN-074（译后术语抽取）、PLAN-076（AD 术语与确定性 QA）、PLAN-077（T3–T7 收口）、PLAN-078a/078b（QA 轮次、规则注册表、处置闭环、`open_blocker`）、PLAN-078f（预检、回收站等遗留）
 > 工作量：阶段 A–E 7.5–11 人日；收口项 F0–F17（F16 不估）约 10–17 人日；合计约 17.6–27.6 人日，不含灰度观察期、发布窗口和等待用户确认的时间
 
