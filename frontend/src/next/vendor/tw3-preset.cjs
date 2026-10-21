@@ -1,4 +1,4 @@
-/* generated from QyunsApps@4f289eb3792e (tokens sha256:1db8c44ec9cc) — do not edit */
+/* generated from QyunsApps@069eab1fc531 (tokens sha256:1db8c44ec9cc) — do not edit */
 module.exports = {
   "theme": {
     "extend": {
