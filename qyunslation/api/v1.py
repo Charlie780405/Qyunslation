@@ -6727,10 +6727,10 @@ def list_concepts_api(
 
     size = min(max(int(limit or LIST_LIMIT_DEFAULT), 1), LIST_LIMIT_MAX)
     rows = list_concepts(session, status=status, tenant_id=tenant.id, limit=size)
-    # 同源多译/同源重复只在本次返回的有效词条内比对，驳回的不参与。
+    # 同源多译/同源重复：只在同层级、同租户内比对；驳回的不参与。
     flags = same_source_flags(
         [
-            (c.id, *preferred_pair(list(c.terms)))
+            (c.id, *preferred_pair(list(c.terms)), f"{c.layer or ''}|{c.tenant_id or 'global'}")
             for c in rows
             if c.status != "rejected"
         ]

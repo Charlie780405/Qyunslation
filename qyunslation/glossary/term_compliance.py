@@ -80,14 +80,18 @@ def normalize_match_key(text: str | None) -> str:
     return re.sub(r"[\W_]+", " ", (text or "").lower()).strip()
 
 
-def same_source_flags(rows: list[tuple[str, str | None, str | None]]) -> dict[str, dict[str, str]]:
-    """rows: (concept_id, 优选源术语, 优选译名)。同一比对键下多个词条时打标，只标记不改数据。"""
-    groups: dict[str, list[tuple[str, str]]] = {}
-    for concept_id, source, target in rows:
+def same_source_flags(rows: list[tuple[str, str | None, str | None, str]]) -> dict[str, dict[str, str]]:
+    """rows: (concept_id, 优选源术语, 优选译名, 范围键)。范围键通常为 层级+租户。
+
+    只在同一范围内比对：跨层（如 clinical 与 domain-autoimmune 各存一份）属于有意分层，不打标。
+    同一范围、同一比对键下多个词条时打标，只标记不改数据。
+    """
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for concept_id, source, target, scope in rows:
         key = normalize_match_key(source)
         tgt = (target or "").strip()
         if key and tgt:
-            groups.setdefault(key, []).append((concept_id, tgt))
+            groups.setdefault((scope, key), []).append((concept_id, tgt))
     flags: dict[str, dict[str, str]] = {}
     for members in groups.values():
         if len(members) < 2:
