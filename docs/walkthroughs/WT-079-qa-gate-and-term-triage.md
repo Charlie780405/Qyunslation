@@ -433,3 +433,10 @@ git branch -d <name>                                 # 只删已合并的分支
 2. 旧任务 `eb7e4876` 的 5 条处置记录里，4 条 `self_review=t`（3 条 `grant_waiver`、1 条 `confirm_false_positive`，均为 admin，发生在 2026-10-19）。这些记录是否符合 §15/§16 对“第二人确认”的要求，本次没有核对规则实现，**未下结论**；该任务在回收站，暂不处理，如需结论应对照 `qa_disposition.self_review` 的写入逻辑再核。
 
 **现场状态：** 仅恢复了 `a3887b13` 一个任务（用户操作）并完成上述写操作复核，现已还原为 `gated / qa_blocked`；`eb7e4876` 仍在回收站（保留至 2026-11-19）。
+
+## 18. 试行部署与完成页验收（2026-10-21）
+
+- 部署：从 `main`（`9d3e58ad`）执行 `scripts/deploy-translate-stack.sh`，前置门禁、指纹 `7542777de0fd` 核对与后置门禁均 PASS；`qyunslation-office` 与 `pdf2zh` 均为 active；`translate.qyunsgen.com/next/workbench` 与 `/api/v1/health` 返回 200。
+- 删除 `docker-compose.plan034c.yml`（含默认口令回退），同步移除 `scripts/verify-plan-034c.sh` 的存在性校验；PG 容器不受影响。
+- 完成页与导出验收：对已批准任务 `d33c1ab8` 只读核对，完成页与两个 PDF 下载链接均可用（206，`%PDF-`）。
+- 未对 `a3887b13` 批准：其唯一阻断项为 `TEXT_ENCODING_ARTIFACT`（译文第 2 页 `U+FFFD`），不以授权例外放行。
