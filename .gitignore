@@ -59,3 +59,6 @@ docs/Resources/
 .vscode/
 
 var/plan071-browser/
+
+# 运行产物与证据目录（不入库；证据路径见 WT/PLAN 文档）
+var/
