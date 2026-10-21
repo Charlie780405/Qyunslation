@@ -38,3 +38,13 @@ def test_decorative_unmapped_inherited():
     assert not f("clean", "a\ufffdb")
     assert not f("a\x01b", "a\ufffd\ufffd\ufffdb")
     assert f("a\x01b", "a\ufffdb a\ufffdb", copies=2)
+
+
+def test_restore_symbol_left_halves_noop_without_fixed_origin(tmp_path):
+    from qyunslation.structure.source_prepare import restore_symbol_left_halves
+
+    run_dir = tmp_path / "run"
+    (run_dir / "source").mkdir(parents=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    assert restore_symbol_left_halves(run_dir, out) is None
