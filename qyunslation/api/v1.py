@@ -6729,6 +6729,7 @@ def create_concept_api(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     tenant = _tenant_bundle(session, identity)
+    _asset_admin(session, identity, tenant.id)
     from qyunslation.persist.concept_repo import concept_to_dict, create_staging_concept
 
     forbidden = [

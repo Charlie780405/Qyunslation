@@ -66,6 +66,8 @@
 .qy-primary-button { color: #fff; background: var(--qy-primary); border: 1px solid var(--qy-primary); }
 .qy-primary-button:hover { background: var(--qy-primary-hover); border-color: var(--qy-primary-hover); }
 .qy-primary-button:disabled { opacity: .5; cursor: not-allowed; }
+.qy-primary-button.is-locked, .qy-secondary-button.is-locked { color: #77868D; border-color: #C9D2D6; background: #EDF1F2; opacity: .72; cursor: not-allowed; }
+.qy-primary-button.is-locked:hover, .qy-secondary-button.is-locked:hover { color: #77868D; border-color: #C9D2D6; background: #EDF1F2; }
 .qy-primary-button svg, .qy-secondary-button svg { width: 18px; height: 18px; }
 .qy-secondary-button { color: var(--qy-primary); background: var(--qy-paper); border: 1px solid var(--qy-border); }
 .qy-secondary-button:hover { background: #F0F6F8; border-color: #A9C1CB; }
@@ -227,6 +229,12 @@
 .qy-import-callout { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; padding: 16px 20px; }
 .qy-import-callout strong, .qy-import-callout span { display: block; }
 .qy-import-callout span { color: var(--qy-text-secondary); font-size: 12px; margin-top: 2px; }
+.qy-term-form { margin-top: 20px; padding: 22px; }
+.qy-term-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.qy-term-form-wide { grid-column: 1 / -1; }
+.qy-term-form input, .qy-term-form select { min-height: 42px; width: 100%; padding: 0 11px; border: 1px solid var(--qy-border); border-radius: var(--qy-radius-control); color: var(--qy-text-primary); background: #fff; }
+.qy-term-form input:focus, .qy-term-form select:focus { outline: none; border-color: var(--qy-interactive); box-shadow: var(--qy-focus); }
+.qy-callout[role='status'] { margin-top: -12px; margin-bottom: 20px; }
 .qy-settings-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; gap: 24px; }
 .qy-settings-nav { display: grid; gap: 4px; }
 .qy-settings-nav button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 12px; border: 0; border-radius: var(--qy-radius-control); color: var(--qy-text-secondary); background: transparent; text-align: left; cursor: pointer; }

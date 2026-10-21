@@ -2,8 +2,42 @@
   <AppShell>
     <section class="qy-page-head">
       <div><span class="qy-eyebrow">CONTROLLED VOCABULARY</span><h1>专业词库</h1><p>统一维护批准译名、禁用表达和高风险术语。</p></div>
-      <div class="qy-page-head-actions"><button class="qy-secondary-button" type="button" @click="showImport = !showImport"><ArrowUpTrayIcon aria-hidden="true" /> 导入 CSV</button><button class="qy-primary-button" type="button"><PlusIcon aria-hidden="true" /> 新建术语</button></div>
+      <div class="qy-page-head-actions">
+        <button
+          class="qy-secondary-button"
+          :class="{ 'is-locked': !canManageTerms }"
+          type="button"
+          data-term-action="import"
+          :aria-disabled="!canManageTerms"
+          :aria-describedby="!canManageTerms ? 'term-permission-description' : undefined"
+          :title="!canManageTerms ? permissionMessage : undefined"
+          @click="handleImportClick"
+        >
+          <LockClosedIcon v-if="!canManageTerms" aria-hidden="true" />
+          <ArrowUpTrayIcon v-else aria-hidden="true" />
+          导入 CSV
+        </button>
+        <button
+          class="qy-primary-button"
+          :class="{ 'is-locked': !canManageTerms }"
+          type="button"
+          data-term-action="create"
+          :aria-disabled="!canManageTerms"
+          :aria-describedby="!canManageTerms ? 'term-permission-description' : undefined"
+          :title="!canManageTerms ? permissionMessage : undefined"
+          @click="handleNewTermClick"
+        >
+          <LockClosedIcon v-if="!canManageTerms" aria-hidden="true" />
+          <PlusIcon v-else aria-hidden="true" />
+          新建术语
+        </button>
+      </div>
     </section>
+
+    <p v-if="permissionNotice" id="term-permission-notice" class="qy-callout qy-callout-warning" role="status" data-term-permission-notice>
+      <LockClosedIcon aria-hidden="true" /> <span>{{ permissionNotice }}</span>
+    </p>
+    <span id="term-permission-description" class="qy-visually-hidden">{{ permissionMessage }}</span>
 
     <p v-if="loadError" class="qy-panel qy-inline-error" role="alert" data-term-load-error>{{ loadError }} <button type="button" class="qy-link-button" @click="loadTerms">重试</button></p>
 
@@ -23,7 +57,7 @@
         <div v-if="activeAsset === 'terms' && filteredTerms.length" class="qy-term-table-wrap">
           <table class="qy-term-table"><thead><tr><th scope="col">源术语</th><th scope="col">批准译名</th><th scope="col">状态</th><th scope="col">风险</th><th scope="col">维护人</th><th scope="col"><span class="qy-visually-hidden">操作</span></th></tr></thead><tbody><tr v-for="term in filteredTerms" :key="term.id" @click="selectedTerm = term"><td><strong>{{ term.source }}</strong><small>{{ term.domain }}</small></td><td>{{ term.target }}</td><td><span class="qy-status-badge" :class="`is-${term.status}`"><CheckCircleIcon v-if="term.status === 'approved'" aria-hidden="true" /><ClockIcon v-else aria-hidden="true" />{{ term.statusLabel }}</span></td><td><span :class="term.risk === 'high' ? 'qy-risk-high' : 'qy-risk-normal'">{{ term.risk === 'high' ? '高风险' : '常规' }}</span></td><td>{{ term.owner }}</td><td><ChevronRightIcon aria-hidden="true" /></td></tr></tbody></table>
         </div>
-        <div v-else-if="activeAsset === 'terms'" class="qy-empty-state qy-term-empty"><BookOpenIcon aria-hidden="true" /><strong>当前视图还没有术语</strong><span>导入 CSV 或在翻译任务中提交候选术语，建立第一条可审计记录。</span><button class="qy-link-button" type="button" @click="showImport = true">查看导入格式</button></div>
+        <div v-else-if="activeAsset === 'terms'" class="qy-empty-state qy-term-empty"><BookOpenIcon aria-hidden="true" /><strong>当前视图还没有术语</strong><span>导入 CSV 或在翻译任务中提交候选术语，建立第一条可审计记录。</span><button class="qy-link-button" type="button" @click="handleImportClick">查看导入格式</button></div>
         <div v-else class="qy-asset-list">
           <article v-for="item in activeAssetItems" :key="item.id || item.code" class="qy-review-item">
             <strong>{{ item.name || item.code || item.item_key }}</strong>
@@ -40,6 +74,21 @@
       </aside>
     </div>
 
+    <section v-if="showNewTerm" class="qy-panel qy-term-form" data-new-term-form aria-labelledby="new-term-heading">
+      <div class="qy-panel-heading">
+        <div><span class="qy-eyebrow">STAGING TERM</span><h2 id="new-term-heading">新建术语</h2><p>新术语先进入待审核状态，批准后才会进入运行时词库。</p></div>
+        <button class="qy-icon-button" type="button" aria-label="关闭新建术语" @click="showNewTerm = false"><XMarkIcon aria-hidden="true" /></button>
+      </div>
+      <form class="qy-term-form-grid" @submit.prevent="createTerm">
+        <label class="qy-field"><span>源术语</span><input v-model.trim="newTerm.source" required maxlength="512" autocomplete="off" /></label>
+        <label class="qy-field"><span>批准译名</span><input v-model.trim="newTerm.target" required maxlength="512" autocomplete="off" /></label>
+        <label class="qy-field"><span>领域（可选）</span><input v-model.trim="newTerm.domain" maxlength="64" placeholder="clinical" /></label>
+        <label class="qy-field"><span>风险等级</span><select v-model="newTerm.risk"><option value="normal">常规</option><option value="high">高风险</option></select></label>
+        <label class="qy-field qy-term-form-wide"><span>禁用表达（可选，用逗号分隔）</span><input v-model.trim="newTerm.forbidden" maxlength="2000" placeholder="不推荐译法1,不推荐译法2" /></label>
+        <div class="qy-review-actions qy-term-form-wide"><button class="qy-primary-button" type="submit" :disabled="creatingTerm || !newTerm.source || !newTerm.target">{{ creatingTerm ? '保存中…' : '保存为待审核' }}</button><button class="qy-link-button" type="button" @click="showNewTerm = false">取消</button></div>
+      </form>
+    </section>
+
     <div v-if="showImport" class="qy-import-callout qy-panel">
       <div><strong>受控语言资产导入</strong><span>支持 CSV/TSV；首行字段按资产类型填写。提交前会展示条数和内容摘要，应用后仍需管理员发布。</span></div>
       <select v-model="importAssetType" aria-label="导入资产类型"><option value="termbase">术语库</option><option value="style">风格规则</option><option value="pitfall">错法表</option></select>
@@ -55,6 +104,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from '../api.js';
 import AppShell from '../components/AppShell.vue';
+import { useSessionStore } from '../stores/session.js';
 import {
   ArrowUpTrayIcon,
   BookOpenIcon,
@@ -63,17 +113,20 @@ import {
   ClockIcon,
   FunnelIcon,
   InformationCircleIcon,
+  LockClosedIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline';
 
 const route = useRoute();
+const session = useSessionStore();
 const query = ref(typeof route.query.q === 'string' ? route.query.q : '');
 const risk = ref('all');
 const activeView = ref('company');
 const activeAsset = ref('terms');
 const showImport = ref(false);
+const showNewTerm = ref(false);
 const selectedTerm = ref(null);
 const terms = ref([]);
 const releases = ref([]);
@@ -84,6 +137,11 @@ const importContent = ref('');
 const importResult = ref(null);
 const importing = ref(false);
 const loadError = ref('');
+const permissionNotice = ref('');
+const creatingTerm = ref(false);
+const newTerm = ref({ source: '', target: '', domain: '', risk: 'normal', forbidden: '' });
+const permissionMessage = '当前账号没有术语库管理员权限，请联系术语管理员。';
+const canManageTerms = computed(() => session.hasCapability('can_manage_terms'));
 const assetTabs = [
   { key: 'terms', label: '术语库', count: 0 },
   { key: 'style', label: '风格指南', count: 0 },
@@ -152,6 +210,10 @@ async function loadAssets() {
 }
 
 async function previewImport() {
+  if (!canManageTerms.value) {
+    explainPermission();
+    return;
+  }
   importing.value = true;
   importResult.value = null;
   try {
@@ -172,6 +234,10 @@ async function previewImport() {
 }
 
 async function applyImport() {
+  if (!canManageTerms.value) {
+    explainPermission();
+    return;
+  }
   if (!importResult.value?.batch_id) return;
   importing.value = true;
   try {
@@ -185,5 +251,60 @@ async function applyImport() {
   }
 }
 
-onMounted(() => { loadTerms(); loadAssets(); });
+function explainPermission() {
+  permissionNotice.value = permissionMessage;
+}
+
+function handleImportClick() {
+  if (!canManageTerms.value) {
+    explainPermission();
+    return;
+  }
+  permissionNotice.value = '';
+  showImport.value = !showImport.value;
+}
+
+function handleNewTermClick() {
+  if (!canManageTerms.value) {
+    explainPermission();
+    return;
+  }
+  permissionNotice.value = '';
+  showNewTerm.value = true;
+}
+
+async function createTerm() {
+  if (!canManageTerms.value) {
+    explainPermission();
+    return;
+  }
+  creatingTerm.value = true;
+  try {
+    await api.createConcept({
+      preferred_source: newTerm.value.source,
+      preferred_target: newTerm.value.target,
+      domain: newTerm.value.domain,
+      term_type: newTerm.value.risk === 'high' ? 'high_risk' : 'general',
+      layer: 'session',
+      forbidden: newTerm.value.forbidden
+        .split(',')
+        .map((text) => text.trim())
+        .filter(Boolean)
+        .map((text) => ({ lang: 'zh', text })),
+    });
+    showNewTerm.value = false;
+    newTerm.value = { source: '', target: '', domain: '', risk: 'normal', forbidden: '' };
+    await loadTerms();
+  } catch (error) {
+    loadError.value = error.message || '新建术语失败';
+  } finally {
+    creatingTerm.value = false;
+  }
+}
+
+onMounted(async () => {
+  await session.load();
+  loadTerms();
+  loadAssets();
+});
 </script>

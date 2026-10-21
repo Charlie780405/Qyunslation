@@ -201,6 +201,10 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/concepts${query ? `?${query}` : ''}`);
   },
+  createConcept: (payload) => apiRequest(`${API_PREFIX}/concepts`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   listLanguageAssetReleases: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return apiRequest(`${API_PREFIX}/language-assets/releases${query ? `?${query}` : ''}`);

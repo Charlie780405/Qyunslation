@@ -122,7 +122,11 @@ def client(monkeypatch):
 
 
 def test_api_create_forces_staging(client):
-    headers = {"X-Dev-User": "alice", "X-Dev-Tenant": "t1"}
+    headers = {
+        "X-Dev-User": "alice",
+        "X-Dev-Tenant": "t1",
+        "X-Dev-Role": "term_admin",
+    }
     r = client.post(
         "/api/v1/concepts",
         json={
@@ -142,8 +146,8 @@ def test_api_create_forces_staging(client):
 
 
 def test_api_concepts_are_tenant_scoped(client):
-    a = {"X-Dev-User": "alice", "X-Dev-Tenant": "tenant-a"}
-    b = {"X-Dev-User": "bob", "X-Dev-Tenant": "tenant-b"}
+    a = {"X-Dev-User": "alice", "X-Dev-Tenant": "tenant-a", "X-Dev-Role": "term_admin"}
+    b = {"X-Dev-User": "bob", "X-Dev-Tenant": "tenant-b", "X-Dev-Role": "term_admin"}
     created = client.post(
         "/api/v1/concepts",
         json={"preferred_source": "secret-term", "preferred_target": "密词"},
@@ -155,6 +159,17 @@ def test_api_concepts_are_tenant_scoped(client):
     listed_b = client.get("/api/v1/concepts?status=staging", headers=b)
     assert any(x["id"] == cid for x in listed_a.json())
     assert all(x["id"] != cid for x in listed_b.json())
+
+
+def test_api_create_requires_term_admin(client):
+    headers = {"X-Dev-User": "translator", "X-Dev-Tenant": "t1", "X-Dev-Role": "translator"}
+    response = client.post(
+        "/api/v1/concepts",
+        headers=headers,
+        json={"preferred_source": "foo", "preferred_target": "某某"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "ASSET_ADMIN_REQUIRED"
 
 
 def test_csv_fallback_without_engine():
