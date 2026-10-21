@@ -50,7 +50,7 @@ def test_characters_already_on_the_same_source_page_are_not_blamed_on_the_transl
         source_pages=source, translated_pages=translated,
     ))
     inherited, blocker = found["TEXT_ENCODING_INHERITED"], found["TEXT_ENCODING_ARTIFACT"]
-    assert inherited.severity == "warning" and inherited.evidence["pages"] == [2]
+    assert inherited.severity == "info" and inherited.evidence["pages"] == [2]
     assert blocker.severity == "blocker" and blocker.evidence["pages"] == [3]
     assert blocker.evidence["detectors"] == {"fffd": ["U+FFFD"]}
 

@@ -417,7 +417,7 @@ def _encoding_findings(
     if inherited:
         out.append(
             QaFinding(
-                category="integrity", severity="warning", code="TEXT_ENCODING_INHERITED",
+                category="integrity", severity="info", code="TEXT_ENCODING_INHERITED",
                 message="译文中的异常字符在源文同一页也存在，多半来自源文本身",
                 evidence={"detectors": _merge_families([e for _, e in inherited]), "pages": [n for n, _ in inherited]},
                 location=locate.location(

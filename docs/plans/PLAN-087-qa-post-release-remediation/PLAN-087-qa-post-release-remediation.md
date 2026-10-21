@@ -94,3 +94,8 @@ PLAN-079 的第一版上线后，用户在生产环境反馈了以下问题：
 - 双语版（dual）第 2 页原文侧仍有 1 条 `TEXT_ENCODING_INHERITED` 警告（`MG-K10` 前的 •）。双语版原文侧的字体由引擎重建，未读取本次补入的 ToUnicode，这一点尚未修复。
 - 未批准 generation 2；`a3887b13`（generation 1）仍保留，未放行。
 - 遗留决定：是否接受这一条警告，或继续在 pdf2zh/BabelDOC 侧修复双语原文侧的字体映射（需按 SK-Q005 做补丁安全评估）。
+
+**用户决定（2026-10-21）**：双语版原文侧的源文字形异常，按“审阅人不能改任何东西”判为噪声，**降为提示（INFO）**，不计入待处理、不阻断、不占待办数，只在“全部”中可查。
+- 改动：`qyunslation/pipeline/qa/registry.py` 中 `TEXT_ENCODING_INHERITED` 的级别由 WARN 改为 INFO，说明与处置文字随之改为“无需处理”语义。
+- 不改：`TEXT_ENCODING_ARTIFACT` 的判定；译文侧的乱码仍阻断；`TEXT_LAYER_SYMBOL_GLYPH` 等其他规则不变。
+- 验收：相关单测通过；生产上对 generation 2 的 QA 结果：阻断 0、待处理 0、警告 0。
