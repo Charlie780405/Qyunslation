@@ -67,7 +67,8 @@
 | **PLAN-085** | （见 WT-085；无独立计划目录） | **横向表整页转正翻译、表内汉字字重、符号字形不再阻断**（已部署，指纹 `7542777de0fd`，见 WT-085） |
 | **PLAN-086** | [PLAN-086-language-assets-quality-system](./PLAN-086-language-assets-quality-system/) | **术语库、错法表与风格指南质量系统**（核心闭环已实现，代码已随 `62413cc0` 部署（2026-10-21），待专家金标与灰度） |
 | **PLAN-087** | [PLAN-087-qa-post-release-remediation](./PLAN-087-qa-post-release-remediation/) | **PLAN-079 上线后反馈与修复：乱码单人授权、可点击解决方案、自我确认、沿用结论、导出页（原提交沿用 PLAN-079 编号，已拆分归档）** |
+| **PLAN-088** | [PLAN-088-literature-hub-alignment](./PLAN-088-literature-hub-alignment/) | **文献跨仓统筹对齐（只协调）**：把 QyunsApps PLAN-004 的需求映射到 PLAN-081/082/086 并写清解锁条件；不改代码、不部署（父纲要 QyunsApps PLAN-004，对端 WeKnora PLAN-019、QyunsWatch PLAN-026） |
 
 导入草稿见 [cursor-import/](./cursor-import/)。PLAN-034 原暂停记录：[034可行性评估](./cursor-import/034可行性评估_a94734a0.plan.md)（已复活）。
 
-下一个可用父计划编号：**PLAN-088**。创建前须同时检查所有 worktree，避免未合并计划占号。
+下一个可用父计划编号：**PLAN-089**。创建前须同时检查所有 worktree，避免未合并计划占号。
