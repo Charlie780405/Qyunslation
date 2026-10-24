@@ -14,11 +14,11 @@ QyunsApps PLAN-004 统筹 QyunsWatch、WeKnora、Qyunslation 的文献与翻译�
 | 自动翻译不挤占人工任务、满载排队 | PLAN-081b（全站 2 路准入与持久队列）、`/capacity` | 规划中 | **WeKnora 019d 自动翻译** |
 | 服务令牌按调用方分离、带 scope | PLAN-081d（机器身份） | 规划中 | 令牌拆分 |
 | 术语单一事实源，译文记录术语版本 | PLAN-086（`/api/v1/language-assets/*`） | 接口已实现；上线前待专家盲评与灰度 | **QyunsWatch 026d 术语对齐** |
-| WeKnora 文献目录与预览代理 | 分支 `codex/literature-preview-catalog` | **生产工作目录正在运行该分支，且有未提交修改** | 先由责任人合并并清理 |
+| WeKnora 文献目录与预览代理 | 分支 `codex/literature-preview-catalog`（7 个提交） | 未合并；**线上进程未加载它**（2026-10-24 核实）；功能非必需 | 不合并、不部署 |
 
 ## 3. 停手条件
 
-生产服务 `qyunslation-office` 的工作目录 `/home/dev/qyunslation` 当前停在 `codex/literature-preview-catalog`，比 `main` 多若干提交，并有未提交修改（`custom_api.py`、`glossary/ssot.py`、`pipeline/term_snapshot.py`、`server/core.py` 等）。在其责任人合并、提交并清理之前，本仓不做任何会改变运行代码的发布，否则可能覆盖线上在跑的版本。
+生产服务 `qyunslation-office` 的工作目录 `/home/dev/qyunslation` 当前停在 `codex/literature-preview-catalog`，比 `main` 多 7 个提交，并有未提交修改（`custom_api.py`、`glossary/ssot.py`、`pipeline/term_snapshot.py`、`server/core.py` 等，含一个未提交的 `POST /terms/resolve`）。2026-10-24 实测：Qyunslation 进程（`qyunslation -i … --port 8010`）启动于 2026-10-21 16:35，早于该分支的 7 个提交（2026-10-22）；线上 `/api/v1/literature-preview` 返回 404，`QYUNSLATION_WEKNORA_CATALOG_URL` 未设置。**线上并没有在跑这个分支的代码**，只是检出目录被切到了该分支并带着未提交修改。这些未提交修改属于另一个代理的进行中工作，本仓不碰；本仓也不做任何会重启服务或改变运行代码的发布，否则会把检出目录里的未审代码带上线。
 
 ## 4. Out of Scope
 
